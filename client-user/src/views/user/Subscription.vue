@@ -1,0 +1,200 @@
+<template>
+  <div class="subscription-container">
+    <div class="page-header">
+      <h1 class="page-title">订阅信息</h1>
+      <p class="page-subtitle">查看您的订阅详情和节点信息</p>
+    </div>
+    
+    <div class="content-card">
+      <h2 class="card-title">订阅链接</h2>
+      <div class="subscription-links">
+        <div class="link-item">
+          <span class="link-label">通用订阅：</span>
+          <el-input v-model="subscription.subscription_url" readonly size="large">
+            <template #append>
+              <el-button @click="copyLink(subscription.subscription_url)">复制</el-button>
+            </template>
+          </el-input>
+        </div>
+        <div class="link-item">
+          <span class="link-label">Clash订阅：</span>
+          <el-input v-model="subscription.clash_url" readonly size="large">
+            <template #append>
+              <el-button @click="copyLink(subscription.clash_url)">复制</el-button>
+            </template>
+          </el-input>
+        </div>
+        <div class="link-item">
+          <span class="link-label">V2Ray订阅：</span>
+          <el-input v-model="subscription.v2ray_url" readonly size="large">
+            <template #append>
+              <el-button @click="copyLink(subscription.v2ray_url)">复制</el-button>
+            </template>
+          </el-input>
+        </div>
+      </div>
+    </div>
+    
+    <div class="content-card">
+      <h2 class="card-title">账户信息</h2>
+      <div class="account-info">
+        <div class="info-item">
+          <span class="info-label">到期时间：</span>
+          <span class="info-value">{{ subscription.expire_text }}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">已用流量：</span>
+          <span class="info-value">{{ subscription.traffic_used_text }}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">流量总量：</span>
+          <span class="info-value">{{ subscription.traffic_limit_text }}</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">使用比例：</span>
+          <el-progress 
+            :percentage="subscription.traffic_percent || 0" 
+            :stroke-width="16"
+            :text-inside="true"
+            style="width: 200px;"
+          />
+        </div>
+      </div>
+    </div>
+    
+    <div class="content-card">
+      <h2 class="card-title">节点列表</h2>
+      <el-table :data="subscription.nodes" style="width: 100%">
+        <el-table-column prop="server_name" label="服务器" />
+        <el-table-column prop="address" label="地址" />
+        <el-table-column prop="port" label="端口" />
+        <el-table-column prop="protocol" label="协议" />
+        <el-table-column prop="remark" label="备注" />
+      </el-table>
+    </div>
+  </div>
+</template>
+
+<script setup>
+/**
+ * 订阅信息组件
+ * 展示订阅链接、账户信息和节点列表
+ */
+
+import { ref, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import api from '@/api'
+
+// 响应式数据
+const subscription = ref({})
+const loading = ref(false)
+
+/**
+ * 获取订阅信息
+ */
+async function fetchSubscription() {
+  try {
+    loading.value = true
+    const response = await api.user.getSubscription()
+    if (response.code === 0) {
+      subscription.value = response.data
+    }
+  } catch (error) {
+    console.error('获取订阅信息失败:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+/**
+ * 复制链接
+ * @param {string} link - 链接地址
+ */
+function copyLink(link) {
+  if (link) {
+    navigator.clipboard.writeText(link)
+    ElMessage.success('链接已复制到剪贴板')
+  }
+}
+
+// 组件挂载时获取数据
+onMounted(() => {
+  fetchSubscription()
+})
+</script>
+
+<style scoped>
+.subscription-container {
+  max-width: 800px;
+}
+
+.page-header {
+  margin-bottom: 30px;
+}
+
+.page-title {
+  font-size: 28px;
+  color: #333;
+  margin-bottom: 10px;
+}
+
+.page-subtitle {
+  color: #666;
+  font-size: 16px;
+}
+
+.content-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 30px;
+  margin-bottom: 20px;
+}
+
+.card-title {
+  font-size: 20px;
+  color: #333;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.subscription-links {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.link-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.link-label {
+  width: 100px;
+  color: #666;
+  font-weight: 500;
+}
+
+.account-info {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.info-label {
+  color: #666;
+  font-weight: 500;
+}
+
+.info-value {
+  color: #333;
+}
+</style>

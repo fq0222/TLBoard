@@ -1,0 +1,49 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <!-- 蓝紫渐变：保持电光色调 -->
+        <linearGradient id="rocketGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:#9EF8FF;stop-opacity:1" />
+            <stop offset="50%" style="stop-color:#3B9EFF;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#9D3BFF;stop-opacity:1" />
+        </linearGradient>
+
+        <!-- 霓虹外发光滤镜 -->
+        <filter id="neon" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="5" result="coloredBlur" />
+            <feMerge>
+                <feMergeNode in="coloredBlur" />
+                <feMergeNode in="SourceGraphic" />
+            </feMerge>
+        </filter>
+    </defs>
+
+    <!-- 1. 黑色底色：严格限制在 256x256 -->
+    <rect x="0" y="0" width="256" height="256" rx="55" ry="55" fill="#24262E" />
+
+    <!-- 2. 火箭组合：垂直居中 -->
+    <g transform="translate(128, 120)" filter="url(#neon)">
+        
+        <!-- 底部喷火/动力线条：增加速度感 -->
+        <g stroke-width="5" fill="none" stroke-linecap="round" transform="translate(0, 60)">
+            <path d="M-15,10 Q-20,30 0,50 Q20,30 15,10" stroke="#9D3BFF" opacity="0.6" />
+            <path d="M-5,15 Q-10,35 0,45 Q10,35 5,15" stroke="#9EF8FF" opacity="0.8" />
+            <!-- 气流装饰线 -->
+            <path d="M-40,20 Q-50,40 -45,50" stroke="#3B9EFF" stroke-width="4" opacity="0.4" />
+            <path d="M40,20 Q50,40 45,50" stroke="#3B9EFF" stroke-width="4" opacity="0.4" />
+        </g>
+
+        <!-- 火箭主体：精细矢量路径 -->
+        <g transform="translate(-40, -85)">
+            <!-- 箭体 -->
+            <path d="M40,0 C60,30 65,70 65,110 L15,110 C15,70 20,30 40,0 Z" fill="url(#rocketGrad)" stroke="#9EF8FF" stroke-width="1.5" />
+            <!-- 左侧机翼 -->
+            <path d="M15,80 C0,95 0,120 5,130 L15,110 Z" fill="#3B9EFF" stroke="#9EF8FF" stroke-width="1" />
+            <!-- 右侧机翼 -->
+            <path d="M65,80 C80,95 80,120 75,130 L65,110 Z" fill="#3B9EFF" stroke="#9EF8FF" stroke-width="1" />
+            <!-- 圆形舷窗 -->
+            <circle cx="40" cy="55" r="8" fill="#24262E" stroke="#9EF8FF" stroke-width="1.5" />
+            <!-- 顶部高光 -->
+            <path d="M40,5 C48,25 52,50 52,80" stroke="white" stroke-width="1" stroke-opacity="0.3" fill="none" />
+        </g>
+    </g>
+</svg>

@@ -1,0 +1,343 @@
+/**
+ * 用户认证路由
+ * 处理用户注册、登录、获取个人信息等操作
+ */
+
+const express = require('express');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const { body, validationResult } = require('express-validator');
+const config = require('../../config');
+const { authenticateUser } = require('../../middleware/auth-user');
+
+const router = express.Router();
+
+// 日志工具
+const logger = {
+  info: (msg) => console.log(`[USER-AUTH] [INFO] ${new Date().toISOString()} - ${msg}`),
+  error: (msg) => console.error(`[USER-AUTH] [ERROR] ${new Date().toISOString()} - ${msg}`),
+  warn: (msg) => console.warn(`[USER-AUTH] [WARN] ${new Date().toISOString()} - ${msg}`)
+};
+
+/**
+ * POST /api/user/register-and-pay
+ * 注册并发起支付
+ */
+router.post('/register-and-pay', [
+  body('email')
+    .isEmail()
+    .withMessage('请输入有效的邮箱地址')
+    .normalizeEmail(),
+  body('password')
+    .isLength({ min: 8 })
+    .withMessage('密码长度至少8位')
+    .matches(/^(?=.*[A-Za-z])(?=.*\d)/)
+    .withMessage('密码必须包含字母和数字'),
+  body('plan_id')
+    .isInt({ min: 1 })
+    .withMessage('套餐ID必须是大于0的整数')
+], async (req, res) => {
+  try {
+    // 验证请求参数
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      logger.warn('注册参数验证失败');
+      return res.status(400).json({
+        code: 1001,
+        message: '参数校验失败',
+        data: null
+      });
+    }
+
+    const { email, password, plan_id } = req.body;
+    const db = req.app.locals.db;
+
+    // 检查邮箱是否已注册
+    const existingUser = await db.prepare('SELECT id, enabled, expire_at FROM users WHERE email = ?').get(email);
+    
+    if (existingUser) {
+      // 检查用户是否有未过期套餐
+      const now = Math.floor(Date.now() / 1000);
+      if (existingUser.enabled && existingUser.expire_at > now) {
+        logger.warn(`注册失败: 邮箱已注册且有未过期套餐 - ${email}`);
+        return res.status(400).json({
+          code: 2001,
+          message: '该邮箱已注册，如需续费请先登录',
+          data: null
+        });
+      }
+    }
+
+    // 检查套餐是否存在
+    const plan = await db.prepare('SELECT * FROM plans WHERE id = ? AND enabled = 1').get(plan_id);
+    
+    if (!plan) {
+      logger.warn(`注册失败: 套餐不存在或已下架 - ${plan_id}`);
+      return res.status(400).json({
+        code: 1001,
+        message: '套餐不存在或已下架',
+        data: null
+      });
+    }
+
+    // 生成订阅Token
+    const subscriptionToken = crypto.randomBytes(32).toString('hex');
+
+    // 加密密码
+    const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
+
+    // 开始事务
+    const transaction = db.transaction(async () => {
+      // 创建或更新用户
+      let userId;
+      if (existingUser) {
+        // 更新现有用户
+        await db.prepare(`
+          UPDATE users SET 
+            password_hash = ?,
+            plan_id = ?,
+            subscription_token = ?,
+            traffic_used = 0,
+            traffic_limit = ?,
+            enabled = 0,
+            updated_at = ?
+          WHERE id = ?
+        `).run(passwordHash, plan_id, subscriptionToken, plan.traffic_limit, Math.floor(Date.now() / 1000), existingUser.id);
+        userId = existingUser.id;
+      } else {
+        // 创建新用户
+        const result = await db.prepare(`
+          INSERT INTO users (email, password_hash, plan_id, subscription_token, traffic_used, traffic_limit, enabled)
+          VALUES (?, ?, ?, ?, 0, ?, 0)
+        `).run(email, passwordHash, plan_id, subscriptionToken, plan.traffic_limit);
+        userId = result.lastInsertRowid;
+      }
+
+      // 生成商户订单号
+      const outTradeNo = `ORD${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
+
+      // 创建订单
+      await db.prepare(`
+        INSERT INTO orders (user_id, email, plan_id, amount, out_trade_no, status)
+        VALUES (?, ?, ?, ?, ?, 'pending')
+      `).run(userId, email, plan_id, plan.price, outTradeNo);
+
+      return { userId, outTradeNo };
+    });
+
+    // 执行事务
+    const { userId, outTradeNo } = transaction();
+
+    // 生成支付URL（模拟）
+    const paymentUrl = `${config.payment.apiUrl}/submit?out_trade_no=${outTradeNo}&pid=${config.payment.pid}&amount=${(plan.price / 100).toFixed(2)}&name=${encodeURIComponent(plan.name)}`;
+
+    logger.info(`用户注册成功: ${email}，订单号: ${outTradeNo}`);
+
+    res.json({
+      code: 0,
+      message: 'ok',
+      data: {
+        order_id: userId,
+        out_trade_no: outTradeNo,
+        payment_url: paymentUrl,
+        expire_in: 1800 // 30分钟
+      }
+    });
+  } catch (error) {
+    logger.error(`用户注册错误: ${error.message}`);
+    res.status(500).json({
+      code: 500,
+      message: '服务器内部错误',
+      data: null
+    });
+  }
+});
+
+/**
+ * POST /api/user/login
+ * 用户登录
+ */
+router.post('/login', [
+  body('email')
+    .isEmail()
+    .withMessage('请输入有效的邮箱地址')
+    .normalizeEmail(),
+  body('password')
+    .notEmpty()
+    .withMessage('密码不能为空')
+], async (req, res) => {
+  try {
+    // 验证请求参数
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      logger.warn('登录参数验证失败');
+      return res.status(400).json({
+        code: 1001,
+        message: '参数校验失败',
+        data: null
+      });
+    }
+
+    const { email, password } = req.body;
+    const db = req.app.locals.db;
+
+    // 查询用户
+    const user = await db.prepare(`
+      SELECT u.*, p.name as plan_name 
+      FROM users u 
+      LEFT JOIN plans p ON u.plan_id = p.id 
+      WHERE u.email = ?
+    `).get(email);
+    
+    if (!user) {
+      logger.warn(`用户登录失败: 邮箱不存在 - ${email}`);
+      return res.status(400).json({
+        code: 2002,
+        message: '邮箱或密码错误',
+        data: null
+      });
+    }
+
+    // 验证密码
+    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    
+    if (!isValidPassword) {
+      logger.warn(`用户登录失败: 密码错误 - ${email}`);
+      return res.status(400).json({
+        code: 2002,
+        message: '邮箱或密码错误',
+        data: null
+      });
+    }
+
+    // 检查账号是否被禁用
+    if (!user.enabled) {
+      logger.warn(`用户登录失败: 账号已被禁用 - ${email}`);
+      return res.status(400).json({
+        code: 2003,
+        message: '账号已被禁用，请联系管理员',
+        data: null
+      });
+    }
+
+    // 生成JWT Token
+    const token = jwt.sign(
+      {
+        id: user.id,
+        email: user.email,
+        plan_id: user.plan_id
+      },
+      config.user.jwtSecret,
+      { expiresIn: config.user.jwtExpiresIn }
+    );
+
+    logger.info(`用户登录成功: ${email}`);
+
+    res.json({
+      code: 0,
+      message: 'ok',
+      data: {
+        token,
+        expires_in: 604800, // 7天 = 604800秒
+        user: {
+          id: user.id,
+          email: user.email,
+          plan_name: user.plan_name,
+          expire_at: user.expire_at,
+          enabled: user.enabled
+        }
+      }
+    });
+  } catch (error) {
+    logger.error(`用户登录错误: ${error.message}`);
+    res.status(500).json({
+      code: 500,
+      message: '服务器内部错误',
+      data: null
+    });
+  }
+});
+
+/**
+ * GET /api/user/profile
+ * 获取当前登录用户个人信息
+ */
+router.get('/profile', authenticateUser, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const db = req.app.locals.db;
+
+    // 查询用户信息
+    const user = await db.prepare(`
+      SELECT 
+        u.id, u.email, u.plan_id, u.subscription_token,
+        u.traffic_used, u.traffic_limit, u.expire_at, u.enabled, u.created_at,
+        p.name as plan_name
+      FROM users u
+      LEFT JOIN plans p ON u.plan_id = p.id
+      WHERE u.id = ?
+    `).get(userId);
+    
+    if (!user) {
+      logger.error(`用户不存在: ${userId}`);
+      return res.status(400).json({
+        code: 2004,
+        message: '用户不存在',
+        data: null
+      });
+    }
+
+    // 计算流量百分比
+    const trafficPercent = user.traffic_limit > 0 
+      ? Math.round((user.traffic_used / user.traffic_limit) * 100 * 100) / 100 
+      : 0;
+
+    // 格式化流量显示
+    const formatTraffic = (bytes) => {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
+    // 格式化时间显示
+    const formatTime = (timestamp) => {
+      if (!timestamp) return null;
+      return new Date(timestamp * 1000).toISOString().replace('T', ' ').substr(0, 19);
+    };
+
+    logger.info(`获取用户信息成功: ${user.email}`);
+
+    res.json({
+      code: 0,
+      message: 'ok',
+      data: {
+        id: user.id,
+        email: user.email,
+        plan_id: user.plan_id,
+        plan_name: user.plan_name,
+        subscription_url: `${req.protocol}://${req.get('host')}/api/user/sub/${user.subscription_token}`,
+        traffic_used: user.traffic_used,
+        traffic_limit: user.traffic_limit,
+        traffic_used_text: formatTraffic(user.traffic_used),
+        traffic_limit_text: formatTraffic(user.traffic_limit),
+        traffic_percent: trafficPercent,
+        expire_at: user.expire_at,
+        expire_text: formatTime(user.expire_at),
+        enabled: user.enabled,
+        created_at: user.created_at
+      }
+    });
+  } catch (error) {
+    logger.error(`获取用户信息错误: ${error.message}`);
+    res.status(500).json({
+      code: 500,
+      message: '服务器内部错误',
+      data: null
+    });
+  }
+});
+
+module.exports = router;
