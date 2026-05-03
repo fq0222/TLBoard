@@ -3,25 +3,44 @@
     <div class="callback-card">
       <div v-if="loading" class="loading-state">
         <el-icon class="loading-icon"><Loading /></el-icon>
-        <h2>正在处理支付结果...</h2>
-        <p>请稍候，我们正在确认您的支付状态</p>
+        <h2>正在确认支付状态...</h2>
+        <p>请完成付款，系统会自动刷新当前订单状态。</p>
       </div>
-      
+
       <div v-else-if="paymentSuccess" class="success-state">
         <el-icon class="success-icon"><CircleCheck /></el-icon>
-        <h2>支付成功！</h2>
-        <p>您的订阅已激活，正在跳转到用户中心...</p>
-        <el-button type="primary" size="large" @click="goToProfile">
-          立即跳转
+        <h2>支付成功</h2>
+        <p>{{ successMessage }}</p>
+        <el-button type="primary" size="large" @click="goAfterSuccess">
+          继续前往
         </el-button>
       </div>
-      
-      <div v-else class="fail-state">
-        <el-icon class="fail-icon"><CircleClose /></el-icon>
-        <h2>支付失败</h2>
-        <p>{{ errorMessage }}</p>
-        <el-button type="primary" size="large" @click="goToHome">
-          返回首页
+
+      <div v-else class="pending-state">
+        <el-icon class="pending-icon"><Wallet /></el-icon>
+        <h2>等待支付完成</h2>
+        <p class="state-text">{{ errorMessage || '请使用下方二维码扫码支付，系统会自动确认付款结果。' }}</p>
+
+        <div v-if="paymentUrl" class="payment-actions">
+          <div class="qr-panel">
+            <img v-if="qrCodeDataUrl" :src="qrCodeDataUrl" alt="支付二维码" class="qr-image" />
+            <div v-else class="qr-fallback">
+              二维码生成失败，请使用下方支付链接完成付款
+            </div>
+          </div>
+
+          <div class="button-row">
+            <el-button type="primary" size="large" @click="openPaymentUrl">
+              打开支付链接
+            </el-button>
+            <el-button size="large" @click="copyPaymentUrl">
+              复制支付链接
+            </el-button>
+          </div>
+        </div>
+
+        <el-button size="large" @click="retryCheck">
+          重新检查支付状态
         </el-button>
       </div>
     </div>
@@ -30,101 +49,194 @@
 
 <script setup>
 /**
- * 支付回调组件
- * 处理支付完成后的回调逻辑
+ * 支付结果页组件
+ * 展示支付二维码并轮询订单状态，支付完成后自动尝试登录
  */
 
-import { ref, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Loading, CircleCheck, CircleClose } from '@element-plus/icons-vue'
+import { Loading, CircleCheck, Wallet } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import QRCode from 'qrcode'
 import api from '@/api'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
 const route = useRoute()
+const userStore = useUserStore()
 
-// 响应式数据
 const loading = ref(true)
 const paymentSuccess = ref(false)
 const errorMessage = ref('')
+const successMessage = ref('您的订阅已激活，正在为您跳转。')
+const timer = ref(null)
+const qrCodeDataUrl = ref('')
+// 自动轮询间隔延长到 45 秒，避免支付页频繁闪动
+const pollInterval = 45000
+
+const paymentUrl = computed(() => String(route.query.payment_url || ''))
+const orderId = computed(() => String(route.query.order_id || ''))
+
+/**
+ * 根据支付链接生成二维码
+ * 本地生成可减少对外部二维码服务的依赖
+ */
+async function generateQrCode() {
+  if (!paymentUrl.value) {
+    qrCodeDataUrl.value = ''
+    return
+  }
+
+  try {
+    qrCodeDataUrl.value = await QRCode.toDataURL(paymentUrl.value, {
+      width: 280,
+      margin: 2,
+      color: {
+        dark: '#111827',
+        light: '#ffffff'
+      }
+    })
+  } catch (error) {
+    console.error('生成二维码失败:', error)
+    qrCodeDataUrl.value = ''
+  }
+}
 
 /**
  * 检查支付状态
+ * 支付页使用公共查单接口，未登录用户也能轮询订单状态
  */
 async function checkPaymentStatus() {
+  if (!orderId.value) {
+    errorMessage.value = '缺少订单参数'
+    loading.value = false
+    return
+  }
+
   try {
-    const orderId = route.query.order_id
-    
-    if (!orderId) {
-      errorMessage.value = '缺少订单ID参数'
+    const response = await api.user.getPublicOrderStatus(orderId.value)
+    if (response.code !== 0) {
+      throw new Error(response.message || '支付状态查询失败')
+    }
+
+    const status = response.data.status
+    if (status === 'paid') {
+      paymentSuccess.value = true
+      loading.value = false
+      await tryAutoLogin()
+
+      timer.value = setTimeout(() => {
+        goAfterSuccess()
+      }, 2000)
+      return
+    }
+
+    if (status === 'expired') {
+      errorMessage.value = '订单已过期，请返回重新下单'
       loading.value = false
       return
     }
-    
-    // 轮询订单状态
-    let retryCount = 0
-    const maxRetry = 10
-    
-    const checkStatus = async () => {
-      try {
-        const response = await api.user.getOrderStatus(orderId)
-        
-        if (response.code === 0) {
-          if (response.data.status === 'paid') {
-            paymentSuccess.value = true
-            loading.value = false
-            
-            // 3秒后自动跳转
-            setTimeout(() => {
-              goToProfile()
-            }, 3000)
-            return
-          } else if (response.data.status === 'expired') {
-            errorMessage.value = '订单已过期'
-            loading.value = false
-            return
-          }
-        }
-        
-        retryCount++
-        if (retryCount < maxRetry) {
-          setTimeout(checkStatus, 2000)
-        } else {
-          errorMessage.value = '支付状态确认超时，请手动检查订单状态'
-          loading.value = false
-        }
-      } catch (error) {
-        console.error('检查支付状态失败:', error)
-        errorMessage.value = '检查支付状态失败，请稍后重试'
-        loading.value = false
-      }
-    }
-    
-    // 开始检查
-    setTimeout(checkStatus, 1000)
+
+    loading.value = false
+    scheduleNextCheck()
   } catch (error) {
-    console.error('支付回调处理错误:', error)
-    errorMessage.value = '支付回调处理失败'
+    console.error('检查支付状态失败:', error)
+    errorMessage.value = '支付状态检查失败，请稍后重试'
     loading.value = false
   }
 }
 
 /**
- * 跳转到个人中心
+ * 安排下一次静默轮询
+ * 不切回整页 loading，避免页面闪烁
  */
-function goToProfile() {
-  router.push('/user')
+function scheduleNextCheck() {
+  clearTimer()
+  timer.value = setTimeout(() => {
+    checkPaymentStatus()
+  }, pollInterval)
 }
 
 /**
- * 跳转到首页
+ * 支付完成后自动登录
+ * 使用注册阶段暂存的凭据，减少用户再次输入密码
  */
-function goToHome() {
-  router.push('/')
+async function tryAutoLogin() {
+  const cached = sessionStorage.getItem('pending_payment_login')
+  if (!cached) {
+    successMessage.value = '支付成功，请登录后查看订阅信息。'
+    return
+  }
+
+  try {
+    const credentials = JSON.parse(cached)
+    const result = await userStore.login(credentials)
+    if (result.success) {
+      sessionStorage.removeItem('pending_payment_login')
+      successMessage.value = '支付成功，已自动登录。'
+    } else {
+      successMessage.value = '支付成功，请手动登录后查看订阅信息。'
+    }
+  } catch (error) {
+    console.error('自动登录失败:', error)
+    successMessage.value = '支付成功，请手动登录后查看订阅信息。'
+  }
 }
 
-// 组件挂载时检查支付状态
-onMounted(() => {
+function openPaymentUrl() {
+  if (!paymentUrl.value) {
+    ElMessage.warning('当前没有可用的支付链接')
+    return
+  }
+
+  window.open(paymentUrl.value, '_blank', 'noopener,noreferrer')
+}
+
+function copyPaymentUrl() {
+  if (!paymentUrl.value) {
+    ElMessage.warning('当前没有可用的支付链接')
+    return
+  }
+
+  navigator.clipboard.writeText(paymentUrl.value)
+  ElMessage.success('支付链接已复制')
+}
+
+/**
+ * 手动重新查单
+ * 保持即时反馈，不受定时轮询间隔限制
+ */
+function retryCheck() {
+  errorMessage.value = ''
   checkPaymentStatus()
+}
+
+function goAfterSuccess() {
+  if (userStore.isLoggedIn) {
+    router.push('/user')
+  } else {
+    router.push('/login')
+  }
+}
+
+function clearTimer() {
+  if (timer.value) {
+    clearTimeout(timer.value)
+    timer.value = null
+  }
+}
+
+onMounted(() => {
+  generateQrCode()
+  checkPaymentStatus()
+})
+
+watch(paymentUrl, () => {
+  generateQrCode()
+})
+
+onBeforeUnmount(() => {
+  clearTimer()
 })
 </script>
 
@@ -143,18 +255,18 @@ onMounted(() => {
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   width: 100%;
-  max-width: 500px;
-  padding: 60px 40px;
+  max-width: 560px;
+  padding: 48px 40px;
   text-align: center;
 }
 
 .loading-state,
 .success-state,
-.fail-state {
+.pending-state {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
+  gap: 18px;
 }
 
 .loading-icon {
@@ -168,9 +280,57 @@ onMounted(() => {
   color: #67c23a;
 }
 
-.fail-icon {
+.pending-icon {
   font-size: 64px;
-  color: #f56c6c;
+  color: #e6a23c;
+}
+
+.state-text {
+  color: #666;
+  line-height: 1.6;
+}
+
+.payment-actions {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.qr-panel {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.qr-image,
+.qr-fallback {
+  width: 280px;
+  height: 280px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+.qr-image {
+  object-fit: contain;
+  padding: 12px;
+}
+
+.qr-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+  line-height: 1.6;
+  padding: 24px;
+}
+
+.button-row {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
 }
 
 h2 {
@@ -189,6 +349,7 @@ p {
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }

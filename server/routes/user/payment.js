@@ -1,11 +1,11 @@
 /**
  * 支付回调路由
- * 处理易支付异步回调
+ * 处理 VMQ 的异步通知和同步跳转
  */
 
 const express = require('express');
-const crypto = require('crypto');
-const config = require('../../config');
+const vmqService = require('../../services/vmq-service');
+const { completePaidOrder } = require('../../services/order-service');
 
 const router = express.Router();
 
@@ -17,148 +17,65 @@ const logger = {
 };
 
 /**
- * POST /api/user/payment/notify
- * 易支付异步回调接口
+ * 处理 VMQ 支付通知
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
  */
-router.post('/notify', express.urlencoded({ extended: true }), async (req, res) => {
+async function handleVmqNotify(req, res) {
   try {
-    const {
-      pid,
-      trade_no,
-      out_trade_no,
-      type,
-      name,
-      money,
-      trade_status,
-      sign,
-      sign_type
-    } = req.body;
+    // VMQ 可能通过 GET 或表单 POST 回调，这里统一合并参数读取
+    const params = { ...req.query, ...req.body };
+    const payId = params.payId;
+    const vmqOrderId = params.orderId || null;
 
-    logger.info(`收到支付回调: out_trade_no=${out_trade_no}, status=${trade_status}`);
+    logger.info(`VMQ notify received: payId=${payId}, type=${params.type}, price=${params.price}, reallyPrice=${params.reallyPrice}`);
 
-    // 验证签名
-    if (!verifySign(req.body, config.payment.key)) {
-      logger.warn(`支付回调签名验证失败: out_trade_no=${out_trade_no}`);
-      return res.send('sign_error');
+    if (!payId || !params.sign) {
+      logger.warn('VMQ notify missing payId or sign');
+      return res.send('error_sign');
     }
 
-    // 检查交易状态
-    if (trade_status !== 'TRADE_SUCCESS') {
-      logger.info(`支付回调状态非成功: out_trade_no=${out_trade_no}, status=${trade_status}`);
-      return res.send('success');
+    if (!vmqService.verifyNotifySign(params)) {
+      logger.warn(`VMQ notify sign invalid: payId=${payId}`);
+      return res.send('error_sign');
     }
 
     const db = req.app.locals.db;
-
-    // 查询订单
-    const order = await db.prepare(`
-      SELECT o.*, u.id as user_id, u.email
-      FROM orders o
-      LEFT JOIN users u ON o.user_id = u.id
-      WHERE o.out_trade_no = ?
-    `).get(out_trade_no);
-
+    const order = await db.prepare('SELECT amount, trade_no, status FROM orders WHERE out_trade_no = ?').get(payId);
     if (!order) {
-      logger.warn(`支付回调订单不存在: out_trade_no=${out_trade_no}`);
+      logger.warn(`VMQ notify order not found: payId=${payId}`);
       return res.send('success');
     }
 
-    // 检查订单状态，防止重复回调
-    if (order.status === 'paid') {
-      logger.info(`支付回调订单已处理: out_trade_no=${out_trade_no}`);
-      return res.send('success');
+    // 同时校验订单金额和实际支付金额，防止用户手动少付后被错误放行
+    const expectedAmount = (Number(order.amount) / 100).toFixed(2);
+    const orderAmount = Number(params.price).toFixed(2);
+    const reallyPaidAmount = Number(params.reallyPrice).toFixed(2);
+    if (expectedAmount !== orderAmount || expectedAmount !== reallyPaidAmount) {
+      logger.warn(`VMQ notify amount mismatch: payId=${payId}, expected=${expectedAmount}, orderAmount=${orderAmount}, reallyPaid=${reallyPaidAmount}`);
+      return res.send('error_amount');
     }
 
-    // 查询套餐信息
-    const plan = await db.prepare('SELECT * FROM plans WHERE id = ?').get(order.plan_id);
-    
-    if (!plan) {
-      logger.error(`支付回调套餐不存在: plan_id=${order.plan_id}`);
-      return res.send('success');
-    }
-
-    // 开始事务
-    const transaction = db.transaction(async () => {
-      const now = Math.floor(Date.now() / 1000);
-      
-      // 更新订单状态
-      await db.prepare(`
-        UPDATE orders SET 
-          status = 'paid',
-          trade_no = ?,
-          paid_at = ?
-        WHERE out_trade_no = ?
-      `).run(trade_no, now, out_trade_no);
-
-      // 计算到期时间
-      const expireAt = now + (plan.duration_days * 24 * 60 * 60);
-
-      // 更新用户信息
-      await db.prepare(`
-        UPDATE users SET 
-          enabled = 1,
-          plan_id = ?,
-          traffic_limit = ?,
-          expire_at = ?,
-          updated_at = ?
-        WHERE id = ?
-      `).run(plan.id, plan.traffic_limit, expireAt, now, order.user_id);
-
-      // 同步到3X-UI服务器（模拟）
-      syncToXuiServers(order.user_id, order.email, plan);
-    });
-
-    // 执行事务
-    transaction();
-
-    logger.info(`支付回调处理成功: out_trade_no=${out_trade_no}`);
-
-    res.send('success');
+    await completePaidOrder(db, payId, vmqOrderId || order.trade_no);
+    logger.info(`VMQ notify handled: payId=${payId}`);
+    return res.send('success');
   } catch (error) {
-    logger.error(`支付回调处理错误: ${error.message}`);
-    res.send('success');
+    logger.error(`VMQ notify error: ${error.message}`);
+    return res.send('success');
   }
+}
+
+router.get('/notify', handleVmqNotify);
+router.post('/notify', express.urlencoded({ extended: true }), handleVmqNotify);
+
+/**
+ * 支付完成后的同步跳转
+ * 将 VMQ 回传的订单号转发给前端支付结果页
+ */
+router.get('/return', async (req, res) => {
+  const orderId = req.query.payId || req.query.order_id || '';
+  const query = orderId ? `?order_id=${encodeURIComponent(orderId)}` : '';
+  res.redirect(`/payment/callback${query}`);
 });
-
-/**
- * 验证签名
- * @param {Object} params - 请求参数
- * @param {string} key - 密钥
- * @returns {boolean} 签名是否有效
- */
-function verifySign(params, key) {
-  try {
-    // 过滤签名参数
-    const filteredParams = {};
-    for (const [k, v] of Object.entries(params)) {
-      if (k !== 'sign' && k !== 'sign_type' && v !== '') {
-        filteredParams[k] = v;
-      }
-    }
-
-    // 按参数名排序
-    const sortedKeys = Object.keys(filteredParams).sort();
-    const signStr = sortedKeys.map(k => `${k}=${filteredParams[k]}`).join('&');
-    
-    // 计算签名
-    const calculatedSign = crypto.createHash('md5').update(signStr + key).digest('hex');
-    
-    return calculatedSign === params.sign;
-  } catch (error) {
-    logger.error(`签名验证错误: ${error.message}`);
-    return false;
-  }
-}
-
-/**
- * 同步到3X-UI服务器
- * @param {number} userId - 用户ID
- * @param {string} email - 用户邮箱
- * @param {Object} plan - 套餐信息
- */
-function syncToXuiServers(userId, email, plan) {
-  // 模拟同步操作
-  logger.info(`同步用户到3X-UI服务器: ${email}`);
-}
 
 module.exports = router;

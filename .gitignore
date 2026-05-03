@@ -144,3 +144,5 @@ vite.config.ts.timestamp-*
 
 server/test/
 server/config.js
+
+.vscode/

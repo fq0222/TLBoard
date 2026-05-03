@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const config = require('../../config');
 const { authenticateUser } = require('../../middleware/auth-user');
+const vmqService = require('../../services/vmq-service');
 
 const router = express.Router();
 
@@ -36,21 +37,30 @@ router.post('/register-and-pay', [
     .withMessage('密码必须包含字母和数字'),
   body('plan_id')
     .isInt({ min: 1 })
-    .withMessage('套餐ID必须是大于0的整数')
+    .withMessage('套餐ID必须是大于0的整数'),
+  body('pay_type')
+    .optional()
+    .isIn([1, 2, '1', '2'])
+    .withMessage('支付方式必须是1(微信)或2(支付宝)')
 ], async (req, res) => {
   try {
     // 验证请求参数
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      const firstError = errors.array()[0];
       logger.warn('注册参数验证失败');
       return res.status(400).json({
         code: 1001,
-        message: '参数校验失败',
-        data: null
+        message: firstError?.msg || '参数校验失败',
+        data: {
+          errors: errors.array()
+        }
       });
     }
 
     const { email, password, plan_id } = req.body;
+    // VMQ 支付方式：1=微信，2=支付宝
+    const payType = Number(req.body.pay_type || config.payment.vmqDefaultType || 2);
     const db = req.app.locals.db;
 
     // 检查邮箱是否已注册
@@ -118,19 +128,68 @@ router.post('/register-and-pay', [
       const outTradeNo = `ORD${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
 
       // 创建订单
-      await db.prepare(`
+      const orderResult = await db.prepare(`
         INSERT INTO orders (user_id, email, plan_id, amount, out_trade_no, status)
         VALUES (?, ?, ?, ?, ?, 'pending')
       `).run(userId, email, plan_id, plan.price, outTradeNo);
 
-      return { userId, outTradeNo };
+      return { userId, orderId: orderResult.lastInsertRowid, outTradeNo };
     });
 
     // 执行事务
-    const { userId, outTradeNo } = transaction();
+    const { userId, orderId, outTradeNo } = await transaction();
+    // VMQ 接口要求金额使用元并保留两位小数
+    const amount = (Number(plan.price) / 100).toFixed(2);
+    const vmqResult = await vmqService.createOrder({
+      payId: outTradeNo,
+      param: String(userId),
+      type: payType,
+      price: amount,
+      isHtml: 0
+    });
 
-    // 生成支付URL（模拟）
-    const paymentUrl = `${config.payment.apiUrl}/submit?out_trade_no=${outTradeNo}&pid=${config.payment.pid}&amount=${(plan.price / 100).toFixed(2)}&name=${encodeURIComponent(plan.name)}`;
+    if (Number(vmqResult.code) !== 1 || !vmqResult.data) {
+      await db.prepare(`
+        UPDATE orders SET status = 'expired'
+        WHERE out_trade_no = ?
+      `).run(outTradeNo);
+
+      return res.status(502).json({
+        code: 5002,
+        message: vmqResult.msg || '创建VMQ支付订单失败',
+        data: null
+      });
+    }
+
+    // isAuto=1 代表用户需要手动输入金额，这会带来少付风险，直接拒绝下发
+    if (Number(vmqResult.data.isAuto) === 1) {
+      await db.prepare(`
+        UPDATE orders SET status = 'expired'
+        WHERE out_trade_no = ?
+      `).run(outTradeNo);
+
+      try {
+        await vmqService.closeOrder(vmqResult.data.orderId);
+      } catch (closeError) {
+        logger.warn(`关闭需手输金额的VMQ订单失败: ${vmqResult.data.orderId} - ${closeError.message}`);
+      }
+
+      logger.warn(`VMQ返回需手输金额的支付链接，已拒绝下发: ${outTradeNo}`);
+      return res.status(502).json({
+        code: 5003,
+        message: '当前支付通道需要用户手动输入金额，存在少付风险，请更换VMQ监控通道配置后再试',
+        data: null
+      });
+    }
+
+    const paymentUrl = vmqResult.data.payUrl;
+    // 保存 VMQ 云端订单号与支付链接，便于前端展示二维码和后续主动查单
+    await db.prepare(`
+      UPDATE orders SET
+        trade_no = ?,
+        payment_url = ?
+      WHERE out_trade_no = ?
+    `).run(vmqResult.data.orderId, paymentUrl, outTradeNo);
 
     logger.info(`用户注册成功: ${email}，订单号: ${outTradeNo}`);
 
@@ -138,10 +197,14 @@ router.post('/register-and-pay', [
       code: 0,
       message: 'ok',
       data: {
-        order_id: userId,
+        order_id: orderId,
+        user_id: userId,
         out_trade_no: outTradeNo,
+        vmq_order_id: vmqResult.data.orderId,
+        pay_type: vmqResult.data.payType,
+        really_price: vmqResult.data.reallyPrice,
         payment_url: paymentUrl,
-        expire_in: 1800 // 30分钟
+        expire_in: Number(vmqResult.data.timeOut || 5) * 60
       }
     });
   } catch (error) {
@@ -171,11 +234,14 @@ router.post('/login', [
     // 验证请求参数
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      const firstError = errors.array()[0];
       logger.warn('登录参数验证失败');
       return res.status(400).json({
         code: 1001,
-        message: '参数校验失败',
-        data: null
+        message: firstError?.msg || '参数校验失败',
+        data: {
+          errors: errors.array()
+        }
       });
     }
 

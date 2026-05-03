@@ -1,12 +1,11 @@
 /**
- * 用户端API封装
- * 统一管理所有API请求
+ * 用户端 API 封装
+ * 统一管理所有 API 请求
  */
 
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
-// 创建axios实例
 const apiClient = axios.create({
   baseURL: '/api/user',
   timeout: 10000,
@@ -15,10 +14,8 @@ const apiClient = axios.create({
   }
 })
 
-// 请求拦截器
 apiClient.interceptors.request.use(
   (config) => {
-    // 从localStorage获取token
     const token = localStorage.getItem('user_token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
@@ -31,20 +28,22 @@ apiClient.interceptors.request.use(
   }
 )
 
-// 响应拦截器
 apiClient.interceptors.response.use(
-  (response) => {
-    return response.data
-  },
+  (response) => response.data,
   (error) => {
     console.error('响应拦截器错误:', error)
-    
+
+    let userMessage = '请求失败'
+
     if (error.response) {
       const { status, data } = error.response
-      
+      userMessage = data?.message || userMessage
+
       switch (status) {
+        case 400:
+          // 400 多为表单校验错误，交给具体页面决定如何提示，避免重复弹窗
+          break
         case 401:
-          // Token无效或过期，清除token并跳转到登录页
           localStorage.removeItem('user_token')
           window.location.href = '/login'
           break
@@ -61,27 +60,26 @@ apiClient.interceptors.response.use(
           ElMessage.error('服务器内部错误')
           break
         default:
-          ElMessage.error(data?.message || '请求失败')
+          ElMessage.error(userMessage)
       }
     } else if (error.code === 'ECONNABORTED') {
-      ElMessage.error('请求超时，请检查网络连接')
+      userMessage = '请求超时，请检查网络连接'
+      ElMessage.error(userMessage)
     } else {
-      ElMessage.error('网络连接失败')
+      userMessage = '网络连接失败'
+      ElMessage.error(userMessage)
     }
-    
+
+    // 将后端返回的业务提示挂到错误对象，供 store 和页面优先展示
+    error.userMessage = userMessage
     return Promise.reject(error)
   }
 )
 
-/**
- * 用户端API
- */
 const userApi = {
   /**
    * 用户登录
    * @param {Object} data - 登录数据
-   * @param {string} data.email - 邮箱
-   * @param {string} data.password - 密码
    * @returns {Promise<Object>} 响应数据
    */
   login(data) {
@@ -91,9 +89,6 @@ const userApi = {
   /**
    * 用户注册并支付
    * @param {Object} data - 注册数据
-   * @param {string} data.email - 邮箱
-   * @param {string} data.password - 密码
-   * @param {number} data.plan_id - 套餐ID
    * @returns {Promise<Object>} 响应数据
    */
   registerAndPay(data) {
@@ -119,8 +114,6 @@ const userApi = {
   /**
    * 获取公告列表
    * @param {Object} params - 查询参数
-   * @param {number} params.page - 页码
-   * @param {number} params.limit - 每页条数
    * @returns {Promise<Object>} 响应数据
    */
   getAnnouncements(params) {
@@ -130,9 +123,6 @@ const userApi = {
   /**
    * 获取订单列表
    * @param {Object} params - 查询参数
-   * @param {number} params.page - 页码
-   * @param {number} params.limit - 每页条数
-   * @param {string} params.status - 订单状态
    * @returns {Promise<Object>} 响应数据
    */
   getOrders(params) {
@@ -140,12 +130,22 @@ const userApi = {
   },
 
   /**
-   * 轮询订单状态
-   * @param {number} orderId - 订单ID
+   * 登录态下轮询订单状态
+   * @param {number|string} orderId - 订单 ID
    * @returns {Promise<Object>} 响应数据
    */
   getOrderStatus(orderId) {
     return apiClient.get(`/orders/${orderId}/status`)
+  },
+
+  /**
+   * 公共轮询订单状态
+   * 用于支付页在未登录状态下查询订单支付结果
+   * @param {string} orderId - 订单 ID 或商户订单号
+   * @returns {Promise<Object>} 响应数据
+   */
+  getPublicOrderStatus(orderId) {
+    return apiClient.get(`/orders/status/${orderId}`)
   },
 
   /**
@@ -157,7 +157,7 @@ const userApi = {
   },
 
   /**
-   * 获取CF优选IP池
+   * 获取 CF IP 池
    * @returns {Promise<Object>} 响应数据
    */
   getCfIps() {
@@ -165,8 +165,8 @@ const userApi = {
   },
 
   /**
-   * 测试CF IP延迟
-   * @param {Array} ips - IP列表
+   * 测试 CF IP 延迟
+   * @param {Array} ips - IP 列表
    * @returns {Promise<Object>} 响应数据
    */
   testCfIps(ips) {
@@ -174,8 +174,8 @@ const userApi = {
   },
 
   /**
-   * 应用CF优选IP
-   * @param {Array} ipIds - IP ID列表
+   * 应用 CF 优选 IP
+   * @param {Array} ipIds - IP ID 列表
    * @returns {Promise<Object>} 响应数据
    */
   applyCfIps(ipIds) {
