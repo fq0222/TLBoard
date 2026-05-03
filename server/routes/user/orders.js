@@ -8,15 +8,10 @@ const { query, param, validationResult } = require('express-validator');
 const { authenticateUser, optionalAuth } = require('../../middleware/auth-user');
 const vmqService = require('../../services/vmq-service');
 const { completePaidOrder } = require('../../services/order-service');
+const { createLogger } = require('../../utils/logger');
 
 const router = express.Router();
-
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[USER-ORDERS] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[USER-ORDERS] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[USER-ORDERS] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('USER-ORDERS');
 
 /**
  * GET /api/user/orders

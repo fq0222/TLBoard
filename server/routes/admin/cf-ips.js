@@ -5,14 +5,10 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { authenticateAdmin } = require('../../middleware/auth-admin');
+const { createLogger } = require('../../utils/logger');
 
 const router = express.Router();
-
-const logger = {
-  info: (msg) => console.log(`[ADMIN-CF-IPS] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[ADMIN-CF-IPS] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[ADMIN-CF-IPS] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('ADMIN-CF-IPS');
 
 /**
  * GET /api/admin/cf-ips

@@ -11,16 +11,15 @@ const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const databaseManager = require('./db/init');
+const { startAllJobs, stopAllJobs } = require('./jobs');
+const { createLogger } = require('./utils/logger');
 
-const logger = {
-  info: (msg) => console.log(`[APP] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[APP] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[APP] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('APP');
 
 // 保存服务器实例引用
 let userServer = null;
 let adminServer = null;
+let db = null;
 
 // ============ 用户端路由 ============
 const userAuthRoutes = require('./routes/user/auth');
@@ -40,10 +39,10 @@ const adminUsersRoutes = require('./routes/admin/users');
 const adminOrdersRoutes = require('./routes/admin/orders');
 const adminAnnouncementsRoutes = require('./routes/admin/announcements');
 const adminCfIpsRoutes = require('./routes/admin/cf-ips');
+const adminDashboardRoutes = require('./routes/admin/dashboard');
 
 async function startApp() {
   // 初始化数据库
-  let db;
   try {
     db = await databaseManager.init();
     logger.info('数据库初始化成功');
@@ -51,6 +50,9 @@ async function startApp() {
     logger.error(`数据库初始化失败: ${error.message}`);
     process.exit(1);
   }
+
+  // 启动定时任务
+  startAllJobs(db);
 
   // ============ 用户端应用 ============
   const userApp = express();
@@ -113,6 +115,7 @@ async function startApp() {
   adminApp.use(`${adminPrefix}/orders`, adminOrdersRoutes);
   adminApp.use(`${adminPrefix}/announcements`, adminAnnouncementsRoutes);
   adminApp.use(`${adminPrefix}/cf-ips`, adminCfIpsRoutes);
+  adminApp.use(`${adminPrefix}/dashboard`, adminDashboardRoutes);
 
   adminApp.use((req, res) => {
     res.status(404).json({ code: 404, message: '接口不存在', data: null });
@@ -141,6 +144,9 @@ async function startApp() {
  */
 async function gracefulShutdown(signal) {
   logger.info(`收到${signal}信号，正在优雅关闭服务器...`);
+  
+  // 停止所有定时任务
+  stopAllJobs();
   
   // 设置超时强制退出（10秒）
   const forceExitTimeout = setTimeout(() => {

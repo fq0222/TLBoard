@@ -5,13 +5,9 @@
 
 const ThreeXUI = require('3xui-api-client');
 const config = require('../config');
+const { createLogger } = require('../utils/logger');
 
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[XUI-SERVICE] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[XUI-SERVICE] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[XUI-SERVICE] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('XUI-SERVICE');
 
 /**
  * 3X-UI 服务类
@@ -234,7 +230,7 @@ class XuiService {
           user_count: clientStats.length,
           online_count: 0, // 稍后计算
           settings: inbound.settings,
-          stream_settings: inbound.stream_settings,
+          stream_settings: inbound.streamSettings,  // 3X-UI 返回的是驼峰式
           total_up: inbound.up,
           total_down: inbound.down
         });
@@ -400,13 +396,29 @@ class XuiService {
         await this.init();
       }
 
-      const result = await this.client.addClientWithCredentials(inboundId, protocol, options);
+      // 构建客户端配置
+      const clientConfig = {
+        id: inboundId,
+        settings: JSON.stringify({
+          clients: [{
+            id: options.id || this.generateUuid(),
+            email: options.email || '',
+            enable: options.enable !== false,
+            expiryTime: options.expiryTime || 0,
+            totalGB: options.totalGB || 0,
+            limitIp: options.limitIp || 0,
+            tgId: options.tgId || 0,
+            subId: options.subId || ''
+          }]
+        })
+      };
+
+      const result = await this.client.addClient(clientConfig);
       
       if (result.success) {
         logger.info(`添加客户端成功: ${options.email || 'auto'}`);
         return {
           success: true,
-          credentials: result.credentials,
           message: result.msg
         };
       } else {
@@ -423,6 +435,15 @@ class XuiService {
         message: error.message
       };
     }
+  }
+
+  /**
+   * 生成 UUID
+   * @returns {string} UUID
+   */
+  generateUuid() {
+    const crypto = require('crypto');
+    return crypto.randomUUID();
   }
 
   /**

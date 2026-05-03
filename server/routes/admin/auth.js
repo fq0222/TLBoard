@@ -9,15 +9,10 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const config = require('../../config');
 const { authenticateAdmin } = require('../../middleware/auth-admin');
+const { createLogger } = require('../../utils/logger');
 
 const router = express.Router();
-
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[ADMIN-AUTH] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[ADMIN-AUTH] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[ADMIN-AUTH] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('ADMIN-AUTH');
 
 /**
  * POST /api/admin/login

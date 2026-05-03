@@ -4,17 +4,12 @@
  */
 
 const express = require('express');
-const { query, validationResult } = require('express-validator');
+const { query, param, validationResult } = require('express-validator');
 const { authenticateAdmin } = require('../../middleware/auth-admin');
+const { createLogger } = require('../../utils/logger');
 
 const router = express.Router();
-
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[ADMIN-ORDERS] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[ADMIN-ORDERS] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[ADMIN-ORDERS] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('ADMIN-ORDERS');
 
 /**
  * GET /api/admin/orders

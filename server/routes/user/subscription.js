@@ -6,15 +6,116 @@
 const express = require('express');
 const { param, query, validationResult } = require('express-validator');
 const { authenticateUser } = require('../../middleware/auth-user');
+const { createLogger } = require('../../utils/logger');
 
 const router = express.Router();
+const logger = createLogger('USER-SUB');
 
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[USER-SUB] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[USER-SUB] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[USER-SUB] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+/**
+ * 从 inbound 的 settings 和 stream_settings 中解析节点配置
+ * @param {Object} node - 节点基本信息
+ * @param {string|Object} settings - inbound settings
+ * @param {string|Object} streamSettings - inbound stream_settings
+ * @returns {Object} 解析后的节点配置
+ */
+function parseNodeConfig(node, settings, streamSettings) {
+  let parsedSettings = {};
+  let parsedStream = {};
+  
+  // 处理 settings（可能是 JSON 字符串或对象）
+  try {
+    if (typeof settings === 'string') {
+      parsedSettings = JSON.parse(settings || '{}');
+    } else {
+      parsedSettings = settings || {};
+    }
+  } catch (e) {
+    logger.warn(`解析 settings 失败: ${e.message}`);
+  }
+  
+  // 处理 stream_settings（可能是 JSON 字符串或对象）
+  try {
+    if (typeof streamSettings === 'string') {
+      parsedStream = JSON.parse(streamSettings || '{}');
+    } else {
+      parsedStream = streamSettings || {};
+    }
+  } catch (e) {
+    logger.warn(`解析 stream_settings 失败: ${e.message}`);
+  }
+  
+  // 获取 UUID（从第一个客户端）
+  const clients = parsedSettings.clients || [];
+  const uuid = clients.length > 0 ? clients[0].id : '';
+  
+  // 获取传输协议
+  const network = parsedStream.network || 'tcp';
+  
+  // 获取 WS 路径（兼容不同格式的字段名）
+  let wsPath = '';
+  if (network === 'ws') {
+    const wsSettings = parsedStream.wsSettings || parsedStream['ws-settings'] || {};
+    wsPath = wsSettings.path || '/';
+  }
+  
+  // 获取 TLS 设置
+  const security = parsedStream.security || 'none';
+  
+  return {
+    uuid,
+    network,
+    wsPath,
+    security
+  };
+}
+
+/**
+ * 生成完整的节点链接
+ * @param {Object} params - 参数
+ * @returns {string} 节点链接
+ */
+function generateNodeLink(params) {
+  const { protocol, uuid, address, port, host, wsPath, security, remark } = params;
+  
+  if (protocol === 'vless') {
+    // vless://uuid@address:port?encryption=none&security=none&type=ws&host=host&path=path#remark
+    const queryParams = new URLSearchParams({
+      encryption: 'none',
+      security: security || 'none',
+      type: 'ws',
+      host: host || '',
+      path: wsPath || '/'
+    });
+    return `vless://${uuid}@${address}:${port}?${queryParams.toString()}#${encodeURIComponent(remark)}`;
+  } else if (protocol === 'vmess') {
+    // vmess://base64(json)
+    const config = {
+      v: '2',
+      ps: remark,
+      add: address,
+      port: port,
+      id: uuid,
+      aid: 0,
+      net: 'ws',
+      type: 'none',
+      host: host || '',
+      path: wsPath || '/',
+      tls: security === 'tls' ? 'tls' : ''
+    };
+    return `vmess://${Buffer.from(JSON.stringify(config)).toString('base64')}`;
+  } else if (protocol === 'trojan') {
+    // trojan://uuid@address:port?security=tls&type=ws&host=host&path=path#remark
+    const queryParams = new URLSearchParams({
+      security: security || 'tls',
+      type: 'ws',
+      host: host || '',
+      path: wsPath || '/'
+    });
+    return `trojan://${uuid}@${address}:${port}?${queryParams.toString()}#${encodeURIComponent(remark)}`;
+  }
+  
+  return '';
+}
 
 /**
  * GET /api/user/subscription
@@ -57,15 +158,15 @@ router.get('/', authenticateUser, async (req, res) => {
 
     // 查询用户选择的CF优选IP
     const cfIps = await db.prepare(`
-      SELECT cp.ip, cp.port, cp.location
+      SELECT cp.ip
       FROM user_cf_ips uci
       JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
       WHERE uci.user_id = ? AND cp.enabled = 1
     `).all(userId);
 
-    // 查询所有服务器节点
+    // 查询所有在线服务器（包含 host 和 client_port）
     const servers = await db.prepare(`
-      SELECT id, name, api_url, status
+      SELECT id, name, api_url, host, client_port, status
       FROM xui_servers
       WHERE status = 1
     `).all();
@@ -74,34 +175,47 @@ router.get('/', authenticateUser, async (req, res) => {
     const nodes = [];
     
     for (const server of servers) {
-      // 查询服务器节点
+      // 查询服务器节点（包含 settings 和 stream_settings）
       const serverNodes = await db.prepare(`
-        SELECT inbound_id, remark, port, protocol
+        SELECT inbound_id, remark, port, protocol, settings, stream_settings
         FROM xui_nodes
         WHERE server_id = ?
       `).all(server.id);
 
       for (const node of serverNodes) {
-        // 如果有CF优选IP，使用优选IP替换默认IP
+        // 解析节点配置
+        const config = parseNodeConfig(node, node.settings, node.stream_settings);
+        
+        // 使用服务器的 host 和 client_port
+        const nodeHost = server.host || '';
+        const nodePort = server.client_port || node.port;
+        
+        // 如果有CF优选IP，为每个 IP 生成一个节点
         if (cfIps.length > 0) {
           for (const cfIp of cfIps) {
             nodes.push({
-              server_name: server.name,
-              address: cfIp.ip,
-              port: cfIp.port,
               protocol: node.protocol,
-              remark: `${node.remark}-${cfIp.location}`
+              uuid: config.uuid,
+              address: cfIp.ip,
+              port: nodePort,
+              host: nodeHost,
+              wsPath: config.wsPath,
+              security: config.security,
+              remark: `${node.remark}-${server.name}`
             });
           }
         } else {
           // 使用默认IP
           const defaultIp = server.api_url.match(/\/\/([^:]+)/);
           nodes.push({
-            server_name: server.name,
-            address: defaultIp ? defaultIp[1] : '0.0.0.0',
-            port: node.port,
             protocol: node.protocol,
-            remark: node.remark
+            uuid: config.uuid,
+            address: defaultIp ? defaultIp[1] : '0.0.0.0',
+            port: nodePort,
+            host: nodeHost,
+            wsPath: config.wsPath,
+            security: config.security,
+            remark: `${node.remark}-${server.name}`
           });
         }
       }
@@ -124,11 +238,14 @@ router.get('/', authenticateUser, async (req, res) => {
     // 格式化时间显示
     const formatTime = (timestamp) => {
       if (!timestamp) return null;
-      return new Date(timestamp * 1000).toISOString().replace('T', ' ').substr(0, 19);
+      return new Date(timestamp * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     };
 
     const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const subscriptionUrl = `${baseUrl}/api/user/sub/${user.subscription_token}`;
+    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.subscription_token}`;
+
+    // 检查用户是否已完成 CF 优选
+    const cfOptimized = cfIps.length > 0;
 
     logger.info(`获取订阅信息成功: ${user.email}`);
 
@@ -136,9 +253,10 @@ router.get('/', authenticateUser, async (req, res) => {
       code: 0,
       message: 'ok',
       data: {
-        subscription_url: subscriptionUrl,
-        clash_url: `${subscriptionUrl}?clash=1`,
-        v2ray_url: `${subscriptionUrl}?v2ray=1`,
+        subscription_url: cfOptimized ? subscriptionUrl : '',
+        clash_url: cfOptimized ? `${subscriptionUrl}?clash=1` : '',
+        v2ray_url: cfOptimized ? `${subscriptionUrl}?v2ray=1` : '',
+        cf_optimized: cfOptimized,
         expire_at: user.expire_at,
         expire_text: formatTime(user.expire_at),
         traffic_used: user.traffic_used,
@@ -222,15 +340,15 @@ router.get('/sub/:token', [
 
     // 查询用户选择的CF优选IP
     const cfIps = await db.prepare(`
-      SELECT cp.ip, cp.port, cp.location
+      SELECT cp.ip
       FROM user_cf_ips uci
       JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
       WHERE uci.user_id = ? AND cp.enabled = 1
     `).all(user.id);
 
-    // 查询所有服务器节点
+    // 查询所有在线服务器（包含 host 和 client_port）
     const servers = await db.prepare(`
-      SELECT id, name, api_url, status
+      SELECT id, name, api_url, host, client_port, status
       FROM xui_servers
       WHERE status = 1
     `).all();
@@ -239,34 +357,47 @@ router.get('/sub/:token', [
     const nodes = [];
     
     for (const server of servers) {
-      // 查询服务器节点
+      // 查询服务器节点（包含 settings 和 stream_settings）
       const serverNodes = await db.prepare(`
-        SELECT inbound_id, remark, port, protocol
+        SELECT inbound_id, remark, port, protocol, settings, stream_settings
         FROM xui_nodes
         WHERE server_id = ?
       `).all(server.id);
 
       for (const node of serverNodes) {
-        // 如果有CF优选IP，使用优选IP替换默认IP
+        // 解析节点配置
+        const config = parseNodeConfig(node, node.settings, node.stream_settings);
+        
+        // 使用服务器的 host 和 client_port
+        const nodeHost = server.host || '';
+        const nodePort = server.client_port || node.port;
+        
+        // 如果有CF优选IP，为每个 IP 生成一个节点
         if (cfIps.length > 0) {
           for (const cfIp of cfIps) {
             nodes.push({
-              server_name: server.name,
-              address: cfIp.ip,
-              port: cfIp.port,
               protocol: node.protocol,
-              remark: `${node.remark}-${cfIp.location}`
+              uuid: config.uuid,
+              address: cfIp.ip,
+              port: nodePort,
+              host: nodeHost,
+              wsPath: config.wsPath,
+              security: config.security,
+              remark: `${node.remark}-${server.name}`
             });
           }
         } else {
           // 使用默认IP
           const defaultIp = server.api_url.match(/\/\/([^:]+)/);
           nodes.push({
-            server_name: server.name,
-            address: defaultIp ? defaultIp[1] : '0.0.0.0',
-            port: node.port,
             protocol: node.protocol,
-            remark: node.remark
+            uuid: config.uuid,
+            address: defaultIp ? defaultIp[1] : '0.0.0.0',
+            port: nodePort,
+            host: nodeHost,
+            wsPath: config.wsPath,
+            security: config.security,
+            remark: `${node.remark}-${server.name}`
           });
         }
       }
@@ -310,22 +441,48 @@ router.get('/sub/:token', [
  */
 function generateClashConfig(nodes, user) {
   const proxies = nodes.map(node => {
-    if (node.protocol === 'vmess') {
-      return `  - name: ${node.remark}
+    const { protocol, uuid, address, port, host, wsPath, security, remark } = node;
+    
+    if (protocol === 'vless') {
+      return `  - name: ${remark}
+    type: vless
+    server: ${address}
+    port: ${port}
+    uuid: ${uuid}
+    udp: true
+    tls: ${security === 'tls'}
+    network: ws
+    ws-opts:
+      path: ${wsPath || '/'}
+      headers:
+        Host: ${host || address}`;
+    } else if (protocol === 'vmess') {
+      return `  - name: ${remark}
     type: vmess
-    server: ${node.address}
-    port: ${node.port}
-    uuid: ${user.subscription_token}
+    server: ${address}
+    port: ${port}
+    uuid: ${uuid}
     alterId: 0
     cipher: auto
-    tls: true`;
-    } else if (node.protocol === 'trojan') {
-      return `  - name: ${node.remark}
+    tls: ${security === 'tls'}
+    network: ws
+    ws-opts:
+      path: ${wsPath || '/'}
+      headers:
+        Host: ${host || address}`;
+    } else if (protocol === 'trojan') {
+      return `  - name: ${remark}
     type: trojan
-    server: ${node.address}
-    port: ${node.port}
-    password: ${user.subscription_token}
-    sni: ${node.address}`;
+    server: ${address}
+    port: ${port}
+    password: ${uuid}
+    tls: true
+    network: ws
+    ws-opts:
+      path: ${wsPath || '/'}
+      headers:
+        Host: ${host || address}
+    sni: ${host || address}`;
     }
     return '';
   }).filter(Boolean).join('\n');
@@ -344,33 +501,13 @@ rules:
 }
 
 /**
- * 生成V2Ray配置
+ * 生成V2Ray订阅内容
  * @param {Array} nodes - 节点列表
  * @param {Object} user - 用户信息
- * @returns {string} V2Ray配置
+ * @returns {string} V2Ray订阅内容（每行一个节点链接）
  */
 function generateV2RayConfig(nodes, user) {
-  return nodes.map(node => {
-    if (node.protocol === 'vmess') {
-      const config = {
-        v: '2',
-        ps: node.remark,
-        add: node.address,
-        port: node.port,
-        id: user.subscription_token,
-        aid: 0,
-        net: 'tcp',
-        type: 'none',
-        host: '',
-        path: '',
-        tls: 'tls'
-      };
-      return `vmess://${Buffer.from(JSON.stringify(config)).toString('base64')}`;
-    } else if (node.protocol === 'trojan') {
-      return `trojan://${user.subscription_token}@${node.address}:${node.port}?security=tls&type=tcp#${encodeURIComponent(node.remark)}`;
-    }
-    return '';
-  }).filter(Boolean).join('\n');
+  return nodes.map(node => generateNodeLink(node)).filter(Boolean).join('\n');
 }
 
 module.exports = router;

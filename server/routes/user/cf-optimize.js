@@ -5,14 +5,10 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateUser } = require('../../middleware/auth-user');
+const { createLogger } = require('../../utils/logger');
 
 const router = express.Router();
-
-const logger = {
-  info: (msg) => console.log(`[USER-CF] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[USER-CF] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[USER-CF] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('USER-CF');
 
 /**
  * GET /api/user/cf-ips
@@ -77,7 +73,7 @@ router.get('/', authenticateUser, async (req, res) => {
 
 /**
  * POST /api/user/cf-ips/apply
- * 应用用户选择的优选IP
+ * 应用用户选择的优选IP（通过 IP ID）
  */
 router.post('/apply', authenticateUser, [
   body('ip_ids').isArray({ min: 1 }).withMessage('至少选择1个IP'),
@@ -114,7 +110,7 @@ router.post('/apply', authenticateUser, [
 
     const user = await db.prepare('SELECT subscription_token FROM users WHERE id = $1').get(userId);
     const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const subscriptionUrl = `${baseUrl}/api/user/sub/${user.subscription_token}`;
+    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.subscription_token}`;
 
     const nodes = validIps.map(ip => ({
       server_name: 'CF优选',
@@ -133,6 +129,64 @@ router.post('/apply', authenticateUser, [
         subscription_url: subscriptionUrl,
         nodes,
         message: `已成功应用 ${ip_ids.length} 个优选 IP，请重新获取订阅`
+      }
+    });
+  } catch (error) {
+    logger.error(`应用优选IP错误: ${error.message}`);
+    res.status(500).json({ code: 500, message: '服务器内部错误', data: null });
+  }
+});
+
+/**
+ * POST /api/user/cf-ips/apply-by-ip
+ * 应用用户选择的优选IP（通过 IP 地址）
+ */
+router.post('/apply-by-ip', authenticateUser, [
+  body('ips').isArray({ min: 1 }).withMessage('至少选择1个IP'),
+  body('ips.*').isString().withMessage('IP地址必须是字符串')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ code: 1001, message: '参数校验失败', data: null });
+    }
+
+    const { ips } = req.body;
+    const userId = req.user.id;
+    const db = req.app.locals.db;
+
+    // 通过 IP 地址查询 ID
+    const validIps = await db.prepare(`
+      SELECT id, ip FROM cf_ip_pool
+      WHERE ip IN (${ips.map((_, i) => `$${i + 1}`).join(',')}) AND enabled = 1
+    `).all(...ips);
+
+    if (validIps.length === 0) {
+      return res.status(400).json({ code: 4002, message: 'IP 地址无效或已禁用', data: null });
+    }
+
+    const transaction = db.transaction(async () => {
+      await db.prepare('DELETE FROM user_cf_ips WHERE user_id = $1').run(userId);
+      const insertStmt = db.prepare('INSERT INTO user_cf_ips (user_id, ip_pool_id) VALUES ($1, $2)');
+      for (const ip of validIps) {
+        await insertStmt.run(userId, ip.id);
+      }
+    });
+
+    await transaction();
+
+    const user = await db.prepare('SELECT subscription_token FROM users WHERE id = $1').get(userId);
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.subscription_token}`;
+
+    logger.info(`应用优选IP成功，用户: ${req.user.email}，选择了 ${validIps.length} 个IP`);
+
+    res.json({
+      code: 0, message: 'ok',
+      data: {
+        applied_count: validIps.length,
+        subscription_url: subscriptionUrl,
+        message: `已成功应用 ${validIps.length} 个优选 IP`
       }
     });
   } catch (error) {

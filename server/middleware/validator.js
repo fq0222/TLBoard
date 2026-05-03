@@ -4,13 +4,9 @@
  */
 
 const { validationResult } = require('express-validator');
+const { createLogger } = require('../utils/logger');
 
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[VALIDATOR] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[VALIDATOR] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[VALIDATOR] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('VALIDATOR');
 
 /**
  * 验证请求参数

@@ -121,13 +121,9 @@ const servers = ref([])
  */
 async function fetchStats() {
   try {
-    // 这里应该调用实际的API获取统计数据
-    // 模拟数据
-    stats.value = {
-      userCount: 150,
-      planCount: 3,
-      orderCount: 420,
-      serverCount: 5
+    const response = await api.admin.getDashboardStats()
+    if (response.code === 0) {
+      stats.value = response.data
     }
   } catch (error) {
     console.error('获取统计数据失败:', error)

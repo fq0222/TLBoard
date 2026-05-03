@@ -5,15 +5,10 @@
 
 const express = require('express');
 const { query, validationResult } = require('express-validator');
+const { createLogger } = require('../../utils/logger');
 
 const router = express.Router();
-
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[USER-ANNOUNCEMENTS] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[USER-ANNOUNCEMENTS] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[USER-ANNOUNCEMENTS] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('USER-ANNOUNCEMENTS');
 
 /**
  * GET /api/user/announcements

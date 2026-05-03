@@ -11,6 +11,7 @@ const rateLimit = require('express-rate-limit');
 const { body, query, validationResult } = require('express-validator');
 const config = require('./config');
 const databaseManager = require('./db/init');
+const { createLogger } = require('./utils/logger');
 
 // 导入路由模块
 const authRoutes = require('./routes/admin/auth');
@@ -21,13 +22,9 @@ const usersRoutes = require('./routes/admin/users');
 const ordersRoutes = require('./routes/admin/orders');
 const announcementsRoutes = require('./routes/admin/announcements');
 const cfIpsRoutes = require('./routes/admin/cf-ips');
+const dashboardRoutes = require('./routes/admin/dashboard');
 
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[ADMIN-APP] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[ADMIN-APP] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[ADMIN-APP] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('ADMIN-APP');
 
 // 创建Express应用
 const app = express();
@@ -140,6 +137,9 @@ app.use(`${apiPrefix}/announcements`, announcementsRoutes);
 
 // Cloudflare优选IP池管理路由
 app.use(`${apiPrefix}/cf-ips`, cfIpsRoutes);
+
+// 仪表盘统计路由
+app.use(`${apiPrefix}/dashboard`, dashboardRoutes);
 
 // ============ 错误处理 ============
 

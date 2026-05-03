@@ -5,12 +5,9 @@
 
 const { Pool } = require('pg');
 const config = require('../config');
+const { createLogger } = require('../utils/logger');
 
-const logger = {
-  info: (msg) => console.log(`[DB] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[DB] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[DB] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('DB');
 
 class DatabaseManager {
   constructor() {
@@ -216,6 +213,8 @@ class DatabaseManager {
           api_url VARCHAR(500) NOT NULL,
           api_username VARCHAR(255) NOT NULL,
           api_password VARCHAR(255) NOT NULL,
+          host VARCHAR(500) DEFAULT '',
+          client_port INTEGER DEFAULT 0,
           status INTEGER DEFAULT 0,
           last_check_at BIGINT,
           created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
@@ -232,6 +231,8 @@ class DatabaseManager {
           remark VARCHAR(255),
           port INTEGER,
           protocol VARCHAR(50),
+          settings TEXT DEFAULT '{}',
+          stream_settings TEXT DEFAULT '{}',
           user_count INTEGER DEFAULT 0,
           online_count INTEGER DEFAULT 0,
           updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())

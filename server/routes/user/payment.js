@@ -6,15 +6,10 @@
 const express = require('express');
 const vmqService = require('../../services/vmq-service');
 const { completePaidOrder } = require('../../services/order-service');
+const { createLogger } = require('../../utils/logger');
 
 const router = express.Router();
-
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[PAYMENT] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[PAYMENT] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[PAYMENT] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('PAYMENT');
 
 /**
  * 处理 VMQ 支付通知

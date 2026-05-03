@@ -7,15 +7,10 @@ const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const { authenticateAdmin } = require('../../middleware/auth-admin');
 const XuiService = require('../../services/xui-service');
+const { createLogger } = require('../../utils/logger');
 
 const router = express.Router();
-
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[ADMIN-SERVERS] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[ADMIN-SERVERS] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[ADMIN-SERVERS] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('ADMIN-SERVERS');
 
 /**
  * GET /api/admin/servers
@@ -27,7 +22,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
 
     // 查询所有服务器
     const servers = await db.prepare(`
-      SELECT id, name, api_url, status, last_check_at, created_at
+      SELECT id, name, api_url, host, client_port, status, last_check_at, created_at
       FROM xui_servers
       ORDER BY created_at DESC
     `).all();
@@ -48,6 +43,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
         id: server.id,
         name: server.name,
         api_url: server.api_url,
+        host: server.host || '',
+        client_port: server.client_port || 0,
         status: server.status,
         status_text: server.status === 1 ? '在线' : '离线',
         node_count: nodeStats.node_count || 0,
@@ -110,6 +107,8 @@ router.post('/', authenticateAdmin, [
     }
 
     const { name, api_url, api_username, api_password } = req.body;
+    const host = req.body.host || '';
+    const clientPort = parseInt(req.body.client_port, 10) || 0;
     const db = req.app.locals.db;
 
     // 测试连接（模拟）
@@ -126,9 +125,9 @@ router.post('/', authenticateAdmin, [
 
     // 插入服务器记录
     const result = await db.prepare(`
-      INSERT INTO xui_servers (name, api_url, api_username, api_password, status, last_check_at)
-      VALUES (?, ?, ?, ?, 1, ?)
-    `).run(name, api_url, api_username, api_password, Math.floor(Date.now() / 1000));
+      INSERT INTO xui_servers (name, api_url, api_username, api_password, host, client_port, status, last_check_at)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+    `).run(name, api_url, api_username, api_password, host, clientPort, Math.floor(Date.now() / 1000));
 
     logger.info(`添加服务器成功: ${name} (ID: ${result.lastInsertRowid})`);
 
@@ -139,6 +138,8 @@ router.post('/', authenticateAdmin, [
         id: result.lastInsertRowid,
         name,
         api_url,
+        host,
+        client_port: clientPort,
         status: 1,
         message: '服务器添加成功，连接测试通过'
       }
@@ -225,6 +226,14 @@ router.put('/:id', authenticateAdmin, [
       updates.push('api_password = ?');
       values.push(req.body.api_password);
     }
+    if (req.body.host !== undefined) {
+      updates.push('host = ?');
+      values.push(req.body.host);
+    }
+    if (req.body.client_port !== undefined) {
+      updates.push('client_port = ?');
+      values.push(parseInt(req.body.client_port, 10) || 0);
+    }
 
     if (updates.length === 0) {
       logger.warn('修改服务器失败: 没有要更新的字段');
@@ -251,6 +260,8 @@ router.put('/:id', authenticateAdmin, [
         id: updatedServer.id,
         name: updatedServer.name,
         api_url: updatedServer.api_url,
+        host: updatedServer.host || '',
+        client_port: updatedServer.client_port || 0,
         status: updatedServer.status,
         message: '服务器信息更新成功'
       }
@@ -381,11 +392,23 @@ router.get('/:id/detail', authenticateAdmin, [
         for (const inbound of inboundsResult.data) {
           const clientStats = inbound.clientStats || [];
           
+          // 从 settings 中解析客户端配置（包含 totalGB 等信息）
+          let clientsConfig = [];
+          try {
+            const settings = JSON.parse(inbound.settings || '{}');
+            clientsConfig = settings.clients || [];
+          } catch (e) {
+            logger.warn(`解析 inbound settings 失败: ${e.message}`);
+          }
+          
           // 获取每个用户的详细信息
           const users = clientStats.map(client => {
             // 计算流量使用情况
             const trafficUsed = (client.up || 0) + (client.down || 0);
-            const trafficLimit = client.total || 0;
+            
+            // 从 settings.clients 中获取流量限制（totalGB 字段，单位是 GB）
+            const clientConfig = clientsConfig.find(c => c.email === client.email);
+            const trafficLimit = clientConfig ? (clientConfig.totalGB || 0) : 0;
             
             // 检查用户是否在线（onlineClients 是邮箱字符串数组）
             const isOnline = onlineEmails.includes(client.email);
@@ -411,6 +434,8 @@ router.get('/:id/detail', authenticateAdmin, [
             remark: inbound.remark,
             port: inbound.port,
             protocol: inbound.protocol,
+            settings: typeof inbound.settings === 'string' ? inbound.settings : JSON.stringify(inbound.settings || {}),
+            stream_settings: typeof inbound.streamSettings === 'string' ? inbound.streamSettings : JSON.stringify(inbound.streamSettings || {}),
             user_count: clientStats.length,
             online_count: onlineCount,
             users: users
@@ -422,9 +447,9 @@ router.get('/:id/detail', authenticateAdmin, [
         
         for (const node of nodesWithUsers) {
           await db.prepare(`
-            INSERT INTO xui_nodes (server_id, inbound_id, remark, port, protocol, user_count, online_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-          `).run(serverId, node.inbound_id, node.remark, node.port, node.protocol, node.user_count, node.online_count);
+            INSERT INTO xui_nodes (server_id, inbound_id, remark, port, protocol, settings, stream_settings, user_count, online_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(serverId, node.inbound_id, node.remark, node.port, node.protocol, node.settings, node.stream_settings, node.user_count, node.online_count);
         }
         
         logger.info(`从 3X-UI 获取节点信息成功: ${nodesWithUsers.length} 个节点`);
@@ -469,6 +494,8 @@ router.get('/:id/detail', authenticateAdmin, [
           id: server.id,
           name: server.name,
           api_url: server.api_url,
+          host: server.host || '',
+          client_port: server.client_port || 0,
           status: server.status,
           last_check_at: server.last_check_at
         },
@@ -535,10 +562,13 @@ router.post('/:id/sync', authenticateAdmin, [
       
       // 插入新节点
       for (const node of syncResult.nodes) {
+        const settings = typeof node.settings === 'string' ? node.settings : JSON.stringify(node.settings || {});
+        const streamSettings = typeof node.stream_settings === 'string' ? node.stream_settings : JSON.stringify(node.stream_settings || {});
+        
         await db.prepare(`
-          INSERT INTO xui_nodes (server_id, inbound_id, remark, port, protocol, user_count, online_count)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(serverId, node.inbound_id, node.remark, node.port, node.protocol, node.user_count, node.online_count);
+          INSERT INTO xui_nodes (server_id, inbound_id, remark, port, protocol, settings, stream_settings, user_count, online_count)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(serverId, node.inbound_id, node.remark, node.port, node.protocol, settings, streamSettings, node.user_count, node.online_count);
       }
       
       logger.info(`更新节点信息成功: ${syncResult.nodes.length} 个节点`);
@@ -793,7 +823,7 @@ function formatTraffic(bytes) {
  */
 function formatTime(timestamp) {
   if (!timestamp) return null;
-  return new Date(timestamp * 1000).toISOString().replace('T', ' ').substr(0, 19);
+  return new Date(timestamp * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 }
 
 module.exports = router;

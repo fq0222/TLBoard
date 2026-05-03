@@ -154,17 +154,28 @@ VMQ 后台需要配置以下两个地址：
 
 - 邮箱
 - 当前套餐
-- 订阅链接
+- 订阅链接（需先完成 CF IP 优选）
 - 到期时间
 - 已用流量 / 总流量
 - 账号状态
 
 支持操作：
 
+- 一键优选 IP（在浏览器后台自动测试延迟，选择最优 5 个 IP）
+- 生成订阅链接（优选完成后可用）
 - 复制订阅链接
 - 查看订阅详情
 - 重新购买套餐
-- Cloudflare IP 优选
+- Cloudflare IP 优选（手动选择 IP）
+
+一键优选流程：
+
+1. 用户点击"一键优选 IP"按钮
+2. 前端从后端获取 IP 池（最多 20 个，包含 IPv6）
+3. 前端并发测试各 IP 到用户浏览器的延迟（3 次取平均）
+4. 按延迟排序，优先选 1 个 IPv6，其余从 IPv4 中选，共 5 个
+5. 调用后端接口保存优选结果
+6. 显示"生成订阅链接"按钮，用户点击后显示订阅链接
 
 ### 5.5 支付等待页
 
@@ -236,6 +247,15 @@ VMQ 后台需要配置以下两个地址：
 - 同步节点与用户信息
 - 手动更新 3X-UI 用户
 
+服务端字段说明：
+
+- `name`：服务器名称
+- `api_url`：3X-UI 面板地址
+- `api_username`：API 用户名
+- `api_password`：API 密码
+- `host`：CF 端口转发规则中的主机名，用于生成订阅节点的 `host` 参数
+- `client_port`：客户端连接端口，用于生成订阅节点的端口号（如 v2rayN 中配置的端口）
+
 ### 6.7 Cloudflare IP 池管理
 
 - IP 池增删改查
@@ -251,7 +271,7 @@ VMQ 后台需要配置以下两个地址：
 |------|------|------|
 | POST | `/api/user/register-and-pay` | 注册并创建支付订单 |
 | POST | `/api/user/login` | 用户登录 |
-| GET | `/api/user/profile` | 获取个人信息 |
+| GET | `/api/user/profile` | 获取个人信息（包含 `cf_optimized` 状态） |
 | GET | `/api/user/plans` | 获取套餐列表 |
 | GET | `/api/user/announcements` | 获取公告列表 |
 | GET | `/api/user/orders` | 获取当前用户订单列表 |
@@ -260,7 +280,7 @@ VMQ 后台需要配置以下两个地址：
 | GET | `/api/user/subscription` | 获取订阅信息 |
 | GET | `/api/user/sub/:token` | 获取订阅内容 |
 | GET | `/api/user/cf-ips` | 获取 CF IP 池 |
-| POST | `/api/user/cf-ips/apply` | 应用 CF IP |
+| POST | `/api/user/cf-ips/apply` | 应用 CF IP（通过 IP ID） |
 | GET | `/api/user/payment/notify` | VMQ 异步通知 |
 | POST | `/api/user/payment/notify` | VMQ 异步通知 |
 | GET | `/api/user/payment/return` | VMQ 同步回跳 |
@@ -275,8 +295,8 @@ VMQ 后台需要配置以下两个地址：
 | POST | `/api/admin/admins` | 新增管理员 |
 | DELETE | `/api/admin/admins/:id` | 删除管理员 |
 | GET | `/api/admin/servers` | 服务端列表 |
-| POST | `/api/admin/servers` | 新增服务端 |
-| PUT | `/api/admin/servers/:id` | 编辑服务端 |
+| POST | `/api/admin/servers` | 新增服务端（支持 `host`、`client_port`） |
+| PUT | `/api/admin/servers/:id` | 编辑服务端（支持 `host`、`client_port`） |
 | DELETE | `/api/admin/servers/:id` | 删除服务端 |
 | GET | `/api/admin/servers/:id/detail` | 服务端详情 |
 | POST | `/api/admin/servers/:id/sync` | 同步服务端 |
@@ -299,6 +319,7 @@ VMQ 后台需要配置以下两个地址：
 | PUT | `/api/admin/cf-ips/:id` | 编辑 IP |
 | DELETE | `/api/admin/cf-ips/:id` | 删除 IP |
 | POST | `/api/admin/cf-ips/import` | 批量导入 IP |
+| GET | `/api/admin/dashboard/stats` | 仪表盘统计数据 |
 
 ---
 
@@ -343,8 +364,28 @@ project/
 说明：
 
 - `vmq-service.js`：VMQ 下单、查单、关单、回调验签
-- `order-service.js`：订单完成后的统一激活逻辑
+- `order-service.js`：订单完成后的统一激活逻辑（含同步到 3X-UI）
 - 不再使用旧的 `payment-service.js`
+
+---
+
+## 10. 定时任务
+
+系统包含以下定时任务（`server/jobs/index.js`）：
+
+### 10.1 订单自动过期
+
+- 执行频率：每 10 分钟
+- 逻辑：将超过 30 分钟未支付的订单标记为 `expired`
+
+### 10.2 3X-UI 用户同步
+
+- 执行频率：每 4 小时（首次延迟 5 分钟）
+- 逻辑：
+  1. 查询所有已启用且未过期的用户
+  2. 遍历所有在线的 3X-UI 服务器
+  3. 检查用户是否在每个 inbound 的客户端列表中
+  4. 如果不存在，则添加用户到 3X-UI 节点
 
 ---
 

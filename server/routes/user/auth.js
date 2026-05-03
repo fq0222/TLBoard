@@ -11,15 +11,10 @@ const { body, validationResult } = require('express-validator');
 const config = require('../../config');
 const { authenticateUser } = require('../../middleware/auth-user');
 const vmqService = require('../../services/vmq-service');
+const { createLogger } = require('../../utils/logger');
 
 const router = express.Router();
-
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[USER-AUTH] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[USER-AUTH] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[USER-AUTH] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('USER-AUTH');
 
 /**
  * POST /api/user/register-and-pay
@@ -371,8 +366,14 @@ router.get('/profile', authenticateUser, async (req, res) => {
     // 格式化时间显示
     const formatTime = (timestamp) => {
       if (!timestamp) return null;
-      return new Date(timestamp * 1000).toISOString().replace('T', ' ').substr(0, 19);
+      return new Date(timestamp * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     };
+
+    // 检查用户是否已完成 CF 优选
+    const cfIps = await db.prepare(`
+      SELECT 1 FROM user_cf_ips WHERE user_id = ? LIMIT 1
+    `).get(userId);
+    const cfOptimized = !!cfIps;
 
     logger.info(`获取用户信息成功: ${user.email}`);
 
@@ -384,7 +385,8 @@ router.get('/profile', authenticateUser, async (req, res) => {
         email: user.email,
         plan_id: user.plan_id,
         plan_name: user.plan_name,
-        subscription_url: `${req.protocol}://${req.get('host')}/api/user/sub/${user.subscription_token}`,
+        subscription_url: cfOptimized ? `${req.protocol}://${req.get('host')}/api/user/subscription/sub/${user.subscription_token}` : '',
+        cf_optimized: cfOptimized,
         traffic_used: user.traffic_used,
         traffic_limit: user.traffic_limit,
         traffic_used_text: formatTraffic(user.traffic_used),

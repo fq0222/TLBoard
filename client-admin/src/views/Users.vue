@@ -97,12 +97,14 @@ const userForm = reactive({
 
 async function fetchUsers() {
   try {
-    const response = await api.admin.getUsers({
+    const params = {
       page: page.value,
-      limit: limit.value,
-      keyword: keyword.value,
-      status: status.value
-    })
+      limit: limit.value
+    }
+    if (keyword.value) params.keyword = keyword.value
+    if (status.value) params.status = status.value
+    
+    const response = await api.admin.getUsers(params)
     if (response.code === 0) {
       users.value = response.data.list
       total.value = response.data.total

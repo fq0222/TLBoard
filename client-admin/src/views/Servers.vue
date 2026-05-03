@@ -33,6 +33,14 @@
               <el-icon><Link /></el-icon>
               <span class="url-text" :title="server.api_url">{{ server.api_url }}</span>
             </div>
+            <div v-if="server.host" class="info-row host-row">
+              <el-icon><Position /></el-icon>
+              <span class="url-text" :title="server.host">Host: {{ server.host }}</span>
+            </div>
+            <div v-if="server.client_port" class="info-row port-row">
+              <el-icon><Odometer /></el-icon>
+              <span class="url-text">客户端端口: {{ server.client_port }}</span>
+            </div>
             
             <div class="info-grid">
               <div class="info-item">
@@ -104,6 +112,12 @@
             show-password
           />
         </el-form-item>
+        <el-form-item label="Host" prop="host">
+          <el-input v-model="serverForm.host" placeholder="CF端口转发的主机名，如 open.example.com" />
+        </el-form-item>
+        <el-form-item label="客户端端口" prop="client_port">
+          <el-input-number v-model="serverForm.client_port" :min="0" :max="65535" placeholder="客户端连接端口" />
+        </el-form-item>
       </el-form>
       
       <template #footer>
@@ -119,7 +133,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, View, Refresh, Edit, Delete, Link } from '@element-plus/icons-vue'
+import { Plus, View, Refresh, Edit, Delete, Link, Position, Odometer } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 
@@ -136,7 +150,9 @@ const serverForm = reactive({
   name: '',
   api_url: '',
   api_username: '',
-  api_password: ''
+  api_password: '',
+  host: '',
+  client_port: 0
 })
 
 const serverRules = {
@@ -181,6 +197,8 @@ function showEditDialog(server) {
   serverForm.api_url = server.api_url
   serverForm.api_username = ''
   serverForm.api_password = ''
+  serverForm.host = server.host || ''
+  serverForm.client_port = server.client_port || 0
   
   dialogVisible.value = true
 }
@@ -190,6 +208,8 @@ function resetForm() {
   serverForm.api_url = ''
   serverForm.api_username = ''
   serverForm.api_password = ''
+  serverForm.host = ''
+  serverForm.client_port = 0
 }
 
 async function handleSubmit() {
@@ -339,6 +359,26 @@ onMounted(() => {
   gap: 8px;
   padding: 10px 12px;
   background: #f5f7fa;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.host-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #ecf5ff;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.port-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f0f9eb;
   border-radius: 8px;
   margin-bottom: 16px;
 }

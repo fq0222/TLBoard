@@ -4,14 +4,10 @@
  */
 
 const express = require('express');
-const router = express.Router();
+const { createLogger } = require('../../utils/logger');
 
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[USER-PLANS] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[USER-PLANS] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[USER-PLANS] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const router = express.Router();
+const logger = createLogger('USER-PLANS');
 
 /**
  * GET /api/user/plans

@@ -1,17 +1,12 @@
 /**
  * 用户端JWT认证中间件
- * 验证用户Token，提取用户信息
  */
 
 const jwt = require('jsonwebtoken');
 const config = require('../config');
+const { createLogger } = require('../utils/logger');
 
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[AUTH-USER] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[AUTH-USER] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[AUTH-USER] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('AUTH-USER');
 
 /**
  * 用户认证中间件

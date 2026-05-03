@@ -10,6 +10,7 @@ const morgan = require('morgan');
 const { body, query, validationResult } = require('express-validator');
 const config = require('./config');
 const databaseManager = require('./db/init');
+const { createLogger } = require('./utils/logger');
 
 // 导入路由模块
 const authRoutes = require('./routes/user/auth');
@@ -20,12 +21,7 @@ const announcementsRoutes = require('./routes/user/announcements');
 const cfOptimizeRoutes = require('./routes/user/cf-optimize');
 const paymentRoutes = require('./routes/user/payment');
 
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[USER-APP] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[USER-APP] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[USER-APP] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('USER-APP');
 
 // 创建Express应用
 const app = express();

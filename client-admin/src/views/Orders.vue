@@ -65,10 +65,10 @@ async function fetchOrders() {
   try {
     const params = {
       page: page.value,
-      limit: limit.value,
-      email: email.value,
-      status: status.value
+      limit: limit.value
     }
+    if (email.value) params.email = email.value
+    if (status.value) params.status = status.value
     if (dateRange.value && dateRange.value.length === 2) {
       params.start_date = dateRange.value[0].toISOString().split('T')[0]
       params.end_date = dateRange.value[1].toISOString().split('T')[0]

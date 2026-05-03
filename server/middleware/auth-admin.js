@@ -1,17 +1,12 @@
 /**
  * 管理端JWT认证中间件
- * 验证管理员Token，提取管理员信息
  */
 
 const jwt = require('jsonwebtoken');
 const config = require('../config');
+const { createLogger } = require('../utils/logger');
 
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[AUTH-ADMIN] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[AUTH-ADMIN] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[AUTH-ADMIN] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('AUTH-ADMIN');
 
 /**
  * 管理员认证中间件

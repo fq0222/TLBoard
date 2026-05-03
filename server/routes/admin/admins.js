@@ -6,17 +6,12 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const { body, param, validationResult } = require('express-validator');
-const config = require('../../config');
 const { authenticateAdmin, requireSuperAdmin } = require('../../middleware/auth-admin');
+const config = require('../../config');
+const { createLogger } = require('../../utils/logger');
 
 const router = express.Router();
-
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[ADMIN-MANAGE] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[ADMIN-MANAGE] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[ADMIN-MANAGE] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('ADMIN-MANAGE');
 
 /**
  * GET /api/admin/admins

@@ -6,15 +6,10 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { authenticateAdmin } = require('../../middleware/auth-admin');
+const { createLogger } = require('../../utils/logger');
 
 const router = express.Router();
-
-// 日志工具
-const logger = {
-  info: (msg) => console.log(`[ADMIN-ANNOUNCEMENTS] [INFO] ${new Date().toISOString()} - ${msg}`),
-  error: (msg) => console.error(`[ADMIN-ANNOUNCEMENTS] [ERROR] ${new Date().toISOString()} - ${msg}`),
-  warn: (msg) => console.warn(`[ADMIN-ANNOUNCEMENTS] [WARN] ${new Date().toISOString()} - ${msg}`)
-};
+const logger = createLogger('ADMIN-ANNOUNCEMENTS');
 
 /**
  * GET /api/admin/announcements

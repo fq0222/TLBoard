@@ -274,6 +274,20 @@
 
 获取当前登录用户的订阅信息与节点列表。
 
+返回字段说明：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| subscription_url | string | 订阅链接，未优选时为空字符串 |
+| clash_url | string | Clash 订阅链接 |
+| v2ray_url | string | V2Ray 订阅链接 |
+| cf_optimized | boolean | 是否已完成 CF IP 优选 |
+| expire_at | number | 到期时间戳 |
+| expire_text | string | 格式化的到期时间（北京时间） |
+| traffic_used | number | 已用流量（字节） |
+| traffic_limit | number | 流量上限（字节） |
+| nodes | array | 节点列表 |
+
 #### GET `/api/user/sub/:token`
 
 通过订阅 token 获取订阅内容。
@@ -286,6 +300,18 @@
 | v2ray | string | 否 | `1` 时返回 V2Ray Base64 |
 
 默认返回 `text/plain` 格式的 Base64 订阅内容，并带有 `Subscription-Userinfo` 响应头。
+
+节点链接格式说明：
+
+- VLESS: `vless://uuid@address:port?encryption=none&security=none&type=ws&host=host&path=path#remark`
+- VMess: `vmess://base64(json)`
+- Trojan: `trojan://uuid@address:port?security=tls&type=ws&host=host&path=path#remark`
+
+其中：
+- `address`：用户选择的 CF 优选 IP
+- `port`：服务器配置的 `client_port`
+- `host`：服务器配置的 `host`（CF 端口转发主机名）
+- `path`：3X-UI inbound 配置的 WS 路径
 
 ---
 
@@ -425,6 +451,17 @@ md5(payId + param + type + price + reallyPrice + key)
 | PUT | `/servers/:id/users` | 更新 3X-UI 用户 |
 | DELETE | `/servers/:id/users` | 删除 3X-UI 用户 |
 
+服务端新增/编辑请求参数：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | string | 是 | 服务器名称 |
+| api_url | string | 是 | 3X-UI 面板地址 |
+| api_username | string | 是 | API 用户名 |
+| api_password | string | 是 | API 密码 |
+| host | string | 否 | CF 端口转发主机名，用于生成订阅节点的 `host` 参数 |
+| client_port | number | 否 | 客户端连接端口，用于生成订阅节点的端口号 |
+
 ### 3.3 用户管理
 
 | 方法 | 路径 | 说明 |
@@ -467,6 +504,27 @@ md5(payId + param + type + price + reallyPrice + key)
 | DELETE | `/cf-ips/:id` | 删除 IP |
 | POST | `/cf-ips/import` | 批量导入 IP |
 
+### 3.8 仪表盘
+
+#### GET `/api/admin/dashboard/stats`
+
+获取系统统计数据。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "userCount": 150,
+    "planCount": 3,
+    "orderCount": 420,
+    "serverCount": 5
+  }
+}
+```
+
 ---
 
 ## 4. 本次与代码对齐的修正点
@@ -481,4 +539,8 @@ md5(payId + param + type + price + reallyPrice + key)
 - 修正支付通知为同时支持 GET 和 POST
 - 增加 `5002`、`5003` 错误码说明
 - 删除当前代码中不存在的 `/api/user/cf-ips/test` 描述
-- 补充“金额校验”和“拒绝手输金额通道”的当前实现规则
+- 补充"金额校验"和"拒绝手输金额通道"的当前实现规则
+- 补充订阅接口 `cf_optimized` 返回字段
+- 补充服务端管理 `host`、`client_port` 参数说明
+- 补充仪表盘统计接口 `/api/admin/dashboard/stats`
+- 补充节点链接格式说明（VLESS/VMess/Trojan）

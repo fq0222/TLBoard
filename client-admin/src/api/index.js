@@ -367,6 +367,14 @@ const adminApi = {
    */
   importCfIps(data) {
     return apiClient.post('/cf-ips/import', data)
+  },
+
+  /**
+   * 获取仪表盘统计数据
+   * @returns {Promise<Object>} 响应数据
+   */
+  getDashboardStats() {
+    return apiClient.get('/dashboard/stats')
   }
 }
 
