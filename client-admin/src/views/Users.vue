@@ -45,7 +45,7 @@
           v-model:current-page="page"
           v-model:page-size="limit"
           :total="total"
-          :page-sizes="[20, 50, 100]"
+          :page-sizes="[10, 20, 50]"
           layout="total, sizes, prev, pager, next"
           @current-change="fetchUsers"
           @size-change="fetchUsers"
@@ -53,20 +53,33 @@
       </div>
     </div>
     
-    <el-dialog v-model="dialogVisible" title="编辑用户" width="500px">
+    <el-dialog v-model="dialogVisible" title="编辑用户" width="500px" :close-on-click-modal="!submitting">
       <el-form :model="userForm" label-width="100px">
         <el-form-item label="启用">
-          <el-switch v-model="userForm.enabled" />
+          <el-switch v-model="userForm.enabled" :disabled="submitting" />
         </el-form-item>
-        <el-form-item label="流量上限(bytes)">
-          <el-input-number v-model="userForm.traffic_limit" :min="0" />
+        <el-form-item label="流量上限">
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <el-input-number v-model="userForm.traffic_value" :min="0" :precision="2" style="flex: 1;" @change="handleValueChange" :disabled="submitting" />
+            <el-select v-model="userForm.traffic_unit" style="width: 100px;" @change="handleUnitChange" :disabled="submitting">
+              <el-option label="B" value="B" />
+              <el-option label="KB" value="KB" />
+              <el-option label="MB" value="MB" />
+              <el-option label="GB" value="GB" />
+              <el-option label="TB" value="TB" />
+            </el-select>
+          </div>
         </el-form-item>
         <el-form-item label="到期时间">
-          <el-date-picker v-model="userForm.expire_at" type="datetime" placeholder="选择到期时间" />
+          <el-date-picker v-model="userForm.expire_at" type="datetime" placeholder="选择到期时间" :disabled="submitting" />
         </el-form-item>
       </el-form>
+      <div v-if="submitting" style="text-align: center; color: #409eff; margin-top: 10px;">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        正在同步到 3X-UI 服务器，请稍候...
+      </div>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="dialogVisible = false" :disabled="submitting">取消</el-button>
         <el-button type="primary" @click="handleSubmit" :loading="submitting">确定</el-button>
       </template>
     </el-dialog>
@@ -75,7 +88,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { Search } from '@element-plus/icons-vue'
+import { Search, Loading } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 
@@ -83,7 +96,7 @@ const users = ref([])
 const keyword = ref('')
 const status = ref('')
 const page = ref(1)
-const limit = ref(20)
+const limit = ref(10)
 const total = ref(0)
 const dialogVisible = ref(false)
 const submitting = ref(false)
@@ -91,9 +104,55 @@ const editingId = ref(null)
 
 const userForm = reactive({
   enabled: true,
-  traffic_limit: 0,
+  traffic_value: 0,
+  traffic_unit: 'GB',
+  traffic_bytes: 0,  // 存储原始字节值
   expire_at: null
 })
+
+// 单位到字节的转换系数
+const unitMultipliers = {
+  'B': 1,
+  'KB': 1024,
+  'MB': 1024 * 1024,
+  'GB': 1024 * 1024 * 1024,
+  'TB': 1024 * 1024 * 1024 * 1024
+}
+
+// 将字节转换为指定单位的值
+function bytesToUnitValue(bytes, unit) {
+  const numBytes = Number(bytes) || 0
+  if (numBytes === 0) return 0
+  return Math.round((numBytes / unitMultipliers[unit]) * 100) / 100
+}
+
+// 将字节转换为合适的单位显示
+function bytesToUnit(bytes) {
+  const numBytes = Number(bytes) || 0
+  if (numBytes === 0) return { value: 0, unit: 'GB' }
+  
+  // 找到最合适的单位
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let unitIndex = 0
+  let value = numBytes
+  
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex++
+  }
+  
+  return { value: Math.round(value * 100) / 100, unit: units[unitIndex] }
+}
+
+function handleUnitChange(newUnit) {
+  // 从存储的字节值转换为新单位的值
+  userForm.traffic_value = bytesToUnitValue(userForm.traffic_bytes, newUnit)
+}
+
+function handleValueChange() {
+  // 当用户修改数值时，更新存储的字节值
+  userForm.traffic_bytes = Math.round(userForm.traffic_value * unitMultipliers[userForm.traffic_unit])
+}
 
 async function fetchUsers() {
   try {
@@ -116,18 +175,29 @@ async function fetchUsers() {
 
 function showEditDialog(user) {
   editingId.value = user.id
-  userForm.enabled = user.enabled
-  userForm.traffic_limit = user.traffic_limit
-  userForm.expire_at = user.expire_at ? new Date(user.expire_at * 1000) : null
+  // 将数字转换为布尔值（0 = false, 1 = true）
+  userForm.enabled = !!user.enabled
+  
+  // 存储原始字节值，并转换为合适的单位显示
+  const trafficLimit = Number(user.traffic_limit) || 0
+  userForm.traffic_bytes = trafficLimit
+  const traffic = bytesToUnit(trafficLimit)
+  userForm.traffic_value = traffic.value
+  userForm.traffic_unit = traffic.unit
+  
+  // 处理到期时间：0 或 "0" 表示无限期，应设为 null
+  const expireAt = Number(user.expire_at) || 0
+  userForm.expire_at = expireAt > 0 ? new Date(expireAt * 1000) : null
   dialogVisible.value = true
 }
 
 async function handleSubmit() {
   try {
     submitting.value = true
+    
     const data = {
       enabled: userForm.enabled,
-      traffic_limit: userForm.traffic_limit,
+      traffic_limit: userForm.traffic_bytes,  // 直接使用存储的字节值
       expire_at: userForm.expire_at ? Math.floor(userForm.expire_at.getTime() / 1000) : null
     }
     const response = await api.admin.updateUser(editingId.value, data)

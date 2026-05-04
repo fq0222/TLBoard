@@ -54,7 +54,7 @@ router.get('/', authenticateAdmin, [
     }
 
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = parseInt(req.query.limit) || 10;
     const status = req.query.status;
     const email = req.query.email;
     const startDate = req.query.start_date;
@@ -90,7 +90,7 @@ router.get('/', authenticateAdmin, [
 
     // 查询总数
     const countQuery = `SELECT COUNT(*) as total FROM orders o ${whereClause}`;
-    const total = (await db.prepare(countQuery).get(...params)).total;
+    const total = Number((await db.prepare(countQuery).get(...params)).total) || 0;
 
     // 查询订单列表
     const query = `

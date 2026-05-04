@@ -464,8 +464,8 @@ md5(payId + param + type + price + reallyPrice + key)
 1. 校验 `payId` 和 `sign`
 2. 验证 VMQ 签名
 3. 根据 `payId` 查找本地订单
-4. 同时比对本地应付金额、`price`、`reallyPrice`
-5. 金额一致才允许激活订单
+4. 校验 `reallyPrice >= price`（防止少付，允许多付，支持 VMQ 金额递增机制）
+5. 金额校验通过后激活订单
 
 响应文本：
 
@@ -473,7 +473,7 @@ md5(payId + param + type + price + reallyPrice + key)
 |----------|------|
 | `success` | 处理成功或订单不存在但无需重试 |
 | `error_sign` | 缺少签名或验签失败 |
-| `error_amount` | 金额不一致 |
+| `error_amount` | 实付金额小于订单金额（少付） |
 
 #### GET `/api/user/payment/return`
 
@@ -532,7 +532,26 @@ md5(payId + param + type + price + reallyPrice + key)
 |------|------|------|
 | GET | `/users` | 用户列表 |
 | GET | `/users/:id` | 用户详情 |
-| PUT | `/users/:id` | 更新用户 |
+| PUT | `/users/:id` | 更新用户（自动同步到所有 3X-UI 服务器） |
+
+#### PUT `/api/admin/users/:id`
+
+更新用户信息，修改会自动同步到所有在线的 3X-UI 服务器。
+
+请求体：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| enabled | boolean | 否 | 启用状态 |
+| plan_id | number | 否 | 套餐 ID |
+| traffic_limit | number | 否 | 流量上限（字节），0 或 null 表示不限 |
+| expire_at | number/null | 否 | 到期时间戳，0 或 null 表示无限期 |
+
+同步说明：
+
+- 修改 `enabled` 会同步启用/禁用状态到 3X-UI
+- 修改 `expire_at` 会同步到期时间到 3X-UI（0 表示无限期）
+- 修改 `traffic_limit` 会同步流量上限到 3X-UI
 
 ### 3.4 套餐管理
 

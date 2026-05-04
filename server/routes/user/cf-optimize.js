@@ -53,13 +53,7 @@ router.get('/', authenticateUser, async (req, res) => {
     `).all(userId);
 
     if (currentIps.length === 0) {
-      const defaultServer = await db.prepare('SELECT api_url FROM xui_servers WHERE status = 1 LIMIT 1').get();
-      if (defaultServer) {
-        const defaultIp = defaultServer.api_url.match(/\/\/([^:]+)/);
-        if (defaultIp) {
-          currentIps.push({ ip: defaultIp[1], source: 'default' });
-        }
-      }
+      currentIps.push({ ip: '8.8.8.8', source: 'default' });
     }
 
     logger.info(`获取CF IP池成功，用户: ${req.user.email}，返回 ${ips.length} 个IP（IPv4: ${selectedIpv4.length}, IPv6: ${selectedIpv6.length}）`);

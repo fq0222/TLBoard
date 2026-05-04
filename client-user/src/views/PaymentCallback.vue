@@ -71,8 +71,8 @@ const errorMessage = ref('')
 const successMessage = ref('您的订阅已激活，正在为您跳转。')
 const timer = ref(null)
 const qrCodeDataUrl = ref('')
-// 自动轮询间隔延长到 45 秒，避免支付页频繁闪动
-const pollInterval = 45000
+// 自动轮询间隔 5 秒
+const pollInterval = 5000
 
 const paymentUrl = computed(() => String(route.query.payment_url || ''))
 const orderId = computed(() => String(route.query.order_id || ''))

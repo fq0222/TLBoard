@@ -7,6 +7,7 @@ const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { authenticateAdmin } = require('../../middleware/auth-admin');
 const { createLogger } = require('../../utils/logger');
+const XuiService = require('../../services/xui-service');
 
 const router = express.Router();
 const logger = createLogger('ADMIN-USERS');
@@ -50,7 +51,7 @@ router.get('/', authenticateAdmin, [
     }
 
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = parseInt(req.query.limit) || 10;
     const keyword = req.query.keyword || '';
     const status = req.query.status;
     const planId = req.query.plan_id;
@@ -87,7 +88,7 @@ router.get('/', authenticateAdmin, [
 
     // 查询总数
     const countQuery = `SELECT COUNT(*) as total FROM users u ${whereClause}`;
-    const total = (await db.prepare(countQuery).get(...params)).total;
+    const total = Number((await db.prepare(countQuery).get(...params)).total) || 0;
 
     // 查询用户列表
     const query = `
@@ -278,7 +279,7 @@ router.put('/:id', authenticateAdmin, [
     .withMessage('ID必须是大于0的整数'),
   body('enabled')
     .optional()
-    .isBoolean()
+    .isIn([true, false, 0, 1, '0', '1', 'true', 'false'])
     .withMessage('enabled必须是布尔值'),
   body('plan_id')
     .optional()
@@ -289,9 +290,12 @@ router.put('/:id', authenticateAdmin, [
     .isInt({ min: 0 })
     .withMessage('流量上限必须是非负整数'),
   body('expire_at')
-    .optional()
-    .isInt({ min: 0 })
-    .withMessage('到期时间必须是非负整数')
+    .optional({ values: 'null' })
+    .custom((value) => {
+      if (value === null || value === undefined) return true;
+      return Number.isInteger(value) && value >= 0;
+    })
+    .withMessage('到期时间必须是非负整数或null')
 ], async (req, res) => {
   try {
     // 验证请求参数
@@ -366,8 +370,8 @@ router.put('/:id', authenticateAdmin, [
       WHERE u.id = ?
     `).get(userId);
 
-    // 同步到3X-UI服务器（模拟）
-    syncToXuiServers(updatedUser);
+    // 同步到3X-UI服务器
+    await syncToXuiServers(db, updatedUser);
 
     logger.info(`修改用户信息成功: ${updatedUser.email}`);
 
@@ -398,12 +402,91 @@ router.put('/:id', authenticateAdmin, [
 });
 
 /**
- * 同步到3X-UI服务器
+ * 同步用户状态到所有3X-UI服务器
+ * @param {Object} db - 数据库实例
  * @param {Object} user - 用户信息
  */
-function syncToXuiServers(user) {
-  // 模拟同步操作
-  logger.info(`同步用户到3X-UI服务器: ${user.email}`);
+async function syncToXuiServers(db, user) {
+  try {
+    logger.info(`开始同步用户到3X-UI服务器: ${user.email}`);
+
+    // 查询所有在线的3X-UI服务器
+    const servers = await db.prepare('SELECT id, name, api_url, api_username, api_password FROM xui_servers WHERE status = 1').all();
+
+    if (servers.length === 0) {
+      logger.warn('没有在线的3X-UI服务器');
+      return;
+    }
+
+    // 查询用户在哪些节点上有客户端（通过 email 标识）
+    const userNodes = await db.prepare(`
+      SELECT server_id, inbound_id 
+      FROM xui_nodes 
+      WHERE user_count > 0
+    `).all();
+
+    // 按服务器分组
+    const nodesByServer = {};
+    for (const node of userNodes) {
+      if (!nodesByServer[node.server_id]) {
+        nodesByServer[node.server_id] = [];
+      }
+      nodesByServer[node.server_id].push(node.inbound_id);
+    }
+
+    // 同步到每个服务器
+    const syncResults = [];
+    for (const server of servers) {
+      const inboundIds = nodesByServer[server.id] || [];
+      
+      if (inboundIds.length === 0) {
+        logger.info(`服务器 ${server.name} 没有节点，跳过`);
+        continue;
+      }
+
+      try {
+        // 创建 XuiService 实例
+        const xuiService = new XuiService(server.api_url, server.api_username, server.api_password);
+        
+        // 计算到期时间（3XUI 使用毫秒时间戳，0 表示无限期）
+        const expireAt = Number(user.expire_at) || 0;
+        const expiryTime = expireAt > 0 ? expireAt * 1000 : 0;
+        
+        // 计算流量上限（3XUI 使用 GB）
+        const trafficLimit = Number(user.traffic_limit) || 0;
+        const totalGB = trafficLimit > 0 ? trafficLimit / (1024 * 1024 * 1024) : 0;
+        
+        // 同步到每个 inbound
+        for (const inboundId of inboundIds) {
+          const result = await xuiService.updateClient(inboundId, user.email, {
+            enabled: !!user.enabled,
+            expiryTime: expiryTime,
+            totalGB: totalGB
+          });
+
+          if (result.success) {
+            logger.info(`同步成功: 服务器=${server.name}, inbound=${inboundId}, 用户=${user.email}`);
+            syncResults.push({ server: server.name, inboundId, success: true });
+          } else {
+            // 如果是"未找到用户"，可能是该节点没有这个用户的客户端，不算失败
+            if (result.message.includes('未找到用户')) {
+              logger.info(`服务器 ${server.name} 的 inbound ${inboundId} 中未找到用户 ${user.email}，跳过`);
+            } else {
+              logger.warn(`同步失败: 服务器=${server.name}, inbound=${inboundId}, 原因=${result.message}`);
+              syncResults.push({ server: server.name, inboundId, success: false, message: result.message });
+            }
+          }
+        }
+      } catch (error) {
+        logger.error(`同步到服务器 ${server.name} 失败: ${error.message}`);
+        syncResults.push({ server: server.name, success: false, message: error.message });
+      }
+    }
+
+    logger.info(`用户 ${user.email} 同步完成，成功: ${syncResults.filter(r => r.success).length}，失败: ${syncResults.filter(r => !r.success).length}`);
+  } catch (error) {
+    logger.error(`同步用户到3X-UI服务器失败: ${error.message}`);
+  }
 }
 
 /**

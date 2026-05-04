@@ -9,13 +9,13 @@
  * | 标记过期订单           | 是             | 无             | 10 分钟          |
  * | 删除过期订单           | 是             | 5 分钟         | 1 小时           |
  * | 清理僵尸用户           | 是             | 2 分钟         | 30 分钟          |
- * | 3X-UI 用户同步         | 是             | 5 分钟         | 4 小时           |
+ * | 3X-UI 用户同步         | 是             | 7 分钟         | 4 小时           |
  * | 流量同步               | 是             | 10 分钟        | 3 小时           |
  * +------------------------+----------------+----------------+------------------+
  * 
  * 任务说明：
  * - 标记过期订单：将超过 30 分钟未支付的 pending 订单标记为 expired
- * - 删除过期订单：删除超过 24 小时的 expired 订单
+ * - 删除过期订单：删除超过 1 小时的 expired 订单
  * - 清理僵尸用户：删除未支付且超过 30 分钟的用户（enabled=0, payment_count=0）
  * - 3X-UI 用户同步：确保所有已付费用户都在 3X-UI 节点中
  * - 流量同步：从 3X-UI 服务器同步用户流量数据到本地数据库
@@ -69,7 +69,7 @@ async function runMarkExpired(db) {
 
 /**
  * 注册删除过期订单任务
- * 删除超过24小时的 expired 订单
+ * 删除超过1小时的 expired 订单
  * @param {Object} db - 数据库实例
  */
 function registerDeleteExpiredJob(db) {
@@ -92,7 +92,7 @@ function registerDeleteExpiredJob(db) {
  */
 async function runDeleteExpired(db) {
   try {
-    const deleteTime = Math.floor(Date.now() / 1000) - 24 * 60 * 60; // 24小时前
+    const deleteTime = Math.floor(Date.now() / 1000) - 1 * 60 * 60; // 1小时前
     
     const result = await db.prepare(`
       DELETE FROM orders 
@@ -224,10 +224,10 @@ async function syncUsersToServer(db, server, users) {
  * @param {Object} db - 数据库实例
  */
 function registerXuiSyncJob(db) {
-  // 启动时延迟5分钟执行第一次，避免启动时负载过高
+  // 启动时延迟7分钟执行第一次，避免启动时负载过高
   setTimeout(async () => {
     await runXuiSync(db);
-  }, 5 * 60 * 1000);
+  }, 7 * 60 * 1000);
 
   const interval = setInterval(async () => {
     await runXuiSync(db);

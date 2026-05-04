@@ -145,7 +145,7 @@ router.post('/register-and-pay', [
       param: String(userId),
       type: payType,
       price: amount,
-      isHtml: 1
+      isHtml: 0
     });
 
     if (Number(vmqResult.code) !== 1 || !vmqResult.data) {
