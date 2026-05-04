@@ -1,6 +1,24 @@
 /**
  * 定时任务管理
  * 集中管理所有定时任务，方便维护
+ * 
+ * 任务配置表：
+ * +------------------------+----------------+----------------+------------------+
+ * | 任务名称               | 启动时执行     | 首次延迟       | 执行间隔         |
+ * +------------------------+----------------+----------------+------------------+
+ * | 标记过期订单           | 是             | 无             | 10 分钟          |
+ * | 删除过期订单           | 是             | 5 分钟         | 1 小时           |
+ * | 清理僵尸用户           | 是             | 2 分钟         | 30 分钟          |
+ * | 3X-UI 用户同步         | 是             | 5 分钟         | 4 小时           |
+ * | 流量同步               | 是             | 10 分钟        | 3 小时           |
+ * +------------------------+----------------+----------------+------------------+
+ * 
+ * 任务说明：
+ * - 标记过期订单：将超过 30 分钟未支付的 pending 订单标记为 expired
+ * - 删除过期订单：删除超过 24 小时的 expired 订单
+ * - 清理僵尸用户：删除未支付且超过 30 分钟的用户（enabled=0, payment_count=0）
+ * - 3X-UI 用户同步：确保所有已付费用户都在 3X-UI 节点中
+ * - 流量同步：从 3X-UI 服务器同步用户流量数据到本地数据库
  */
 
 const XuiService = require('../services/xui-service');
@@ -12,29 +30,123 @@ const logger = createLogger('JOBS');
 const intervals = [];
 
 /**
- * 注册订单自动过期任务
- * 每10分钟检查一次，超过30分钟未支付的订单自动标记为过期
+ * 注册标记过期订单任务
+ * 将超过30分钟未支付的 pending 订单标记为 expired
  * @param {Object} db - 数据库实例
  */
-function registerOrderExpireJob(db) {
+function registerMarkExpiredJob(db) {
+  // 启动时立即执行一次
+  runMarkExpired(db);
+
   const interval = setInterval(async () => {
-    try {
-      const expireTime = Math.floor(Date.now() / 1000) - 30 * 60; // 30分钟前
-      const result = await db.prepare(`
-        UPDATE orders SET status = 'expired'
-        WHERE status = 'pending' AND created_at < ?
-      `).run(expireTime);
-      
-      if (result.changes > 0) {
-        logger.info(`自动过期 ${result.changes} 个超时订单`);
-      }
-    } catch (error) {
-      logger.error(`订单自动过期任务错误: ${error.message}`);
-    }
+    await runMarkExpired(db);
   }, 10 * 60 * 1000); // 每10分钟执行一次
   
   intervals.push(interval);
-  logger.info('订单自动过期任务已注册');
+  logger.info('标记过期订单任务已注册（每10分钟执行一次）');
+}
+
+/**
+ * 执行标记过期订单
+ * @param {Object} db - 数据库实例
+ */
+async function runMarkExpired(db) {
+  try {
+    const expireTime = Math.floor(Date.now() / 1000) - 30 * 60; // 30分钟前
+    
+    const result = await db.prepare(`
+      UPDATE orders SET status = 'expired'
+      WHERE status = 'pending' AND created_at < ?
+    `).run(expireTime);
+    
+    if (result.changes > 0) {
+      logger.info(`标记 ${result.changes} 个超时订单为过期`);
+    }
+  } catch (error) {
+    logger.error(`标记过期订单任务错误: ${error.message}`);
+  }
+}
+
+/**
+ * 注册删除过期订单任务
+ * 删除超过24小时的 expired 订单
+ * @param {Object} db - 数据库实例
+ */
+function registerDeleteExpiredJob(db) {
+  // 启动时延迟5分钟执行第一次
+  setTimeout(async () => {
+    await runDeleteExpired(db);
+  }, 5 * 60 * 1000);
+
+  const interval = setInterval(async () => {
+    await runDeleteExpired(db);
+  }, 60 * 60 * 1000); // 每1小时执行一次
+  
+  intervals.push(interval);
+  logger.info('删除过期订单任务已注册（每1小时执行一次）');
+}
+
+/**
+ * 执行删除过期订单
+ * @param {Object} db - 数据库实例
+ */
+async function runDeleteExpired(db) {
+  try {
+    const deleteTime = Math.floor(Date.now() / 1000) - 24 * 60 * 60; // 24小时前
+    
+    const result = await db.prepare(`
+      DELETE FROM orders 
+      WHERE status = 'expired' AND created_at < ?
+    `).run(deleteTime);
+    
+    if (result.changes > 0) {
+      logger.info(`删除 ${result.changes} 个过期订单`);
+    }
+  } catch (error) {
+    logger.error(`删除过期订单任务错误: ${error.message}`);
+  }
+}
+
+/**
+ * 注册清理僵尸用户任务
+ * 删除未支付且超过30分钟的用户（enabled=0, payment_count=0）
+ * @param {Object} db - 数据库实例
+ */
+function registerCleanZombieUsersJob(db) {
+  // 启动时延迟2分钟执行第一次
+  setTimeout(async () => {
+    await runCleanZombieUsers(db);
+  }, 2 * 60 * 1000);
+
+  const interval = setInterval(async () => {
+    await runCleanZombieUsers(db);
+  }, 30 * 60 * 1000); // 每30分钟执行一次
+  
+  intervals.push(interval);
+  logger.info('清理僵尸用户任务已注册（每30分钟执行一次）');
+}
+
+/**
+ * 执行清理僵尸用户
+ * @param {Object} db - 数据库实例
+ */
+async function runCleanZombieUsers(db) {
+  try {
+    const expireTime = Math.floor(Date.now() / 1000) - 30 * 60; // 30分钟前
+    
+    const result = await db.prepare(`
+      DELETE FROM users 
+      WHERE enabled = 0 
+      AND payment_count = 0 
+      AND created_at < ?
+    `).run(expireTime);
+    
+    if (result.changes > 0) {
+      logger.info(`清理 ${result.changes} 个僵尸用户`);
+    }
+  } catch (error) {
+    logger.error(`清理僵尸用户任务错误: ${error.message}`);
+  }
 }
 
 /**
@@ -235,12 +347,12 @@ async function runXuiSync(db) {
   try {
     logger.info('开始执行3X-UI用户同步任务...');
 
-    // 查询所有已启用且未过期的用户
+    // 查询所有已启用且未过期的用户（expire_at为0或'0'表示无限期）
     const now = Math.floor(Date.now() / 1000);
     const users = await db.prepare(`
       SELECT id, email, subscription_token, enabled, traffic_limit, expire_at
       FROM users
-      WHERE enabled = 1 AND expire_at > ?
+      WHERE enabled = 1 AND (expire_at = 0 OR expire_at = '0' OR expire_at IS NULL OR expire_at > ?)
     `).all(now);
 
     if (users.length === 0) {
@@ -281,7 +393,9 @@ async function runXuiSync(db) {
  */
 function startAllJobs(db) {
   logger.info('正在启动所有定时任务...');
-  registerOrderExpireJob(db);
+  registerMarkExpiredJob(db);
+  registerDeleteExpiredJob(db);
+  registerCleanZombieUsersJob(db);
   registerXuiSyncJob(db);
   registerTrafficSyncJob(db);
   logger.info(`所有定时任务已启动，共 ${intervals.length} 个任务`);

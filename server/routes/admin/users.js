@@ -68,10 +68,12 @@ router.get('/', authenticateAdmin, [
     
     if (status) {
       if (status === 'active') {
-        whereClause += ' AND u.enabled = 1 AND u.expire_at > ?';
+        // 正常状态：已启用且未过期（expire_at为0或'0'表示无限期）
+        whereClause += ' AND u.enabled = 1 AND (u.expire_at = 0 OR u.expire_at = \'0\' OR u.expire_at IS NULL OR u.expire_at > ?)';
         params.push(Math.floor(Date.now() / 1000));
       } else if (status === 'expired') {
-        whereClause += ' AND u.enabled = 1 AND u.expire_at <= ?';
+        // 已过期：已启用且已过期（expire_at不为0且小于当前时间）
+        whereClause += ' AND u.enabled = 1 AND u.expire_at != 0 AND u.expire_at != \'0\' AND u.expire_at IS NOT NULL AND u.expire_at <= ?';
         params.push(Math.floor(Date.now() / 1000));
       } else if (status === 'disabled') {
         whereClause += ' AND u.enabled = 0';
@@ -105,13 +107,15 @@ router.get('/', authenticateAdmin, [
     // 格式化用户数据
     const formattedUsers = users.map(user => {
       const now = Math.floor(Date.now() / 1000);
+      const expireAt = Number(user.expire_at) || 0;
       let userStatus = 'active';
       let statusText = '正常';
       
       if (!user.enabled) {
         userStatus = 'disabled';
         statusText = '已禁用';
-      } else if (user.expire_at && user.expire_at <= now) {
+      } else if (expireAt !== 0 && expireAt <= now) {
+        // expire_at为0表示无限期，不认为是过期
         userStatus = 'expired';
         statusText = '已过期';
       }
@@ -432,7 +436,7 @@ function formatTraffic(bytes) {
  * @returns {string} 格式化后的时间字符串
  */
 function formatTime(timestamp) {
-  if (!timestamp) return null;
+  if (!timestamp || timestamp === 0 || timestamp === '0') return '无限期';
   return new Date(timestamp * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 }
 

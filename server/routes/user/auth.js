@@ -62,9 +62,10 @@ router.post('/register-and-pay', [
     const existingUser = await db.prepare('SELECT id, enabled, expire_at FROM users WHERE email = ?').get(email);
     
     if (existingUser) {
-      // 检查用户是否有未过期套餐
+      // 检查用户是否有未过期套餐（expire_at为0或'0'表示无限期）
       const now = Math.floor(Date.now() / 1000);
-      if (existingUser.enabled && existingUser.expire_at > now) {
+      const expireAt = Number(existingUser.expire_at) || 0;
+      if (existingUser.enabled && (expireAt === 0 || expireAt > now)) {
         logger.warn(`注册失败: 邮箱已注册且有未过期套餐 - ${email}`);
         return res.status(400).json({
           code: 2001,
@@ -144,7 +145,7 @@ router.post('/register-and-pay', [
       param: String(userId),
       type: payType,
       price: amount,
-      isHtml: 0
+      isHtml: 1
     });
 
     if (Number(vmqResult.code) !== 1 || !vmqResult.data) {
@@ -380,7 +381,7 @@ router.get('/profile', authenticateUser, async (req, res) => {
 
     // 格式化时间显示
     const formatTime = (timestamp) => {
-      if (!timestamp) return null;
+      if (!timestamp || timestamp === 0 || timestamp === '0') return '无限期';
       return new Date(timestamp * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     };
 

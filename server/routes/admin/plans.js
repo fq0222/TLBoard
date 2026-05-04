@@ -71,8 +71,8 @@ router.post('/', authenticateAdmin, [
     .isInt({ min: 0 })
     .withMessage('价格必须是非负整数'),
   body('duration_days')
-    .isInt({ min: 1 })
-    .withMessage('有效天数必须是大于0的整数'),
+    .isInt({ min: 0 })
+    .withMessage('有效天数必须是非负整数（0表示无限期）'),
   body('traffic_limit')
     .isInt({ min: 0 })
     .withMessage('流量上限必须是非负整数'),
@@ -153,8 +153,8 @@ router.put('/:id', authenticateAdmin, [
     .withMessage('价格必须是非负整数'),
   body('duration_days')
     .optional()
-    .isInt({ min: 1 })
-    .withMessage('有效天数必须是大于0的整数'),
+    .isInt({ min: 0 })
+    .withMessage('有效天数必须是非负整数（0表示无限期）'),
   body('traffic_limit')
     .optional()
     .isInt({ min: 0 })

@@ -8,16 +8,30 @@
         </p>
       </div>
 
-      <el-alert
+      <div
         v-if="isRegisterMode && selectedPlanId"
-        type="info"
-        :closable="false"
-        class="plan-alert"
+        class="plan-info-card"
       >
-        <template #title>
-          当前将购买套餐 ID：{{ selectedPlanId }}
-        </template>
-      </el-alert>
+        <h3 class="plan-info-title">购买套餐</h3>
+        <div class="plan-info-details">
+          <div class="plan-info-item">
+            <span class="plan-info-label">套餐名称：</span>
+            <span class="plan-info-value">{{ planInfo.name }}</span>
+          </div>
+          <div class="plan-info-item">
+            <span class="plan-info-label">价格：</span>
+            <span class="plan-info-value price">¥{{ planInfo.price }}</span>
+          </div>
+          <div class="plan-info-item">
+            <span class="plan-info-label">流量：</span>
+            <span class="plan-info-value">{{ planInfo.traffic }}</span>
+          </div>
+          <div class="plan-info-item">
+            <span class="plan-info-label">有效期：</span>
+            <span class="plan-info-value">{{ planInfo.duration }}</span>
+          </div>
+        </div>
+      </div>
 
       <el-form
         ref="formRef"
@@ -119,6 +133,13 @@ const selectedPlanId = computed(() => {
   const planId = Number(route.query.plan_id || 0)
   return planId > 0 ? planId : null
 })
+
+const planInfo = computed(() => ({
+  name: route.query.plan_name || '未知套餐',
+  price: route.query.plan_price || '0.00',
+  traffic: route.query.plan_traffic || '0 B',
+  duration: Number(route.query.plan_duration) === 0 ? '无限期' : (route.query.plan_duration || '0') + ' 天'
+}))
 
 const isRegisterMode = computed(() => !!selectedPlanId.value)
 
@@ -287,6 +308,49 @@ function switchToLogin() {
 
 .plan-alert {
   margin-bottom: 20px;
+}
+
+.plan-info-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+  color: #fff;
+}
+
+.plan-info-title {
+  font-size: 18px;
+  margin: 0 0 16px 0;
+  text-align: center;
+  opacity: 0.9;
+}
+
+.plan-info-details {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.plan-info-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.plan-info-label {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-bottom: 4px;
+}
+
+.plan-info-value {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.plan-info-value.price {
+  font-size: 24px;
+  color: #ffd700;
 }
 
 .login-form {

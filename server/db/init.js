@@ -154,6 +154,7 @@ class DatabaseManager {
           traffic_limit BIGINT DEFAULT 0,
           expire_at BIGINT,
           enabled INTEGER DEFAULT 0,
+          payment_count INTEGER DEFAULT 0,
           created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
           updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
         )

@@ -21,7 +21,11 @@
             ¥{{ scope.row.price_text }}
           </template>
         </el-table-column>
-        <el-table-column prop="duration_days" label="有效天数" />
+        <el-table-column label="有效天数">
+          <template #default="scope">
+            {{ scope.row.duration_days === 0 ? '无限期' : scope.row.duration_days + '天' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="traffic_text" label="流量上限" />
         <el-table-column prop="sort_order" label="排序" width="80" />
         <el-table-column prop="enabled" label="状态" width="100">
@@ -60,10 +64,19 @@
           <el-input-number v-model="planForm.price" :min="0" />
         </el-form-item>
         <el-form-item label="有效天数" prop="duration_days">
-          <el-input-number v-model="planForm.duration_days" :min="1" />
+          <el-input-number v-model="planForm.duration_days" :min="0" />
+          <span class="form-tip">0 表示无限期</span>
         </el-form-item>
-        <el-form-item label="流量上限(bytes)" prop="traffic_limit">
-          <el-input-number v-model="planForm.traffic_limit" :min="0" />
+        <el-form-item label="流量上限" prop="traffic_limit">
+          <div class="traffic-input">
+            <el-input-number v-model="trafficValue" :min="0" :precision="2" />
+            <el-select v-model="trafficUnit" style="width: 100px;">
+              <el-option label="GB" :value="1073741824" />
+              <el-option label="MB" :value="1048576" />
+              <el-option label="KB" :value="1024" />
+              <el-option label="B" :value="1" />
+            </el-select>
+          </div>
         </el-form-item>
         <el-form-item label="排序权重" prop="sort_order">
           <el-input-number v-model="planForm.sort_order" :min="0" />
@@ -81,7 +94,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
@@ -92,6 +105,10 @@ const isEditing = ref(false)
 const submitting = ref(false)
 const editingId = ref(null)
 const planFormRef = ref(null)
+
+// 流量单位相关
+const trafficUnit = ref(1073741824) // 默认GB
+const trafficValue = ref(0)
 
 const planForm = reactive({
   name: '',
@@ -106,9 +123,13 @@ const planForm = reactive({
 const planRules = {
   name: [{ required: true, message: '请输入套餐名称', trigger: 'blur' }],
   price: [{ required: true, message: '请输入价格', trigger: 'blur' }],
-  duration_days: [{ required: true, message: '请输入有效天数', trigger: 'blur' }],
-  traffic_limit: [{ required: true, message: '请输入流量上限', trigger: 'blur' }]
+  duration_days: [{ required: true, message: '请输入有效天数', trigger: 'blur' }]
 }
+
+// 监听流量值和单位变化，计算实际字节数
+watch([trafficValue, trafficUnit], () => {
+  planForm.traffic_limit = Math.round(trafficValue.value * trafficUnit.value)
+})
 
 async function fetchPlans() {
   try {
@@ -135,9 +156,26 @@ function showEditDialog(plan) {
   planForm.description = plan.description
   planForm.price = plan.price
   planForm.duration_days = plan.duration_days
-  planForm.traffic_limit = plan.traffic_limit
   planForm.sort_order = plan.sort_order
-  planForm.enabled = plan.enabled
+  planForm.enabled = !!plan.enabled  // 将数字转换为布尔值
+  
+  // 计算流量值和单位
+  const trafficLimit = Number(plan.traffic_limit) || 0
+  if (trafficLimit >= 1073741824 && trafficLimit % 1073741824 === 0) {
+    trafficValue.value = trafficLimit / 1073741824
+    trafficUnit.value = 1073741824
+  } else if (trafficLimit >= 1048576 && trafficLimit % 1048576 === 0) {
+    trafficValue.value = trafficLimit / 1048576
+    trafficUnit.value = 1048576
+  } else if (trafficLimit >= 1024 && trafficLimit % 1024 === 0) {
+    trafficValue.value = trafficLimit / 1024
+    trafficUnit.value = 1024
+  } else {
+    trafficValue.value = trafficLimit
+    trafficUnit.value = 1
+  }
+  planForm.traffic_limit = trafficLimit
+  
   dialogVisible.value = true
 }
 
@@ -149,12 +187,18 @@ function resetForm() {
   planForm.traffic_limit = 0
   planForm.sort_order = 0
   planForm.enabled = true
+  trafficValue.value = 0
+  trafficUnit.value = 1073741824
 }
 
 async function handleSubmit() {
   try {
     await planFormRef.value.validate()
     submitting.value = true
+    
+    // 确保traffic_limit是数字
+    planForm.traffic_limit = Math.round(trafficValue.value * trafficUnit.value)
+    
     if (isEditing.value) {
       const response = await api.admin.updatePlan(editingId.value, planForm)
       if (response.code === 0) {
@@ -200,4 +244,6 @@ onMounted(() => {
 .page-subtitle { color: #666; font-size: 16px; }
 .content-card { background: #fff; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 20px; }
 .toolbar { margin-bottom: 20px; }
+.form-tip { margin-left: 10px; color: #999; font-size: 12px; }
+.traffic-input { display: flex; gap: 10px; align-items: center; }
 </style>

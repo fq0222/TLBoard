@@ -42,11 +42,12 @@ async function handleVmqNotify(req, res) {
       return res.send('success');
     }
 
-    // 同时校验订单金额和实际支付金额，防止用户手动少付后被错误放行
+    // 校验金额：实际支付金额 >= 订单金额即可（防止少付，允许多付）
+    // VMQ 使用金额递增机制区分订单，reallyPrice 可能略高于 price
     const expectedAmount = (Number(order.amount) / 100).toFixed(2);
     const orderAmount = Number(params.price).toFixed(2);
     const reallyPaidAmount = Number(params.reallyPrice).toFixed(2);
-    if (expectedAmount !== orderAmount || expectedAmount !== reallyPaidAmount) {
+    if (reallyPaidAmount < orderAmount) {
       logger.warn(`VMQ notify amount mismatch: payId=${payId}, expected=${expectedAmount}, orderAmount=${orderAmount}, reallyPaid=${reallyPaidAmount}`);
       return res.send('error_amount');
     }

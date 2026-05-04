@@ -22,14 +22,12 @@
             v-for="plan in plans" 
             :key="plan.id" 
             class="plan-card"
-            @click="selectPlan(plan)"
           >
             <div class="plan-header">
               <h3 class="plan-name">{{ plan.name }}</h3>
               <div class="plan-price">
                 <span class="price-symbol">¥</span>
                 <span class="price-value">{{ plan.price_text }}</span>
-                <span class="price-unit">/{{ plan.duration_days }}天</span>
               </div>
             </div>
             <div class="plan-body">
@@ -41,12 +39,12 @@
                 </div>
                 <div class="feature">
                   <el-icon><Check /></el-icon>
-                  <span>{{ plan.duration_days }} 天有效期</span>
+                  <span>{{ plan.duration_days === 0 ? '无限期' : plan.duration_days + ' 天有效期' }}</span>
                 </div>
               </div>
             </div>
             <div class="plan-footer">
-              <el-button type="primary" size="large" class="buy-btn">
+              <el-button type="primary" size="large" class="buy-btn" @click="selectPlan(plan)">
                 立即购买
               </el-button>
             </div>
@@ -147,8 +145,17 @@ function selectPlan(plan) {
     // 已登录用户直接跳转到购买页面
     router.push({ name: 'UserProfile' })
   } else {
-    // 未登录用户跳转到登录页面
-    router.push({ name: 'Login', query: { plan_id: plan.id } })
+    // 未登录用户跳转到登录页面，传递套餐信息
+    router.push({ 
+      name: 'Login', 
+      query: { 
+        plan_id: plan.id,
+        plan_name: plan.name,
+        plan_price: plan.price_text,
+        plan_traffic: plan.traffic_text,
+        plan_duration: plan.duration_days
+      } 
+    })
   }
 }
 
@@ -253,7 +260,6 @@ onMounted(() => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   overflow: hidden;
   transition: all 0.3s;
-  cursor: pointer;
 }
 
 .plan-card:hover {

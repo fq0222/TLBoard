@@ -260,7 +260,7 @@ router.get('/', authenticateUser, async (req, res) => {
 
     // 格式化时间显示
     const formatTime = (timestamp) => {
-      if (!timestamp) return null;
+      if (!timestamp || timestamp === 0 || timestamp === '0') return '无限期';
       return new Date(timestamp * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     };
 

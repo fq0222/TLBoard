@@ -118,7 +118,8 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   const now = Math.floor(Date.now() / 1000);
   const currentExpireAt = Number(order.current_expire_at || 0);
   const baseExpireAt = currentExpireAt > now ? currentExpireAt : now;
-  const expireAt = baseExpireAt + (Number(plan.duration_days) * 24 * 60 * 60);
+  // duration_days为0表示无限期，expireAt设为0
+  const expireAt = plan.duration_days === 0 ? 0 : baseExpireAt + (Number(plan.duration_days) * 24 * 60 * 60);
   const finalTradeNo = tradeNo || order.trade_no;
 
   // 订单和用户信息需要同时更新，避免出现支付成功但账号未激活的中间状态
@@ -137,6 +138,7 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
         plan_id = ?,
         traffic_limit = ?,
         expire_at = ?,
+        payment_count = payment_count + 1,
         updated_at = ?
       WHERE id = ?
     `).run(plan.id, plan.traffic_limit, expireAt, now, order.user_id);
