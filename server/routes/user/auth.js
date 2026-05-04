@@ -86,8 +86,8 @@ router.post('/register-and-pay', [
       });
     }
 
-    // 生成订阅Token
-    const subscriptionToken = crypto.randomBytes(32).toString('hex');
+    // 生成订阅Token（标准UUID格式）
+    const subscriptionToken = crypto.randomUUID();
 
     // 加密密码
     const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
