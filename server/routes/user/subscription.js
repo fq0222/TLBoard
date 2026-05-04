@@ -242,7 +242,7 @@ router.get('/', authenticateUser, async (req, res) => {
     };
 
     const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.subscription_token}`;
+    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.sub_id}`;
 
     // 检查用户是否已完成 CF 优选
     const cfOptimized = cfIps.length > 0;
@@ -310,13 +310,13 @@ router.get('/sub/:token', [
     const { clash, v2ray } = req.query;
     const db = req.app.locals.db;
 
-    // 查询用户
+    // 查询用户（通过 sub_id 查询）
     const user = await db.prepare(`
       SELECT 
         u.id, u.email, u.subscription_token,
         u.traffic_used, u.traffic_limit, u.expire_at, u.enabled
       FROM users u
-      WHERE u.subscription_token = ?
+      WHERE u.sub_id = ?
     `).get(token);
     
     if (!user) {

@@ -86,8 +86,11 @@ router.post('/register-and-pay', [
       });
     }
 
-    // 生成订阅Token（标准UUID格式）
+    // 生成订阅Token（用于3X-UI节点认证）
     const subscriptionToken = crypto.randomUUID();
+    
+    // 生成订阅链接ID（用于订阅链接，不暴露UUID）
+    const subId = crypto.randomBytes(16).toString('hex');
 
     // 加密密码
     const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
@@ -103,19 +106,20 @@ router.post('/register-and-pay', [
             password_hash = ?,
             plan_id = ?,
             subscription_token = ?,
+            sub_id = ?,
             traffic_used = 0,
             traffic_limit = ?,
             enabled = 0,
             updated_at = ?
           WHERE id = ?
-        `).run(passwordHash, plan_id, subscriptionToken, plan.traffic_limit, Math.floor(Date.now() / 1000), existingUser.id);
+        `).run(passwordHash, plan_id, subscriptionToken, subId, plan.traffic_limit, Math.floor(Date.now() / 1000), existingUser.id);
         userId = existingUser.id;
       } else {
         // 创建新用户
         const result = await db.prepare(`
-          INSERT INTO users (email, password_hash, plan_id, subscription_token, traffic_used, traffic_limit, enabled)
-          VALUES (?, ?, ?, ?, 0, ?, 0)
-        `).run(email, passwordHash, plan_id, subscriptionToken, plan.traffic_limit);
+          INSERT INTO users (email, password_hash, plan_id, subscription_token, sub_id, traffic_used, traffic_limit, enabled)
+          VALUES (?, ?, ?, ?, ?, 0, ?, 0)
+        `).run(email, passwordHash, plan_id, subscriptionToken, subId, plan.traffic_limit);
         userId = result.lastInsertRowid;
       }
 
@@ -332,7 +336,7 @@ router.get('/profile', authenticateUser, async (req, res) => {
     // 查询用户信息
     const user = await db.prepare(`
       SELECT 
-        u.id, u.email, u.plan_id, u.subscription_token,
+        u.id, u.email, u.plan_id, u.subscription_token, u.sub_id,
         u.traffic_used, u.traffic_limit, u.expire_at, u.enabled, u.created_at,
         p.name as plan_name
       FROM users u
@@ -385,7 +389,7 @@ router.get('/profile', authenticateUser, async (req, res) => {
         email: user.email,
         plan_id: user.plan_id,
         plan_name: user.plan_name,
-        subscription_url: cfOptimized ? `${req.protocol}://${req.get('host')}/api/user/subscription/sub/${user.subscription_token}` : '',
+        subscription_url: cfOptimized ? `${req.protocol}://${req.get('host')}/api/user/subscription/sub/${user.sub_id}` : '',
         cf_optimized: cfOptimized,
         traffic_used: user.traffic_used,
         traffic_limit: user.traffic_limit,

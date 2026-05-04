@@ -9,6 +9,12 @@ const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('XUI-SERVICE');
 
+// 禁用环境变量代理，避免连接问题
+delete process.env.http_proxy;
+delete process.env.https_proxy;
+delete process.env.HTTP_PROXY;
+delete process.env.HTTPS_PROXY;
+
 /**
  * 3X-UI 服务类
  * 封装与 3X-UI 面板的所有交互

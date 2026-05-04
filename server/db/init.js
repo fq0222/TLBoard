@@ -149,6 +149,7 @@ class DatabaseManager {
           password_hash VARCHAR(255) NOT NULL,
           plan_id INTEGER,
           subscription_token VARCHAR(255) UNIQUE,
+          sub_id VARCHAR(255) UNIQUE,
           traffic_used BIGINT DEFAULT 0,
           traffic_limit BIGINT DEFAULT 0,
           expire_at BIGINT,

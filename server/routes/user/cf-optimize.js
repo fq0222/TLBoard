@@ -108,9 +108,9 @@ router.post('/apply', authenticateUser, [
 
     await transaction();
 
-    const user = await db.prepare('SELECT subscription_token FROM users WHERE id = $1').get(userId);
+    const user = await db.prepare('SELECT sub_id FROM users WHERE id = $1').get(userId);
     const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.subscription_token}`;
+    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.sub_id}`;
 
     const nodes = validIps.map(ip => ({
       server_name: 'CF优选',
@@ -175,9 +175,9 @@ router.post('/apply-by-ip', authenticateUser, [
 
     await transaction();
 
-    const user = await db.prepare('SELECT subscription_token FROM users WHERE id = $1').get(userId);
+    const user = await db.prepare('SELECT sub_id FROM users WHERE id = $1').get(userId);
     const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.subscription_token}`;
+    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.sub_id}`;
 
     logger.info(`应用优选IP成功，用户: ${req.user.email}，选择了 ${validIps.length} 个IP`);
 
