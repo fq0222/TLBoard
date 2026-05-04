@@ -186,6 +186,54 @@
 
 获取当前登录用户信息。
 
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 1,
+    "email": "user@example.com",
+    "plan_id": 1,
+    "plan_name": "基础套餐",
+    "subscription_url": "https://example.com/api/user/sub/abc123",
+    "clash_url": "https://example.com/api/user/sub/abc123?clash=1",
+    "cf_optimized": true,
+    "traffic_used": 1073741824,
+    "traffic_limit": 107374182400,
+    "traffic_used_text": "1 GB",
+    "traffic_limit_text": "100 GB",
+    "traffic_percent": 1,
+    "expire_at": 1770000000,
+    "expire_text": "2026/5/3 12:00:00",
+    "enabled": true,
+    "created_at": 1746260000
+  }
+}
+```
+
+返回字段说明：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | number | 用户 ID |
+| email | string | 邮箱 |
+| plan_id | number | 套餐 ID |
+| plan_name | string | 套餐名称 |
+| subscription_url | string | 通用订阅链接，未优选时为空字符串 |
+| clash_url | string | Clash 订阅链接，未优选时为空字符串 |
+| cf_optimized | boolean | 是否已完成 CF IP 优选 |
+| traffic_used | number | 已用流量（字节） |
+| traffic_limit | number | 流量上限（字节） |
+| traffic_used_text | string | 格式化的已用流量 |
+| traffic_limit_text | string | 格式化的流量上限 |
+| traffic_percent | number | 流量使用百分比 |
+| expire_at | number | 到期时间戳 |
+| expire_text | string | 格式化的到期时间（北京时间） |
+| enabled | boolean | 账号是否启用 |
+| created_at | number | 注册时间戳 |
+
 ---
 
 ### 2.2 套餐与公告
@@ -278,15 +326,31 @@
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| subscription_url | string | 订阅链接，未优选时为空字符串 |
+| subscription_url | string | 通用订阅链接，未优选时为空字符串 |
 | clash_url | string | Clash 订阅链接 |
-| v2ray_url | string | V2Ray 订阅链接 |
 | cf_optimized | boolean | 是否已完成 CF IP 优选 |
 | expire_at | number | 到期时间戳 |
 | expire_text | string | 格式化的到期时间（北京时间） |
 | traffic_used | number | 已用流量（字节） |
 | traffic_limit | number | 流量上限（字节） |
+| traffic_used_text | string | 格式化的已用流量 |
+| traffic_limit_text | string | 格式化的流量上限 |
+| traffic_percent | number | 流量使用百分比 |
 | nodes | array | 节点列表 |
+
+节点列表字段说明：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| server_name | string | 服务器名称（管理端配置的名称） |
+| protocol | string | 协议类型（vless/vmess/trojan） |
+| uuid | string | 用户 UUID |
+| address | string | 节点地址（CF 优选 IP 或服务器 IP） |
+| port | number | 端口号 |
+| host | string | CF 端口转发主机名 |
+| wsPath | string | WebSocket 路径 |
+| security | string | TLS 设置 |
+| remark | string | 节点备注 |
 
 #### GET `/api/user/sub/:token`
 

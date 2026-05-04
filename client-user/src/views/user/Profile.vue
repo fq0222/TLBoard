@@ -101,20 +101,39 @@
       </div>
 
       <!-- 已生成：显示订阅链接 -->
-      <div v-if="subscriptionGenerated" class="subscription-link">
-        <el-input 
-          v-model="userInfo.subscription_url" 
-          readonly
-          size="large"
-        >
-          <template #append>
-            <el-button @click="copyLink">
-              <el-icon><CopyDocument /></el-icon>
-              复制
-            </el-button>
-          </template>
-        </el-input>
-        <p class="link-tip">复制此链接到您的代理客户端中使用</p>
+      <div v-if="subscriptionGenerated" class="subscription-links">
+        <div class="link-group">
+          <span class="link-label">通用订阅：</span>
+          <el-input 
+            v-model="userInfo.subscription_url" 
+            readonly
+            size="large"
+          >
+            <template #append>
+              <el-button @click="copyLink(userInfo.subscription_url)">
+                <el-icon><CopyDocument /></el-icon>
+                复制
+              </el-button>
+            </template>
+          </el-input>
+          <p class="link-tip">适用于 v2rayN、V2rayNG、Shadowrocket、Quantumult X 等</p>
+        </div>
+        <div class="link-group">
+          <span class="link-label">Clash订阅：</span>
+          <el-input 
+            v-model="userInfo.clash_url" 
+            readonly
+            size="large"
+          >
+            <template #append>
+              <el-button @click="copyLink(userInfo.clash_url)">
+                <el-icon><CopyDocument /></el-icon>
+                复制
+              </el-button>
+            </template>
+          </el-input>
+          <p class="link-tip">适用于 Clash、Clash Verge、ClashX、Clash for Windows 等</p>
+        </div>
       </div>
     </div>
     
@@ -207,10 +226,11 @@ async function fetchOrders() {
 
 /**
  * 复制订阅链接
+ * @param {string} link - 要复制的链接
  */
-function copyLink() {
-  if (userInfo.value.subscription_url) {
-    navigator.clipboard.writeText(userInfo.value.subscription_url)
+function copyLink(link) {
+  if (link) {
+    navigator.clipboard.writeText(link)
     ElMessage.success('链接已复制到剪贴板')
   }
 }
@@ -505,14 +525,25 @@ onMounted(() => {
   color: #666;
 }
 
-.subscription-link {
+.subscription-links {
   margin-top: 10px;
 }
 
+.link-group {
+  margin-bottom: 20px;
+}
+
+.link-label {
+  display: block;
+  margin-bottom: 8px;
+  color: #333;
+  font-weight: 500;
+}
+
 .link-tip {
-  margin-top: 10px;
+  margin-top: 8px;
   color: #999;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .optimize-guide {

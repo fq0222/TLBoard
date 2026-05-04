@@ -360,11 +360,22 @@ router.get('/profile', authenticateUser, async (req, res) => {
 
     // 格式化流量显示
     const formatTraffic = (bytes) => {
-      if (bytes === 0) return '0 B';
+      // 处理 null、undefined 或非数字情况
+      if (bytes === null || bytes === undefined || bytes === '') return '0 B';
+      
+      // 转换为数字
+      const numBytes = Number(bytes);
+      
+      // 检查是否为有效数字
+      if (isNaN(numBytes)) return '0 B';
+      
+      // 处理0的情况
+      if (numBytes === 0) return '0 B';
+      
       const k = 1024;
       const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+      const i = Math.floor(Math.log(numBytes) / Math.log(k));
+      return parseFloat((numBytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
 
     // 格式化时间显示
@@ -390,6 +401,7 @@ router.get('/profile', authenticateUser, async (req, res) => {
         plan_id: user.plan_id,
         plan_name: user.plan_name,
         subscription_url: cfOptimized ? `${req.protocol}://${req.get('host')}/api/user/subscription/sub/${user.sub_id}` : '',
+        clash_url: cfOptimized ? `${req.protocol}://${req.get('host')}/api/user/subscription/sub/${user.sub_id}?clash=1` : '',
         cf_optimized: cfOptimized,
         traffic_used: user.traffic_used,
         traffic_limit: user.traffic_limit,

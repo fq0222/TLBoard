@@ -8,29 +8,23 @@
     <div class="content-card">
       <h2 class="card-title">订阅链接</h2>
       <div class="subscription-links">
-        <div class="link-item">
+        <div class="link-group">
           <span class="link-label">通用订阅：</span>
           <el-input v-model="subscription.subscription_url" readonly size="large">
             <template #append>
               <el-button @click="copyLink(subscription.subscription_url)">复制</el-button>
             </template>
           </el-input>
+          <p class="link-tip">适用于 v2rayN、V2rayNG、Shadowrocket、Quantumult X 等</p>
         </div>
-        <div class="link-item">
+        <div class="link-group">
           <span class="link-label">Clash订阅：</span>
           <el-input v-model="subscription.clash_url" readonly size="large">
             <template #append>
               <el-button @click="copyLink(subscription.clash_url)">复制</el-button>
             </template>
           </el-input>
-        </div>
-        <div class="link-item">
-          <span class="link-label">V2Ray订阅：</span>
-          <el-input v-model="subscription.v2ray_url" readonly size="large">
-            <template #append>
-              <el-button @click="copyLink(subscription.v2ray_url)">复制</el-button>
-            </template>
-          </el-input>
+          <p class="link-tip">适用于 Clash、Clash Verge、ClashX、Clash for Windows 等</p>
         </div>
       </div>
     </div>
@@ -162,19 +156,24 @@ onMounted(() => {
 .subscription-links {
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  gap: 20px;
 }
 
-.link-item {
+.link-group {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
 }
 
 .link-label {
-  width: 100px;
-  color: #666;
+  margin-bottom: 8px;
+  color: #333;
   font-weight: 500;
+}
+
+.link-tip {
+  margin-top: 8px;
+  color: #999;
+  font-size: 13px;
 }
 
 .account-info {

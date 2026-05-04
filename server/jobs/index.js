@@ -126,6 +126,108 @@ function registerXuiSyncJob(db) {
 }
 
 /**
+ * 注册流量同步任务
+ * 每3小时从3X-UI服务器同步用户流量数据到本地数据库
+ * @param {Object} db - 数据库实例
+ */
+function registerTrafficSyncJob(db) {
+  // 启动时延迟10分钟执行第一次，避免启动时负载过高
+  setTimeout(async () => {
+    await runTrafficSync(db);
+  }, 10 * 60 * 1000);
+
+  const interval = setInterval(async () => {
+    await runTrafficSync(db);
+  }, 3 * 60 * 60 * 1000); // 每3小时执行一次
+  
+  intervals.push(interval);
+  logger.info('流量同步任务已注册（每3小时执行一次）');
+}
+
+/**
+ * 执行流量同步
+ * 从3X-UI服务器获取用户流量数据并更新到本地数据库
+ * @param {Object} db - 数据库实例
+ */
+async function runTrafficSync(db) {
+  try {
+    logger.info('开始执行流量同步任务...');
+
+    // 查询所有已启用的用户
+    const users = await db.prepare(`
+      SELECT id, email
+      FROM users
+      WHERE enabled = 1
+    `).all();
+
+    if (users.length === 0) {
+      logger.info('没有需要同步流量的用户');
+      return;
+    }
+
+    logger.info(`需要同步流量的用户数量: ${users.length}`);
+
+    // 查询所有在线服务器
+    const servers = await db.prepare(`
+      SELECT id, name, api_url, api_username, api_password
+      FROM xui_servers
+      WHERE status = 1
+    `).all();
+
+    if (servers.length === 0) {
+      logger.info('没有在线的3X-UI服务器');
+      return;
+    }
+
+    logger.info(`在线服务器数量: ${servers.length}`);
+
+    let updatedCount = 0;
+
+    // 对每个服务器执行流量同步
+    for (const server of servers) {
+      try {
+        const xuiService = new XuiService(server.api_url, server.api_username, server.api_password);
+        await xuiService.init();
+
+        // 获取所有inbounds
+        const inboundsResult = await xuiService.getInbounds();
+        if (!inboundsResult.success) {
+          logger.warn(`获取服务器 ${server.name} 的inbounds失败: ${inboundsResult.message}`);
+          continue;
+        }
+
+        // 遍历所有inbound，收集用户流量数据
+        for (const inbound of inboundsResult.data) {
+          const clientStats = inbound.clientStats || [];
+          
+          for (const client of clientStats) {
+            // 查找匹配的用户
+            const user = users.find(u => u.email === client.email);
+            if (user) {
+              // 计算总流量（上行 + 下行）
+              const trafficUsed = (client.up || 0) + (client.down || 0);
+              
+              // 更新数据库中的流量数据
+              await db.prepare(`
+                UPDATE users SET traffic_used = ?, updated_at = ? WHERE id = ?
+              `).run(trafficUsed, Math.floor(Date.now() / 1000), user.id);
+              
+              updatedCount++;
+            }
+          }
+        }
+      } catch (error) {
+        logger.error(`同步服务器 ${server.name} 流量错误: ${error.message}`);
+      }
+    }
+
+    logger.info(`流量同步任务完成，更新了 ${updatedCount} 个用户的流量数据`);
+  } catch (error) {
+    logger.error(`流量同步任务错误: ${error.message}`);
+  }
+}
+
+/**
  * 执行3X-UI用户同步
  * @param {Object} db - 数据库实例
  */
@@ -181,6 +283,7 @@ function startAllJobs(db) {
   logger.info('正在启动所有定时任务...');
   registerOrderExpireJob(db);
   registerXuiSyncJob(db);
+  registerTrafficSyncJob(db);
   logger.info(`所有定时任务已启动，共 ${intervals.length} 个任务`);
 }
 

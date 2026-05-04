@@ -408,11 +408,22 @@ function syncToXuiServers(user) {
  * @returns {string} 格式化后的流量字符串
  */
 function formatTraffic(bytes) {
-  if (bytes === 0) return '0 B';
+  // 处理 null、undefined 或非数字情况
+  if (bytes === null || bytes === undefined || bytes === '') return '0 B';
+  
+  // 转换为数字
+  const numBytes = Number(bytes);
+  
+  // 检查是否为有效数字
+  if (isNaN(numBytes)) return '0 B';
+  
+  // 处理0的情况
+  if (numBytes === 0) return '0 B';
+  
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  const i = Math.floor(Math.log(numBytes) / Math.log(k));
+  return parseFloat((numBytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 /**

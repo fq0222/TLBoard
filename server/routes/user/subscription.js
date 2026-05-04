@@ -16,9 +16,10 @@ const logger = createLogger('USER-SUB');
  * @param {Object} node - 节点基本信息
  * @param {string|Object} settings - inbound settings
  * @param {string|Object} streamSettings - inbound stream_settings
+ * @param {string} [userEmail] - 用户邮箱，用于查找特定用户的UUID
  * @returns {Object} 解析后的节点配置
  */
-function parseNodeConfig(node, settings, streamSettings) {
+function parseNodeConfig(node, settings, streamSettings, userEmail) {
   let parsedSettings = {};
   let parsedStream = {};
   
@@ -44,9 +45,17 @@ function parseNodeConfig(node, settings, streamSettings) {
     logger.warn(`解析 stream_settings 失败: ${e.message}`);
   }
   
-  // 获取 UUID（从第一个客户端）
+  // 获取 UUID（优先查找用户自己的UUID，否则返回第一个客户端的UUID）
   const clients = parsedSettings.clients || [];
-  const uuid = clients.length > 0 ? clients[0].id : '';
+  let uuid = '';
+  
+  if (userEmail && clients.length > 0) {
+    // 根据用户邮箱查找对应的客户端
+    const userClient = clients.find(c => c.email === userEmail);
+    uuid = userClient ? userClient.id : clients[0].id;
+  } else {
+    uuid = clients.length > 0 ? clients[0].id : '';
+  }
   
   // 获取传输协议
   const network = parsedStream.network || 'tcp';
@@ -129,7 +138,7 @@ router.get('/', authenticateUser, async (req, res) => {
     // 查询用户信息
     const user = await db.prepare(`
       SELECT 
-        u.id, u.email, u.subscription_token,
+        u.id, u.email, u.subscription_token, u.sub_id,
         u.traffic_used, u.traffic_limit, u.expire_at, u.enabled,
         p.name as plan_name
       FROM users u
@@ -184,7 +193,7 @@ router.get('/', authenticateUser, async (req, res) => {
 
       for (const node of serverNodes) {
         // 解析节点配置
-        const config = parseNodeConfig(node, node.settings, node.stream_settings);
+        const config = parseNodeConfig(node, node.settings, node.stream_settings, user.email);
         
         // 使用服务器的 host 和 client_port
         const nodeHost = server.host || '';
@@ -192,8 +201,10 @@ router.get('/', authenticateUser, async (req, res) => {
         
         // 如果有CF优选IP，为每个 IP 生成一个节点
         if (cfIps.length > 0) {
-          for (const cfIp of cfIps) {
+          cfIps.forEach((cfIp, index) => {
+            const ipRemark = cfIps.length > 1 ? `${node.remark}-${server.name}-${index + 1}` : `${node.remark}-${server.name}`;
             nodes.push({
+              server_name: server.name,
               protocol: node.protocol,
               uuid: config.uuid,
               address: cfIp.ip,
@@ -201,13 +212,14 @@ router.get('/', authenticateUser, async (req, res) => {
               host: nodeHost,
               wsPath: config.wsPath,
               security: config.security,
-              remark: `${node.remark}-${server.name}`
+              remark: ipRemark
             });
-          }
+          });
         } else {
           // 使用默认IP
           const defaultIp = server.api_url.match(/\/\/([^:]+)/);
           nodes.push({
+            server_name: server.name,
             protocol: node.protocol,
             uuid: config.uuid,
             address: defaultIp ? defaultIp[1] : '0.0.0.0',
@@ -228,11 +240,22 @@ router.get('/', authenticateUser, async (req, res) => {
 
     // 格式化流量显示
     const formatTraffic = (bytes) => {
-      if (bytes === 0) return '0 B';
+      // 处理 null、undefined 或非数字情况
+      if (bytes === null || bytes === undefined || bytes === '') return '0 B';
+      
+      // 转换为数字
+      const numBytes = Number(bytes);
+      
+      // 检查是否为有效数字
+      if (isNaN(numBytes)) return '0 B';
+      
+      // 处理0的情况
+      if (numBytes === 0) return '0 B';
+      
       const k = 1024;
       const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+      const i = Math.floor(Math.log(numBytes) / Math.log(k));
+      return parseFloat((numBytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
 
     // 格式化时间显示
@@ -366,7 +389,7 @@ router.get('/sub/:token', [
 
       for (const node of serverNodes) {
         // 解析节点配置
-        const config = parseNodeConfig(node, node.settings, node.stream_settings);
+        const config = parseNodeConfig(node, node.settings, node.stream_settings, user.email);
         
         // 使用服务器的 host 和 client_port
         const nodeHost = server.host || '';
@@ -374,8 +397,10 @@ router.get('/sub/:token', [
         
         // 如果有CF优选IP，为每个 IP 生成一个节点
         if (cfIps.length > 0) {
-          for (const cfIp of cfIps) {
+          cfIps.forEach((cfIp, index) => {
+            const ipRemark = cfIps.length > 1 ? `${node.remark}-${server.name}-${index + 1}` : `${node.remark}-${server.name}`;
             nodes.push({
+              server_name: server.name,
               protocol: node.protocol,
               uuid: config.uuid,
               address: cfIp.ip,
@@ -383,13 +408,14 @@ router.get('/sub/:token', [
               host: nodeHost,
               wsPath: config.wsPath,
               security: config.security,
-              remark: `${node.remark}-${server.name}`
+              remark: ipRemark
             });
-          }
+          });
         } else {
           // 使用默认IP
           const defaultIp = server.api_url.match(/\/\/([^:]+)/);
           nodes.push({
+            server_name: server.name,
             protocol: node.protocol,
             uuid: config.uuid,
             address: defaultIp ? defaultIp[1] : '0.0.0.0',
@@ -443,10 +469,15 @@ function generateClashConfig(nodes, user) {
   const proxies = nodes.map(node => {
     const { protocol, uuid, address, port, host, wsPath, security, remark } = node;
     
+    // 处理IPv6地址，去除方括号
+    const serverAddress = address.startsWith('[') && address.endsWith(']') 
+      ? address.slice(1, -1) 
+      : address;
+    
     if (protocol === 'vless') {
       return `  - name: ${remark}
     type: vless
-    server: ${address}
+    server: ${serverAddress}
     port: ${port}
     uuid: ${uuid}
     udp: true
@@ -455,11 +486,11 @@ function generateClashConfig(nodes, user) {
     ws-opts:
       path: ${wsPath || '/'}
       headers:
-        Host: ${host || address}`;
+        Host: ${host || serverAddress}`;
     } else if (protocol === 'vmess') {
       return `  - name: ${remark}
     type: vmess
-    server: ${address}
+    server: ${serverAddress}
     port: ${port}
     uuid: ${uuid}
     alterId: 0
@@ -469,11 +500,11 @@ function generateClashConfig(nodes, user) {
     ws-opts:
       path: ${wsPath || '/'}
       headers:
-        Host: ${host || address}`;
+        Host: ${host || serverAddress}`;
     } else if (protocol === 'trojan') {
       return `  - name: ${remark}
     type: trojan
-    server: ${address}
+    server: ${serverAddress}
     port: ${port}
     password: ${uuid}
     tls: true
@@ -481,8 +512,8 @@ function generateClashConfig(nodes, user) {
     ws-opts:
       path: ${wsPath || '/'}
       headers:
-        Host: ${host || address}
-    sni: ${host || address}`;
+        Host: ${host || serverAddress}
+    sni: ${host || serverAddress}`;
     }
     return '';
   }).filter(Boolean).join('\n');
