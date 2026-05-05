@@ -237,8 +237,6 @@ async function handleLogout() {
   flex: 1;
   margin-left: 240px;
   transition: margin-left 0.3s;
-  height: 100vh;
-  overflow: hidden;
 }
 
 .sidebar.collapsed + .main-content {

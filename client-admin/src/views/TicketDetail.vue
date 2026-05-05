@@ -186,12 +186,6 @@ onMounted(() => {
 <style scoped>
 .ticket-detail-container {
   width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 20px;
-  box-sizing: border-box;
 }
 
 .page-header {
@@ -199,7 +193,6 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
-  flex-shrink: 0;
 }
 
 .page-title {
@@ -219,17 +212,12 @@ onMounted(() => {
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   padding: 30px;
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 .ticket-info {
-  margin-bottom: 20px;
-  padding-bottom: 15px;
+  margin-bottom: 30px;
+  padding-bottom: 20px;
   border-bottom: 1px solid #ebeef5;
-  flex-shrink: 0;
 }
 
 .info-header {
@@ -266,9 +254,9 @@ onMounted(() => {
 }
 
 .replies-section {
-  flex: 1;
+  margin-bottom: 30px;
+  max-height: 60vh;
   overflow-y: auto;
-  margin-bottom: 20px;
 }
 
 .section-title {
@@ -326,9 +314,9 @@ onMounted(() => {
 }
 
 .reply-input {
+  margin-top: 30px;
   padding-top: 20px;
   border-top: 1px solid #ebeef5;
-  flex-shrink: 0;
 }
 
 .reply-actions {
@@ -338,6 +326,6 @@ onMounted(() => {
 }
 
 .closed-notice {
-  flex-shrink: 0;
+  margin-top: 30px;
 }
 </style>
