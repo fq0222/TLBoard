@@ -316,7 +316,110 @@
 
 ---
 
-### 2.4 订阅相关
+### 2.4 续费相关
+
+#### POST `/api/user/renew`
+
+用户续费接口，在现有套餐基础上累加流量。
+
+请求体：
+
+```json
+{
+  "plan_id": 1,
+  "pay_type": 2
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| plan_id | number | 是 | 套餐 ID |
+| pay_type | number | 否 | 支付方式，`1=微信`，`2=支付宝`，默认支付宝 |
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "order_id": 10002,
+    "out_trade_no": "REN1746260000000abc123",
+    "vmq_order_id": "202605050001",
+    "pay_type": 2,
+    "really_price": "10.01",
+    "payment_url": "https://qr.alipay.com/fkxxxxx",
+    "expire_in": 300
+  }
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| order_id | number | 本地订单 ID |
+| out_trade_no | string | 商户订单号（REN 前缀表示续费订单） |
+| vmq_order_id | string | VMQ 订单号 |
+| pay_type | number | VMQ 实际使用的支付方式 |
+| really_price | string | VMQ 返回的实际支付金额 |
+| payment_url | string | 支付链接，前端用于生成二维码 |
+| expire_in | number | 订单过期时间，单位秒 |
+
+常见失败响应：
+
+```json
+{
+  "code": 1002,
+  "message": "未登录或 Token 无效",
+  "data": null
+}
+```
+
+```json
+{
+  "code": 2004,
+  "message": "请先购买套餐后再续费",
+  "data": null
+}
+```
+
+```json
+{
+  "code": 1001,
+  "message": "套餐不存在或未启用",
+  "data": null
+}
+```
+
+```json
+{
+  "code": 5002,
+  "message": "VMQ 创建订单失败",
+  "data": null
+}
+```
+
+```json
+{
+  "code": 5003,
+  "message": "当前支付通道需要用户手动输入金额，存在少付风险，请更换 VMQ 监控通道配置后再试",
+  "data": null
+}
+```
+
+业务说明：
+
+- 续费订单号以 `REN` 前缀标识，区别于新购订单（`ORD` 前缀）
+- 流量累加公式：新总流量 = 当前套餐流量 + 新套餐流量
+- 订单金额记录为 VMQ 实际支付金额（可能因 VMQ 递增机制比套餐金额多 0.01 元）
+- 支付成功后自动同步到所有在线的 3X-UI 服务器
+
+---
+
+### 2.5 订阅相关
 
 #### GET `/api/user/subscription`
 
@@ -379,7 +482,7 @@
 
 ---
 
-### 2.5 Cloudflare IP 优选
+### 2.6 Cloudflare IP 优选
 
 #### GET `/api/user/cf-ips`
 
@@ -432,7 +535,7 @@
 
 ---
 
-### 2.6 支付回调
+### 2.7 支付回调
 
 #### GET `/api/user/payment/notify`
 #### POST `/api/user/payment/notify`

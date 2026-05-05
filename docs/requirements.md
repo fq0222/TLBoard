@@ -86,9 +86,9 @@ VMQ 后台需要配置以下两个地址：
 - `user_id`
 - `email`
 - `plan_id`
-- `amount`
+- `amount`：订单金额（分），记录 VMQ 实际支付金额
 - `trade_no`：VMQ 订单号
-- `out_trade_no`：商户订单号
+- `out_trade_no`：商户订单号（`ORD` 前缀为新购订单，`REN` 前缀为续费订单）
 - `status`：`pending` / `paid` / `expired`
 - `payment_url`
 - `paid_at`
@@ -166,8 +166,20 @@ VMQ 后台需要配置以下两个地址：
 - 生成订阅链接（优选完成后可用）
 - 复制订阅链接
 - 查看订阅详情
+- 续费套餐（在现有套餐基础上累加流量）
 - 重新购买套餐
 - Cloudflare IP 优选（手动选择 IP）
+
+续费流程：
+
+1. 用户在个人中心点击"续费套餐"按钮
+2. 弹出续费弹窗，展示所有启用套餐
+3. 默认选中当前套餐，用户可选择其他套餐
+4. 用户选择支付方式（支付宝/微信）
+5. 点击"立即续费"，调用续费接口
+6. 创建订单并跳转到支付等待页
+7. 支付成功后，流量累加到当前套餐（当前流量 + 新套餐流量）
+8. 同步更新到所有 3X-UI 服务器
 
 一键优选流程：
 
@@ -283,6 +295,7 @@ VMQ 后台需要配置以下两个地址：
 | GET | `/api/user/orders` | 获取当前用户订单列表 |
 | GET | `/api/user/orders/status/:id` | 公共查单 |
 | GET | `/api/user/orders/:id/status` | 登录态查单 |
+| POST | `/api/user/renew` | 用户续费（累加流量） |
 | GET | `/api/user/subscription` | 获取订阅信息 |
 | GET | `/api/user/sub/:token` | 获取订阅内容 |
 | GET | `/api/user/cf-ips` | 获取 CF IP 池 |
