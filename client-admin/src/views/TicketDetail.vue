@@ -27,7 +27,7 @@
           <div class="info-meta">
             <span>用户：{{ ticket.user?.email || '-' }}</span>
             <span>创建时间：{{ formatTime(ticket.created_at) }}</span>
-            <span v-if="ticket.last_read_at">用户最后已读：{{ formatTime(ticket.last_read_at) }}</span>
+            <span v-if="isUserRead">用户已读</span>
             <span v-else class="unread-badge">用户未读</span>
           </div>
           <div class="ticket-description">
@@ -80,7 +80,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
@@ -91,6 +91,14 @@ const ticket = ref(null)
 const loading = ref(false)
 const replyContent = ref('')
 const replying = ref(false)
+
+const isUserRead = computed(() => {
+  if (!ticket.value) return false
+  // 没有回复时，看用户是否查看过
+  if (!ticket.value.last_reply_at) return !!ticket.value.last_read_at
+  // 有回复时，比较最后回复时间和最后已读时间
+  return ticket.value.last_read_at && ticket.value.last_read_at >= ticket.value.last_reply_at
+})
 
 function getStatusType(status) {
   const map = { open: 'info', pending: 'warning', closed: '' }
