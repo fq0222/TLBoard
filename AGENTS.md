@@ -1,166 +1,159 @@
-# 📄 项目指令与协作规范 (AGENTS.md)
+# 项目指令与协作规范
 
-> **Role Prompt**: 你是一个全栈开发专家，在执行任何任务前，请务必阅读并严格遵守以下项目结构说明及工作流规范。
+> 使用简体中文回答所有问题
 
----
+## 项目概述
 
-### 👤 用户简介 (User Profile)
+机场面板订阅管理系统，包含三个独立包（无根 package.json）：
+- `server/` - Node.js Express 后端 + PostgreSQL
+- `client-user/` - Vue 3 + Vite 用户端
+- `client-admin/` - Vue 3 + Vite 管理端
 
-* **姓名**：Sam
-* **技术背景**：
-  * C/C++、Java 程序员
-  * 8 年 Android 系统开发经验
-  * 2 年 Android 应用开发经验
-  * 学习过 Node.js、JavaScript（未学过 TypeScript）
+## 关键命令
 
----
+### 后端 (server/)
+```bash
+npm run dev          # 开发模式（nodemon）
+npm run dev:all      # 同时启动用户端(30000)和管理端(30001)
+npm run init-db      # 初始化数据库表结构
+node test/xxx.js     # 运行测试脚本
+```
 
-不管我输入什么国家的语言，你都使用简体中文回答我
+### 前端 (client-user/ 或 client-admin/)
+```bash
+npm run dev          # 开发服务器
+npm run build        # 生产构建（需要 terser）
+npx vite build --minify esbuild  # 绕过 terser 的构建方式
+```
 
-### 🧪 测试账号 (Test Accounts)
+## 测试账号
 
-| 用途 | 邮箱/用户名 | 密码 | 说明 |
-|---|---|---|---|
-| 用户端测试 | `fuqiang_2015@163.com` | `fuqiang2015` | 主要测试账号 |
-| 管理端测试 | `admin` | `admin123` | 管理员账号 |
+| 用途 | 账号 | 密码 |
+|------|------|------|
+| 用户端 | `fuqiang_2015@163.com` | `fuqiang2015` |
+| 管理端 | `admin` | `admin123` |
 
-* **使用原则**：需要测试账号时，应主动向用户询问，而非猜测密码。
+*需要测试时主动询问用户，不要猜测密码*
 
----
+## 工作流规范
 
-### 📂 项目结构概览 (Project Structure)
+### 代码提交
+1. 可以 `git commit` 提交本地更改
+2. `git push` 前**必须**展示变更并获得用户同意
 
-* **`client-admin`**: 管理员端前端代码 (Vue + Vite/Webpack)。
-* **`client-user`**: 用户端前端代码 (Vue + Vite/Webpack)。
-* **`server`**: 后端代码 (Node.js Express)。
-* **`docs/`**: 项目文档库。
-    * `requirements.md`: 核心需求文档。
-    * `api.md`: 项目核心接口定义文档。
-    * `vmq-server-api.md`: 支付功能 (vmq-server) 专用接口文档。
-    * *注：其他源自 3xui-api-client 的文档可能过时，需以实际测试结果为准。*
-* **测试资源**:
-    * `server/test`: 存量测试脚本。在编写新测试时，**必须**优先参考或在此基础上进行修改。
-* **配置文件**:
-    * `ecosystem.config.js`: PM2 生产环境启动配置。**禁止写入真实敏感信息**，此文件需提交至 GitHub。
-    * `config.js`: 本地开发与测试配置文件。**允许写入真实数据**，严禁提交至远程仓库。
+### 验证要求
+- 后端修改：运行 `server/test/` 下的脚本验证
+- 前端修改：执行构建确保无错误
+- 完成时**必须**展示测试日志
 
----
+### 服务器重启
+修改 `server/**/*.js` 后提醒用户重启服务器，**不要自行启动**
 
-### 🛠 强制工作流 (Workflow Requirements)
+## 架构要点
 
-#### 1. 代码提交规范 (Commit & Push Rules)
-* **允许行为**：在修复 Bug 或开发功能后，**可以执行** `git commit` 提交代码。
-* **限制行为**：在执行 `git push` 推送到远程仓库前，**必须**先向用户展示变更内容并获得明确同意。
-* **流程要求**：
-  1. 执行 `git add` 和 `git commit` 提交本地更改
-  2. 展示 `git diff` 或 `git log` 等变更摘要
-  3. 等待用户确认同意后，方可执行 `git push`
+### 双 Express 应用
+- `app.js` 统一启动入口，同时运行用户端和管理端
+- 用户端端口：30000，管理端端口：30001
+- 共享 PostgreSQL 数据库实例
 
-#### 2. 强制验证与测试流程
-* **后端修改 (Server)**：必须通过终端执行 `server/test` 下的脚本或相关 `curl/http` 命令进行功能验证。
-* **前端修改 (Client)**：必须执行编译流程，确保无任何 Lint 或编译错误后，交由用户预览效果。
-  * 标准构建：`npm run build`
-  * 绕过 terser 依赖（项目未安装 terser 时）：`npx vite build --minify esbuild`
-* **反馈标准**：在告知任务完成时，**必须**在回复中展示详细的测试日志 (Logs) 或终端文本输出作为凭证。
+### API 路径
+- 用户端：`/api/user/*`
+- 管理端：`/api/admin/*`
 
-#### 3. 特殊情况处理
-* 若当前任务缺乏自动化测试环境，必须在 **Plan 阶段** 明确说明理由，并请求用户进行手动验证，获得确认后方可进入提交环节。
+### Service 层
+- `services/order-service.js` - 订单处理
+- `services/vmq-service.js` - VMQ 支付
+- `services/xui-service.js` - 3X-UI 服务器交互
 
-#### 4. 服务器重启提醒
-* **触发条件**：当修改涉及以下文件时，必须提醒用户重启服务器：
-  * `server/**/*.js`（所有后端代码）
-  * `server/jobs/*.js`（定时任务）
-  * `server/services/*.js`（服务层）
-  * `server/routes/*.js`（路由层）
-* **提醒方式**：在任务完成时，明确告知用户："请重启服务器使修改生效"
-* **禁止行为**：**不得自行启动或重启服务器**，必须由用户手动操作
+## 关键配置
 
----
+### ecosystem.config.js (PM2)
+- 生产环境启动配置
+- **禁止写入真实敏感信息**，此文件需提交至 GitHub
 
-### 📚 文档同步机制 (Documentation Sync)
+### config.js (本地开发)
+- **允许写入真实数据**，严禁提交至远程仓库
+- 包含数据库连接、JWT 密钥等
 
-* **冲突处理**：当代码逻辑修改与 `requirements.md` 或 `api.md` 产生分歧时，以**代码测试通过的实际结果**为准。
-* **更新流程**：
-    1.  在代码测试无误后，先列出详细的文档更新要点。
-    2.  提交给用户进行审核确认。
-    3.  **用户确认后**，方可同步更新对应的 Markdown 文档。
+## 3X-UI API 注意事项
 
----
+3X-UI API 返回字段使用**驼峰命名**，不是下划线命名：
 
-### ⚠️ 注意事项 (Important Notes)
+| 正确（驼峰） | 错误（下划线） |
+|--------------|----------------|
+| `streamSettings` | `stream_settings` |
+| `clientStats` | `client_stats` |
+| `expiryTime` | `expiry_time` |
+| `totalGB` | `total_gb` |
+| `limitIp` | `limit_ip` |
+| `subId` | `sub_id` |
 
-#### 1. 3X-UI API 字段命名规范
-* **问题描述**：3X-UI API 返回的字段使用**驼峰命名**（如 `streamSettings`、`clientStats`），而非下划线命名（如 `stream_settings`、`client_stats`）。
-* **影响范围**：节点数据同步、订阅链接生成、wsPath 获取等。
-* **解决方案**：在处理 3X-UI API 返回数据时，必须使用驼峰命名字段：
-  ```javascript
-  // ❌ 错误写法
-  const streamSettings = inbound.stream_settings;
-  
-  // ✅ 正确写法
-  const streamSettings = inbound.streamSettings;
-  ```
-* **关键字段对照表**：
-  | 下划线命名（错误） | 驼峰命名（正确） | 说明 |
-  |---|---|---|
-  | `stream_settings` | `streamSettings` | 传输配置，包含 wsSettings、TLS 等 |
-  | `client_stats` | `clientStats` | 客户端统计信息 |
-  | `expiry_time` | `expiryTime` | 到期时间 |
-  | `total_gb` | `totalGB` | 流量限制 |
-  | `limit_ip` | `limitIp` | IP 限制 |
-  | `sub_id` | `subId` | 订阅 ID |
+## 订阅链接格式
 
-#### 2. 订阅链接格式与客户端适配
-* **通用订阅**（`/api/user/sub/:token`）：
-  * 格式：Base64 编码的 v2ray 链接（`vless://...`、`vmess://...`）
-  * 适用客户端：v2rayN、V2rayNG、Shadowrocket、Quantumult X 等
-* **Clash 订阅**（`/api/user/sub/:token?clash=1`）：
-  * 格式：YAML 配置文件
-  * 适用客户端：Clash、Clash Verge、ClashX、Clash for Windows 等
-* **注意**：两种格式不通用，Clash 客户端必须使用 Clash 订阅链接
+- **通用订阅** `/api/user/sub/:token` - Base64 编码的 v2ray 链接
+- **Clash 订阅** `/api/user/sub/:token?clash=1` - YAML 配置
 
-#### 3. Clash 配置生成注意事项
-* **节点名称唯一性**：当用户有多个 CF 优选 IP 时，需要为节点名称添加序号后缀（如 `节点名-1`、`节点名-2`）
-* **IPv6 地址处理**：IPv6 地址在 Clash 配置中**不能**包含方括号，需要去除 `[` 和 `]`
-  ```javascript
-  // ❌ 错误写法
-  server: [2606:4700:4700::0]
-  
-  // ✅ 正确写法
-  server: 2606:4700:4700::0
-  ```
+两种格式不通用，Clash 客户端必须使用 Clash 链接
 
-#### 4. 流量显示处理
-* **问题描述**：数据库中的 `traffic_used` 和 `traffic_limit` 字段可能为 `null`、`undefined` 或字符串类型
-* **解决方案**：`formatTraffic` 函数必须处理这些异常情况：
-  ```javascript
-  function formatTraffic(bytes) {
-    if (bytes === null || bytes === undefined || bytes === '') return '0 B';
-    const numBytes = Number(bytes);
-    if (isNaN(numBytes)) return '0 B';
-    if (numBytes === 0) return '0 B';
-    // ... 格式化逻辑
-  }
-  ```
+## Clash 配置要点
 
-#### 5. VMQ 支付回调地址配置
-* **问题描述**：VMQ 回调地址使用 `127.0.0.1` 导致回调失败
-* **原因分析**：VMQ 运行在 NAS 上，后端服务运行在开发机上，`127.0.0.1` 指向的是 NAS 本身，而非开发机
-* **正确配置**：
-  * 回调地址必须使用**开发机在局域网中的 IP**（如 `192.168.31.x`）或**公网域名**
-  * 示例：`http://192.168.31.100:30000/api/user/payment/notify`
-* **排查方法**：检查 VMQ 后台的"通知失败"记录，确认回调地址是否可达
-* **注意事项**：
-  * 涉及跨设备通信时，不能使用 `127.0.0.1` 或 `localhost`
-  * 需要确认防火墙是否放行了对应端口
+- 多个 CF 优选 IP 时，节点名需添加序号后缀（如 `节点名-1`、`节点名-2`）
+- IPv6 地址**不能**包含方括号：`server: 2606:4700:4700::0`（不是 `[2606:4700:4700::0]`）
 
-#### 6. 续费功能注意事项
-* **订单号前缀**：续费订单以 `REN` 前缀标识，新购订单以 `ORD` 前缀标识
-* **流量累加**：续费时流量累加公式为 `新总流量 = 当前套餐流量 + 新套餐流量`
-* **金额记录**：订单金额记录为 VMQ 实际支付金额（可能因递增机制比套餐金额多 0.01 元）
-* **3X-UI 同步**：续费后会自动同步到所有在线的 3X-UI 服务器，使用 `updateClient` 更新已存在用户
-* **类型转换**：数据库中的 `traffic_limit` 字段可能是字符串类型，进行数学运算前必须使用 `Number()` 转换
+## 数据库字段类型
 
----
+`traffic_used` 和 `traffic_limit` 可能是 `null`、`undefined` 或字符串，格式化时需处理：
+```javascript
+function formatTraffic(bytes) {
+  if (bytes === null || bytes === undefined || bytes === '') return '0 B';
+  const numBytes = Number(bytes);
+  if (isNaN(numBytes) || numBytes === 0) return '0 B';
+  // ... 格式化逻辑
+}
+```
 
-**Target**: 始终保持后端逻辑标准化（Service-Controller 分层）与前端 UI 的美观响应式。
+## VMQ 支付回调
+
+回调地址**不能**使用 `127.0.0.1`（VMQ 和后端可能在不同设备），需使用局域网 IP 或公网域名：
+```
+http://192.168.31.100:30000/api/user/payment/notify
+```
+
+## 续费功能
+
+- 订单号前缀：续费 `REN`，新购 `ORD`
+- 流量累加：`新总流量 = 当前套餐流量 + 新套餐流量`
+- 3X-UI 同步：使用 `updateClient` 更新已存在用户
+- `traffic_limit` 可能是字符串，运算前用 `Number()` 转换
+
+## 文档同步
+
+代码与 `docs/requirements.md`、`docs/api.md` 冲突时，以**代码测试通过的实际结果**为准。更新文档前需用户确认。
+
+## 工单系统
+
+### 功能概述
+- 用户端：创建工单、查看列表和详情、回复工单、关闭工单
+- 管理端：查看列表和详情、回复工单、关闭工单、删除工单
+- 未读提示：用户端导航栏显示未读红点，工单列表显示未读标记
+- 自动关闭：管理员回复且用户已读后 24 小时无回复自动关闭
+
+### 文件结构
+- `server/services/ticket-service.js` - 工单服务层
+- `server/routes/user/tickets.js` - 用户端路由
+- `server/routes/admin/tickets.js` - 管理端路由
+- `client-user/src/views/user/Tickets.vue` - 用户工单列表
+- `client-user/src/views/user/TicketDetail.vue` - 用户工单详情
+- `client-user/src/views/user/CreateTicket.vue` - 创建工单
+- `client-admin/src/views/Tickets.vue` - 管理工单列表
+- `client-admin/src/views/TicketDetail.vue` - 管理工单详情
+
+### 状态流转
+- `open` → 待处理（用户创建）
+- `pending` → 处理中（管理员回复）
+- `closed` → 已关闭（手动关闭或自动关闭）
+
+### 注意事项
+- 删除工单会同时删除回复和已读记录
+- 已读状态通过比较 `last_reply_at` 和 `last_read_at` 判断
+- 定时任务每小时检查一次可自动关闭的工单
