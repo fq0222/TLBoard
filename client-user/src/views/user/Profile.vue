@@ -44,6 +44,36 @@
     </div>
     
     <div class="content-card">
+      <h2 class="card-title">套餐续费</h2>
+      <div class="renew-section">
+        <el-alert
+          title="续费说明"
+          description="续费将在现有套餐基础上累加流量，使用期限保持无限期。"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 20px;"
+        />
+        <el-button 
+          type="primary" 
+          size="large" 
+          @click="showRenewDialog = true"
+          :disabled="!userInfo.plan_id"
+        >
+          <el-icon><Refresh /></el-icon>
+          续费套餐
+        </el-button>
+      </div>
+    </div>
+    
+    <!-- 续费弹窗 -->
+    <RenewDialog 
+      v-model:visible="showRenewDialog"
+      :current-plan-id="userInfo.plan_id"
+      @renew="handleRenew"
+    />
+    
+    <div class="content-card">
       <h2 class="card-title">订阅链接</h2>
       
       <!-- 未优选或优选完成：显示引导说明和按钮 -->
@@ -172,11 +202,14 @@
 
 import { ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { CopyDocument, MagicStick, Link } from '@element-plus/icons-vue'
+import { CopyDocument, MagicStick, Link, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
+import RenewDialog from '@/components/RenewDialog.vue'
 import api from '@/api'
 
 const userStore = useUserStore()
+const router = useRouter()
 
 // 响应式数据
 const userInfo = ref({})
@@ -187,6 +220,7 @@ const optimizing = ref(false)
 const optimizeProgress = ref(0)
 const optimizeStatusText = ref('')
 const subscriptionGenerated = ref(false)
+const showRenewDialog = ref(false)
 const TEST_COUNT = 3
 const TEST_TIMEOUT = 5000
 const TEST_INTERVAL = 200
@@ -450,6 +484,36 @@ function formatTime(timestamp) {
   })
 }
 
+/**
+ * 处理续费
+ * @param {number} planId - 套餐ID
+ */
+async function handleRenew(planId) {
+  try {
+    showRenewDialog.value = false
+    
+    const response = await api.user.renew({ plan_id: planId })
+    
+    if (response.code === 0) {
+      // 跳转到支付等待页
+      router.push({
+        path: '/payment/callback',
+        query: {
+          order_id: response.data.order_id,
+          out_trade_no: response.data.out_trade_no,
+          payment_url: response.data.payment_url,
+          expire_in: response.data.expire_in
+        }
+      })
+    } else {
+      ElMessage.error(response.message || '续费失败')
+    }
+  } catch (error) {
+    console.error('续费失败:', error)
+    ElMessage.error('续费失败，请重试')
+  }
+}
+
 // 组件挂载时获取数据
 onMounted(() => {
   fetchUserInfo()
@@ -523,6 +587,11 @@ onMounted(() => {
   justify-content: space-between;
   margin-bottom: 10px;
   color: #666;
+}
+
+.renew-section {
+  text-align: center;
+  padding: 20px 0;
 }
 
 .subscription-links {

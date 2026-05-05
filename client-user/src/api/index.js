@@ -180,6 +180,16 @@ const userApi = {
    */
   applyCfIps(ipIds) {
     return apiClient.post('/cf-ips/apply', { ip_ids: ipIds })
+  },
+
+  /**
+   * 用户续费
+   * @param {Object} data - 续费数据
+   * @param {number} data.plan_id - 套餐ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  renew(data) {
+    return apiClient.post('/renew', data)
   }
 }
 

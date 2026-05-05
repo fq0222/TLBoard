@@ -93,7 +93,7 @@ async function syncUserToXuiServers(db, user, plan) {
 async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   // 查询订单及用户当前到期时间，用于续费场景累计有效期
   const order = await db.prepare(`
-    SELECT o.*, u.expire_at as current_expire_at, u.email, u.subscription_token
+    SELECT o.*, u.expire_at as current_expire_at, u.traffic_limit as current_traffic_limit, u.email, u.subscription_token
     FROM orders o
     LEFT JOIN users u ON o.user_id = u.id
     WHERE o.out_trade_no = ?
@@ -132,6 +132,20 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
       WHERE out_trade_no = ?
     `).run(finalTradeNo, now, outTradeNo);
 
+    // 判断是否为续费订单（REN前缀）
+    const isRenewOrder = order.out_trade_no.startsWith('REN');
+    let newTrafficLimit;
+
+    if (isRenewOrder) {
+      // 续费场景：当前流量 + 新套餐流量
+      const currentTrafficLimit = Number(order.current_traffic_limit || 0);
+      newTrafficLimit = currentTrafficLimit + plan.traffic_limit;
+      logger.info(`续费订单流量累加: ${currentTrafficLimit} + ${plan.traffic_limit} = ${newTrafficLimit}`);
+    } else {
+      // 新购场景：直接使用套餐流量
+      newTrafficLimit = plan.traffic_limit;
+    }
+
     await db.prepare(`
       UPDATE users SET
         enabled = 1,
@@ -141,7 +155,7 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
         payment_count = payment_count + 1,
         updated_at = ?
       WHERE id = ?
-    `).run(plan.id, plan.traffic_limit, expireAt, now, order.user_id);
+    `).run(plan.id, newTrafficLimit, expireAt, now, order.user_id);
   });
 
   await transaction();
@@ -153,7 +167,8 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
     id: order.user_id,
     email: order.email,
     subscription_token: order.subscription_token,
-    expire_at: expireAt
+    expire_at: expireAt,
+    traffic_limit: newTrafficLimit || plan.traffic_limit
   };
   syncUserToXuiServers(db, userInfo, plan).catch(err => {
     logger.error(`后台同步用户到 3X-UI 失败: ${err.message}`);

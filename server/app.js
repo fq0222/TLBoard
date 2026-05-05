@@ -29,6 +29,7 @@ const userSubscriptionRoutes = require('./routes/user/subscription');
 const userAnnouncementsRoutes = require('./routes/user/announcements');
 const userCfOptimizeRoutes = require('./routes/user/cf-optimize');
 const userPaymentRoutes = require('./routes/user/payment');
+const userRenewRoutes = require('./routes/user/renew');
 
 // ============ 管理端路由 ============
 const adminAuthRoutes = require('./routes/admin/auth');
@@ -76,6 +77,7 @@ async function startApp() {
   userApp.use(`${userPrefix}/announcements`, userAnnouncementsRoutes);
   userApp.use(`${userPrefix}/cf-ips`, userCfOptimizeRoutes);
   userApp.use(`${userPrefix}/payment`, userPaymentRoutes);
+  userApp.use(`${userPrefix}/renew`, userRenewRoutes);
 
   userApp.use((req, res) => {
     res.status(404).json({ code: 404, message: '接口不存在', data: null });
