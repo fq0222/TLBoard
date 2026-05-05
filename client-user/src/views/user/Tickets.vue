@@ -13,6 +13,7 @@
           <template #default="{ row }">
             <router-link :to="`/user/tickets/${row.id}`" class="ticket-link">
               {{ row.title }}
+              <span v-if="row.is_unread" class="unread-badge">未读</span>
             </router-link>
           </template>
         </el-table-column>
@@ -134,6 +135,18 @@ onMounted(() => {
 
 .ticket-link:hover {
   text-decoration: underline;
+}
+
+.unread-badge {
+  display: inline-block;
+  font-size: 12px;
+  color: #f56c6c;
+  background: #fef0f0;
+  border: 1px solid #fde2e2;
+  border-radius: 4px;
+  padding: 0 6px;
+  margin-left: 8px;
+  font-weight: normal;
 }
 
 .pagination {

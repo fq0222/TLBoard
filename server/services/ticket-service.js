@@ -41,7 +41,14 @@ async function getUserTickets(db, userId, page = 1, limit = 10) {
   ).get(userId)).count;
 
   const tickets = await db.prepare(`
-    SELECT * FROM tickets 
+    SELECT *,
+      CASE 
+        WHEN last_reply_at IS NULL THEN 0
+        WHEN last_read_at IS NULL AND last_reply_at IS NOT NULL THEN 1
+        WHEN last_reply_at > last_read_at THEN 1
+        ELSE 0
+      END as is_unread
+    FROM tickets 
     WHERE user_id = ? 
     ORDER BY created_at DESC 
     LIMIT ? OFFSET ?
