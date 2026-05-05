@@ -226,9 +226,10 @@ onMounted(() => {
 }
 
 .ticket-info {
-  margin-bottom: 30px;
-  padding-bottom: 20px;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
   border-bottom: 1px solid #ebeef5;
+  flex-shrink: 0;
 }
 
 .info-header {
