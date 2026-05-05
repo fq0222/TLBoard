@@ -237,6 +237,8 @@ onMounted(() => {
 
 .replies-section {
   margin-bottom: 30px;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 .section-title {
