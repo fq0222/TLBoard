@@ -19,6 +19,10 @@
           <el-icon><Connection /></el-icon>
           <span>CF IP优选</span>
         </router-link>
+        <router-link to="/user/tickets" class="nav-item" active-class="active">
+          <el-icon><ChatDotRound /></el-icon>
+          <span>工单支持</span>
+        </router-link>
       </nav>
       
       <div class="sidebar-footer">
@@ -44,7 +48,7 @@
 
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { User, Link, Connection, SwitchButton } from '@element-plus/icons-vue'
+import { User, Link, Connection, SwitchButton, ChatDotRound } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 
 const router = useRouter()

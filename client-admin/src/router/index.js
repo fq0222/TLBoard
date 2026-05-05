@@ -69,6 +69,18 @@ const routes = [
         meta: { title: 'CF IP池管理' }
       },
       {
+        path: 'tickets',
+        name: 'Tickets',
+        component: () => import('@/views/Tickets.vue'),
+        meta: { title: '工单管理' }
+      },
+      {
+        path: 'tickets/:id',
+        name: 'TicketDetail',
+        component: () => import('@/views/TicketDetail.vue'),
+        meta: { title: '工单详情' }
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),

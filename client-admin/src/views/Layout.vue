@@ -36,6 +36,10 @@
           <el-icon><Connection /></el-icon>
           <span v-if="!isCollapsed">CF IP池</span>
         </router-link>
+        <router-link to="/admin/tickets" class="nav-item" active-class="active">
+          <el-icon><ChatDotRound /></el-icon>
+          <span v-if="!isCollapsed">工单管理</span>
+        </router-link>
         <router-link to="/admin/settings" class="nav-item" active-class="active">
           <el-icon><Setting /></el-icon>
           <span v-if="!isCollapsed">系统设置</span>
@@ -104,7 +108,7 @@ import { useAdminStore } from '@/stores/admin'
 import { 
   DataBoard, Monitor, Goods, User, Document, 
   Bell, Connection, Setting, SwitchButton, 
-  Expand, Fold, ArrowDown 
+  Expand, Fold, ArrowDown, ChatDotRound 
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 

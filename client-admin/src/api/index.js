@@ -375,6 +375,51 @@ const adminApi = {
    */
   getDashboardStats() {
     return apiClient.get('/dashboard/stats')
+  },
+
+  /**
+   * 获取工单统计
+   * @returns {Promise<Object>} 响应数据
+   */
+  getTicketStats() {
+    return apiClient.get('/tickets/stats')
+  },
+
+  /**
+   * 获取工单列表
+   * @param {Object} params - 查询参数
+   * @returns {Promise<Object>} 响应数据
+   */
+  getTickets(params) {
+    return apiClient.get('/tickets', { params })
+  },
+
+  /**
+   * 获取工单详情
+   * @param {number} id - 工单ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  getTicketDetail(id) {
+    return apiClient.get(`/tickets/${id}`)
+  },
+
+  /**
+   * 回复工单
+   * @param {number} id - 工单ID
+   * @param {Object} data - 回复数据
+   * @returns {Promise<Object>} 响应数据
+   */
+  replyTicket(id, data) {
+    return apiClient.post(`/tickets/${id}/replies`, data)
+  },
+
+  /**
+   * 关闭工单
+   * @param {number} id - 工单ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  closeTicket(id) {
+    return apiClient.put(`/tickets/${id}/close`)
   }
 }
 
