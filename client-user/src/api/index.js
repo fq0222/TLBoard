@@ -190,6 +190,60 @@ const userApi = {
    */
   renew(data) {
     return apiClient.post('/renew', data)
+  },
+
+  /**
+   * 获取未读工单数量
+   * @returns {Promise<Object>} 响应数据
+   */
+  getTicketUnreadCount() {
+    return apiClient.get('/tickets/unread-count')
+  },
+
+  /**
+   * 获取工单列表
+   * @param {Object} params - 查询参数
+   * @returns {Promise<Object>} 响应数据
+   */
+  getTickets(params) {
+    return apiClient.get('/tickets', { params })
+  },
+
+  /**
+   * 创建工单
+   * @param {Object} data - 工单数据
+   * @returns {Promise<Object>} 响应数据
+   */
+  createTicket(data) {
+    return apiClient.post('/tickets', data)
+  },
+
+  /**
+   * 获取工单详情
+   * @param {number} id - 工单ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  getTicketDetail(id) {
+    return apiClient.get(`/tickets/${id}`)
+  },
+
+  /**
+   * 回复工单
+   * @param {number} id - 工单ID
+   * @param {Object} data - 回复数据
+   * @returns {Promise<Object>} 响应数据
+   */
+  replyTicket(id, data) {
+    return apiClient.post(`/tickets/${id}/replies`, data)
+  },
+
+  /**
+   * 关闭工单
+   * @param {number} id - 工单ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  closeTicket(id) {
+    return apiClient.put(`/tickets/${id}/close`)
   }
 }
 

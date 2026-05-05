@@ -43,6 +43,24 @@ const routes = [
         name: 'CfOptimize',
         component: () => import('@/views/user/CfOptimize.vue'),
         meta: { title: 'CF IP优选' }
+      },
+      {
+        path: 'tickets',
+        name: 'Tickets',
+        component: () => import('@/views/user/Tickets.vue'),
+        meta: { title: '我的工单' }
+      },
+      {
+        path: 'tickets/create',
+        name: 'CreateTicket',
+        component: () => import('@/views/user/CreateTicket.vue'),
+        meta: { title: '创建工单' }
+      },
+      {
+        path: 'tickets/:id',
+        name: 'TicketDetail',
+        component: () => import('@/views/user/TicketDetail.vue'),
+        meta: { title: '工单详情' }
       }
     ]
   },
