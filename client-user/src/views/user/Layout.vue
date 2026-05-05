@@ -47,16 +47,24 @@
  * 提供侧边栏导航和内容区域
  */
 
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { User, Link, Connection, SwitchButton, ChatDotRound } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import api from '@/api'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 const unreadTicketCount = ref(0)
+
+// 监听路由变化，当离开工单详情页时刷新未读数量
+watch(() => route.path, (newPath, oldPath) => {
+  if (oldPath && oldPath.startsWith('/user/tickets/')) {
+    fetchUnreadCount()
+  }
+})
 
 /**
  * 获取未读工单数量
