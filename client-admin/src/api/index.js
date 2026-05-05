@@ -420,6 +420,15 @@ const adminApi = {
    */
   closeTicket(id) {
     return apiClient.put(`/tickets/${id}/close`)
+  },
+
+  /**
+   * 删除工单
+   * @param {number} id - 工单ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  deleteTicket(id) {
+    return apiClient.delete(`/tickets/${id}`)
   }
 }
 

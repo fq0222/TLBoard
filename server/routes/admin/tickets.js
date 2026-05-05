@@ -184,4 +184,41 @@ router.put('/:id/close', authenticateAdmin, [
   }
 });
 
+/**
+ * DELETE /api/admin/tickets/:id
+ * 删除工单
+ */
+router.delete('/:id', authenticateAdmin, [
+  param('id').isInt({ min: 1 }).withMessage('ID必须是大于0的整数')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ code: 1001, message: '参数校验失败', data: null });
+    }
+
+    const db = req.app.locals.db;
+    const ticketId = parseInt(req.params.id);
+
+    // 验证工单存在
+    const ticket = await db.prepare('SELECT * FROM tickets WHERE id = ?').get(ticketId);
+    if (!ticket) {
+      return res.status(400).json({ code: 1001, message: '工单不存在', data: null });
+    }
+
+    await ticketService.deleteTicket(db, ticketId);
+
+    logger.info(`管理员 ${req.admin.username} 删除工单 ${ticketId} 成功`);
+
+    res.json({
+      code: 0,
+      message: 'ok',
+      data: { message: '工单已删除' }
+    });
+  } catch (error) {
+    logger.error(`删除工单错误: ${error.message}`);
+    res.status(500).json({ code: 500, message: '服务器内部错误', data: null });
+  }
+});
+
 module.exports = router;

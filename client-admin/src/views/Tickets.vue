@@ -64,10 +64,13 @@
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120">
+        <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-button link type="primary" @click="$router.push(`/admin/tickets/${row.id}`)">
               查看
+            </el-button>
+            <el-button link type="danger" @click="handleDelete(row)">
+              删除
             </el-button>
           </template>
         </el-table-column>
@@ -89,7 +92,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { Search } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 
 const tickets = ref([])
@@ -151,6 +154,28 @@ async function fetchTickets() {
     ElMessage.error('获取工单列表失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function handleDelete(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除工单"${row.title}"吗？删除后无法恢复。`,
+      '确认删除',
+      { type: 'warning' }
+    )
+    
+    const response = await api.admin.deleteTicket(row.id)
+    if (response.code === 0) {
+      ElMessage.success('工单已删除')
+      fetchTickets()
+      fetchStats()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('删除工单失败:', error)
+      ElMessage.error('删除工单失败')
+    }
   }
 }
 

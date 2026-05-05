@@ -146,6 +146,19 @@ async function closeTicket(db, ticketId) {
 }
 
 /**
+ * 删除工单
+ * @param {Object} db - 数据库实例
+ * @param {number} ticketId - 工单ID
+ * @returns {Promise<boolean>} 是否成功
+ */
+async function deleteTicket(db, ticketId) {
+  await db.prepare('DELETE FROM ticket_replies WHERE ticket_id = ?').run(ticketId);
+  await db.prepare('DELETE FROM ticket_reads WHERE ticket_id = ?').run(ticketId);
+  await db.prepare('DELETE FROM tickets WHERE id = ?').run(ticketId);
+  return true;
+}
+
+/**
  * 更新用户已读时间
  * @param {Object} db - 数据库实例
  * @param {number} ticketId - 工单ID
@@ -253,6 +266,7 @@ module.exports = {
   getTicketDetail,
   addReply,
   closeTicket,
+  deleteTicket,
   updateReadTime,
   getUnreadCount,
   getTicketStats,
