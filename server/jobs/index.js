@@ -388,6 +388,49 @@ async function runXuiSync(db) {
 }
 
 /**
+ * 注册工单自动关闭任务
+ * 每小时检查一次，关闭满足条件的工单
+ * 条件：状态为 pending，用户已读后超过24小时无新回复
+ * @param {Object} db - 数据库实例
+ */
+function registerTicketAutoCloseJob(db) {
+  // 启动时延迟3分钟执行第一次
+  setTimeout(async () => {
+    await runTicketAutoClose(db);
+  }, 3 * 60 * 1000);
+
+  const interval = setInterval(async () => {
+    await runTicketAutoClose(db);
+  }, 60 * 60 * 1000); // 每1小时执行一次
+  
+  intervals.push(interval);
+  logger.info('工单自动关闭任务已注册（每1小时执行一次）');
+}
+
+/**
+ * 执行工单自动关闭
+ * @param {Object} db - 数据库实例
+ */
+async function runTicketAutoClose(db) {
+  try {
+    const result = await db.prepare(`
+      UPDATE tickets 
+      SET status = 'closed', closed_at = EXTRACT(EPOCH FROM NOW()), updated_at = EXTRACT(EPOCH FROM NOW())
+      WHERE status = 'pending' 
+        AND last_read_at IS NOT NULL 
+        AND last_read_at < EXTRACT(EPOCH FROM NOW()) - 86400
+        AND last_reply_at <= last_read_at
+    `).run();
+    
+    if (result.changes > 0) {
+      logger.info(`自动关闭 ${result.changes} 个超时工单`);
+    }
+  } catch (error) {
+    logger.error(`工单自动关闭任务错误: ${error.message}`);
+  }
+}
+
+/**
  * 启动所有定时任务
  * @param {Object} db - 数据库实例
  */
@@ -398,6 +441,7 @@ function startAllJobs(db) {
   registerCleanZombieUsersJob(db);
   registerXuiSyncJob(db);
   registerTrafficSyncJob(db);
+  registerTicketAutoCloseJob(db);
   logger.info(`所有定时任务已启动，共 ${intervals.length} 个任务`);
 }
 
