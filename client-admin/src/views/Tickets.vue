@@ -162,7 +162,11 @@ async function handleDelete(row) {
     await ElMessageBox.confirm(
       `确定要删除工单"${row.title}"吗？删除后无法恢复。`,
       '确认删除',
-      { type: 'warning' }
+      { 
+        type: 'warning',
+        confirmButtonText: '确定',
+        cancelButtonText: '取消'
+      }
     )
     
     const response = await api.admin.deleteTicket(row.id)
@@ -174,7 +178,7 @@ async function handleDelete(row) {
   } catch (error) {
     if (error !== 'cancel') {
       console.error('删除工单失败:', error)
-      ElMessage.error('删除工单失败')
+      ElMessage.error(error.response?.data?.message || '删除工单失败')
     }
   }
 }
