@@ -46,14 +46,10 @@
     <div class="content-card">
       <h2 class="card-title">套餐续费</h2>
       <div class="renew-section">
-        <el-alert
-          title="续费说明"
-          description="续费将在现有套餐基础上累加流量，使用期限保持无限期。"
-          type="info"
-          :closable="false"
-          show-icon
-          style="margin-bottom: 20px;"
-        />
+        <div class="renew-info">
+          <el-icon class="renew-icon"><InfoFilled /></el-icon>
+          <span class="renew-text">续费将在现有套餐基础上累加流量，使用期限保持无限期。</span>
+        </div>
         <el-button 
           type="primary" 
           size="large" 
@@ -202,7 +198,7 @@
 
 import { ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { CopyDocument, MagicStick, Link, Refresh } from '@element-plus/icons-vue'
+import { CopyDocument, MagicStick, Link, Refresh, InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import RenewDialog from '@/components/RenewDialog.vue'
@@ -486,13 +482,15 @@ function formatTime(timestamp) {
 
 /**
  * 处理续费
- * @param {number} planId - 套餐ID
+ * @param {Object} params - 续费参数
+ * @param {number} params.planId - 套餐ID
+ * @param {number} params.payType - 支付方式（1=微信，2=支付宝）
  */
-async function handleRenew(planId) {
+async function handleRenew({ planId, payType }) {
   try {
     showRenewDialog.value = false
     
-    const response = await api.user.renew({ plan_id: planId })
+    const response = await api.user.renew({ plan_id: planId, pay_type: payType })
     
     if (response.code === 0) {
       // 跳转到支付等待页
@@ -590,8 +588,27 @@ onMounted(() => {
 }
 
 .renew-section {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 20px 0;
+}
+
+.renew-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #909399;
+  font-size: 14px;
+}
+
+.renew-icon {
+  color: #909399;
+  font-size: 16px;
+}
+
+.renew-text {
+  flex: 1;
 }
 
 .subscription-links {

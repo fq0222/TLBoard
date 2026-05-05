@@ -48,8 +48,13 @@
 
 ### 🛠 强制工作流 (Workflow Requirements)
 
-#### 1. 禁止“抢跑”提交 (Commit Redline)
-* **严禁行为**：在修复任何 Bug 或开发功能后，**禁止直接执行** `git commit` 或 `git push`。
+#### 1. 代码提交规范 (Commit & Push Rules)
+* **允许行为**：在修复 Bug 或开发功能后，**可以执行** `git commit` 提交代码。
+* **限制行为**：在执行 `git push` 推送到远程仓库前，**必须**先向用户展示变更内容并获得明确同意。
+* **流程要求**：
+  1. 执行 `git add` 和 `git commit` 提交本地更改
+  2. 展示 `git diff` 或 `git log` 等变更摘要
+  3. 等待用户确认同意后，方可执行 `git push`
 
 #### 2. 强制验证与测试流程
 * **后端修改 (Server)**：必须通过终端执行 `server/test` 下的脚本或相关 `curl/http` 命令进行功能验证。

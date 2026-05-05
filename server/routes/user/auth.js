@@ -183,13 +183,15 @@ router.post('/register-and-pay', [
     }
 
     const paymentUrl = vmqResult.data.payUrl;
-    // 保存 VMQ 云端订单号与支付链接，便于前端展示二维码和后续主动查单
+    // 保存 VMQ 云端订单号、支付链接和实际支付金额（VMQ可能会递增0.01元）
+    const realAmount = Math.round(Number(vmqResult.data.reallyPrice) * 100); // 元转分
     await db.prepare(`
       UPDATE orders SET
         trade_no = ?,
-        payment_url = ?
+        payment_url = ?,
+        amount = ?
       WHERE out_trade_no = ?
-    `).run(vmqResult.data.orderId, paymentUrl, outTradeNo);
+    `).run(vmqResult.data.orderId, paymentUrl, realAmount, outTradeNo);
 
     logger.info(`用户注册成功: ${email}，订单号: ${outTradeNo}`);
 

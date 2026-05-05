@@ -56,6 +56,35 @@
           </div>
         </div>
       </div>
+      
+      <!-- 支付方式选择 -->
+      <div v-if="plans.length > 0" class="pay-type-section">
+        <h3 class="section-title">支付方式</h3>
+        <div class="pay-type-options">
+          <div
+            class="pay-type-card"
+            :class="{ 'is-selected': payType === 2 }"
+            @click="payType = 2"
+          >
+            <div class="pay-type-icon alipay">支付宝</div>
+            <span class="pay-type-name">支付宝支付</span>
+            <div class="pay-type-check" v-if="payType === 2">
+              <el-icon><CircleCheck /></el-icon>
+            </div>
+          </div>
+          <div
+            class="pay-type-card"
+            :class="{ 'is-selected': payType === 1 }"
+            @click="payType = 1"
+          >
+            <div class="pay-type-icon wechat">微信</div>
+            <span class="pay-type-name">微信支付</span>
+            <div class="pay-type-check" v-if="payType === 1">
+              <el-icon><CircleCheck /></el-icon>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
     
     <template #footer>
@@ -102,11 +131,14 @@ const loading = ref(false)
 const submitting = ref(false)
 const plans = ref([])
 const selectedPlanId = ref(null)
+const payType = ref(2) // 默认支付宝，1=微信，2=支付宝
 
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     fetchPlans()
-    selectedPlanId.value = null
+    // 默认选中当前套餐
+    selectedPlanId.value = props.currentPlanId || null
+    payType.value = 2 // 重置为默认支付宝
   }
 })
 
@@ -118,7 +150,7 @@ async function fetchPlans() {
     loading.value = true
     const result = await api.user.getPlans()
     if (result.code === 0) {
-      plans.value = result.data || []
+      plans.value = result.data.plans || []
     } else {
       ElMessage.error(result.message || '获取套餐列表失败')
     }
@@ -169,7 +201,7 @@ async function handleRenew() {
   submitting.value = true
   
   try {
-    emit('renew', selectedPlanId.value)
+    emit('renew', { planId: selectedPlanId.value, payType: payType.value })
   } catch (error) {
     console.error('续费失败:', error)
     ElMessage.error('续费失败，请重试')
@@ -282,6 +314,80 @@ async function handleRenew() {
   right: 10px;
   color: #409eff;
   font-size: 24px;
+}
+
+.pay-type-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #ebeef5;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0 0 16px 0;
+}
+
+.pay-type-options {
+  display: flex;
+  gap: 16px;
+}
+
+.pay-type-card {
+  position: relative;
+  flex: 1;
+  border: 2px solid #e4e7ed;
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pay-type-card:hover {
+  border-color: #409eff;
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.2);
+}
+
+.pay-type-card.is-selected {
+  border-color: #409eff;
+  background: #ecf5ff;
+}
+
+.pay-type-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.pay-type-icon.alipay {
+  background: linear-gradient(135deg, #1677ff, #0958d9);
+}
+
+.pay-type-icon.wechat {
+  background: linear-gradient(135deg, #07c160, #06ad56);
+}
+
+.pay-type-name {
+  font-size: 14px;
+  color: #303133;
+}
+
+.pay-type-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: #409eff;
+  font-size: 20px;
 }
 
 .dialog-footer {

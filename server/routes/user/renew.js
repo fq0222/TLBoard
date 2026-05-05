@@ -146,9 +146,10 @@ router.post('/', authenticateUser, [
       });
     }
 
-    // 9. 更新订单的VMQ订单号
-    await db.prepare('UPDATE orders SET trade_no = ?, payment_url = ? WHERE out_trade_no = ?')
-      .run(vmqResult.data.orderId, vmqResult.data.payUrl, outTradeNo);
+    // 9. 更新订单的VMQ订单号和实际支付金额（VMQ可能会递增0.01元）
+    const realAmount = Math.round(Number(vmqResult.data.reallyPrice) * 100); // 元转分
+    await db.prepare('UPDATE orders SET trade_no = ?, payment_url = ?, amount = ? WHERE out_trade_no = ?')
+      .run(vmqResult.data.orderId, vmqResult.data.payUrl, realAmount, outTradeNo);
 
     // 10. 返回支付信息
     logger.info(`续费订单支付链接生成成功: ${outTradeNo}`);

@@ -42,30 +42,49 @@ async function syncUserToXuiServers(db, user, plan) {
           continue;
         }
 
-        // 为每个 inbound 添加用户
+        // 为每个 inbound 添加或更新用户
         for (const inbound of inboundsResult.data) {
           try {
             // 计算到期时间（毫秒）
             const expiryTime = user.expire_at ? user.expire_at * 1000 : 0;
             
-            // 流量限制（字节）
-            const totalGB = plan.traffic_limit || 0;
+            // 流量限制（字节）- 优先使用用户实际流量限制（续费场景累加后的值）
+            const totalGB = user.traffic_limit || plan.traffic_limit || 0;
 
-            const result = await xuiService.addClient(inbound.id, inbound.protocol, {
-              email: user.email,
-              id: user.subscription_token, // 使用 subscription_token 作为 UUID
-              enable: true,
-              expiryTime: expiryTime,
-              totalGB: totalGB,
-              limitIp: 0,
-              tgId: 0,
-              subId: ''
-            });
-
-            if (result.success) {
-              logger.info(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功`);
+            // 先尝试获取用户是否已存在
+            const existingClient = await xuiService.getClientByEmail(inbound.id, user.email);
+            
+            if (existingClient.success) {
+              // 用户已存在，更新用户
+              const updateResult = await xuiService.updateClient(inbound.id, user.email, {
+                expiryTime: expiryTime,
+                totalGB: totalGB / (1024 * 1024 * 1024), // 字节转GB
+                enabled: true
+              });
+              
+              if (updateResult.success) {
+                logger.info(`更新用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功`);
+              } else {
+                logger.warn(`更新用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${updateResult.message}`);
+              }
             } else {
-              logger.warn(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${result.message}`);
+              // 用户不存在，添加用户
+              const addResult = await xuiService.addClient(inbound.id, inbound.protocol, {
+                email: user.email,
+                id: user.subscription_token, // 使用 subscription_token 作为 UUID
+                enable: true,
+                expiryTime: expiryTime,
+                totalGB: totalGB,
+                limitIp: 0,
+                tgId: 0,
+                subId: ''
+              });
+
+              if (addResult.success) {
+                logger.info(`添加用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功`);
+              } else {
+                logger.warn(`添加用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${addResult.message}`);
+              }
             }
           } catch (error) {
             logger.error(`同步用户到 inbound ${inbound.id} 错误: ${error.message}`);
@@ -122,6 +141,21 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   const expireAt = plan.duration_days === 0 ? 0 : baseExpireAt + (Number(plan.duration_days) * 24 * 60 * 60);
   const finalTradeNo = tradeNo || order.trade_no;
 
+  // 判断是否为续费订单（REN前缀）- 提升到transaction外部以便后续使用
+  const isRenewOrder = order.out_trade_no.startsWith('REN');
+  let newTrafficLimit;
+
+  if (isRenewOrder) {
+    // 续费场景：当前流量 + 新套餐流量
+    const currentTrafficLimit = Number(order.current_traffic_limit || 0);
+    const planTrafficLimit = Number(plan.traffic_limit || 0);
+    newTrafficLimit = currentTrafficLimit + planTrafficLimit;
+    logger.info(`续费订单流量累加: ${currentTrafficLimit} + ${planTrafficLimit} = ${newTrafficLimit}`);
+  } else {
+    // 新购场景：直接使用套餐流量
+    newTrafficLimit = Number(plan.traffic_limit || 0);
+  }
+
   // 订单和用户信息需要同时更新，避免出现支付成功但账号未激活的中间状态
   const transaction = db.transaction(async () => {
     await db.prepare(`
@@ -131,20 +165,6 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
         paid_at = ?
       WHERE out_trade_no = ?
     `).run(finalTradeNo, now, outTradeNo);
-
-    // 判断是否为续费订单（REN前缀）
-    const isRenewOrder = order.out_trade_no.startsWith('REN');
-    let newTrafficLimit;
-
-    if (isRenewOrder) {
-      // 续费场景：当前流量 + 新套餐流量
-      const currentTrafficLimit = Number(order.current_traffic_limit || 0);
-      newTrafficLimit = currentTrafficLimit + plan.traffic_limit;
-      logger.info(`续费订单流量累加: ${currentTrafficLimit} + ${plan.traffic_limit} = ${newTrafficLimit}`);
-    } else {
-      // 新购场景：直接使用套餐流量
-      newTrafficLimit = plan.traffic_limit;
-    }
 
     await db.prepare(`
       UPDATE users SET
@@ -160,7 +180,7 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
 
   await transaction();
 
-  logger.info(`Order paid: ${outTradeNo}, user=${order.email}, expire_at=${expireAt}`);
+  logger.info(`Order paid: ${outTradeNo}, user=${order.email}, expire_at=${expireAt}, traffic_limit=${newTrafficLimit}`);
 
   // 同步用户到 3X-UI 服务器（异步执行，不阻塞返回）
   const userInfo = {
@@ -168,7 +188,7 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
     email: order.email,
     subscription_token: order.subscription_token,
     expire_at: expireAt,
-    traffic_limit: newTrafficLimit || plan.traffic_limit
+    traffic_limit: newTrafficLimit
   };
   syncUserToXuiServers(db, userInfo, plan).catch(err => {
     logger.error(`后台同步用户到 3X-UI 失败: ${err.message}`);
