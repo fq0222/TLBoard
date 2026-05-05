@@ -256,6 +256,49 @@ class DatabaseManager {
       `);
       logger.info('公告表初始化完成');
 
+      // 工单表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS tickets (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          title VARCHAR(50) NOT NULL,
+          description TEXT NOT NULL,
+          status VARCHAR(20) DEFAULT 'open',
+          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+          closed_at BIGINT,
+          last_reply_at BIGINT,
+          last_read_at BIGINT,
+          reply_count INTEGER DEFAULT 0
+        )
+      `);
+      logger.info('工单表初始化完成');
+
+      // 工单回复表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS ticket_replies (
+          id SERIAL PRIMARY KEY,
+          ticket_id INTEGER NOT NULL,
+          user_id INTEGER,
+          admin_id INTEGER,
+          content TEXT NOT NULL,
+          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+        )
+      `);
+      logger.info('工单回复表初始化完成');
+
+      // 工单已读表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS ticket_reads (
+          id SERIAL PRIMARY KEY,
+          ticket_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          last_read_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+          UNIQUE(ticket_id, user_id)
+        )
+      `);
+      logger.info('工单已读表初始化完成');
+
       // Cloudflare优选IP池
       await client.query(`
         CREATE TABLE IF NOT EXISTS cf_ip_pool (
@@ -305,6 +348,13 @@ class DatabaseManager {
       await client.query('CREATE INDEX IF NOT EXISTS idx_orders_out_trade_no ON orders(out_trade_no)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_xui_nodes_server_id ON xui_nodes(server_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_cf_ips_user_id ON user_cf_ips(user_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets(created_at)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_replies_ticket_id ON ticket_replies(ticket_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_replies_created_at ON ticket_replies(created_at)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_reads_ticket_id ON ticket_reads(ticket_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_reads_user_id ON ticket_reads(user_id)');
       logger.info('数据库索引创建完成');
     } catch (error) {
       logger.error(`索引创建失败: ${error.message}`);
