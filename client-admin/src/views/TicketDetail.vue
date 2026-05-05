@@ -186,10 +186,12 @@ onMounted(() => {
 <style scoped>
 .ticket-detail-container {
   width: 100%;
-  height: calc(100vh - 40px);
+  height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: 20px;
+  box-sizing: border-box;
 }
 
 .page-header {
