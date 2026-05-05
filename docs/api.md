@@ -730,3 +730,226 @@ md5(payId + param + type + price + reallyPrice + key)
 - 补充服务端管理 `host`、`client_port` 参数说明
 - 补充仪表盘统计接口 `/api/admin/dashboard/stats`
 - 补充节点链接格式说明（VLESS/VMess/Trojan）
+- 新增用户端工单接口（创建、查看、回复、关闭、未读数量）
+- 新增管理端工单接口（查看、回复、关闭、删除、统计）
+
+---
+
+## 5. 工单系统 API
+
+### 5.1 用户端工单接口
+
+所有用户端工单接口前缀：`/api/user/tickets`
+
+#### GET `/api/user/tickets/unread-count`
+
+获取未读工单数量。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "count": 2
+  }
+}
+```
+
+#### GET `/api/user/tickets`
+
+获取工单列表（分页）。
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| page | number | 否 | 页码，默认 1 |
+| limit | number | 否 | 每页条数，默认 10 |
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 5,
+    "page": 1,
+    "limit": 10,
+    "list": [
+      {
+        "id": 1,
+        "user_id": 1,
+        "title": "无法连接服务器",
+        "description": "今天早上开始无法连接",
+        "status": "pending",
+        "created_at": 1746260000,
+        "updated_at": 1746260000,
+        "closed_at": null,
+        "last_reply_at": 1746260100,
+        "last_read_at": 1746260200,
+        "reply_count": 2,
+        "is_unread": 0
+      }
+    ]
+  }
+}
+```
+
+#### POST `/api/user/tickets`
+
+创建工单。
+
+请求体：
+
+```json
+{
+  "title": "无法连接服务器",
+  "description": "今天早上开始无法连接到代理服务器"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| title | string | 是 | 工单标题，最多 50 字 |
+| description | string | 是 | 问题描述，最多 500 字 |
+
+#### GET `/api/user/tickets/:id`
+
+获取工单详情（含回复列表）。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 1,
+    "user_id": 1,
+    "title": "无法连接服务器",
+    "description": "今天早上开始无法连接",
+    "status": "pending",
+    "created_at": 1746260000,
+    "last_read_at": 1746260200,
+    "user": {
+      "id": 1,
+      "email": "user@example.com"
+    },
+    "replies": [
+      {
+        "id": 1,
+        "ticket_id": 1,
+        "user_id": 1,
+        "admin_id": null,
+        "content": "请检查网络连接",
+        "created_at": 1746260100,
+        "reply_name": "user@example.com"
+      },
+      {
+        "id": 2,
+        "ticket_id": 1,
+        "user_id": null,
+        "admin_id": 1,
+        "content": "已收到，正在排查",
+        "created_at": 1746260150,
+        "reply_name": "admin"
+      }
+    ]
+  }
+}
+```
+
+#### POST `/api/user/tickets/:id/replies`
+
+回复工单。
+
+请求体：
+
+```json
+{
+  "content": "我已经检查了网络，连接正常"
+}
+```
+
+#### PUT `/api/user/tickets/:id/close`
+
+关闭工单。
+
+### 5.2 管理端工单接口
+
+所有管理端工单接口前缀：`/api/admin/tickets`
+
+#### GET `/api/admin/tickets/stats`
+
+获取工单统计。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "open_count": 3,
+    "pending_count": 5,
+    "today_count": 2
+  }
+}
+```
+
+#### GET `/api/admin/tickets`
+
+获取工单列表（支持搜索和筛选）。
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| page | number | 否 | 页码，默认 1 |
+| limit | number | 否 | 每页条数，默认 10 |
+| status | string | 否 | 状态筛选：open/pending/closed |
+| keyword | string | 否 | 搜索关键词（匹配标题或用户邮箱） |
+
+#### GET `/api/admin/tickets/:id`
+
+获取工单详情（含回复列表）。
+
+#### POST `/api/admin/tickets/:id/replies`
+
+回复工单。
+
+请求体：
+
+```json
+{
+  "content": "问题已修复，请重新连接试试"
+}
+```
+
+#### PUT `/api/admin/tickets/:id/close`
+
+关闭工单。
+
+#### DELETE `/api/admin/tickets/:id`
+
+删除工单（同时删除回复和已读记录）。
+
+### 5.3 工单状态说明
+
+| 状态 | 说明 |
+|------|------|
+| open | 待处理（用户创建后） |
+| pending | 处理中（管理员回复后） |
+| closed | 已关闭（用户/管理员关闭或 24 小时无回复自动关闭） |
+
+### 5.4 自动关闭规则
+
+工单满足以下条件时自动关闭：
+- 状态为 `pending`
+- 用户已读最后一条管理员回复
+- 用户已读后超过 24 小时无新回复
+
+定时任务每小时检查一次。
