@@ -22,6 +22,7 @@
         <router-link to="/user/tickets" class="nav-item" active-class="active">
           <el-icon><ChatDotRound /></el-icon>
           <span>工单支持</span>
+          <span v-if="unreadTicketCount > 0" class="badge"></span>
         </router-link>
       </nav>
       
@@ -46,13 +47,30 @@
  * 提供侧边栏导航和内容区域
  */
 
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { User, Link, Connection, SwitchButton, ChatDotRound } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
+import api from '@/api'
 
 const router = useRouter()
 const userStore = useUserStore()
+const unreadTicketCount = ref(0)
+
+/**
+ * 获取未读工单数量
+ */
+async function fetchUnreadCount() {
+  try {
+    const response = await api.user.getTicketUnreadCount()
+    if (response.code === 0) {
+      unreadTicketCount.value = response.data.count
+    }
+  } catch (error) {
+    console.error('获取未读工单数量失败:', error)
+  }
+}
 
 /**
  * 处理退出登录
@@ -75,6 +93,10 @@ async function handleLogout() {
     // 用户取消操作
   }
 }
+
+onMounted(() => {
+  fetchUnreadCount()
+})
 </script>
 
 <style scoped>
@@ -127,6 +149,15 @@ async function handleLogout() {
 .nav-item.active {
   background: #ecf5ff;
   color: #409eff;
+}
+
+.badge {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: #f56c6c;
+  border-radius: 50%;
+  margin-left: 5px;
 }
 
 .sidebar-footer {
