@@ -59,11 +59,9 @@ const route = useRoute()
 const userStore = useUserStore()
 const unreadTicketCount = ref(0)
 
-// 监听路由变化，当离开工单详情页时刷新未读数量
-watch(() => route.path, (newPath, oldPath) => {
-  if (oldPath && oldPath.startsWith('/user/tickets/')) {
-    fetchUnreadCount()
-  }
+// 监听路由变化，切换导航时刷新未读数量
+watch(() => route.path, () => {
+  fetchUnreadCount()
 })
 
 /**
