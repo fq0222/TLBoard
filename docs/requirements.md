@@ -1,7 +1,7 @@
 # 机场面板系统需求文档
 
-> 版本：V1.1  
-> 更新日期：2026-05-03
+> 版本：V1.2  
+> 更新日期：2026-05-05
 
 ---
 
@@ -9,8 +9,8 @@
 
 本项目是一套订阅管理系统，分为用户端和管理端两个独立子系统：
 
-- 用户端：套餐展示、注册登录、在线支付、订阅管理、Cloudflare IP 优选
-- 管理端：套餐管理、订单管理、用户管理、公告管理、3X-UI 服务端管理
+- 用户端：套餐展示、注册登录、在线支付、订阅管理、Cloudflare IP 优选、工单支持
+- 管理端：套餐管理、订单管理、用户管理、公告管理、3X-UI 服务端管理、工单管理
 
 系统采用前后端分离架构，用户端和管理端分别运行在不同端口，通过 Nginx 统一代理对外提供服务。
 
@@ -221,6 +221,24 @@ VMQ 后台需要配置以下两个地址：
 
 前端延迟测试如果存在，应视为前端本地能力，而不是强依赖后端 `/test` 接口。
 
+### 5.7 工单支持
+
+用户在遇到问题时可通过工单系统联系管理员。
+
+功能要求：
+
+- 创建工单：填写标题（50字以内）和问题描述（500字以内）
+- 工单列表：查看历史工单，显示状态和未读标记
+- 工单详情：查看对话记录，回复管理员
+- 关闭工单：用户可手动关闭自己的工单
+- 未读提示：导航栏显示未读工单数量红点
+
+状态说明：
+
+- `open`：待处理（用户创建后）
+- `pending`：处理中（管理员回复后）
+- `closed`：已关闭
+
 ---
 
 ## 6. 管理端需求
@@ -279,6 +297,19 @@ VMQ 后台需要配置以下两个地址：
 - IP 池增删改查
 - 批量导入
 
+### 6.8 工单管理
+
+管理员可处理用户提交的工单。
+
+功能要求：
+
+- 工单列表：查看所有工单，支持按状态筛选和关键词搜索
+- 工单统计：显示待处理、处理中、今日新增数量
+- 工单详情：查看对话记录，回复工单
+- 关闭工单：管理员可关闭工单
+- 删除工单：管理员可删除工单（同时删除回复和已读记录）
+- 已读状态：显示用户是否已读管理员的回复
+
 ---
 
 ## 7. 当前接口总览
@@ -303,6 +334,12 @@ VMQ 后台需要配置以下两个地址：
 | GET | `/api/user/payment/notify` | VMQ 异步通知 |
 | POST | `/api/user/payment/notify` | VMQ 异步通知 |
 | GET | `/api/user/payment/return` | VMQ 同步回跳 |
+| GET | `/api/user/tickets/unread-count` | 获取未读工单数量 |
+| GET | `/api/user/tickets` | 获取工单列表 |
+| POST | `/api/user/tickets` | 创建工单 |
+| GET | `/api/user/tickets/:id` | 获取工单详情 |
+| POST | `/api/user/tickets/:id/replies` | 回复工单 |
+| PUT | `/api/user/tickets/:id/close` | 关闭工单 |
 
 ### 7.2 管理端
 
@@ -339,6 +376,12 @@ VMQ 后台需要配置以下两个地址：
 | DELETE | `/api/admin/cf-ips/:id` | 删除 IP |
 | POST | `/api/admin/cf-ips/import` | 批量导入 IP |
 | GET | `/api/admin/dashboard/stats` | 仪表盘统计数据 |
+| GET | `/api/admin/tickets/stats` | 工单统计 |
+| GET | `/api/admin/tickets` | 工单列表 |
+| GET | `/api/admin/tickets/:id` | 工单详情 |
+| POST | `/api/admin/tickets/:id/replies` | 回复工单 |
+| PUT | `/api/admin/tickets/:id/close` | 关闭工单 |
+| DELETE | `/api/admin/tickets/:id` | 删除工单 |
 
 ---
 
@@ -358,23 +401,38 @@ project/
 │  │  │  ├─ payment.js
 │  │  │  ├─ subscription.js
 │  │  │  ├─ announcements.js
-│  │  │  └─ cf-optimize.js
+│  │  │  ├─ cf-optimize.js
+│  │  │  ├─ renew.js
+│  │  │  └─ tickets.js
 │  │  └─ admin/
+│  │     ├─ tickets.js
+│  │     └─ ...
 │  ├─ services/
 │  │  ├─ vmq-service.js
 │  │  ├─ order-service.js
 │  │  ├─ xui-service.js
-│  │  └─ user-sync.js
+│  │  └─ ticket-service.js
 │  └─ config.js
 ├─ client-user/
 │  └─ src/
 │     ├─ views/
 │     │  ├─ Home.vue
 │     │  ├─ Login.vue
-│     │  └─ PaymentCallback.vue
+│     │  ├─ PaymentCallback.vue
+│     │  └─ user/
+│     │     ├─ Tickets.vue
+│     │     ├─ TicketDetail.vue
+│     │     └─ CreateTicket.vue
 │     ├─ api/
 │     └─ stores/
 ├─ client-admin/
+│  └─ src/
+│     ├─ views/
+│     │  ├─ Tickets.vue
+│     │  ├─ TicketDetail.vue
+│     │  └─ ...
+│     ├─ api/
+│     └─ stores/
 └─ docs/
    ├─ requirements.md
    └─ api.md
@@ -399,6 +457,7 @@ project/
 | 清理僵尸用户 | 是 | 2 分钟 | 30 分钟 | 删除未支付的超时用户 |
 | 3X-UI 用户同步 | 是 | 7 分钟 | 4 小时 | 同步用户到 3X-UI 节点 |
 | 流量同步 | 是 | 10 分钟 | 3 小时 | 同步用户流量数据 |
+| 工单自动关闭 | 是 | 3 分钟 | 1 小时 | 关闭超时未回复的工单 |
 
 ### 10.1 标记过期订单
 
@@ -436,14 +495,22 @@ project/
   3. 从 3X-UI 的 `clientStats` 中获取用户流量数据（上行 + 下行）
   4. 更新本地数据库中的 `traffic_used` 字段
 
+### 10.6 工单自动关闭
+
+- 执行频率：每 1 小时（首次延迟 3 分钟）
+- 逻辑：关闭满足以下条件的工单
+  - 状态为 `pending`（管理员已回复）
+  - 用户已读最后一条管理员回复
+  - 用户已读后超过 24 小时无新回复
+
 ---
 
-## 9. 与旧文档相比的关键修正
+## 11. 与旧文档相比的关键修正
 
 本次已按当前代码实现修正文档中的以下不一致项：
 
 - 支付网关从旧描述调整为 VMQ
-- 用户购买流程调整为“注册并支付”一体化流程
+- 用户购买流程调整为"注册并支付"一体化流程
 - 新增公共查单接口 `/api/user/orders/status/:id`
 - 增加 VMQ 回调接口 `/api/user/payment/notify`
 - 增加同步回跳接口 `/api/user/payment/return`
@@ -452,3 +519,5 @@ project/
 - 服务层说明调整为 `vmq-service.js` 与 `order-service.js`
 - 增加对 `isAuto=1` 风险通道的拒绝规则
 - 增加少付金额不得激活订单的要求
+- 新增工单系统功能（用户端和管理端）
+- 新增工单自动关闭定时任务
