@@ -27,6 +27,8 @@
           <div class="info-meta">
             <span>用户：{{ ticket.user?.email || '-' }}</span>
             <span>创建时间：{{ formatTime(ticket.created_at) }}</span>
+            <span v-if="ticket.last_read_at">用户最后已读：{{ formatTime(ticket.last_read_at) }}</span>
+            <span v-else class="unread-badge">用户未读</span>
           </div>
           <div class="ticket-description">
             {{ ticket.description }}
@@ -236,6 +238,11 @@ onMounted(() => {
   color: #606266;
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.unread-badge {
+  color: #e6a23c;
+  font-weight: 600;
 }
 
 .replies-section {
