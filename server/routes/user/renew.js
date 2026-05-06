@@ -84,14 +84,34 @@ router.post('/', authenticateUser, [
       });
     }
 
-    // 5. 检查套餐是否售罄（续费当前套餐时允许，切换套餐时检查）
-    if (user.plan_id !== plan_id && plan.sales_limit !== -1 && plan.sales_count >= plan.sales_limit) {
-      logger.warn(`续费失败: 套餐已售罄 - ${plan_id}`);
-      return res.json({
-        code: 1002,
-        message: '该套餐已售罄',
-        data: null
-      });
+    // 5. 检查续费资格
+    const isRenewCurrentPlan = user.plan_id === plan_id;
+    
+    if (isRenewCurrentPlan) {
+      // 续费当前套餐：检查是否在流量用完后 3 天内
+      if (user.traffic_used_at) {
+        const now = Math.floor(Date.now() / 1000);
+        const daysSinceTrafficUsed = (now - user.traffic_used_at) / (24 * 60 * 60);
+        
+        if (daysSinceTrafficUsed > 3) {
+          logger.warn(`续费失败: 流量用完超过 3 天 - ${user.email}`);
+          return res.json({
+            code: 1003,
+            message: '流量用完已超过 3 天，请等待名额释放后重新购买',
+            data: null
+          });
+        }
+      }
+    } else {
+      // 切换套餐：检查新套餐是否售罄
+      if (plan.sales_limit !== -1 && plan.sales_count >= plan.sales_limit) {
+        logger.warn(`续费失败: 套餐已售罄 - ${plan_id}`);
+        return res.json({
+          code: 1002,
+          message: '该套餐已售罄',
+          data: null
+        });
+      }
     }
 
     // 6. 生成商户订单号（REN前缀表示续费订单）

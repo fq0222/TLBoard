@@ -8,7 +8,7 @@
     <div class="renew-dialog-content">
       <el-alert
         title="续费说明"
-        description="续费将在现有套餐基础上累加流量，使用期限保持无限期。"
+        description="续费将在现有套餐基础上累加流量，使用期限保持无限期。流量用完后 3 天内可续费当前套餐，超过 3 天需等待名额释放后重新购买。"
         type="info"
         :closable="false"
         show-icon

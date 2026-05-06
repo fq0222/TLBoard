@@ -48,7 +48,7 @@
       <div class="renew-section">
         <div class="renew-info">
           <el-icon class="renew-icon"><InfoFilled /></el-icon>
-          <span class="renew-text">续费将在现有套餐基础上累加流量，使用期限保持无限期。</span>
+          <span class="renew-text">续费将在现有套餐基础上累加流量，使用期限保持无限期。流量用完后 3 天内可续费当前套餐，超过 3 天需等待名额释放后重新购买。</span>
         </div>
         <el-button 
           type="primary" 
