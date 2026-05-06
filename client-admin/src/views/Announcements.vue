@@ -110,8 +110,8 @@ function showEditDialog(announcement) {
   editingId.value = announcement.id
   announcementForm.title = announcement.title
   announcementForm.content = announcement.content
-  announcementForm.pinned = announcement.pinned
-  announcementForm.enabled = announcement.enabled
+  announcementForm.pinned = !!announcement.pinned
+  announcementForm.enabled = !!announcement.enabled
   dialogVisible.value = true
 }
 
