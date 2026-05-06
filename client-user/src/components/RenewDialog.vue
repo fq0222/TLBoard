@@ -29,12 +29,13 @@
           v-for="plan in plans"
           :key="plan.id"
           class="plan-card"
-          :class="{ 'is-selected': selectedPlanId === plan.id, 'is-current': plan.id === currentPlanId }"
-          @click="selectPlan(plan.id)"
+          :class="{ 'is-selected': selectedPlanId === plan.id, 'is-current': plan.id === currentPlanId, 'is-soldout': plan.is_soldout }"
+          @click="selectPlan(plan)"
         >
           <div class="plan-header">
             <h3 class="plan-name">{{ plan.name }}</h3>
-            <el-tag v-if="plan.id === currentPlanId" type="success" size="small">当前套餐</el-tag>
+            <el-tag v-if="plan.is_soldout" type="danger" size="small">已售罄</el-tag>
+            <el-tag v-else-if="plan.id === currentPlanId" type="success" size="small">当前套餐</el-tag>
           </div>
           
           <div class="plan-price">
@@ -165,8 +166,12 @@ async function fetchPlans() {
 /**
  * 选择套餐
  */
-function selectPlan(planId) {
-  selectedPlanId.value = planId
+function selectPlan(plan) {
+  if (plan.is_soldout && plan.id !== currentPlanId) {
+    ElMessage.warning('该套餐已售罄')
+    return
+  }
+  selectedPlanId.value = plan.id
 }
 
 /**
@@ -259,6 +264,17 @@ async function handleRenew() {
 
 .plan-card.is-current {
   border-color: #67c23a;
+}
+
+.plan-card.is-soldout {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #f5f5f5;
+}
+
+.plan-card.is-soldout:hover {
+  border-color: #e4e7ed;
+  box-shadow: none;
 }
 
 .plan-header {
