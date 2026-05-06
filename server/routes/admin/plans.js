@@ -37,6 +37,9 @@ router.get('/', authenticateAdmin, async (req, res) => {
       traffic_text: formatTraffic(plan.traffic_limit),
       sort_order: plan.sort_order,
       enabled: plan.enabled,
+      sales_limit: plan.sales_limit,
+      sales_count: plan.sales_count,
+      updated_at: plan.updated_at,
       created_at: plan.created_at
     }));
 
@@ -97,14 +100,14 @@ router.post('/', authenticateAdmin, [
       });
     }
 
-    const { name, description, price, duration_days, traffic_limit, sort_order = 0, enabled = true } = req.body;
+    const { name, description, price, duration_days, traffic_limit, sort_order = 0, enabled = true, sales_limit = -1 } = req.body;
     const db = req.app.locals.db;
 
     // 插入套餐记录
     const result = await db.prepare(`
-      INSERT INTO plans (name, description, price, duration_days, traffic_limit, sort_order, enabled)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(name, description || null, price, duration_days, traffic_limit, sort_order, enabled ? 1 : 0);
+      INSERT INTO plans (name, description, price, duration_days, traffic_limit, sort_order, enabled, sales_limit)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(name, description || null, price, duration_days, traffic_limit, sort_order, enabled ? 1 : 0, sales_limit);
 
     logger.info(`添加套餐成功: ${name} (ID: ${result.lastInsertRowid})`);
 
@@ -122,6 +125,7 @@ router.post('/', authenticateAdmin, [
         traffic_text: formatTraffic(traffic_limit),
         sort_order,
         enabled: enabled ? 1 : 0,
+        sales_limit: sales_limit,
         created_at: Math.floor(Date.now() / 1000)
       }
     });
@@ -227,6 +231,10 @@ router.put('/:id', authenticateAdmin, [
       updates.push('enabled = ?');
       values.push(req.body.enabled ? 1 : 0);
     }
+    if (req.body.sales_limit !== undefined) {
+      updates.push('sales_limit = ?');
+      values.push(req.body.sales_limit);
+    }
 
     if (updates.length === 0) {
       logger.warn('修改套餐失败: 没有要更新的字段');
@@ -260,6 +268,8 @@ router.put('/:id', authenticateAdmin, [
         traffic_text: formatTraffic(updatedPlan.traffic_limit),
         sort_order: updatedPlan.sort_order,
         enabled: updatedPlan.enabled,
+        sales_limit: updatedPlan.sales_limit,
+        updated_at: updatedPlan.updated_at,
         created_at: updatedPlan.created_at
       }
     });
