@@ -152,6 +152,7 @@ class DatabaseManager {
           sub_id VARCHAR(255) UNIQUE,
           traffic_used BIGINT DEFAULT 0,
           traffic_limit BIGINT DEFAULT 0,
+          traffic_used_at BIGINT,
           expire_at BIGINT,
           enabled INTEGER DEFAULT 0,
           payment_count INTEGER DEFAULT 0,
@@ -184,6 +185,9 @@ class DatabaseManager {
           traffic_limit BIGINT NOT NULL,
           sort_order INTEGER DEFAULT 0,
           enabled INTEGER DEFAULT 1,
+          sales_limit INTEGER DEFAULT -1,
+          sales_count INTEGER DEFAULT 0,
+          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
           created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
         )
       `);
