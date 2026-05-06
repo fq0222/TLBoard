@@ -84,10 +84,20 @@ router.post('/', authenticateUser, [
       });
     }
 
-    // 5. 生成商户订单号（REN前缀表示续费订单）
+    // 5. 检查套餐是否售罄（续费当前套餐时允许，切换套餐时检查）
+    if (user.plan_id !== plan_id && plan.sales_limit !== -1 && plan.sales_count >= plan.sales_limit) {
+      logger.warn(`续费失败: 套餐已售罄 - ${plan_id}`);
+      return res.json({
+        code: 1002,
+        message: '该套餐已售罄',
+        data: null
+      });
+    }
+
+    // 6. 生成商户订单号（REN前缀表示续费订单）
     const outTradeNo = 'REN' + Date.now() + crypto.randomBytes(3).toString('hex');
 
-    // 6. 开始事务 - 创建订单并调用VMQ
+    // 7. 开始事务 - 创建订单并处理名额变化
     let orderId;
     const transaction = db.transaction(async () => {
       // 创建订单
@@ -97,13 +107,28 @@ router.post('/', authenticateUser, [
       `).run(userId, user.email, plan_id, plan.price, outTradeNo, Math.floor(Date.now() / 1000));
 
       orderId = orderResult.lastInsertRowid;
+
+      // 处理名额变化
+      if (user.plan_id !== plan_id) {
+        // 更换套餐：旧套餐名额 -1，新套餐名额 +1
+        await db.prepare('UPDATE plans SET sales_count = GREATEST(0, sales_count - 1) WHERE id = ?').run(user.plan_id);
+        await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(plan_id);
+      } else if (!user.plan_id) {
+        // 新用户：新套餐名额 +1
+        await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(plan_id);
+      }
+      // 续费相同套餐：名额不变
+
+      // 重置流量用完时间
+      await db.prepare('UPDATE users SET traffic_used_at = NULL WHERE id = ?').run(userId);
+
       logger.info(`续费订单创建成功: ${outTradeNo}, 用户: ${user.email}, 套餐: ${plan.name}`);
     });
 
     // 执行事务
     await transaction();
 
-    // 7. 调用VMQ创建支付订单
+    // 8. 调用VMQ创建支付订单
     // VMQ 接口要求金额使用元并保留两位小数
     const amount = (Number(plan.price) / 100).toFixed(2);
     const vmqResult = await vmqService.createOrder({
@@ -126,7 +151,7 @@ router.post('/', authenticateUser, [
       });
     }
 
-    // 8. 检查是否需要手输金额（isAuto=1）
+    // 9. 检查是否需要手输金额（isAuto=1）
     if (Number(vmqResult.data.isAuto) === 1) {
       logger.warn(`VMQ通道需要手输金额，拒绝下单: ${outTradeNo}`);
       // 关闭本地订单
@@ -146,12 +171,12 @@ router.post('/', authenticateUser, [
       });
     }
 
-    // 9. 更新订单的VMQ订单号和实际支付金额（VMQ可能会递增0.01元）
+    // 10. 更新订单的VMQ订单号和实际支付金额（VMQ可能会递增0.01元）
     const realAmount = Math.round(Number(vmqResult.data.reallyPrice) * 100); // 元转分
     await db.prepare('UPDATE orders SET trade_no = ?, payment_url = ?, amount = ? WHERE out_trade_no = ?')
       .run(vmqResult.data.orderId, vmqResult.data.payUrl, realAmount, outTradeNo);
 
-    // 10. 返回支付信息
+    // 11. 返回支付信息
     logger.info(`续费订单支付链接生成成功: ${outTradeNo}`);
 
     res.json({
