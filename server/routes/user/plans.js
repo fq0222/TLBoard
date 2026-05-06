@@ -19,7 +19,7 @@ router.get('/', async (req, res) => {
 
     // 查询已上架套餐
     const plans = await db.prepare(`
-      SELECT id, name, description, price, duration_days, traffic_limit, sort_order
+      SELECT id, name, description, price, duration_days, traffic_limit, sort_order, sales_limit, sales_count
       FROM plans 
       WHERE enabled = 1 
       ORDER BY sort_order ASC, id ASC
@@ -35,7 +35,10 @@ router.get('/', async (req, res) => {
       duration_days: plan.duration_days,
       traffic_limit: plan.traffic_limit,
       traffic_text: formatTraffic(plan.traffic_limit),
-      sort_order: plan.sort_order
+      sort_order: plan.sort_order,
+      sales_limit: plan.sales_limit,
+      sales_count: plan.sales_count,
+      is_soldout: plan.sales_limit !== -1 && plan.sales_count >= plan.sales_limit
     }));
 
     logger.info(`获取套餐列表成功，共 ${formattedPlans.length} 个套餐`);
