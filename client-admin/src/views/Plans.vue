@@ -28,6 +28,17 @@
         </el-table-column>
         <el-table-column prop="traffic_text" label="流量上限" />
         <el-table-column prop="sort_order" label="排序" width="80" />
+        <el-table-column label="可销售总量" width="120">
+          <template #default="scope">
+            {{ scope.row.sales_limit === -1 ? '不限制' : scope.row.sales_limit }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="sales_count" label="已售数量" width="100" />
+        <el-table-column label="最后更新时间" width="160">
+          <template #default="scope">
+            {{ scope.row.updated_at ? formatTime(scope.row.updated_at) : '-' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="enabled" label="状态" width="100">
           <template #default="scope">
             <el-tag :type="scope.row.enabled ? 'success' : 'danger'">
@@ -81,6 +92,10 @@
         <el-form-item label="排序权重" prop="sort_order">
           <el-input-number v-model="planForm.sort_order" :min="0" />
         </el-form-item>
+        <el-form-item label="可销售总量" prop="sales_limit">
+          <el-input-number v-model="planForm.sales_limit" :min="-1" />
+          <span class="form-tip">-1 表示不限制可售数量</span>
+        </el-form-item>
         <el-form-item label="是否上架" prop="enabled">
           <el-switch v-model="planForm.enabled" />
         </el-form-item>
@@ -117,13 +132,26 @@ const planForm = reactive({
   duration_days: 30,
   traffic_limit: 0,
   sort_order: 0,
-  enabled: true
+  enabled: true,
+  sales_limit: -1
 })
 
 const planRules = {
   name: [{ required: true, message: '请输入套餐名称', trigger: 'blur' }],
   price: [{ required: true, message: '请输入价格', trigger: 'blur' }],
   duration_days: [{ required: true, message: '请输入有效天数', trigger: 'blur' }]
+}
+
+function formatTime(timestamp) {
+  if (!timestamp) return '-'
+  const date = new Date(timestamp * 1000)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
 }
 
 // 监听流量值和单位变化，计算实际字节数
@@ -158,6 +186,7 @@ function showEditDialog(plan) {
   planForm.duration_days = plan.duration_days
   planForm.sort_order = plan.sort_order
   planForm.enabled = !!plan.enabled  // 将数字转换为布尔值
+  planForm.sales_limit = plan.sales_limit
   
   // 计算流量值和单位
   const trafficLimit = Number(plan.traffic_limit) || 0
@@ -187,6 +216,7 @@ function resetForm() {
   planForm.traffic_limit = 0
   planForm.sort_order = 0
   planForm.enabled = true
+  planForm.sales_limit = -1
   trafficValue.value = 0
   trafficUnit.value = 1073741824
 }
