@@ -142,7 +142,11 @@ async function handleSubmit() {
 
 async function deleteAnnouncement(announcement) {
   try {
-    await ElMessageBox.confirm(`确定要删除公告 "${announcement.title}" 吗？`, '提示', { type: 'warning' })
+    await ElMessageBox.confirm(`确定要删除公告 "${announcement.title}" 吗？`, '提示', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    })
     const response = await api.admin.deleteAnnouncement(announcement.id)
     if (response.code === 0) {
       ElMessage.success('删除成功')
