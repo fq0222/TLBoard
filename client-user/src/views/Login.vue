@@ -31,6 +31,7 @@
             <span class="plan-info-value">{{ planInfo.duration }}</span>
           </div>
         </div>
+        <div v-if="planInfo.is_soldout" class="sold-out-warning">该套餐已售罄</div>
       </div>
 
       <el-form
@@ -90,9 +91,10 @@
             size="large"
             class="login-btn"
             :loading="loading"
+            :disabled="isRegisterMode && planInfo.is_soldout"
             @click="handleSubmit"
           >
-            {{ isRegisterMode ? '提交并前往支付' : '登录' }}
+            {{ isRegisterMode && planInfo.is_soldout ? '套餐已售罄' : (isRegisterMode ? '提交并前往支付' : '登录') }}
           </el-button>
         </el-form-item>
       </el-form>
@@ -138,7 +140,8 @@ const planInfo = computed(() => ({
   name: route.query.plan_name || '未知套餐',
   price: route.query.plan_price || '0.00',
   traffic: route.query.plan_traffic || '0 B',
-  duration: Number(route.query.plan_duration) === 0 ? '无限期' : (route.query.plan_duration || '0') + ' 天'
+  duration: Number(route.query.plan_duration) === 0 ? '无限期' : (route.query.plan_duration || '0') + ' 天',
+  is_soldout: route.query.plan_soldout === '1'
 }))
 
 const isRegisterMode = computed(() => !!selectedPlanId.value)
@@ -351,6 +354,17 @@ function switchToLogin() {
 .plan-info-value.price {
   font-size: 24px;
   color: #ffd700;
+}
+
+.sold-out-warning {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 77, 79, 0.2);
+  border: 1px solid rgba(255, 77, 79, 0.4);
+  border-radius: 6px;
+  text-align: center;
+  font-size: 14px;
+  color: #ffa39e;
 }
 
 .login-form {
