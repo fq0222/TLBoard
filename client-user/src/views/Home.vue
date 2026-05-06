@@ -79,6 +79,15 @@
             暂无公告
           </div>
         </div>
+        <div v-if="announcementTotal > announcementLimit" class="pagination-container">
+          <el-pagination
+            v-model:current-page="announcementPage"
+            :page-size="announcementLimit"
+            :total="announcementTotal"
+            layout="prev, pager, next"
+            @current-change="handleAnnouncementPageChange"
+          />
+        </div>
       </section>
     </main>
 
@@ -111,6 +120,11 @@ const plans = ref([])
 const announcements = ref([])
 const loading = ref(false)
 
+// 公告分页相关
+const announcementPage = ref(1)
+const announcementTotal = ref(0)
+const announcementLimit = 3
+
 // 计算属性
 const isLoggedIn = ref(userStore.isLoggedIn)
 
@@ -136,13 +150,23 @@ async function fetchPlans() {
  */
 async function fetchAnnouncements() {
   try {
-    const response = await api.user.getAnnouncements({ page: 1, limit: 10 })
+    const response = await api.user.getAnnouncements({ page: announcementPage.value, limit: announcementLimit })
     if (response.code === 0) {
       announcements.value = response.data.list
+      announcementTotal.value = response.data.total
     }
   } catch (error) {
     console.error('获取公告列表失败:', error)
   }
+}
+
+/**
+ * 公告翻页
+ * @param {number} page - 页码
+ */
+function handleAnnouncementPageChange(page) {
+  announcementPage.value = page
+  fetchAnnouncements()
 }
 
 /**
@@ -378,6 +402,16 @@ onMounted(() => {
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   overflow: hidden;
+}
+
+.pagination-container {
+  display: flex;
+  justify-content: center;
+  padding: 20px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  margin-top: 16px;
 }
 
 .announcement-item {
