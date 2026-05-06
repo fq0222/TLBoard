@@ -42,10 +42,17 @@
                   <span>{{ plan.duration_days === 0 ? '无限期' : plan.duration_days + ' 天有效期' }}</span>
                 </div>
               </div>
+              <div v-if="plan.is_soldout" class="sold-out-tag">已售罄</div>
             </div>
             <div class="plan-footer">
-              <el-button type="primary" size="large" class="buy-btn" @click="selectPlan(plan)">
-                立即购买
+              <el-button 
+                type="primary" 
+                size="large" 
+                class="buy-btn" 
+                :disabled="plan.is_soldout"
+                @click="selectPlan(plan)"
+              >
+                {{ plan.is_soldout ? '已售罄' : '立即购买' }}
               </el-button>
             </div>
           </div>
@@ -92,6 +99,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { Check } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import api from '@/api'
 
 const router = useRouter()
@@ -141,11 +149,14 @@ async function fetchAnnouncements() {
  * @param {Object} plan - 套餐信息
  */
 function selectPlan(plan) {
+  if (plan.is_soldout) {
+    ElMessage.warning('该套餐已售罄')
+    return
+  }
+  
   if (isLoggedIn.value) {
-    // 已登录用户直接跳转到购买页面
     router.push({ name: 'UserProfile' })
   } else {
-    // 未登录用户跳转到登录页面，传递套餐信息
     router.push({ 
       name: 'Login', 
       query: { 
@@ -331,6 +342,16 @@ onMounted(() => {
   width: 100%;
   height: 50px;
   font-size: 18px;
+}
+
+.sold-out-tag {
+  display: inline-block;
+  background: #f56c6c;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-top: 8px;
 }
 
 .announcements-section {
