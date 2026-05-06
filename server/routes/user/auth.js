@@ -87,6 +87,16 @@ router.post('/register-and-pay', [
       });
     }
 
+    // 检查套餐是否售罄
+    if (plan.sales_limit !== -1 && plan.sales_count >= plan.sales_limit) {
+      logger.warn(`注册失败: 套餐已售罄 - ${plan_id}`);
+      return res.status(400).json({
+        code: 1002,
+        message: '该套餐已售罄',
+        data: null
+      });
+    }
+
     // 生成订阅Token（用于3X-UI节点认证）
     const subscriptionToken = crypto.randomUUID();
     
@@ -132,6 +142,9 @@ router.post('/register-and-pay', [
         INSERT INTO orders (user_id, email, plan_id, amount, out_trade_no, status)
         VALUES (?, ?, ?, ?, ?, 'pending')
       `).run(userId, email, plan_id, plan.price, outTradeNo);
+
+      // 增加销售计数
+      await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(plan_id);
 
       return { userId, orderId: orderResult.lastInsertRowid, outTradeNo };
     });
