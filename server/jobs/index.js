@@ -327,7 +327,15 @@ async function runTrafficSync(db) {
               await db.prepare(`
                 UPDATE users SET traffic_used = ?, updated_at = ? WHERE id = ?
               `).run(trafficUsed, Math.floor(Date.now() / 1000), user.id);
-              
+
+              // 检查流量是否用完，记录时间戳
+              const userData = await db.prepare('SELECT traffic_limit FROM users WHERE id = ?').get(user.id);
+              if (userData && userData.traffic_limit != null && userData.traffic_limit !== '' && trafficUsed >= Number(userData.traffic_limit)) {
+                await db.prepare(`
+                  UPDATE users SET traffic_used_at = ? WHERE id = ? AND traffic_used_at IS NULL
+                `).run(Math.floor(Date.now() / 1000), user.id);
+              }
+
               updatedCount++;
             }
           }
