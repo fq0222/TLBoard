@@ -73,7 +73,7 @@
               <h3 class="announcement-title">{{ announcement.title }}</h3>
               <span class="announcement-time">{{ formatTime(announcement.created_at) }}</span>
             </div>
-            <div class="announcement-content" v-html="announcement.content"></div>
+            <div class="announcement-content" v-html="renderMarkdown(announcement.content)"></div>
           </div>
           <div v-if="announcements.length === 0" class="empty-tip">
             暂无公告
@@ -100,6 +100,7 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { Check } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { marked } from 'marked'
 import api from '@/api'
 
 const router = useRouter()
@@ -142,6 +143,16 @@ async function fetchAnnouncements() {
   } catch (error) {
     console.error('获取公告列表失败:', error)
   }
+}
+
+/**
+ * 渲染 Markdown 内容
+ * @param {string} content - Markdown 内容
+ * @returns {string} 渲染后的 HTML
+ */
+function renderMarkdown(content) {
+  if (!content) return ''
+  return marked(content)
 }
 
 /**
@@ -399,6 +410,90 @@ onMounted(() => {
 .announcement-content {
   color: #666;
   line-height: 1.6;
+}
+
+.announcement-content :deep(h1),
+.announcement-content :deep(h2),
+.announcement-content :deep(h3),
+.announcement-content :deep(h4),
+.announcement-content :deep(h5),
+.announcement-content :deep(h6) {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+.announcement-content :deep(h1) { font-size: 24px; }
+.announcement-content :deep(h2) { font-size: 20px; }
+.announcement-content :deep(h3) { font-size: 18px; }
+
+.announcement-content :deep(p) {
+  margin-bottom: 12px;
+}
+
+.announcement-content :deep(ul),
+.announcement-content :deep(ol) {
+  padding-left: 24px;
+  margin-bottom: 12px;
+}
+
+.announcement-content :deep(li) {
+  margin-bottom: 4px;
+}
+
+.announcement-content :deep(code) {
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 14px;
+}
+
+.announcement-content :deep(pre) {
+  background: #f5f5f5;
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin-bottom: 12px;
+}
+
+.announcement-content :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+
+.announcement-content :deep(blockquote) {
+  border-left: 4px solid #409eff;
+  padding-left: 16px;
+  margin: 12px 0;
+  color: #999;
+}
+
+.announcement-content :deep(a) {
+  color: #409eff;
+  text-decoration: none;
+}
+
+.announcement-content :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.announcement-content :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+.announcement-content :deep(th),
+.announcement-content :deep(td) {
+  border: 1px solid #eee;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.announcement-content :deep(th) {
+  background: #f5f5f5;
+  font-weight: 600;
 }
 
 .empty-tip {
