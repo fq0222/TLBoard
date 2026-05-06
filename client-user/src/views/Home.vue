@@ -23,6 +23,7 @@
             :key="plan.id" 
             class="plan-card"
           >
+            <div v-if="plan.is_soldout" class="sold-out-tag">已售罄</div>
             <div class="plan-header">
               <h3 class="plan-name">{{ plan.name }}</h3>
               <div class="plan-price">
@@ -42,7 +43,6 @@
                   <span>{{ plan.duration_days === 0 ? '无限期' : plan.duration_days + ' 天有效期' }}</span>
                 </div>
               </div>
-              <div v-if="plan.is_soldout" class="sold-out-tag">已售罄</div>
             </div>
             <div class="plan-footer">
               <el-button 
@@ -266,6 +266,7 @@ onMounted(() => {
 }
 
 .plan-card {
+  position: relative;
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -345,13 +346,16 @@ onMounted(() => {
 }
 
 .sold-out-tag {
-  display: inline-block;
+  position: absolute;
+  top: 12px;
+  left: 12px;
   background: #f56c6c;
   color: #fff;
-  padding: 2px 8px;
+  padding: 4px 10px;
   border-radius: 4px;
   font-size: 12px;
-  margin-top: 8px;
+  font-weight: bold;
+  z-index: 1;
 }
 
 .announcements-section {
