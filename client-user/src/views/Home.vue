@@ -153,7 +153,7 @@ async function fetchAnnouncements() {
     const response = await api.user.getAnnouncements({ page: announcementPage.value, limit: announcementLimit })
     if (response.code === 0) {
       announcements.value = response.data.list
-      announcementTotal.value = response.data.total
+      announcementTotal.value = Number(response.data.total) || 0
     }
   } catch (error) {
     console.error('获取公告列表失败:', error)
