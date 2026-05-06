@@ -42,21 +42,29 @@
       </el-table>
     </div>
     
-    <el-dialog v-model="dialogVisible" :title="isEditing ? '编辑公告' : '添加公告'" width="600px">
-      <el-form :model="announcementForm" label-width="80px">
-        <el-form-item label="标题">
-          <el-input v-model="announcementForm.title" placeholder="请输入公告标题" />
-        </el-form-item>
-        <el-form-item label="内容">
-          <el-input v-model="announcementForm.content" type="textarea" :rows="6" placeholder="请输入公告内容，支持Markdown" />
-        </el-form-item>
-        <el-form-item label="置顶">
-          <el-switch v-model="announcementForm.pinned" />
-        </el-form-item>
-        <el-form-item label="显示">
-          <el-switch v-model="announcementForm.enabled" />
-        </el-form-item>
-      </el-form>
+    <el-dialog v-model="dialogVisible" :title="isEditing ? '编辑公告' : '添加公告'" width="900px">
+      <div class="editor-container">
+        <div class="editor-left">
+          <el-form :model="announcementForm" label-width="80px">
+            <el-form-item label="标题">
+              <el-input v-model="announcementForm.title" placeholder="请输入公告标题" />
+            </el-form-item>
+            <el-form-item label="内容">
+              <el-input v-model="announcementForm.content" type="textarea" :rows="12" placeholder="请输入公告内容，支持Markdown" />
+            </el-form-item>
+            <el-form-item label="置顶">
+              <el-switch v-model="announcementForm.pinned" />
+            </el-form-item>
+            <el-form-item label="显示">
+              <el-switch v-model="announcementForm.enabled" />
+            </el-form-item>
+          </el-form>
+        </div>
+        <div class="editor-right">
+          <div class="preview-header">Markdown 预览</div>
+          <div class="preview-content" v-html="renderedContent"></div>
+        </div>
+      </div>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="handleSubmit" :loading="submitting">确定</el-button>
@@ -66,9 +74,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { marked } from 'marked'
 import api from '@/api'
 
 const announcements = ref([])
@@ -82,6 +91,11 @@ const announcementForm = reactive({
   content: '',
   pinned: false,
   enabled: true
+})
+
+const renderedContent = computed(() => {
+  if (!announcementForm.content) return '<p style="color: #999;">请输入内容查看预览</p>'
+  return marked(announcementForm.content)
 })
 
 async function fetchAnnouncements() {
@@ -172,4 +186,120 @@ onMounted(() => {
 .page-subtitle { color: #666; font-size: 16px; }
 .content-card { background: #fff; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 20px; }
 .toolbar { margin-bottom: 20px; }
+
+.editor-container {
+  display: flex;
+  gap: 20px;
+  min-height: 400px;
+}
+
+.editor-left {
+  flex: 1;
+}
+
+.editor-right {
+  flex: 1;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.preview-header {
+  background: #f5f7fa;
+  padding: 10px 16px;
+  font-weight: 600;
+  color: #606266;
+  border-bottom: 1px solid #dcdfe6;
+}
+
+.preview-content {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: 450px;
+  line-height: 1.6;
+}
+
+.preview-content :deep(h1),
+.preview-content :deep(h2),
+.preview-content :deep(h3),
+.preview-content :deep(h4),
+.preview-content :deep(h5),
+.preview-content :deep(h6) {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+.preview-content :deep(h1) { font-size: 24px; }
+.preview-content :deep(h2) { font-size: 20px; }
+.preview-content :deep(h3) { font-size: 18px; }
+
+.preview-content :deep(p) {
+  margin-bottom: 12px;
+}
+
+.preview-content :deep(ul),
+.preview-content :deep(ol) {
+  padding-left: 24px;
+  margin-bottom: 12px;
+}
+
+.preview-content :deep(li) {
+  margin-bottom: 4px;
+}
+
+.preview-content :deep(code) {
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 14px;
+}
+
+.preview-content :deep(pre) {
+  background: #f5f5f5;
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin-bottom: 12px;
+}
+
+.preview-content :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+
+.preview-content :deep(blockquote) {
+  border-left: 4px solid #409eff;
+  padding-left: 16px;
+  margin: 12px 0;
+  color: #999;
+}
+
+.preview-content :deep(a) {
+  color: #409eff;
+  text-decoration: none;
+}
+
+.preview-content :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.preview-content :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+.preview-content :deep(th),
+.preview-content :deep(td) {
+  border: 1px solid #eee;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.preview-content :deep(th) {
+  background: #f5f5f5;
+  font-weight: 600;
+}
 </style>
