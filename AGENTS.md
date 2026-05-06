@@ -112,6 +112,57 @@ function formatTraffic(bytes) {
 }
 ```
 
+## 项目开发经验
+
+### PostgreSQL 字段添加
+
+添加新字段时，`ALTER TABLE` 语句不能使用 `prepare().run()`（会自动添加 `RETURNING id`），需使用 `exec()` 方法：
+```javascript
+// 正确
+await db.exec('ALTER TABLE users ADD COLUMN traffic_used_at BIGINT');
+
+// 错误 - 会报 syntax error
+await db.prepare('ALTER TABLE users ADD COLUMN traffic_used_at BIGINT').run();
+```
+
+### Element Plus 组件注意事项
+
+- `el-switch` 组件需要布尔值，数据库返回的 `0/1` 整数需用 `!!` 转换：
+```javascript
+announcementForm.pinned = !!announcement.pinned
+announcementForm.enabled = !!announcement.enabled
+```
+
+- `ElMessageBox.confirm` 默认按钮是英文，需手动设置中文：
+```javascript
+await ElMessageBox.confirm('确定删除？', '提示', {
+  confirmButtonText: '确定',
+  cancelButtonText: '取消'
+})
+```
+
+### Markdown 渲染
+
+前端使用 `marked` 库渲染 Markdown 内容：
+```javascript
+import { marked } from 'marked'
+
+const renderedHtml = marked(markdownContent)
+```
+
+### 分页组件
+
+使用 `el-pagination` 组件实现分页：
+```vue
+<el-pagination
+  v-model:current-page="currentPage"
+  :page-size="pageSize"
+  :total="total"
+  layout="prev, pager, next"
+  @current-change="handlePageChange"
+/>
+```
+
 ## VMQ 支付回调
 
 回调地址**不能**使用 `127.0.0.1`（VMQ 和后端可能在不同设备），需使用局域网 IP 或公网域名：
@@ -125,6 +176,18 @@ http://192.168.31.100:30000/api/user/payment/notify
 - 流量累加：`新总流量 = 当前套餐流量 + 新套餐流量`
 - 3X-UI 同步：使用 `updateClient` 更新已存在用户
 - `traffic_limit` 可能是字符串，运算前用 `Number()` 转换
+- **续费规则**：
+  - 续费当前套餐：流量用完后 3 天内可续费，不管套餐是否售罄
+  - 切换其他套餐：需要检查新套餐是否售罄
+  - 超过 3 天：需等待名额释放后重新购买
+
+## 套餐可销售总量
+
+- `sales_limit`：可销售总量，`-1` 表示不限制
+- `sales_count`：已售数量
+- 售罄检查：注册时检查，续费切换套餐时检查
+- 名额释放：流量用完超过 3 天未续费，定时任务自动释放
+- `traffic_used_at`：记录流量用完的时间戳
 
 ## 文档同步
 
