@@ -12,6 +12,7 @@
  * | 3X-UI 用户同步         | 是             | 7 分钟         | 4 小时           |
  * | 流量同步               | 是             | 10 分钟        | 3 小时           |
  * | 工单自动关闭           | 是             | 3 分钟         | 1 小时           |
+ * | 释放过期名额           | 否             | 15 分钟        | 1 小时           |
  * +------------------------+----------------+----------------+------------------+
  * 
  * 任务说明：
@@ -21,6 +22,7 @@
  * - 3X-UI 用户同步：确保所有已付费用户都在 3X-UI 节点中
  * - 流量同步：从 3X-UI 服务器同步用户流量数据到本地数据库
  * - 工单自动关闭：关闭用户已读后超过24小时无新回复的 pending 工单
+ * - 释放过期名额：释放流量用完超过3天且未续费的用户名额
  */
 
 const XuiService = require('../services/xui-service');
@@ -433,6 +435,69 @@ async function runTicketAutoClose(db) {
 }
 
 /**
+ * 注册释放过期名额任务
+ * 每小时检查一次，释放流量用完超过3天且未续费的用户名额
+ * @param {Object} db - 数据库实例
+ */
+function registerReleaseExpiredSalesJob(db) {
+  // 启动时延迟15分钟执行第一次
+  setTimeout(async () => {
+    await runReleaseExpiredSales(db);
+  }, 15 * 60 * 1000);
+
+  const interval = setInterval(async () => {
+    await runReleaseExpiredSales(db);
+  }, 60 * 60 * 1000); // 每1小时执行一次
+  
+  intervals.push(interval);
+  logger.info('释放过期名额任务已注册（每1小时执行一次）');
+}
+
+/**
+ * 执行释放过期名额
+ * @param {Object} db - 数据库实例
+ */
+async function runReleaseExpiredSales(db) {
+  try {
+    // 查找需要释放名额的用户（流量用完超过3天且未续费）
+    const expiredUsers = await db.prepare(`
+      SELECT u.plan_id, COUNT(*) as expired_count
+      FROM users u
+      WHERE u.plan_id IS NOT NULL
+        AND u.traffic_used_at IS NOT NULL
+        AND u.traffic_used_at < EXTRACT(EPOCH FROM NOW()) - 259200
+        AND NOT EXISTS (
+          SELECT 1 FROM orders o 
+          WHERE o.user_id = u.id 
+            AND o.status = 'paid'
+            AND o.created_at > u.traffic_used_at
+        )
+      GROUP BY u.plan_id
+    `).all();
+
+    let releasedCount = 0;
+
+    for (const row of expiredUsers) {
+      const result = await db.prepare(`
+        UPDATE plans 
+        SET sales_count = GREATEST(0, sales_count - ?)
+        WHERE id = ?
+      `).run(row.expired_count, row.plan_id);
+      
+      if (result.changes > 0) {
+        releasedCount += row.expired_count;
+      }
+    }
+
+    if (releasedCount > 0) {
+      logger.info(`释放过期名额完成，共释放 ${releasedCount} 个名额`);
+    }
+  } catch (error) {
+    logger.error(`释放过期名额任务错误: ${error.message}`);
+  }
+}
+
+/**
  * 启动所有定时任务
  * @param {Object} db - 数据库实例
  */
@@ -444,6 +509,7 @@ function startAllJobs(db) {
   registerXuiSyncJob(db);
   registerTrafficSyncJob(db);
   registerTicketAutoCloseJob(db);
+  registerReleaseExpiredSalesJob(db);
   logger.info(`所有定时任务已启动，共 ${intervals.length} 个任务`);
 }
 
