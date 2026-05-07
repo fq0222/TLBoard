@@ -25,13 +25,11 @@ function createAuthLimiter(options = {}) {
     },
     // 设置Retry-After头
     headers: true,
+    // 只在失败响应时计数（跳过成功请求）
+    skipSuccessfulRequests: true,
     // 标准化响应格式
     handler: (req, res) => {
       res.status(429).json(options.message || { code: 429, message: '请求过于频繁', data: null });
-    },
-    // 跳过成功请求（只在失败响应时计数）
-    skip: (req, res) => {
-      return res.statusCode < 400;
     }
   });
 }
