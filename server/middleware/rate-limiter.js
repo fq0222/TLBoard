@@ -19,19 +19,17 @@ function createAuthLimiter(options = {}) {
     message,
     // 自定义keyGenerator：基于IP+邮箱组合
     keyGenerator: (req) => {
-      const ip = req.ip || req.connection.remoteAddress;
+      const ip = req.ip || req.socket.remoteAddress;
       const email = req.body?.email || 'unknown';
       return `${ip}:${email}`;
     },
-    // 只在失败响应时计数
-    skipSuccessfulRequests: true,
     // 设置Retry-After头
     headers: true,
     // 标准化响应格式
     handler: (req, res) => {
-      res.status(429).json(message);
+      res.status(429).json(options.message || { code: 429, message: '请求过于频繁', data: null });
     },
-    // 跳过成功请求
+    // 跳过成功请求（只在失败响应时计数）
     skip: (req, res) => {
       return res.statusCode < 400;
     }
