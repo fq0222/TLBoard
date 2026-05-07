@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { body, validationResult } = require('express-validator');
 const config = require('../../config');
 const { authenticateUser } = require('../../middleware/auth-user');
+const { userLoginLimiter, userRegisterLimiter } = require('../../middleware/rate-limiter');
 const vmqService = require('../../services/vmq-service');
 const { createLogger } = require('../../utils/logger');
 
@@ -21,6 +22,7 @@ const logger = createLogger('USER-AUTH');
  * 注册并发起支付
  */
 router.post('/register-and-pay', [
+  userRegisterLimiter, // 添加速率限制中间件
   body('email')
     .isEmail()
     .withMessage('请输入有效的邮箱地址')
@@ -237,6 +239,7 @@ router.post('/register-and-pay', [
  * 用户登录
  */
 router.post('/login', [
+  userLoginLimiter, // 添加速率限制中间件
   body('email')
     .isEmail()
     .withMessage('请输入有效的邮箱地址')
