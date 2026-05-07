@@ -28,7 +28,16 @@ class DatabaseManager {
         database: config.database.database,
         max: config.database.max,
         idleTimeoutMillis: config.database.idleTimeoutMillis,
-        connectionTimeoutMillis: config.database.connectionTimeoutMillis
+        connectionTimeoutMillis: config.database.connectionTimeoutMillis,
+        // 连接健康检查
+        allowExitOnIdle: false,
+        // 应用名称，便于在数据库中识别
+        application_name: 'subscription_manager'
+      });
+
+      // 监听连接池错误事件
+      this.pool.on('error', (err) => {
+        logger.error(`连接池错误: ${err.message}`);
       });
 
       // 测试连接
@@ -44,6 +53,33 @@ class DatabaseManager {
       logger.error(`数据库初始化失败: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * 执行带重试的数据库查询
+   * @param {string} sql - SQL 语句
+   * @param {Array} params - 参数
+   * @param {number} maxRetries - 最大重试次数
+   * @returns {Promise<Object>} 查询结果
+   */
+  async queryWithRetry(sql, params = [], maxRetries = 2) {
+    let lastError;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const result = await this.pool.query(sql, params);
+        return result;
+      } catch (error) {
+        lastError = error;
+        // 如果是连接错误，重试
+        if (attempt < maxRetries && (error.code === 'ECONNRESET' || error.code === '57P01' || error.message.includes('connection'))) {
+          logger.warn(`数据库查询失败，正在重试 (${attempt}/${maxRetries}): ${error.message}`);
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        } else {
+          throw error;
+        }
+      }
+    }
+    throw lastError;
   }
 
   /**
@@ -64,7 +100,7 @@ class DatabaseManager {
         return {
           async run(...params) {
             try {
-              const result = await self.pool.query(convertedSql + ' RETURNING id', params);
+              const result = await self.queryWithRetry(convertedSql + ' RETURNING id', params);
               const lastId = result.rows.length > 0 ? result.rows[0].id : 0;
               return { lastInsertRowid: lastId, changes: result.rowCount };
             } catch (error) {
@@ -74,7 +110,7 @@ class DatabaseManager {
           },
           async get(...params) {
             try {
-              const result = await self.pool.query(convertedSql, params);
+              const result = await self.queryWithRetry(convertedSql, params);
               return result.rows[0] || undefined;
             } catch (error) {
               logger.error(`SQL执行错误(get): ${convertedSql} - ${error.message}`);
@@ -83,7 +119,7 @@ class DatabaseManager {
           },
           async all(...params) {
             try {
-              const result = await self.pool.query(convertedSql, params);
+              const result = await self.queryWithRetry(convertedSql, params);
               return result.rows;
             } catch (error) {
               logger.error(`SQL执行错误(all): ${convertedSql} - ${error.message}`);
