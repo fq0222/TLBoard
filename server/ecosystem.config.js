@@ -26,8 +26,8 @@ module.exports = {
         DB_PASSWORD: 'postgres',
         DB_NAME: 'subscription_manager',
         DB_POOL_MAX: 20,
-        DB_IDLE_TIMEOUT: 30000,
-        DB_CONNECT_TIMEOUT: 2000,
+        DB_IDLE_TIMEOUT: 60000, // 空闲超时60秒
+        DB_CONNECT_TIMEOUT: 5000, // 连接超时5秒
         
         // 日志级别
         LOG_LEVEL: 'info',
@@ -51,8 +51,8 @@ module.exports = {
         DB_PASSWORD: 'your_db_password_here',
         DB_NAME: 'subscription_manager',
         DB_POOL_MAX: 20,
-        DB_IDLE_TIMEOUT: 30000,
-        DB_CONNECT_TIMEOUT: 2000,
+        DB_IDLE_TIMEOUT: 60000, // 空闲超时60秒
+        DB_CONNECT_TIMEOUT: 5000, // 连接超时5秒
         LOG_LEVEL: 'warn',
         
         // 安全配置
