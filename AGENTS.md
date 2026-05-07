@@ -112,6 +112,33 @@ function formatTraffic(bytes) {
 }
 ```
 
+## 安全防护
+
+### 暴力破解防护
+
+用户端登录和注册接口已实现基于 IP+邮箱组合的速率限制：
+
+- **窗口时间**：15 分钟
+- **最大尝试次数**：3 次失败尝试
+- **响应格式**：HTTP 429 + Retry-After 头
+- **存储方式**：内存存储（单实例部署）
+
+**配置文件：**
+- `server/middleware/rate-limiter.js` - 速率限制中间件
+- `config.security.rateLimitWindow` - 窗口时间（毫秒）
+- `config.security.rateLimitMax` - 最大尝试次数
+
+**环境变量：**
+```bash
+RATE_LIMIT_WINDOW=900000  # 15分钟
+RATE_LIMIT_MAX=3          # 最大尝试次数
+```
+
+**测试脚本：**
+```bash
+node server/test/test-rate-limiter.js
+```
+
 ## 项目开发经验
 
 ### PostgreSQL 字段添加
@@ -188,6 +215,27 @@ http://192.168.31.100:30000/api/user/payment/notify
 - 售罄检查：注册时检查，续费切换套餐时检查
 - 名额释放：流量用完超过 3 天未续费，定时任务自动释放
 - `traffic_used_at`：记录流量用完的时间戳
+
+## 数据库连接优化
+
+### 连接池配置
+
+PostgreSQL 连接池已优化，防止空闲连接超时断开：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `DB_POOL_MAX` | 20 | 最大连接数 |
+| `DB_IDLE_TIMEOUT` | 60000 | 空闲超时（60秒） |
+| `DB_CONNECT_TIMEOUT` | 5000 | 连接超时（5秒） |
+
+**重试机制：**
+- 查询失败自动重试 2 次
+- 支持连接错误（ECONNRESET、57P01）自动恢复
+
+**配置文件：**
+- `server/config.js` - 开发环境配置
+- `server/ecosystem.config.js` - 生产环境配置（PM2）
+- `server/db/init.js` - 数据库初始化和连接池管理
 
 ## 文档同步
 
