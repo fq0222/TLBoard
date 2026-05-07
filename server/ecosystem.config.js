@@ -30,7 +30,12 @@ module.exports = {
         DB_CONNECT_TIMEOUT: 2000,
         
         // 日志级别
-        LOG_LEVEL: 'info'
+        LOG_LEVEL: 'info',
+        
+        // 安全配置
+        RATE_LIMIT_WINDOW: 900000, // 15分钟 = 15 * 60 * 1000 = 900000毫秒
+        RATE_LIMIT_MAX: 3, // 最大尝试次数
+        BCRYPT_ROUNDS: 12
       },
       
       // 生产环境配置
@@ -48,7 +53,12 @@ module.exports = {
         DB_POOL_MAX: 20,
         DB_IDLE_TIMEOUT: 30000,
         DB_CONNECT_TIMEOUT: 2000,
-        LOG_LEVEL: 'warn'
+        LOG_LEVEL: 'warn',
+        
+        // 安全配置
+        RATE_LIMIT_WINDOW: 900000,
+        RATE_LIMIT_MAX: 3,
+        BCRYPT_ROUNDS: 12
       },
       
       // 日志配置
