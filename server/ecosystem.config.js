@@ -65,6 +65,7 @@ module.exports = {
       log_file: './logs/app.log',
       error_file: './logs/error.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
+      merge_logs: true,           // 合并输出到单个文件
       
       // 自动重启
       autorestart: true,
