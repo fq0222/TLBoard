@@ -90,6 +90,11 @@ class DatabaseManager {
     const self = this;
     return {
       /**
+       * 获取连接池（用于需要直接使用连接的场景，如事务）
+       */
+      pool: self.pool,
+      
+      /**
        * 准备 SQL 语句
        * @param {string} sql - SQL 语句，使用 $1, $2, ... 作为参数占位符
        */

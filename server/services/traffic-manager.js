@@ -89,7 +89,7 @@ async function fetchAllServerTraffic(db) {
 /**
  * 计算用户总流量（增量更新）
  * 使用事务保护，批量查询和写入同步日志
- * @param {Object} db - 数据库实例
+ * @param {Object} db - 数据库实例（需要有 pool 属性）
  * @param {Object} serverTrafficData - 服务器流量数据
  * @returns {Promise<Object>} 用户流量数据 { userId: { email, trafficUsed, trafficLimit, isOverLimit } }
  */
@@ -100,6 +100,7 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
     return {};
   }
 
+  // 先查询用户（不需要事务）
   const users = await db.prepare(`
     SELECT id, email, traffic_used, traffic_limit
     FROM users
@@ -115,13 +116,18 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
 
   const now = Math.floor(Date.now() / 1000);
 
-  const transaction = db.transaction(async () => {
-    // 批量获取所有同步记录
-    const syncResult = await db.prepare(
+  // 获取专用连接用于事务
+  const client = await db.pool.connect();
+  
+  try {
+    await client.query('BEGIN');
+    
+    // 批量获取所有同步记录（使用事务连接）
+    const syncResult = await client.query(
       'SELECT user_id, server_id, last_sync_traffic FROM traffic_sync_log'
-    ).all();
+    );
     const syncLogMap = new Map();
-    for (const row of syncResult) {
+    for (const row of syncResult.rows) {
       syncLogMap.set(`${row.user_id}-${row.server_id}`, Number(row.last_sync_traffic) || 0);
     }
 
@@ -164,7 +170,7 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
       };
     }
 
-    // 批量写入同步日志
+    // 批量写入同步日志（使用事务连接）
     if (syncLogUpdates.length > 0) {
       const values = [];
       const params = [];
@@ -174,19 +180,25 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
         params.push(update.userId, update.serverId, update.currentTraffic, update.now);
         paramIndex += 4;
       }
-      await db.prepare(
+      await client.query(
         `INSERT INTO traffic_sync_log (user_id, server_id, last_sync_traffic, last_sync_at)
          VALUES ${values.join(', ')}
          ON CONFLICT (user_id, server_id)
-         DO UPDATE SET last_sync_traffic = EXCLUDED.last_sync_traffic, last_sync_at = EXCLUDED.last_sync_at`
-      ).run(...params);
+         DO UPDATE SET last_sync_traffic = EXCLUDED.last_sync_traffic, last_sync_at = EXCLUDED.last_sync_at`,
+        params
+      );
     }
 
+    await client.query('COMMIT');
     logger.info(`计算用户流量完成，${Object.keys(userTrafficData).length} 个用户，${syncLogUpdates.length} 条同步记录更新`);
     return userTrafficData;
-  });
-  
-  return await transaction();
+  } catch (error) {
+    await client.query('ROLLBACK');
+    logger.error(`计算用户流量事务失败，已回滚: ${error.message}`);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**
