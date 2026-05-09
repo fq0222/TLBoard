@@ -7,6 +7,7 @@ const express = require('express');
 const { param, query, validationResult } = require('express-validator');
 const { authenticateUser } = require('../../middleware/auth-user');
 const { createLogger } = require('../../utils/logger');
+const { syncAllServers } = require('../../services/xui-sync');
 
 const router = express.Router();
 const logger = createLogger('USER-SUB');
@@ -125,6 +126,88 @@ function generateNodeLink(params) {
   
   return '';
 }
+
+/**
+ * POST /api/user/subscription/generate
+ * 生成订阅链接（同步节点信息后返回订阅数据）
+ */
+router.post('/generate', authenticateUser, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const db = req.app.locals.db;
+
+    // 查询用户信息
+    const user = await db.prepare(`
+      SELECT 
+        u.id, u.email, u.subscription_token, u.sub_id,
+        u.traffic_used, u.traffic_limit, u.expire_at, u.enabled,
+        p.name as plan_name
+      FROM users u
+      LEFT JOIN plans p ON u.plan_id = p.id
+      WHERE u.id = ?
+    `).get(userId);
+    
+    if (!user) {
+      logger.error(`用户不存在: ${userId}`);
+      return res.status(400).json({
+        code: 2004,
+        message: '用户不存在',
+        data: null
+      });
+    }
+
+    // 检查账号是否启用
+    if (!user.enabled) {
+      logger.warn(`用户账号已禁用: ${user.email}`);
+      return res.status(400).json({
+        code: 2003,
+        message: '账号已被禁用',
+        data: null
+      });
+    }
+
+    // 检查是否已完成 CF 优选
+    const cfIps = await db.prepare(`
+      SELECT 1 FROM user_cf_ips WHERE user_id = ? LIMIT 1
+    `).get(userId);
+    
+    if (!cfIps) {
+      return res.status(400).json({
+        code: 3001,
+        message: '请先完成 IP 优选',
+        data: null
+      });
+    }
+
+    // 同步所有服务器的节点信息
+    logger.info(`用户 ${user.email} 生成订阅链接，开始同步节点信息`);
+    const syncResult = await syncAllServers(db);
+    logger.info(`节点同步完成: ${syncResult.syncedCount}/${syncResult.totalCount} 台服务器`);
+
+    // 生成订阅链接
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.sub_id}`;
+
+    logger.info(`用户 ${user.email} 生成订阅链接成功`);
+
+    res.json({
+      code: 0,
+      message: 'ok',
+      data: {
+        subscription_url: subscriptionUrl,
+        clash_url: `${subscriptionUrl}?clash=1`,
+        v2ray_url: `${subscriptionUrl}?v2ray=1`
+      }
+    });
+  } catch (error) {
+    logger.error(`生成订阅链接错误: ${error.message}`);
+    res.status(500).json({
+      code: 500,
+      message: '服务器内部错误',
+      data: null
+    });
+  }
+});
 
 /**
  * GET /api/user/subscription

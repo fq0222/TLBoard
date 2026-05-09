@@ -97,10 +97,11 @@
             type="success" 
             size="large" 
             @click="generateSubscription"
-            :disabled="!cfOptimized"
+            :disabled="!cfOptimized || generatingSubscription"
+            :loading="generatingSubscription"
           >
             <el-icon><Link /></el-icon>
-            生成订阅链接
+            {{ generatingSubscription ? '正在生成...' : '生成订阅链接' }}
           </el-button>
         </div>
       </div>
@@ -216,6 +217,7 @@ const optimizing = ref(false)
 const optimizeProgress = ref(0)
 const optimizeStatusText = ref('')
 const subscriptionGenerated = ref(false)
+const generatingSubscription = ref(false)
 const showRenewDialog = ref(false)
 const TEST_COUNT = 3
 const TEST_TIMEOUT = 5000
@@ -273,9 +275,25 @@ async function generateSubscription() {
     ElMessage.warning('请先完成 IP 优选')
     return
   }
-  subscriptionGenerated.value = true
-  await fetchUserInfo()
-  ElMessage.success('订阅链接已生成')
+  
+  try {
+    generatingSubscription.value = true
+    const response = await api.user.generateSubscription()
+    if (response.code === 0) {
+      // 更新订阅链接
+      userInfo.value.subscription_url = response.data.subscription_url
+      userInfo.value.clash_url = response.data.clash_url
+      subscriptionGenerated.value = true
+      ElMessage.success('订阅链接已生成')
+    } else {
+      ElMessage.error(response.message || '生成订阅链接失败')
+    }
+  } catch (error) {
+    console.error('生成订阅链接失败:', error)
+    ElMessage.error('生成订阅链接失败')
+  } finally {
+    generatingSubscription.value = false
+  }
 }
 
 /**

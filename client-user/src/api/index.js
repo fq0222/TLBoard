@@ -157,6 +157,14 @@ const userApi = {
   },
 
   /**
+   * 生成订阅链接（会同步节点信息）
+   * @returns {Promise<Object>} 响应数据
+   */
+  generateSubscription() {
+    return apiClient.post('/subscription/generate')
+  },
+
+  /**
    * 获取 CF IP 池
    * @returns {Promise<Object>} 响应数据
    */

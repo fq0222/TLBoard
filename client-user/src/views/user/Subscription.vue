@@ -1,5 +1,5 @@
 <template>
-  <div class="subscription-container">
+  <div class="subscription-container" v-loading="loading" element-loading-text="正在同步节点信息，请稍候...">
     <div class="page-header">
       <h1 class="page-title">订阅信息</h1>
       <p class="page-subtitle">查看您的订阅详情和节点信息</p>
