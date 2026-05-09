@@ -23,7 +23,7 @@
 ## 部署架构
 
 ```
-外网访问：用户 → Cloudflare Tunnel → OpenResty (443) → Node.js用户端 (30000)
+外网访问：用户 → Cloudflare (HTTPS) → Cloudflare Tunnel → OpenResty (80) → Node.js用户端 (30000)
 局域网访问：管理员 → OpenResty (80) → Node.js管理端 (30001)
 ```
 
@@ -31,18 +31,17 @@
 
 | 服务 | 访问地址 | 用途 | 网络 |
 |------|---------|------|------|
-| 用户端 | `https://你的域名.com` | 用户订阅管理 | 外网 |
-| 管理端 | `http://NAS局域网IP:30001` | 管理员后台 | 局域网 |
+| 用户端 | `https://你的域名.com` | 用户订阅管理 | 外网（HTTPS） |
+| 管理端 | `http://NAS局域网IP` | 管理员后台 | 局域网 |
 
 ### 通信路径
 
 | 通信链路 | 走向 | 是否经过公网 |
 |----------|------|:------------:|
-| 用户 → 用户端 | Cloudflare Tunnel → NAS | ✅ 加密穿透 |
-| 管理员 → 管理端 | 局域网直连 | ❌ 纯本地 |
-| 用户端 → PostgreSQL | localhost | ❌ 纯本地 |
-| 管理端 → PostgreSQL | localhost | ❌ 纯本地 |
-| 用户端 → 3X-UI API | 由配置决定 | 视配置而定 |
+| 用户 → 用户端 | Cloudflare (HTTPS) → Tunnel → OpenResty → Node.js | ✅ 加密穿透 |
+| 管理员 → 管理端 | OpenResty → Node.js | ❌ 纯本地 |
+| OpenResty → Node.js | localhost:30000/30001 | ❌ 纯本地 |
+| Node.js → PostgreSQL | localhost:5432 | ❌ 纯本地 |
 
 ---
 
@@ -93,7 +92,38 @@ sudo npm install -g pm2
 pm2 --version
 ```
 
-### 1.3 创建项目目录
+### 1.3 安装pm2-logrotate日志轮转模块
+
+```bash
+# 安装pm2-logrotate模块
+pm2 install pm2-logrotate
+
+# 配置日志轮转参数
+pm2 set pm2-logrotate:max_size 100M      # 单个日志文件最大100MB
+pm2 set pm2-logrotate:retain 5           # 保留5个轮转文件
+pm2 set pm2-logrotate:compress true      # 压缩旧日志文件
+pm2 set pm2-logrotate:dateFormat YYYY-MM-DD_HH-mm-ss  # 轮转文件名格式
+pm2 set pm2-logrotate:rotateModule true  # 同时轮转PM2模块日志
+pm2 set pm2-logrotate:workerInterval 30  # 检查间隔（秒）
+pm2 set pm2-logrotate:rotateInterval '0 0 * * *'  # 每天凌晨执行轮转（可选）
+
+# 验证配置
+pm2 conf
+```
+
+**pm2-logrotate配置说明：**
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| `max_size` | `100M` | 日志文件达到100MB时触发轮转 |
+| `retain` | `5` | 保留5个历史日志文件 |
+| `compress` | `true` | 启用gzip压缩旧日志 |
+| `dateFormat` | `YYYY-MM-DD_HH-mm-ss` | 轮转文件命名格式 |
+| `rotateModule` | `true` | 轮转PM2模块日志 |
+| `workerInterval` | `30` | 每30秒检查一次日志大小 |
+| `rotateInterval` | `0 0 * * *` | cron表达式，每天凌晨轮转 |
+
+### 1.4 创建项目目录
 
 ```bash
 # 创建项目目录
@@ -329,96 +359,158 @@ pm2 logs subscription-manager
 
 ---
 
-## 阶段四：OpenResty配置
+## 阶段四：前端部署与OpenResty配置
 
-### 4.1 配置用户端反向代理
+### 4.1 前端静态文件部署
 
-创建OpenResty配置文件：
+将前端构建的 `dist` 目录文件复制到OpenResty的html目录：
 
 ```bash
-sudo nano /usr/local/openresty/nginx/conf/conf.d/subscription-user.conf
+# 进入 www 目录
+cd /vol1/@appdata/1Panel/1panel/apps/openresty/openresty/www
+
+# 创建网站存放根目录
+mkdir -p sites/sub-user/index
+mkdir -p sites/sub-admin/index
+
+# 复制用户端构建文件
+sudo cp -r /opt/subscription-manager/client-user/dist/* /usr/local/openresty/html/user/
+
+# 复制管理端构建文件
+sudo cp -r /opt/subscription-manager/client-admin/dist/* /usr/local/openresty/html/admin/
+
+# 设置权限
+sudo chown -R www:www /usr/local/openresty/html/user
+sudo chown -R www:www /usr/local/openresty/html/admin
 ```
 
-添加以下配置：
+### 4.2 通过1Panel配置OpenResty反向代理
+
+1Panel中安装的OpenResty通过网站管理界面配置，无需手动编辑配置文件。
+
+#### 4.2.1 配置用户端网站
+
+1. 登录1Panel管理界面
+2. 进入 **网站** → **网站** → **创建网站**
+3. 选择 **反向代理** 类型
+4. 填写配置：
+   - **域名：** `你的域名.com`
+   - **代理地址：** `http://127.0.0.1:30000`
+   - **启用HTTPS：** 不需要（由Cloudflare Tunnel提供）
+
+#### 4.2.2 配置管理端网站（局域网访问）
+
+1. 在1Panel中创建第二个网站
+2. 配置：
+   - **域名：** `NAS局域网IP`（如 `192.168.1.100`）
+   - **代理地址：** `http://127.0.0.1:30001`
+   - **启用HTTPS：** 不需要
+
+#### 4.2.3 高级Nginx配置
+
+在1Panel网站设置中，找到 **配置文件** 或 **自定义配置**，添加以下优化配置：
+
+**用户端网站配置：**
 
 ```nginx
-server {
-    listen 80;
-    server_name 你的域名.com;  # 替换为你的域名
+# API请求代理到Node.js
+location /api/ {
+    proxy_pass http://127.0.0.1:30000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_cache_bypass $http_upgrade;
+    
+    # 超时设置
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+}
 
-    # 用户端API和页面
-    location / {
-        proxy_pass http://127.0.0.1:30000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-        
-        # 超时设置
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-    }
+# 健康检查接口
+location /health {
+    proxy_pass http://127.0.0.1:30000;
+}
 
+# 订阅链接接口
+location /api/user/sub/ {
+    proxy_pass http://127.0.0.1:30000;
+}
+
+# 前端静态文件
+location / {
+    root /usr/local/openresty/html/user;
+    index index.html;
+    try_files $uri $uri/ /index.html;
+    
     # 静态资源缓存
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        proxy_pass http://127.0.0.1:30000;
         expires 7d;
         add_header Cache-Control "public, no-transform";
     }
 }
 ```
 
-### 4.2 配置管理端局域网访问（可选）
-
-如果你想通过域名访问管理端，创建配置：
-
-```bash
-sudo nano /usr/local/openresty/nginx/conf/conf.d/subscription-admin.conf
-```
+**管理端网站配置：**
 
 ```nginx
-server {
-    listen 80;
-    server_name admin.你的域名.com;  # 或者使用局域网IP
+# API请求代理到Node.js
+location /api/ {
+    proxy_pass http://127.0.0.1:30001;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_cache_bypass $http_upgrade;
+    
+    # 超时设置
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+}
 
-    # 限制只允许局域网访问
-    allow 192.168.0.0/16;
-    allow 10.0.0.0/8;
-    allow 172.16.0.0/12;
-    deny all;
+# 健康检查接口
+location /health {
+    proxy_pass http://127.0.0.1:30001;
+}
 
-    location / {
-        proxy_pass http://127.0.0.1:30001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
+# 前端静态文件
+location / {
+    root /usr/local/openresty/html/admin;
+    index index.html;
+    try_files $uri $uri/ /index.html;
+    
+    # 静态资源缓存
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 7d;
+        add_header Cache-Control "public, no-transform";
     }
 }
 ```
 
-### 4.3 测试并重载OpenResty配置
+### 4.3 测试OpenResty配置
 
 ```bash
-# 测试配置
-sudo /usr/local/openresty/bin/openresty -t
+# 通过1Panel重启OpenResty
+# 或者命令行测试配置
+sudo openresty -t
 
-# 重载配置
-sudo /usr/local/openresty/bin/openresty -s reload
+# 重启OpenResty
+sudo systemctl restart openresty
 ```
 
 ---
 
 ## 阶段五：Cloudflare Tunnel配置
+
+> **HTTPS说明：** Cloudflare Tunnel会自动为你的域名提供HTTPS证书，无需在NAS上配置SSL证书。用户通过HTTPS访问时，请求经过Cloudflare网络加密传输到你的NAS。
 
 ### 5.1 安装cloudflared
 
@@ -450,14 +542,14 @@ tunnel: your-tunnel-id
 credentials-file: /home/your_user/.cloudflared/your-tunnel-id.json
 
 ingress:
-  # 用户端域名 - 暴露到公网
+  # 用户端域名 - 指向OpenResty（80端口）
   - hostname: 你的域名.com
-    service: http://localhost:30000
+    service: http://localhost:80
   
   # 管理端 - 不暴露到公网（仅局域网访问）
   # 如需外网访问，取消注释并配置Cloudflare Access
   # - hostname: admin.你的域名.com
-  #   service: http://localhost:30001
+  #   service: http://localhost:80
   
   # 兜底规则
   - service: http_status:404
@@ -513,11 +605,11 @@ sudo systemctl status cloudflared
 ### 访问测试
 
 1. **局域网测试：**
-   - 用户端：`http://NAS局域网IP:30000`
-   - 管理端：`http://NAS局域网IP:30001`
+   - 用户端：`http://NAS局域网IP`（OpenResty监听80端口）
+   - 管理端：`http://NAS局域网IP`（需要配置单独的域名或端口）
 
 2. **外网测试：**
-   - 用户端：`https://你的域名.com`
+   - 用户端：`https://你的域名.com`（Cloudflare自动HTTPS）
 
 3. **登录测试：**
    - 管理端：`admin` / `admin123`（首次登录后请立即修改密码）
@@ -547,6 +639,28 @@ pm2 stop subscription-manager
 
 # 监控资源
 pm2 monit
+```
+
+### PM2日志轮转管理
+
+```bash
+# 查看pm2-logrotate配置
+pm2 conf
+
+# 修改日志大小限制（例如改为50MB）
+pm2 set pm2-logrotate:max_size 50M
+
+# 修改保留文件数量（例如保留10个）
+pm2 set pm2-logrotate:retain 10
+
+# 手动触发日志轮转（测试用）
+pm2 trigger pm2-logrotate rotate
+
+# 查看pm2-logrotate日志
+pm2 logs pm2-logrotate
+
+# 重启pm2-logrotate模块
+pm2 restart pm2-logrotate
 ```
 
 ### 数据库备份
@@ -582,11 +696,11 @@ journalctl -u cloudflared -f
 
 1. **修改默认密码：** 首次登录后立即修改管理员密码
 2. **修改JWT密钥：** 使用随机生成的强密码（至少32位）
-3. **配置防火墙：** 只开放必要端口（80、443、30001可选）
+3. **配置防火墙：** 只开放必要端口（80、443）
 4. **定期备份：** 备份数据库和配置文件
 5. **更新系统：** 定期更新NAS系统和Node.js
 6. **限制管理端访问：** 仅允许局域网IP访问管理端
-7. **使用HTTPS：** 通过Cloudflare Tunnel自动启用HTTPS
+7. **HTTPS由Cloudflare提供：** 无需在NAS上配置SSL证书
 
 ---
 
