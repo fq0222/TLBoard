@@ -114,26 +114,14 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
   logger.info(`开始计算 ${users.length} 个用户的流量，${serverIds.length} 台服务器`);
 
   const now = Math.floor(Date.now() / 1000);
-  const { Pool } = require('pg');
-  const config = require('../config');
-  const pool = new Pool({
-    host: config.database.host,
-    port: config.database.port,
-    user: config.database.user,
-    password: config.database.password,
-    database: config.database.database,
-  });
 
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
+  const transaction = db.transaction(async () => {
     // 批量获取所有同步记录
-    const syncResult = await client.query(
+    const syncResult = await db.prepare(
       'SELECT user_id, server_id, last_sync_traffic FROM traffic_sync_log'
-    );
+    ).all();
     const syncLogMap = new Map();
-    for (const row of syncResult.rows) {
+    for (const row of syncResult) {
       syncLogMap.set(`${row.user_id}-${row.server_id}`, Number(row.last_sync_traffic) || 0);
     }
 
@@ -186,26 +174,19 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
         params.push(update.userId, update.serverId, update.currentTraffic, update.now);
         paramIndex += 4;
       }
-      await client.query(
+      await db.prepare(
         `INSERT INTO traffic_sync_log (user_id, server_id, last_sync_traffic, last_sync_at)
          VALUES ${values.join(', ')}
          ON CONFLICT (user_id, server_id)
-         DO UPDATE SET last_sync_traffic = EXCLUDED.last_sync_traffic, last_sync_at = EXCLUDED.last_sync_at`,
-        params
-      );
+         DO UPDATE SET last_sync_traffic = EXCLUDED.last_sync_traffic, last_sync_at = EXCLUDED.last_sync_at`
+      ).run(...params);
     }
 
-    await client.query('COMMIT');
     logger.info(`计算用户流量完成，${Object.keys(userTrafficData).length} 个用户，${syncLogUpdates.length} 条同步记录更新`);
     return userTrafficData;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    logger.error(`计算用户流量错误: ${error.message}`);
-    throw error;
-  } finally {
-    client.release();
-    await pool.end();
-  }
+  });
+  
+  return await transaction();
 }
 
 /**
