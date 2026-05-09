@@ -88,65 +88,82 @@ async function fetchAllServerTraffic(db) {
 
 /**
  * 计算用户总流量（增量更新）
+ * 使用事务保护，批量查询和写入同步日志
  * @param {Object} db - 数据库实例
  * @param {Object} serverTrafficData - 服务器流量数据
  * @returns {Promise<Object>} 用户流量数据 { userId: { email, trafficUsed, trafficLimit, isOverLimit } }
  */
 async function calculateUserTotalTraffic(db, serverTrafficData) {
-  try {
-    const users = await db.prepare(`
-      SELECT id, email, traffic_used, traffic_limit
-      FROM users
-      WHERE enabled = 1
-    `).all();
+  const serverIds = Object.keys(serverTrafficData);
+  if (serverIds.length === 0) {
+    logger.info('没有服务器流量数据');
+    return {};
+  }
 
-    if (users.length === 0) {
-      logger.info('没有启用的用户');
-      return {};
+  const users = await db.prepare(`
+    SELECT id, email, traffic_used, traffic_limit
+    FROM users
+    WHERE enabled = 1
+  `).all();
+
+  if (users.length === 0) {
+    logger.info('没有启用的用户');
+    return {};
+  }
+
+  logger.info(`开始计算 ${users.length} 个用户的流量，${serverIds.length} 台服务器`);
+
+  const now = Math.floor(Date.now() / 1000);
+  const { Pool } = require('pg');
+  const config = require('../config');
+  const pool = new Pool({
+    host: config.database.host,
+    port: config.database.port,
+    user: config.database.user,
+    password: config.database.password,
+    database: config.database.database,
+  });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 批量获取所有同步记录
+    const syncResult = await client.query(
+      'SELECT user_id, server_id, last_sync_traffic FROM traffic_sync_log'
+    );
+    const syncLogMap = new Map();
+    for (const row of syncResult.rows) {
+      syncLogMap.set(`${row.user_id}-${row.server_id}`, Number(row.last_sync_traffic) || 0);
     }
 
-    logger.info(`开始计算 ${users.length} 个用户的流量`);
-
     const userTrafficData = {};
+    const syncLogUpdates = [];
 
     for (const user of users) {
       let totalIncrement = 0;
 
-      for (const serverId of Object.keys(serverTrafficData)) {
+      for (const serverId of serverIds) {
         const serverData = serverTrafficData[serverId];
         const clientData = serverData[user.email];
-
         if (!clientData) continue;
 
-        const lastSyncLog = await db.prepare(`
-          SELECT last_sync_traffic FROM traffic_sync_log
-          WHERE user_id = ? AND server_id = ?
-        `).get(user.id, serverId);
-
-        const lastSyncTraffic = lastSyncLog ? lastSyncLog.last_sync_traffic : 0;
+        const lastSyncTraffic = syncLogMap.get(`${user.id}-${serverId}`) || 0;
         const currentTraffic = clientData.total;
 
         let increment = 0;
         if (currentTraffic >= lastSyncTraffic) {
           increment = currentTraffic - lastSyncTraffic;
         } else {
+          logger.warn(`服务器 ${serverId} 用户 ${user.email} 流量重置: 当前 ${currentTraffic} < 上次 ${lastSyncTraffic}`);
           increment = currentTraffic;
         }
 
         totalIncrement += increment;
-
-        await db.prepare(`
-          INSERT INTO traffic_sync_log (user_id, server_id, last_sync_traffic, last_sync_at)
-          VALUES (?, ?, ?, ?)
-          ON CONFLICT (user_id, server_id)
-          DO UPDATE SET last_sync_traffic = ?, last_sync_at = ?
-        `).run(
-          user.id, serverId, currentTraffic, Math.floor(Date.now() / 1000),
-          currentTraffic, Math.floor(Date.now() / 1000)
-        );
+        syncLogUpdates.push({ userId: user.id, serverId, currentTraffic, now });
       }
 
-      const newTrafficUsed = (user.traffic_used || 0) + totalIncrement;
+      const newTrafficUsed = (Number(user.traffic_used) || 0) + totalIncrement;
       const trafficLimit = Number(user.traffic_limit) || 0;
       const isOverLimit = trafficLimit > 0 && newTrafficUsed >= trafficLimit;
 
@@ -159,11 +176,35 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
       };
     }
 
-    logger.info(`计算用户流量完成，${Object.keys(userTrafficData).length} 个用户`);
+    // 批量写入同步日志
+    if (syncLogUpdates.length > 0) {
+      const values = [];
+      const params = [];
+      let paramIndex = 1;
+      for (const update of syncLogUpdates) {
+        values.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3})`);
+        params.push(update.userId, update.serverId, update.currentTraffic, update.now);
+        paramIndex += 4;
+      }
+      await client.query(
+        `INSERT INTO traffic_sync_log (user_id, server_id, last_sync_traffic, last_sync_at)
+         VALUES ${values.join(', ')}
+         ON CONFLICT (user_id, server_id)
+         DO UPDATE SET last_sync_traffic = EXCLUDED.last_sync_traffic, last_sync_at = EXCLUDED.last_sync_at`,
+        params
+      );
+    }
+
+    await client.query('COMMIT');
+    logger.info(`计算用户流量完成，${Object.keys(userTrafficData).length} 个用户，${syncLogUpdates.length} 条同步记录更新`);
     return userTrafficData;
   } catch (error) {
+    await client.query('ROLLBACK');
     logger.error(`计算用户流量错误: ${error.message}`);
-    return {};
+    throw error;
+  } finally {
+    client.release();
+    await pool.end();
   }
 }
 
