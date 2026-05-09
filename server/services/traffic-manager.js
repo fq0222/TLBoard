@@ -374,7 +374,31 @@ async function syncDisableStatusToXui(db, userId, disable) {
  * @param {Object} db - 数据库实例
  */
 async function syncTrafficAndHandleDisable(db) {
-  // TODO: 实现
+  try {
+    logger.info('开始执行流量同步与禁用检查任务...');
+
+    const serverTrafficData = await fetchAllServerTraffic(db);
+
+    if (Object.keys(serverTrafficData).length === 0) {
+      logger.info('没有获取到服务器流量数据，跳过后续步骤');
+      return;
+    }
+
+    const userTrafficData = await calculateUserTotalTraffic(db, serverTrafficData);
+
+    if (Object.keys(userTrafficData).length === 0) {
+      logger.info('没有计算到用户流量数据，跳过后续步骤');
+      return;
+    }
+
+    await updateTrafficInDatabase(db, userTrafficData);
+
+    await checkAndDisableOverLimitUsers(db, userTrafficData);
+
+    logger.info('流量同步与禁用检查任务完成');
+  } catch (error) {
+    logger.error(`流量同步与禁用检查任务错误: ${error.message}`);
+  }
 }
 
 module.exports = {
