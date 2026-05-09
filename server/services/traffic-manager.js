@@ -93,7 +93,78 @@ async function fetchAllServerTraffic(db) {
  * @returns {Promise<Object>} 用户流量数据 { userId: { email, trafficUsed, trafficLimit, isOverLimit } }
  */
 async function calculateUserTotalTraffic(db, serverTrafficData) {
-  // TODO: 实现
+  try {
+    const users = await db.prepare(`
+      SELECT id, email, traffic_used, traffic_limit
+      FROM users
+      WHERE enabled = 1
+    `).all();
+
+    if (users.length === 0) {
+      logger.info('没有启用的用户');
+      return {};
+    }
+
+    logger.info(`开始计算 ${users.length} 个用户的流量`);
+
+    const userTrafficData = {};
+
+    for (const user of users) {
+      let totalIncrement = 0;
+
+      for (const serverId of Object.keys(serverTrafficData)) {
+        const serverData = serverTrafficData[serverId];
+        const clientData = serverData[user.email];
+
+        if (!clientData) continue;
+
+        const lastSyncLog = await db.prepare(`
+          SELECT last_sync_traffic FROM traffic_sync_log
+          WHERE user_id = ? AND server_id = ?
+        `).get(user.id, serverId);
+
+        const lastSyncTraffic = lastSyncLog ? lastSyncLog.last_sync_traffic : 0;
+        const currentTraffic = clientData.total;
+
+        let increment = 0;
+        if (currentTraffic >= lastSyncTraffic) {
+          increment = currentTraffic - lastSyncTraffic;
+        } else {
+          increment = currentTraffic;
+        }
+
+        totalIncrement += increment;
+
+        await db.prepare(`
+          INSERT INTO traffic_sync_log (user_id, server_id, last_sync_traffic, last_sync_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT (user_id, server_id)
+          DO UPDATE SET last_sync_traffic = ?, last_sync_at = ?
+        `).run(
+          user.id, serverId, currentTraffic, Math.floor(Date.now() / 1000),
+          currentTraffic, Math.floor(Date.now() / 1000)
+        );
+      }
+
+      const newTrafficUsed = (user.traffic_used || 0) + totalIncrement;
+      const trafficLimit = Number(user.traffic_limit) || 0;
+      const isOverLimit = trafficLimit > 0 && newTrafficUsed >= trafficLimit;
+
+      userTrafficData[user.id] = {
+        email: user.email,
+        trafficUsed: newTrafficUsed,
+        trafficLimit: trafficLimit,
+        isOverLimit: isOverLimit,
+        increment: totalIncrement
+      };
+    }
+
+    logger.info(`计算用户流量完成，${Object.keys(userTrafficData).length} 个用户`);
+    return userTrafficData;
+  } catch (error) {
+    logger.error(`计算用户流量错误: ${error.message}`);
+    return {};
+  }
 }
 
 /**
