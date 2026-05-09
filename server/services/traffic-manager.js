@@ -256,7 +256,66 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
  * @returns {Promise<boolean>} 是否成功
  */
 async function syncDisableStatusToXui(db, userId, disable) {
-  // TODO: 实现
+  try {
+    // 查询用户信息
+    const user = await db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
+    if (!user) {
+      logger.warn(`用户不存在: ${userId}`);
+      return false;
+    }
+    
+    // 查询所有在线服务器
+    const servers = await db.prepare(`
+      SELECT id, name, api_url, api_username, api_password
+      FROM xui_servers
+      WHERE status = 1
+    `).all();
+    
+    if (servers.length === 0) {
+      logger.warn('没有在线服务器');
+      return false;
+    }
+    
+    logger.info(`开始同步禁用状态到 ${servers.length} 台服务器: 用户 ${user.email}, 禁用 ${disable}`);
+    
+    // 遍历服务器，同步禁用状态
+    let successCount = 0;
+    for (const server of servers) {
+      try {
+        const xuiService = new XuiService(server.api_url, server.api_username, server.api_password);
+        await xuiService.init();
+        
+        // 获取所有inbound
+        const inboundsResult = await xuiService.getInbounds();
+        if (!inboundsResult.success) {
+          logger.warn(`获取服务器 ${server.name} 的 inbounds 失败`);
+          continue;
+        }
+        
+        // 对每个inbound，查找匹配用户并更新
+        for (const inbound of inboundsResult.data) {
+          const updateResult = await xuiService.updateClient(inbound.id, user.email, {
+            enabled: !disable
+          });
+          
+          if (updateResult.success) {
+            successCount++;
+            logger.info(`同步服务器 ${server.name} 的 inbound ${inbound.id} 成功`);
+          } else {
+            logger.warn(`同步服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${updateResult.message}`);
+          }
+        }
+      } catch (error) {
+        logger.error(`同步服务器 ${server.name} 禁用状态错误: ${error.message}`);
+      }
+    }
+    
+    logger.info(`同步禁用状态完成: 用户 ${user.email}, 禁用 ${disable}, 成功 ${successCount} 个 inbound`);
+    return successCount > 0;
+  } catch (error) {
+    logger.error(`同步禁用状态错误: ${error.message}`);
+    return false;
+  }
 }
 
 /**
