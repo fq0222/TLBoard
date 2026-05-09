@@ -245,7 +245,58 @@ async function updateTrafficInDatabase(db, userTrafficData) {
  * @param {Object} userTrafficData - 用户流量数据
  */
 async function checkAndDisableOverLimitUsers(db, userTrafficData) {
-  // TODO: 实现
+  try {
+    const userIds = Object.keys(userTrafficData);
+    
+    if (userIds.length === 0) {
+      logger.info('没有需要检查的用户');
+      return;
+    }
+
+    logger.info(`开始检查 ${userIds.length} 个用户的流量限制`);
+
+    let disabledCount = 0;
+
+    for (const userId of userIds) {
+      const data = userTrafficData[userId];
+      
+      // 检查是否超限
+      if (!data.isOverLimit) {
+        continue;
+      }
+
+      // 检查用户当前状态
+      const user = await db.prepare('SELECT enabled FROM users WHERE id = ?').get(userId);
+      if (!user || user.enabled === 0) {
+        continue;
+      }
+
+      logger.info(`用户 ${data.email} 流量超限，开始禁用: ${data.trafficUsed}/${data.trafficLimit}`);
+
+      try {
+        // 先同步到3X-UI
+        const syncSuccess = await syncDisableStatusToXui(db, userId, true);
+        
+        if (syncSuccess) {
+          // 更新本地数据库
+          await db.prepare(`
+            UPDATE users SET enabled = 0, traffic_used_at = ? WHERE id = ?
+          `).run(Math.floor(Date.now() / 1000), userId);
+          
+          disabledCount++;
+          logger.info(`禁用用户 ${data.email} 成功`);
+        } else {
+          logger.warn(`同步禁用状态到3X-UI失败，跳过用户 ${data.email}`);
+        }
+      } catch (error) {
+        logger.error(`禁用用户 ${data.email} 错误: ${error.message}`);
+      }
+    }
+
+    logger.info(`检查用户流量限制完成，禁用 ${disabledCount} 个用户`);
+  } catch (error) {
+    logger.error(`检查用户流量限制错误: ${error.message}`);
+  }
 }
 
 /**
