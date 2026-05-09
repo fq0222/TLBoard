@@ -480,6 +480,36 @@
 
 ### 2.5 订阅相关
 
+#### POST `/api/user/subscription/generate`
+
+生成订阅链接，会同步所有在线 3X-UI 服务器的节点信息。
+
+**说明**：此接口在用户点击"生成订阅链接"按钮时调用，会先同步节点信息再返回订阅链接，确保节点数据最新。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "subscription_url": "https://example.com/api/user/sub/abc123",
+    "clash_url": "https://example.com/api/user/sub/abc123?clash=1",
+    "v2ray_url": "https://example.com/api/user/sub/abc123?v2ray=1"
+  }
+}
+```
+
+常见失败响应：
+
+```json
+{
+  "code": 3001,
+  "message": "请先完成 IP 优选",
+  "data": null
+}
+```
+
 #### GET `/api/user/subscription`
 
 获取当前登录用户的订阅信息与节点列表。

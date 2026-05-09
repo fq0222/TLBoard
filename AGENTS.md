@@ -64,6 +64,7 @@ npx vite build --minify esbuild  # 绕过 terser 的构建方式
 - `services/order-service.js` - 订单处理
 - `services/vmq-service.js` - VMQ 支付
 - `services/xui-service.js` - 3X-UI 服务器交互
+- `services/xui-sync.js` - 节点信息同步工具
 
 ## 关键配置
 
@@ -151,6 +152,27 @@ await db.exec('ALTER TABLE users ADD COLUMN traffic_used_at BIGINT');
 // 错误 - 会报 syntax error
 await db.prepare('ALTER TABLE users ADD COLUMN traffic_used_at BIGINT').run();
 ```
+
+### 多台 3X-UI 服务器 UUID 同步问题
+
+**问题**：多台 3X-UI 服务器时，订阅链接返回的 UUID 不一致，导致某些节点不可用。
+
+**根因**：
+- `xui_nodes` 表的 `settings` 字段存储的是同步时的快照
+- 新用户支付完成后，`syncUserToXuiServers()` 会将用户添加到 3X-UI，但不会更新 `xui_nodes` 表
+- 订阅时从 `xui_nodes.settings` 中查找用户 UUID，找不到时会返回错误的 UUID（第一个客户端的 UUID）
+
+**解决方案**：
+- 创建 `server/services/xui-sync.js` 工具函数
+- 新增 `POST /api/user/subscription/generate` 接口
+- 用户点击"生成订阅链接"时，先同步所有服务器的节点信息，再返回订阅链接
+- 同步操作不放在每次访问订阅接口时执行，避免影响访问速度
+
+**关键代码**：
+- `server/services/xui-sync.js` - 同步工具函数
+- `server/routes/user/subscription.js` - `/generate` 接口
+- `client-user/src/api/index.js` - `generateSubscription()` 方法
+- `client-user/src/views/user/Profile.vue` - 生成按钮调用新接口+loading
 
 ### Element Plus 组件注意事项
 

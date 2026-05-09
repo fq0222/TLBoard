@@ -1,7 +1,7 @@
 # 机场面板系统需求文档
 
-> 版本：V1.4  
-> 更新日期：2026-05-07
+> 版本：V1.5  
+> 更新日期：2026-05-09
 
 ---
 
@@ -195,12 +195,21 @@ VMQ 后台需要配置以下两个地址：
 支持操作：
 
 - 一键优选 IP（在浏览器后台自动测试延迟，选择最优 5 个 IP）
-- 生成订阅链接（优选完成后可用）
+- 生成订阅链接（优选完成后可用，会自动同步节点信息到所有 3X-UI 服务器）
 - 复制订阅链接
 - 查看订阅详情
 - 续费套餐（在现有套餐基础上累加流量）
 - 重新购买套餐
 - Cloudflare IP 优选（手动选择 IP）
+
+生成订阅链接流程：
+
+1. 用户点击"生成订阅链接"按钮
+2. 后端同步所有在线 3X-UI 服务器的节点信息（更新 `xui_nodes` 表）
+3. 返回订阅链接（通用订阅、Clash 订阅）
+4. 前端显示订阅链接
+
+**说明**：同步操作放在生成订阅链接时执行，而不是每次访问订阅接口时执行，避免影响订阅链接的访问速度。
 
 续费流程：
 
@@ -377,6 +386,7 @@ VMQ 后台需要配置以下两个地址：
 | POST | `/api/user/register-and-pay` | 注册并创建支付订单 |
 | POST | `/api/user/login` | 用户登录 |
 | GET | `/api/user/profile` | 获取个人信息（包含 `cf_optimized` 状态） |
+| POST | `/api/user/subscription/generate` | 生成订阅链接（同步节点信息） |
 | GET | `/api/user/plans` | 获取套餐列表 |
 | GET | `/api/user/announcements` | 获取公告列表 |
 | GET | `/api/user/orders` | 获取当前用户订单列表 |
@@ -467,6 +477,7 @@ project/
 │  │  ├─ vmq-service.js
 │  │  ├─ order-service.js
 │  │  ├─ xui-service.js
+│  │  ├─ xui-sync.js
 │  │  └─ ticket-service.js
 │  └─ config.js
 ├─ client-user/
