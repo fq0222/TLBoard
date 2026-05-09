@@ -198,6 +198,19 @@ class DatabaseManager {
       `);
       logger.info('用户表初始化完成');
 
+      // 流量同步日志表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS traffic_sync_log (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          server_id INTEGER NOT NULL,
+          last_sync_traffic BIGINT DEFAULT 0,
+          last_sync_at BIGINT,
+          UNIQUE(user_id, server_id)
+        )
+      `);
+      logger.info('流量同步日志表初始化完成');
+
       // 管理员表
       await client.query(`
         CREATE TABLE IF NOT EXISTS admins (
@@ -395,6 +408,8 @@ class DatabaseManager {
       await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_replies_created_at ON ticket_replies(created_at)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_reads_ticket_id ON ticket_reads(ticket_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_reads_user_id ON ticket_reads(user_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_traffic_sync_log_user_server ON traffic_sync_log(user_id, server_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_traffic_sync_log_last_sync_at ON traffic_sync_log(last_sync_at)');
       logger.info('数据库索引创建完成');
     } catch (error) {
       logger.error(`索引创建失败: ${error.message}`);
