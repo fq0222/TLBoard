@@ -207,7 +207,36 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
  * @param {Object} userTrafficData - 用户流量数据
  */
 async function updateTrafficInDatabase(db, userTrafficData) {
-  // TODO: 实现
+  try {
+    const userIds = Object.keys(userTrafficData);
+    
+    if (userIds.length === 0) {
+      logger.info('没有需要更新的用户流量数据');
+      return;
+    }
+
+    logger.info(`开始更新 ${userIds.length} 个用户的流量数据`);
+
+    let updatedCount = 0;
+
+    for (const userId of userIds) {
+      const data = userTrafficData[userId];
+      
+      try {
+        await db.prepare(`
+          UPDATE users SET traffic_used = ?, updated_at = ? WHERE id = ?
+        `).run(data.trafficUsed, Math.floor(Date.now() / 1000), userId);
+        
+        updatedCount++;
+      } catch (error) {
+        logger.error(`更新用户 ${data.email} 流量数据错误: ${error.message}`);
+      }
+    }
+
+    logger.info(`更新用户流量数据完成，${updatedCount}/${userIds.length} 个用户`);
+  } catch (error) {
+    logger.error(`更新用户流量数据错误: ${error.message}`);
+  }
 }
 
 /**
