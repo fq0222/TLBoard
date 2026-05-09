@@ -4,6 +4,7 @@
  */
 
 const XuiService = require('./xui-service');
+const trafficManager = require('./traffic-manager');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('ORDER-SERVICE');
@@ -179,6 +180,24 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   });
 
   await transaction();
+
+  // 检查用户是否需要解除禁用（流量用完被禁用的情况）
+  const user = await db.prepare('SELECT enabled FROM users WHERE id = ?').get(order.user_id);
+  if (user && user.enabled === 0) {
+    logger.info(`用户 ${order.email} 已禁用，开始解除禁用`);
+    
+    // 更新本地数据库
+    await db.prepare(`
+      UPDATE users SET enabled = 1, traffic_used_at = NULL WHERE id = ?
+    `).run(order.user_id);
+    
+    // 异步同步到3X-UI
+    trafficManager.syncDisableStatusToXui(db, order.user_id, false).catch(err => {
+      logger.error(`后台同步解除禁用到 3X-UI 失败: ${err.message}`);
+    });
+    
+    logger.info(`用户 ${order.email} 解除禁用成功`);
+  }
 
   logger.info(`Order paid: ${outTradeNo}, user=${order.email}, expire_at=${expireAt}, traffic_limit=${newTrafficLimit}`);
 
