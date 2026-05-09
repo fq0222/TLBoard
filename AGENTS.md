@@ -65,6 +65,7 @@ npx vite build --minify esbuild  # 绕过 terser 的构建方式
 - `services/vmq-service.js` - VMQ 支付
 - `services/xui-service.js` - 3X-UI 服务器交互
 - `services/xui-sync.js` - 节点信息同步工具
+- `services/traffic-manager.js` - 流量统计与自动禁用管理
 
 ## 关键配置
 
@@ -174,6 +175,28 @@ await db.prepare('ALTER TABLE users ADD COLUMN traffic_used_at BIGINT').run();
 - `client-user/src/api/index.js` - `generateSubscription()` 方法
 - `client-user/src/views/user/Profile.vue` - 生成按钮调用新接口+loading
 
+### PostgreSQL 事务使用
+
+**问题**：`db.prepare().run()` 使用连接池的默认连接，不在事务中。
+
+**解决方案**：需要使用 `db.pool.connect()` 获取专用连接，在事务中执行所有操作：
+
+```javascript
+const client = await db.pool.connect()
+try {
+  await client.query('BEGIN')
+  // 所有查询和写入使用 client.query()
+  await client.query('COMMIT')
+} catch (error) {
+  await client.query('ROLLBACK')
+  throw error
+} finally {
+  client.release()
+}
+```
+
+**注意**：`db` 代理对象已暴露 `pool` 属性，可以直接使用 `db.pool.connect()`。
+
 ### Element Plus 组件注意事项
 
 - `el-switch` 组件需要布尔值，数据库返回的 `0/1` 整数需用 `!!` 转换：
@@ -237,6 +260,84 @@ http://192.168.31.100:30000/api/user/payment/notify
 - 售罄检查：注册时检查，续费切换套餐时检查
 - 名额释放：流量用完超过 3 天未续费，定时任务自动释放
 - `traffic_used_at`：记录流量用完的时间戳
+
+## 流量管理模块
+
+### 功能概述
+
+`server/services/traffic-manager.js` 负责流量统计、自动禁用和解除禁用：
+
+- **流量统计**：汇总所有 3X-UI 服务器的用户流量（增量更新）
+- **自动禁用**：流量达到套餐限额后自动禁用用户并同步到 3X-UI
+- **自动解除禁用**：用户续费后自动解除禁用状态
+
+### 核心函数
+
+```javascript
+// 主函数：同步流量并处理禁用
+await trafficManager.syncTrafficAndHandleDisable(db)
+
+// 子函数
+await trafficManager.fetchAllServerTraffic(db)           // 获取所有服务器流量
+await trafficManager.calculateUserTotalTraffic(db, data)  // 计算用户总流量
+await trafficManager.updateTrafficInDatabase(db, data)    // 更新数据库
+await trafficManager.checkAndDisableOverLimitUsers(db, data) // 检查并禁用超量用户
+await trafficManager.syncDisableStatusToXui(db, userId, disable) // 同步禁用状态到 3X-UI
+```
+
+### 增量更新机制
+
+使用 `traffic_sync_log` 表记录每个服务器上次同步的流量值：
+
+1. 从所有服务器获取当前流量
+2. 计算增量：`增量 = 本次流量 - 上次流量`
+3. 累加到用户总流量：`新总流量 = 原有流量 + 增量`
+4. 更新同步日志
+
+### 数据库事务
+
+流量计算使用 PostgreSQL 事务保护：
+
+```javascript
+const client = await db.pool.connect()
+try {
+  await client.query('BEGIN')
+  // 所有查询和写入使用 client.query()
+  await client.query('COMMIT')
+} catch (error) {
+  await client.query('ROLLBACK')
+  throw error
+} finally {
+  client.release()
+}
+```
+
+**注意**：`db.prepare().run()` 使用连接池的默认连接，不在事务中。需要使用 `db.pool.connect()` 获取专用连接。
+
+### 定时任务
+
+流量同步任务每 1 小时执行一次（首次延迟 10 分钟）：
+
+```javascript
+// server/jobs/index.js
+const trafficManager = require('../services/traffic-manager')
+
+function registerTrafficSyncJob(db) {
+  setTimeout(async () => {
+    await trafficManager.syncTrafficAndHandleDisable(db)
+  }, 10 * 60 * 1000)
+
+  setInterval(async () => {
+    await trafficManager.syncTrafficAndHandleDisable(db)
+  }, 60 * 60 * 1000) // 每1小时
+}
+```
+
+### 测试脚本
+
+```bash
+node server/test/test-traffic-manager.js
+```
 
 ## 数据库连接优化
 
