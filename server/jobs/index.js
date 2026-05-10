@@ -200,15 +200,40 @@ async function syncUsersToServer(db, server, users) {
           // 为每个节点生成唯一的邮箱标识（邮箱-节点备注）
           const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
 
+          // 生成独立的 UUID 和 sub_id
+          const crypto = require('crypto');
+          const uuid = crypto.randomUUID();
+          const subId = crypto.randomBytes(8).toString('hex');
+
+          // 查找节点记录
+          const node = await db.prepare(
+            'SELECT id FROM xui_nodes WHERE server_id = ? AND inbound_id = ?'
+          ).get(server.id, inbound.id);
+
+          if (node) {
+            // 检查是否已有配置
+            const existingConfig = await db.prepare(
+              'SELECT id FROM user_node_configs WHERE user_id = ? AND node_id = ?'
+            ).get(user.id, node.id);
+
+            if (!existingConfig) {
+              // 保存到 user_node_configs 表
+              await db.prepare(
+                'INSERT INTO user_node_configs (user_id, node_id, uuid, sub_id) VALUES (?, ?, ?, ?)'
+              ).run(user.id, node.id, uuid, subId);
+              logger.info(`保存用户节点配置: user=${user.email}, node=${node.id}, uuid=${uuid}`);
+            }
+          }
+
           const result = await xuiService.addClient(inbound.id, inbound.protocol, {
             email: nodeEmail,
-            id: user.subscription_token,
+            id: uuid,
             enable: user.enabled === 1,
             expiryTime: expiryTime,
             totalGB: totalGB,
             limitIp: 0,
             tgId: 0,
-            subId: ''
+            subId: subId
           });
 
           if (result.success) {
