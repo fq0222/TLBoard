@@ -457,7 +457,6 @@ class DatabaseManager {
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_node_id ON user_node_configs(node_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_sub_id ON user_node_configs(sub_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_id ON user_subscriptions(user_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscriptions_sub_id ON user_subscriptions(sub_id)');
       logger.info('数据库索引创建完成');
     } catch (error) {
       logger.error(`索引创建失败: ${error.message}`);
