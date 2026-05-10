@@ -22,7 +22,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
 
     // 查询所有服务器
     const servers = await db.prepare(`
-      SELECT id, name, api_url, host, client_port, status, last_check_at, created_at
+      SELECT id, name, api_url, host, client_port, sub_url, status, last_check_at, created_at
       FROM xui_servers
       ORDER BY created_at DESC
     `).all();
@@ -45,6 +45,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
         api_url: server.api_url,
         host: server.host || '',
         client_port: server.client_port || 0,
+        sub_url: server.sub_url || '',
         status: server.status,
         status_text: server.status === 1 ? '在线' : '离线',
         node_count: nodeStats.node_count || 0,
@@ -106,7 +107,7 @@ router.post('/', authenticateAdmin, [
       });
     }
 
-    const { name, api_url, api_username, api_password } = req.body;
+    const { name, api_url, api_username, api_password, sub_url } = req.body;
     const host = req.body.host || '';
     const clientPort = parseInt(req.body.client_port, 10) || 0;
     const db = req.app.locals.db;
@@ -125,9 +126,9 @@ router.post('/', authenticateAdmin, [
 
     // 插入服务器记录
     const result = await db.prepare(`
-      INSERT INTO xui_servers (name, api_url, api_username, api_password, host, client_port, status, last_check_at)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-    `).run(name, api_url, api_username, api_password, host, clientPort, Math.floor(Date.now() / 1000));
+      INSERT INTO xui_servers (name, api_url, api_username, api_password, host, client_port, sub_url, status, last_check_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+    `).run(name, api_url, api_username, api_password, host, clientPort, sub_url || '', Math.floor(Date.now() / 1000));
 
     logger.info(`添加服务器成功: ${name} (ID: ${result.lastInsertRowid})`);
 
@@ -140,6 +141,7 @@ router.post('/', authenticateAdmin, [
         api_url,
         host,
         client_port: clientPort,
+        sub_url: sub_url || '',
         status: 1,
         message: '服务器添加成功，连接测试通过'
       }
@@ -234,6 +236,10 @@ router.put('/:id', authenticateAdmin, [
       updates.push('client_port = ?');
       values.push(parseInt(req.body.client_port, 10) || 0);
     }
+    if (req.body.sub_url !== undefined) {
+      updates.push('sub_url = ?');
+      values.push(req.body.sub_url);
+    }
 
     if (updates.length === 0) {
       logger.warn('修改服务器失败: 没有要更新的字段');
@@ -262,6 +268,7 @@ router.put('/:id', authenticateAdmin, [
         api_url: updatedServer.api_url,
         host: updatedServer.host || '',
         client_port: updatedServer.client_port || 0,
+        sub_url: updatedServer.sub_url || '',
         status: updatedServer.status,
         message: '服务器信息更新成功'
       }
@@ -496,6 +503,7 @@ router.get('/:id/detail', authenticateAdmin, [
           api_url: server.api_url,
           host: server.host || '',
           client_port: server.client_port || 0,
+          sub_url: server.sub_url || '',
           status: server.status,
           last_check_at: server.last_check_at
         },
