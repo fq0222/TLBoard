@@ -139,11 +139,21 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
 
       for (const serverId of serverIds) {
         const serverData = serverTrafficData[serverId];
-        const clientData = serverData[user.email];
-        if (!clientData) continue;
+        
+        // 查找该用户在该服务器上的所有节点流量（邮箱格式：用户邮箱-节点备注）
+        let userTotalTraffic = 0;
+        let found = false;
+        for (const [email, data] of Object.entries(serverData)) {
+          if (email.startsWith(user.email + '-')) {
+            userTotalTraffic += data.total || 0;
+            found = true;
+          }
+        }
+        
+        if (!found) continue;
 
         const lastSyncTraffic = syncLogMap.get(`${user.id}-${serverId}`) || 0;
-        const currentTraffic = clientData.total;
+        const currentTraffic = userTotalTraffic;
 
         let increment = 0;
         if (currentTraffic >= lastSyncTraffic) {
@@ -345,7 +355,9 @@ async function syncDisableStatusToXui(db, userId, disable) {
         
         // 对每个inbound，查找匹配用户并更新
         for (const inbound of inboundsResult.data) {
-          const updateResult = await xuiService.updateClient(inbound.id, user.email, {
+          // 使用新的邮箱格式（用户邮箱-节点备注）
+          const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
+          const updateResult = await xuiService.updateClient(inbound.id, nodeEmail, {
             enabled: !disable
           });
           
