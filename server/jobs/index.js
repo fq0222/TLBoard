@@ -208,6 +208,9 @@ async function syncUsersToServer(db, server, users) {
           if (result.success) {
             syncCount++;
             logger.info(`同步用户 ${user.email} 到服务器 ${server.name} 的inbound ${inbound.id} 成功`);
+          } else if (result.message && result.message.includes('Duplicate email')) {
+            // 邮箱已存在（可能在其他 inbound 中），跳过
+            logger.info(`用户 ${user.email} 已存在于 3X-UI，跳过`);
           }
         } catch (error) {
           logger.error(`同步用户 ${user.email} 到inbound ${inbound.id} 失败: ${error.message}`);
