@@ -458,7 +458,11 @@ async function syncToXuiServers(db, user) {
         
         // 同步到每个 inbound
         for (const inboundId of inboundIds) {
-          const result = await xuiService.updateClient(inboundId, user.email, {
+          // 查询节点备注，生成新的邮箱格式
+          const node = await db.prepare('SELECT remark FROM xui_nodes WHERE server_id = ? AND inbound_id = ?').get(server.id, inboundId);
+          const nodeEmail = `${user.email}-${node?.remark || inboundId}`;
+          
+          const result = await xuiService.updateClient(inboundId, nodeEmail, {
             enabled: !!user.enabled,
             expiryTime: expiryTime,
             totalGB: totalGB
