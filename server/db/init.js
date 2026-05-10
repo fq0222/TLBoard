@@ -275,6 +275,7 @@ class DatabaseManager {
           api_password VARCHAR(255) NOT NULL,
           host VARCHAR(500) DEFAULT '',
           client_port INTEGER DEFAULT 0,
+          sub_url VARCHAR(500) DEFAULT '',
           status INTEGER DEFAULT 0,
           last_check_at BIGINT,
           created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
@@ -299,6 +300,32 @@ class DatabaseManager {
         )
       `);
       logger.info('3X-UI节点快照表初始化完成');
+
+      // 用户节点配置表（存储每个用户在每个节点上的独立配置）
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS user_node_configs (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          node_id INTEGER NOT NULL REFERENCES xui_nodes(id) ON DELETE CASCADE,
+          uuid VARCHAR(100) NOT NULL,
+          sub_id VARCHAR(50) NOT NULL,
+          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+          UNIQUE(user_id, node_id)
+        )
+      `);
+      logger.info('用户节点配置表初始化完成');
+
+      // 用户订阅缓存表（存储聚合后的订阅信息）
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS user_subscriptions (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          sub_id VARCHAR(50) NOT NULL UNIQUE,
+          nodes_data TEXT NOT NULL,
+          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+        )
+      `);
+      logger.info('用户订阅缓存表初始化完成');
 
       // 公告表
       await client.query(`
@@ -384,6 +411,17 @@ class DatabaseManager {
 
       await client.query('COMMIT');
       logger.info('数据库表初始化完成');
+
+      // 迁移：为已存在的 xui_servers 表添加 sub_url 字段
+      try {
+        await client.query('ALTER TABLE xui_servers ADD COLUMN IF NOT EXISTS sub_url VARCHAR(500) DEFAULT \'\'');
+        logger.info('Migration: Added sub_url column to xui_servers table');
+      } catch (error) {
+        // 字段已存在时忽略错误
+        if (!error.message.includes('already exists')) {
+          logger.error(`Migration error: ${error.message}`);
+        }
+      }
     } catch (error) {
       await client.query('ROLLBACK');
       logger.error(`表结构初始化失败: ${error.message}`);
@@ -415,6 +453,11 @@ class DatabaseManager {
       await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_reads_user_id ON ticket_reads(user_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_traffic_sync_log_user_server ON traffic_sync_log(user_id, server_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_traffic_sync_log_last_sync_at ON traffic_sync_log(last_sync_at)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_user_id ON user_node_configs(user_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_node_id ON user_node_configs(node_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_sub_id ON user_node_configs(sub_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_id ON user_subscriptions(user_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscriptions_sub_id ON user_subscriptions(sub_id)');
       logger.info('数据库索引创建完成');
     } catch (error) {
       logger.error(`索引创建失败: ${error.message}`);
