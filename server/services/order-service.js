@@ -83,6 +83,27 @@ async function syncUserToXuiServers(db, user, plan) {
               } else {
                 logger.warn(`更新用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${updateResult.message}`);
               }
+
+              // 查找节点记录，确保 user_node_configs 表中有配置
+              const node = await db.prepare(
+                'SELECT id FROM xui_nodes WHERE server_id = ? AND inbound_id = ?'
+              ).get(server.id, inbound.id);
+
+              if (node) {
+                // 检查是否已有配置
+                const existingConfig = await db.prepare(
+                  'SELECT id FROM user_node_configs WHERE user_id = ? AND node_id = ?'
+                ).get(user.id, node.id);
+
+                if (!existingConfig) {
+                  // 没有配置，需要创建
+                  const credentials = generateNodeCredentials();
+                  await db.prepare(
+                    'INSERT INTO user_node_configs (user_id, node_id, uuid, sub_id) VALUES (?, ?, ?, ?)'
+                  ).run(user.id, node.id, existingClient.uuid || credentials.uuid, credentials.subId);
+                  logger.info(`补充用户节点配置: user=${user.email}, node=${node.id}`);
+                }
+              }
             } else {
               // 用户不存在，添加新用户
               // 生成独立的 UUID 和 sub_id
