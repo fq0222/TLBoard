@@ -3,11 +3,23 @@
  * 处理订单支付成功后的统一激活逻辑
  */
 
+const crypto = require('crypto');
 const XuiService = require('./xui-service');
 const trafficManager = require('./traffic-manager');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('ORDER-SERVICE');
+
+/**
+ * 为用户在节点上生成独立的 UUID 和 sub_id
+ * @returns {object} { uuid, subId }
+ */
+function generateNodeCredentials() {
+  return {
+    uuid: crypto.randomUUID(),
+    subId: crypto.randomBytes(8).toString('hex')  // 16 位十六进制
+  };
+}
 
 /**
  * 同步用户到所有在线的 3X-UI 服务器
@@ -69,20 +81,37 @@ async function syncUserToXuiServers(db, user, plan) {
                 logger.warn(`更新用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${updateResult.message}`);
               }
             } else {
-              // 用户不存在，添加用户
+              // 用户不存在，添加新用户
+              // 生成独立的 UUID 和 sub_id
+              const credentials = generateNodeCredentials();
+
+              // 查找节点记录
+              const node = await db.prepare(
+                'SELECT id FROM xui_nodes WHERE server_id = ? AND inbound_id = ?'
+              ).get(server.id, inbound.id);
+
+              if (node) {
+                // 保存到 user_node_configs 表
+                await db.prepare(
+                  'INSERT INTO user_node_configs (user_id, node_id, uuid, sub_id) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, node_id) DO NOTHING'
+                ).run(user.id, node.id, credentials.uuid, credentials.subId);
+                logger.info(`保存用户节点配置: user=${user.email}, node=${node.id}, uuid=${credentials.uuid}`);
+              }
+
+              // 添加到 3X-UI
               const addResult = await xuiService.addClient(inbound.id, inbound.protocol, {
                 email: user.email,
-                id: user.subscription_token, // 使用 subscription_token 作为 UUID
+                id: credentials.uuid,
                 enable: true,
                 expiryTime: expiryTime,
                 totalGB: totalGB,
                 limitIp: 0,
                 tgId: 0,
-                subId: ''
+                subId: credentials.subId
               });
 
               if (addResult.success) {
-                logger.info(`添加用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功`);
+                logger.info(`添加用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功，UUID: ${credentials.uuid}`);
               } else {
                 logger.warn(`添加用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${addResult.message}`);
               }
@@ -217,5 +246,6 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
 }
 
 module.exports = {
-  completePaidOrder
+  completePaidOrder,
+  syncUserToXuiServers
 };
