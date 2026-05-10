@@ -8,9 +8,46 @@ const { param, query, validationResult } = require('express-validator');
 const { authenticateUser } = require('../../middleware/auth-user');
 const { createLogger } = require('../../utils/logger');
 const { syncAllServers } = require('../../services/xui-sync');
+const { getStrategyFromRemark, processNodeLink, parseNodeLink } = require('../../services/subscription-strategy');
+const https = require('https');
+const http = require('http');
 
 const router = express.Router();
 const logger = createLogger('USER-SUB');
+
+/**
+ * 从 3X-UI 获取原始订阅内容
+ * @param {string} subUrl - 订阅地址
+ * @param {string} subId - 订阅 token
+ * @returns {Promise<string>} 原始订阅内容
+ */
+async function fetchOriginalSubscription(subUrl, subId) {
+  return new Promise((resolve, reject) => {
+    const fullUrl = `${subUrl}${subId}`;
+    const client = fullUrl.startsWith('https') ? https : http;
+    
+    client.get(fullUrl, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(data));
+    }).on('error', reject);
+  });
+}
+
+/**
+ * 解析订阅内容为节点链接数组
+ * @param {string} content - 订阅内容（Base64 编码）
+ * @returns {string[]} 节点链接数组
+ */
+function parseSubscriptionContent(content) {
+  try {
+    const decoded = Buffer.from(content, 'base64').toString('utf-8');
+    return decoded.split('\n').filter(line => line.trim());
+  } catch (error) {
+    logger.error(`解析订阅内容失败: ${error.message}`);
+    return [];
+  }
+}
 
 /**
  * 从 inbound 的 settings 和 stream_settings 中解析节点配置
@@ -129,7 +166,7 @@ function generateNodeLink(params) {
 
 /**
  * POST /api/user/subscription/generate
- * 生成订阅链接（同步节点信息后返回订阅数据）
+ * 生成订阅链接（同步节点信息、处理策略、聚合节点后返回）
  */
 router.post('/generate', authenticateUser, async (req, res) => {
   try {
@@ -168,10 +205,13 @@ router.post('/generate', authenticateUser, async (req, res) => {
 
     // 检查是否已完成 CF 优选
     const cfIps = await db.prepare(`
-      SELECT 1 FROM user_cf_ips WHERE user_id = ? LIMIT 1
-    `).get(userId);
+      SELECT cp.ip
+      FROM user_cf_ips uci
+      JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
+      WHERE uci.user_id = ? AND cp.enabled = 1
+    `).all(userId);
     
-    if (!cfIps) {
+    if (cfIps.length === 0) {
       return res.status(400).json({
         code: 3001,
         message: '请先完成 IP 优选',
@@ -184,11 +224,114 @@ router.post('/generate', authenticateUser, async (req, res) => {
     const syncResult = await syncAllServers(db);
     logger.info(`节点同步完成: ${syncResult.syncedCount}/${syncResult.totalCount} 台服务器`);
 
-    // 生成订阅链接
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.sub_id}`;
+    // 获取用户的 CF 优选 IP（取第一个）
+    const cfIp = cfIps[0].ip;
 
-    logger.info(`用户 ${user.email} 生成订阅链接成功`);
+    // 获取所有在线服务器
+    const servers = await db.prepare(`
+      SELECT id, name, api_url, host, client_port, sub_url
+      FROM xui_servers
+      WHERE status = 1
+    `).all();
+
+    // 聚合所有节点
+    const allNodes = [];
+
+    for (const server of servers) {
+      try {
+        // 获取用户在该服务器的节点配置
+        const nodeConfigs = await db.prepare(`
+          SELECT unc.uuid, unc.sub_id, xn.remark, xn.protocol, xn.inbound_id
+          FROM user_node_configs unc
+          JOIN xui_nodes xn ON unc.node_id = xn.id
+          WHERE unc.user_id = ? AND xn.server_id = ?
+        `).all(userId, server.id);
+
+        if (nodeConfigs.length === 0) {
+          logger.warn(`服务器 ${server.name} 没有用户 ${user.email} 的节点配置`);
+          continue;
+        }
+
+        // 检查服务器是否有订阅地址
+        if (!server.sub_url) {
+          logger.warn(`服务器 ${server.name} 没有设置订阅地址`);
+          continue;
+        }
+
+        // 获取第一个节点的 sub_id（用于获取原始订阅）
+        const firstConfig = nodeConfigs[0];
+
+        // 从 3X-UI 获取原始订阅
+        let originalLinks = [];
+        try {
+          const originalContent = await fetchOriginalSubscription(server.sub_url, firstConfig.sub_id);
+          originalLinks = parseSubscriptionContent(originalContent);
+          logger.info(`从服务器 ${server.name} 获取到 ${originalLinks.length} 个原始节点`);
+        } catch (error) {
+          logger.error(`从服务器 ${server.name} 获取原始订阅失败: ${error.message}`);
+          continue;
+        }
+
+        // 处理每个节点
+        for (let i = 0; i < nodeConfigs.length; i++) {
+          const config = nodeConfigs[i];
+          
+          // 尝试从原始链接中找到匹配的节点
+          // 优先通过 UUID 匹配，如果找不到则按顺序取
+          let originalLink = originalLinks.find(link => link.includes(config.uuid));
+          if (!originalLink && i < originalLinks.length) {
+            originalLink = originalLinks[i];
+          }
+
+          if (!originalLink) {
+            logger.warn(`找不到节点 ${config.remark} 的原始链接`);
+            continue;
+          }
+
+          // 判断策略
+          const strategy = getStrategyFromRemark(config.remark);
+
+          // 处理节点链接
+          let processedLink;
+          if (strategy === 'cf') {
+            processedLink = processNodeLink(originalLink, 'cf', {
+              cfIp: cfIp,
+              clientPort: server.client_port,
+              host: server.host
+            });
+          } else {
+            processedLink = processNodeLink(originalLink, 'direct');
+          }
+
+          allNodes.push({
+            server_name: server.name,
+            node_name: config.remark,
+            protocol: config.protocol,
+            strategy: strategy,
+            link: processedLink,
+            original_link: originalLink
+          });
+        }
+      } catch (error) {
+        logger.error(`处理服务器 ${server.name} 错误: ${error.message}`);
+      }
+    }
+
+    // 存储到 user_subscriptions 表
+    const now = Math.floor(Date.now() / 1000);
+    await db.prepare(`
+      INSERT INTO user_subscriptions (user_id, sub_id, nodes_data, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT (sub_id) DO UPDATE SET
+        nodes_data = ?,
+        updated_at = ?
+    `).run(userId, user.sub_id, JSON.stringify(allNodes), now, JSON.stringify(allNodes), now);
+
+    logger.info(`用户 ${user.email} 生成订阅链接成功，共 ${allNodes.length} 个节点`);
+
+    // 返回订阅链接
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const subscriptionUrl = `${baseUrl}/api/user/sub/${user.sub_id}`;
 
     res.json({
       code: 0,
@@ -385,7 +528,7 @@ router.get('/', authenticateUser, async (req, res) => {
 
 /**
  * GET /api/user/sub/:token
- * 通过token直接获取订阅内容
+ * 通过token直接获取订阅内容（从缓存中获取）
  */
 router.get('/sub/:token', [
   param('token')
@@ -416,27 +559,26 @@ router.get('/sub/:token', [
     const { clash, v2ray } = req.query;
     const db = req.app.locals.db;
 
-    // 查询用户（通过 sub_id 查询）
-    const user = await db.prepare(`
-      SELECT 
-        u.id, u.email, u.subscription_token,
-        u.traffic_used, u.traffic_limit, u.expire_at, u.enabled
-      FROM users u
-      WHERE u.sub_id = ?
+    // 从 user_subscriptions 表获取缓存的节点信息
+    const subscription = await db.prepare(`
+      SELECT us.*, u.email, u.traffic_used, u.traffic_limit, u.expire_at, u.enabled
+      FROM user_subscriptions us
+      JOIN users u ON us.user_id = u.id
+      WHERE us.sub_id = ?
     `).get(token);
     
-    if (!user) {
+    if (!subscription) {
       logger.warn(`订阅链接无效: ${token}`);
       return res.status(400).json({
         code: 2004,
-        message: '订阅链接无效',
+        message: '订阅链接无效或尚未生成',
         data: null
       });
     }
 
     // 检查账号是否启用
-    if (!user.enabled) {
-      logger.warn(`用户账号已禁用: ${user.email}`);
+    if (!subscription.enabled) {
+      logger.warn(`用户账号已禁用: ${subscription.email}`);
       return res.status(400).json({
         code: 2003,
         message: '账号已被禁用',
@@ -444,94 +586,29 @@ router.get('/sub/:token', [
       });
     }
 
-    // 查询用户选择的CF优选IP
-    const cfIps = await db.prepare(`
-      SELECT cp.ip
-      FROM user_cf_ips uci
-      JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
-      WHERE uci.user_id = ? AND cp.enabled = 1
-    `).all(user.id);
-
-    // 查询所有在线服务器（包含 host 和 client_port）
-    const servers = await db.prepare(`
-      SELECT id, name, api_url, host, client_port, status
-      FROM xui_servers
-      WHERE status = 1
-    `).all();
-
-    // 构建节点列表
-    const nodes = [];
-    
-    for (const server of servers) {
-      // 查询服务器节点（包含 settings 和 stream_settings）
-      const serverNodes = await db.prepare(`
-        SELECT inbound_id, remark, port, protocol, settings, stream_settings
-        FROM xui_nodes
-        WHERE server_id = ?
-      `).all(server.id);
-
-      for (const node of serverNodes) {
-        // 解析节点配置
-        const config = parseNodeConfig(node, node.settings, node.stream_settings, user.email);
-        
-        // 使用服务器的 host 和 client_port
-        const nodeHost = server.host || '';
-        const nodePort = server.client_port || node.port;
-        
-        // 如果有CF优选IP，为每个 IP 生成一个节点
-        if (cfIps.length > 0) {
-          cfIps.forEach((cfIp, index) => {
-            const ipRemark = cfIps.length > 1 ? `${node.remark}-${server.name}-${index + 1}` : `${node.remark}-${server.name}`;
-            nodes.push({
-              server_name: server.name,
-              protocol: node.protocol,
-              uuid: config.uuid,
-              address: cfIp.ip,
-              port: nodePort,
-              host: nodeHost,
-              wsPath: config.wsPath,
-              security: config.security,
-              remark: ipRemark
-            });
-          });
-        } else {
-          // 使用默认IP
-          const defaultIp = server.api_url.match(/\/\/([^:]+)/);
-          nodes.push({
-            server_name: server.name,
-            protocol: node.protocol,
-            uuid: config.uuid,
-            address: defaultIp ? defaultIp[1] : '0.0.0.0',
-            port: nodePort,
-            host: nodeHost,
-            wsPath: config.wsPath,
-            security: config.security,
-            remark: `${node.remark}-${server.name}`
-          });
-        }
-      }
-    }
+    // 解析缓存的节点数据
+    const nodes = JSON.parse(subscription.nodes_data);
 
     // 根据请求格式返回订阅内容
     if (clash === '1') {
       // 返回Clash格式
-      const clashConfig = generateClashConfig(nodes, user);
+      const clashConfig = generateClashConfig(nodes, subscription);
       res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
       res.send(clashConfig);
     } else if (v2ray === '1') {
       // 返回V2Ray base64格式
-      const v2rayConfig = generateV2RayConfig(nodes, user);
+      const v2rayConfig = generateV2RayConfig(nodes, subscription);
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.send(Buffer.from(v2rayConfig).toString('base64'));
     } else {
       // 返回默认格式（V2Ray base64）
-      const v2rayConfig = generateV2RayConfig(nodes, user);
+      const v2rayConfig = generateV2RayConfig(nodes, subscription);
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      res.setHeader('Subscription-Userinfo', `upload=0; download=${user.traffic_used}; total=${user.traffic_limit}; expire=${user.expire_at}`);
+      res.setHeader('Subscription-Userinfo', `upload=0; download=${subscription.traffic_used}; total=${subscription.traffic_limit}; expire=${subscription.expire_at}`);
       res.send(Buffer.from(v2rayConfig).toString('base64'));
     }
 
-    logger.info(`获取订阅内容成功: ${user.email}`);
+    logger.info(`获取订阅内容成功: ${subscription.email}`);
   } catch (error) {
     logger.error(`获取订阅内容错误: ${error.message}`);
     res.status(500).json({
@@ -544,13 +621,22 @@ router.get('/sub/:token', [
 
 /**
  * 生成Clash配置
- * @param {Array} nodes - 节点列表
+ * @param {Array} nodes - 节点列表（包含 link 字段）
  * @param {Object} user - 用户信息
  * @returns {string} Clash配置YAML
  */
 function generateClashConfig(nodes, user) {
   const proxies = nodes.map(node => {
-    const { protocol, uuid, address, port, host, wsPath, security, remark } = node;
+    const { link, node_name } = node;
+    
+    // 解析节点链接
+    const parsed = parseNodeLink(link);
+    if (!parsed) return '';
+    
+    const { protocol, uuid, address, port, params } = parsed;
+    const host = params.host || '';
+    const wsPath = params.path || '/';
+    const security = params.security || 'none';
     
     // 处理IPv6地址，去除方括号
     const serverAddress = address.startsWith('[') && address.endsWith(']') 
@@ -558,20 +644,20 @@ function generateClashConfig(nodes, user) {
       : address;
     
     if (protocol === 'vless') {
-      return `  - name: ${remark}
+      return `  - name: ${node_name}
     type: vless
     server: ${serverAddress}
     port: ${port}
     uuid: ${uuid}
     udp: true
-    tls: ${security === 'tls'}
+    tls: ${security === 'tls' || security === 'reality'}
     network: ws
     ws-opts:
-      path: ${wsPath || '/'}
+      path: ${wsPath}
       headers:
         Host: ${host || serverAddress}`;
     } else if (protocol === 'vmess') {
-      return `  - name: ${remark}
+      return `  - name: ${node_name}
     type: vmess
     server: ${serverAddress}
     port: ${port}
@@ -581,11 +667,11 @@ function generateClashConfig(nodes, user) {
     tls: ${security === 'tls'}
     network: ws
     ws-opts:
-      path: ${wsPath || '/'}
+      path: ${wsPath}
       headers:
         Host: ${host || serverAddress}`;
     } else if (protocol === 'trojan') {
-      return `  - name: ${remark}
+      return `  - name: ${node_name}
     type: trojan
     server: ${serverAddress}
     port: ${port}
@@ -593,7 +679,7 @@ function generateClashConfig(nodes, user) {
     tls: true
     network: ws
     ws-opts:
-      path: ${wsPath || '/'}
+      path: ${wsPath}
       headers:
         Host: ${host || serverAddress}
     sni: ${host || serverAddress}`;
@@ -608,7 +694,7 @@ proxy-groups:
   - name: Proxy
     type: select
     proxies:
-${nodes.map(node => `      - ${node.remark}`).join('\n')}
+${nodes.map(node => `      - ${node.node_name}`).join('\n')}
 
 rules:
   - MATCH,Proxy`;
@@ -616,12 +702,12 @@ rules:
 
 /**
  * 生成V2Ray订阅内容
- * @param {Array} nodes - 节点列表
+ * @param {Array} nodes - 节点列表（包含 link 字段）
  * @param {Object} user - 用户信息
  * @returns {string} V2Ray订阅内容（每行一个节点链接）
  */
 function generateV2RayConfig(nodes, user) {
-  return nodes.map(node => generateNodeLink(node)).filter(Boolean).join('\n');
+  return nodes.map(node => node.link).filter(Boolean).join('\n');
 }
 
 module.exports = router;
