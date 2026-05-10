@@ -39,6 +39,9 @@
         <div class="node-header">
           <h3>{{ node.remark || '未命名节点' }}</h3>
           <div class="node-stats">
+            <el-tag :type="getStrategyTagType(node.remark)" size="small">
+              {{ getStrategyFromRemark(node.remark) }}
+            </el-tag>
             <el-tag size="small">{{ node.protocol }}</el-tag>
             <span>端口：{{ node.port }}</span>
             <span>用户：{{ node.user_count }}</span>
@@ -178,6 +181,30 @@ async function fetchServerDetail() {
 function formatTime(timestamp) {
   if (!timestamp) return ''
   return new Date(timestamp * 1000).toLocaleString('zh-CN')
+}
+
+/**
+ * 从节点备注中获取策略类型
+ */
+function getStrategyFromRemark(remark) {
+  if (!remark) return 'Direct策略'
+  const lowerRemark = remark.toLowerCase()
+  if (lowerRemark.includes('cf')) {
+    return 'CF策略'
+  }
+  return 'Direct策略'
+}
+
+/**
+ * 获取策略标签类型
+ */
+function getStrategyTagType(remark) {
+  if (!remark) return 'success'
+  const lowerRemark = remark.toLowerCase()
+  if (lowerRemark.includes('cf')) {
+    return 'warning'  // 橙色
+  }
+  return 'success'  // 绿色
 }
 
 // 编辑用户
