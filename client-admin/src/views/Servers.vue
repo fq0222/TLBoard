@@ -41,6 +41,10 @@
               <el-icon><Odometer /></el-icon>
               <span class="url-text">客户端端口: {{ server.client_port }}</span>
             </div>
+            <div v-if="server.sub_url" class="info-row sub-row">
+              <el-icon><Tickets /></el-icon>
+              <span class="url-text" :title="server.sub_url">订阅: {{ server.sub_url }}</span>
+            </div>
             
             <div class="info-grid">
               <div class="info-item">
@@ -118,6 +122,9 @@
         <el-form-item label="客户端端口" prop="client_port">
           <el-input-number v-model="serverForm.client_port" :min="0" :max="65535" placeholder="客户端连接端口" />
         </el-form-item>
+        <el-form-item label="订阅地址" prop="sub_url">
+          <el-input v-model="serverForm.sub_url" placeholder="如：https://example.com/sub/aaa333/" />
+        </el-form-item>
       </el-form>
       
       <template #footer>
@@ -133,7 +140,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, View, Refresh, Edit, Delete, Link, Position, Odometer } from '@element-plus/icons-vue'
+import { Plus, View, Refresh, Edit, Delete, Link, Position, Odometer, Tickets } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 
@@ -152,7 +159,8 @@ const serverForm = reactive({
   api_username: '',
   api_password: '',
   host: '',
-  client_port: 0
+  client_port: 0,
+  sub_url: ''
 })
 
 const serverRules = {
@@ -199,6 +207,7 @@ function showEditDialog(server) {
   serverForm.api_password = ''
   serverForm.host = server.host || ''
   serverForm.client_port = server.client_port || 0
+  serverForm.sub_url = server.sub_url || ''
   
   dialogVisible.value = true
 }
@@ -210,6 +219,7 @@ function resetForm() {
   serverForm.api_password = ''
   serverForm.host = ''
   serverForm.client_port = 0
+  serverForm.sub_url = ''
 }
 
 async function handleSubmit() {
@@ -379,6 +389,16 @@ onMounted(() => {
   gap: 8px;
   padding: 8px 12px;
   background: #f0f9eb;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.sub-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fdf6ec;
   border-radius: 8px;
   margin-bottom: 16px;
 }
