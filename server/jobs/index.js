@@ -186,7 +186,10 @@ async function syncUsersToServer(db, server, users) {
 
       // 找出需要添加的用户（在数据库中存在但不在3xui中）
       const existingEmails = existingClients.map(c => c.email);
-      const usersToAdd = users.filter(user => !existingEmails.includes(user.email));
+      const usersToAdd = users.filter(user => {
+        const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
+        return !existingEmails.includes(nodeEmail);
+      });
 
       // 添加缺失的用户
       for (const user of usersToAdd) {
@@ -194,8 +197,11 @@ async function syncUsersToServer(db, server, users) {
           const expiryTime = user.expire_at ? user.expire_at * 1000 : 0;
           const totalGB = user.traffic_limit || 0;
 
+          // 为每个节点生成唯一的邮箱标识（邮箱-节点备注）
+          const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
+
           const result = await xuiService.addClient(inbound.id, inbound.protocol, {
-            email: user.email,
+            email: nodeEmail,
             id: user.subscription_token,
             enable: user.enabled === 1,
             expiryTime: expiryTime,
@@ -235,7 +241,7 @@ function registerXuiSyncJob(db) {
   // 启动时延迟7分钟执行第一次，避免启动时负载过高
   setTimeout(async () => {
     await runXuiSync(db);
-  }, 7 * 60 * 1000);
+  }, 1 * 60 * 1000);
 
   const interval = setInterval(async () => {
     await runXuiSync(db);

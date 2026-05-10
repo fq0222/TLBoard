@@ -64,12 +64,15 @@ async function syncUserToXuiServers(db, user, plan) {
             // 流量限制（字节）- 优先使用用户实际流量限制（续费场景累加后的值）
             const totalGB = user.traffic_limit || plan.traffic_limit || 0;
 
-            // 先尝试获取用户是否已存在
-            const existingClient = await xuiService.getClientByEmail(inbound.id, user.email);
+            // 为每个节点生成唯一的邮箱标识（邮箱-节点备注）
+            const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
+
+            // 先尝试获取用户是否已存在（使用新的邮箱格式）
+            const existingClient = await xuiService.getClientByEmail(inbound.id, nodeEmail);
             
             if (existingClient.success) {
               // 用户已存在，更新用户
-              const updateResult = await xuiService.updateClient(inbound.id, user.email, {
+              const updateResult = await xuiService.updateClient(inbound.id, nodeEmail, {
                 expiryTime: expiryTime,
                 totalGB: totalGB / (1024 * 1024 * 1024), // 字节转GB
                 enabled: true
@@ -100,7 +103,7 @@ async function syncUserToXuiServers(db, user, plan) {
 
               // 添加到 3X-UI
               const addResult = await xuiService.addClient(inbound.id, inbound.protocol, {
-                email: user.email,
+                email: nodeEmail,
                 id: credentials.uuid,
                 enable: true,
                 expiryTime: expiryTime,
@@ -112,20 +115,6 @@ async function syncUserToXuiServers(db, user, plan) {
 
               if (addResult.success) {
                 logger.info(`添加用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功，UUID: ${credentials.uuid}`);
-              } else if (addResult.message && addResult.message.includes('Duplicate email')) {
-                // 邮箱已存在（可能在其他 inbound 中），尝试更新
-                logger.info(`用户 ${user.email} 已存在于 3X-UI，尝试更新`);
-                const updateResult = await xuiService.updateClient(inbound.id, user.email, {
-                  expiryTime: expiryTime,
-                  totalGB: totalGB / (1024 * 1024 * 1024), // 字节转GB
-                  enabled: true
-                });
-                
-                if (updateResult.success) {
-                  logger.info(`更新用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功`);
-                } else {
-                  logger.warn(`更新用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${updateResult.message}`);
-                }
               } else {
                 logger.warn(`添加用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${addResult.message}`);
               }
