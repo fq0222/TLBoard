@@ -331,7 +331,7 @@ router.post('/generate', authenticateUser, async (req, res) => {
 
     // 返回订阅链接
     const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const subscriptionUrl = `${baseUrl}/api/user/sub/${user.sub_id}`;
+    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.sub_id}`;
 
     res.json({
       code: 0,

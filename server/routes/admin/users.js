@@ -235,7 +235,7 @@ router.get('/:id', authenticateAdmin, [
           email: user.email,
           plan_id: user.plan_id,
           plan_name: user.plan_name,
-          subscription_url: `${baseUrl}/api/user/sub/${user.subscription_token}`,
+          subscription_url: `${baseUrl}/api/user/subscription/sub/${user.sub_id}`,
           traffic_used: user.traffic_used,
           traffic_limit: user.traffic_limit,
           traffic_used_text: formatTraffic(user.traffic_used),
