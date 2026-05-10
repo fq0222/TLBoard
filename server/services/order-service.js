@@ -112,6 +112,20 @@ async function syncUserToXuiServers(db, user, plan) {
 
               if (addResult.success) {
                 logger.info(`添加用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功，UUID: ${credentials.uuid}`);
+              } else if (addResult.message && addResult.message.includes('Duplicate email')) {
+                // 邮箱已存在（可能在其他 inbound 中），尝试更新
+                logger.info(`用户 ${user.email} 已存在于 3X-UI，尝试更新`);
+                const updateResult = await xuiService.updateClient(inbound.id, user.email, {
+                  expiryTime: expiryTime,
+                  totalGB: totalGB / (1024 * 1024 * 1024), // 字节转GB
+                  enabled: true
+                });
+                
+                if (updateResult.success) {
+                  logger.info(`更新用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功`);
+                } else {
+                  logger.warn(`更新用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${updateResult.message}`);
+                }
               } else {
                 logger.warn(`添加用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${addResult.message}`);
               }
