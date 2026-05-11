@@ -49,7 +49,6 @@ async function syncServerNodes(db, server) {
       const result = await db.prepare(`
         INSERT INTO xui_nodes (server_id, inbound_id, remark, port, protocol, settings, stream_settings, user_count, online_count)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING id
       `).run(server.id, inbound.id, inbound.remark, inbound.port, inbound.protocol, settings, streamSettings, clientStats.length, 0);
       
       const newNodeId = result.lastInsertRowid;
