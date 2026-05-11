@@ -221,7 +221,9 @@ async function testSingleIp(ipData) {
 function pingIp(ip) {
   return new Promise((resolve) => {
     const startTime = window.performance.now()
-    const url = `https://${ip}:443/cdn-cgi/trace`
+    // IPv6 地址需要加方括号
+    const host = ip.includes(':') ? `[${ip}]` : ip
+    const url = `https://${host}:443/cdn-cgi/trace`
     
     const controller = new AbortController()
     const timeoutId = setTimeout(() => {
