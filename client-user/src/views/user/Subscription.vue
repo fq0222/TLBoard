@@ -59,10 +59,16 @@
     <div class="content-card">
       <h2 class="card-title">节点列表</h2>
       <el-table :data="subscription.nodes" style="width: 100%">
-        <el-table-column prop="server_name" label="服务器" />
-        <el-table-column prop="address" label="地址" />
-        <el-table-column prop="port" label="端口" />
-        <el-table-column prop="protocol" label="协议" />
+        <el-table-column prop="node_name" label="节点" min-width="150" />
+        <el-table-column prop="address" label="地址" min-width="120" />
+        <el-table-column prop="port" label="端口" width="80" />
+        <el-table-column label="协议" min-width="200">
+          <template #default="{ row }">
+            <template v-for="tag in parseProtocol(row.protocol)" :key="tag">
+              <el-tag :type="getTagType(tag)" size="small" class="protocol-tag">{{ tag }}</el-tag>
+            </template>
+          </template>
+        </el-table-column>
         <el-table-column prop="remark" label="备注" />
       </el-table>
     </div>
@@ -109,6 +115,33 @@ function copyLink(link) {
     navigator.clipboard.writeText(link)
     ElMessage.success('链接已复制到剪贴板')
   }
+}
+
+/**
+ * 解析协议字符串为标签数组
+ * @param {string} protocol - 如 "vless+tcp+reality"
+ * @returns {string[]} 标签数组，过滤掉 none
+ */
+function parseProtocol(protocol) {
+  if (!protocol) return []
+  return protocol.split('+').filter(tag => tag.toLowerCase() !== 'none')
+}
+
+/**
+ * 获取标签类型（颜色）
+ * @param {string} tag - 标签文本
+ * @returns {string} Element Plus tag type
+ */
+function getTagType(tag) {
+  const lower = tag.toLowerCase()
+  if (lower === 'vless') return 'primary'
+  if (lower === 'vmess') return 'success'
+  if (lower === 'trojan') return 'warning'
+  if (lower === 'tcp') return 'info'
+  if (lower === 'ws') return 'info'
+  if (lower === 'reality') return 'danger'
+  if (lower === 'tls') return 'danger'
+  return ''
 }
 
 // 组件挂载时获取数据
@@ -195,5 +228,9 @@ onMounted(() => {
 
 .info-value {
   color: #333;
+}
+
+.protocol-tag {
+  margin-right: 4px;
 }
 </style>

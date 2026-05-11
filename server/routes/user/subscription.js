@@ -432,42 +432,48 @@ router.get('/', authenticateUser, async (req, res) => {
       `).all(server.id);
 
       for (const node of serverNodes) {
+        // 判断策略类型
+        const strategy = node.remark && node.remark.toLowerCase().includes('cf') ? 'cf' : 'direct';
+        
         // 解析节点配置
         const config = parseNodeConfig(node, node.settings, node.stream_settings, user.email);
         
-        // 使用服务器的 host 和 client_port
-        const nodeHost = server.host || '';
-        const nodePort = server.client_port || node.port;
+        // 协议详情：vless+tcp+reality
+        const protocolDetail = `${node.protocol}+${config.network}+${config.security}`;
         
-        // 如果有CF优选IP，为每个 IP 生成一个节点
-        if (cfIps.length > 0) {
+        // 使用服务器的 host
+        const nodeHost = server.host || '';
+        
+        if (strategy === 'cf' && cfIps.length > 0) {
+          // CF 节点：端口用 client_port
+          const nodePort = server.client_port || node.port;
           cfIps.forEach((cfIp, index) => {
-            const ipRemark = cfIps.length > 1 ? `${node.remark}-${server.name}-${index + 1}` : `${node.remark}-${server.name}`;
+            const ipRemark = cfIps.length > 1 ? `${node.remark}-${index + 1}` : node.remark;
             nodes.push({
               server_name: server.name,
-              protocol: node.protocol,
+              node_name: `${server.name}-${ipRemark}`,
+              protocol: protocolDetail,
+              strategy: strategy,
               uuid: config.uuid,
               address: cfIp.ip,
               port: nodePort,
               host: nodeHost,
-              wsPath: config.wsPath,
-              security: config.security,
               remark: ipRemark
             });
           });
         } else {
-          // 使用默认IP
+          // direct 节点：端口用原始端口
           const defaultIp = server.api_url.match(/\/\/([^:]+)/);
           nodes.push({
             server_name: server.name,
-            protocol: node.protocol,
+            node_name: `${server.name}-${node.remark}`,
+            protocol: protocolDetail,
+            strategy: strategy,
             uuid: config.uuid,
             address: defaultIp ? defaultIp[1] : '0.0.0.0',
-            port: nodePort,
+            port: node.port,
             host: nodeHost,
-            wsPath: config.wsPath,
-            security: config.security,
-            remark: `${node.remark}-${server.name}`
+            remark: node.remark
           });
         }
       }
