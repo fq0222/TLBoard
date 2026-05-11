@@ -289,8 +289,15 @@ router.post('/generate', authenticateUser, async (req, res) => {
                 clientPort: server.client_port,
                 host: server.host
               });
-              // 多个 CF IP 时添加序号后缀避免重名
-              const nodeName = cfIps.length > 1 ? `${config.remark}-${i + 1}` : config.remark;
+              // 节点名：服务器名-remark，多个 CF IP 时添加序号后缀
+              const baseName = `${server.name}-${config.remark}`;
+              const nodeName = cfIps.length > 1 ? `${baseName}-${i + 1}` : baseName;
+              // 替换链接中的 remark
+              const hashIdx = processedLink.indexOf('#');
+              if (hashIdx > 0) {
+                processedLink = processedLink.substring(0, hashIdx + 1) + encodeURIComponent(nodeName);
+              }
+              logger.info(`生成CF节点: nodeName=${nodeName}`);
               allNodes.push({
                 server_name: server.name,
                 node_name: nodeName,
@@ -302,9 +309,16 @@ router.post('/generate', authenticateUser, async (req, res) => {
             }
           } else {
             processedLink = processNodeLink(originalLink, 'direct');
+            const nodeName = `${server.name}-${config.remark}`;
+            // 替换链接中的 remark
+            const hashIdx = processedLink.indexOf('#');
+            if (hashIdx > 0) {
+              processedLink = processedLink.substring(0, hashIdx + 1) + encodeURIComponent(nodeName);
+            }
+            logger.info(`生成Direct节点: nodeName=${nodeName}`);
             allNodes.push({
               server_name: server.name,
-              node_name: config.remark,
+              node_name: nodeName,
               protocol: config.protocol,
               strategy: strategy,
               link: processedLink,
