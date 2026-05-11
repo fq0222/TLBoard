@@ -68,6 +68,10 @@ function parseNodeLink(link) {
     } else {
       address = hostPort;
     }
+    // 去除 IPv6 地址的方括号
+    if (address.startsWith('[') && address.endsWith(']')) {
+      address = address.slice(1, -1);
+    }
   }
   
   // 解析参数
