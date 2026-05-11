@@ -106,8 +106,11 @@ function buildNodeLink(nodeInfo) {
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join('&');
   
+  // IPv6 地址需要加方括号
+  const host = address.includes(':') ? `[${address}]` : address;
+  
   // 构建主部分
-  const mainPart = `${uuid}@${address}:${port}`;
+  const mainPart = `${uuid}@${host}:${port}`;
   
   // 构建完整链接
   let link = `${protocol}://${mainPart}`;
