@@ -103,7 +103,7 @@ router.post('/register-and-pay', [
     const subscriptionToken = crypto.randomUUID();
     
     // 生成订阅链接ID（用于订阅链接，不暴露UUID）
-    const subId = crypto.randomBytes(16).toString('hex');
+    const subId = crypto.randomBytes(8).toString('hex');
 
     // 加密密码
     const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);

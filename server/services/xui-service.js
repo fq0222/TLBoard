@@ -414,19 +414,24 @@ class XuiService {
       }
 
       // 构建客户端配置
+      const clientObj = {
+        id: options.id || this.generateUuid(),
+        email: options.email || '',
+        enable: options.enable !== false,
+        expiryTime: options.expiryTime || 0,
+        totalGB: options.totalGB || 0,
+        limitIp: options.limitIp || 0,
+        tgId: options.tgId || 0,
+        subId: options.subId || ''
+      };
+      if (options.flow) {
+        clientObj.flow = options.flow;
+      }
+      logger.info(`添加客户端配置: email=${options.email}, flow=${options.flow || '无'}, 最终flow=${clientObj.flow || '无'}`);
       const clientConfig = {
         id: inboundId,
         settings: JSON.stringify({
-          clients: [{
-            id: options.id || this.generateUuid(),
-            email: options.email || '',
-            enable: options.enable !== false,
-            expiryTime: options.expiryTime || 0,
-            totalGB: options.totalGB || 0,
-            limitIp: options.limitIp || 0,
-            tgId: options.tgId || 0,
-            subId: options.subId || ''
-          }]
+          clients: [clientObj]
         })
       };
 
@@ -592,7 +597,9 @@ class XuiService {
         email: client.email,
         enable: client.enable,
         expiryTime: client.expiryTime,
-        totalGB: client.totalGB || 0
+        totalGB: client.totalGB || 0,
+        subId: client.subId || '',
+        flow: client.flow || ''
       };
     } catch (error) {
       logger.error(`获取客户端信息错误: ${error.message}`);
@@ -630,19 +637,26 @@ class XuiService {
       }
 
       // 构建更新配置
+      const updateClientObj = {
+        id: clientInfo.uuid,
+        email: email,
+        enable: options.enabled !== undefined ? options.enabled : clientInfo.enable,
+        expiryTime: options.expiryTime !== undefined ? options.expiryTime : clientInfo.expiryTime,
+        totalGB: options.totalGB !== undefined ? options.totalGB * 1073741824 : clientInfo.totalGB, // GB 转字节
+        limitIp: 0,
+        tgId: 0,
+        subId: options.subId !== undefined ? options.subId : (clientInfo.subId || '')
+      };
+      if (options.flow !== undefined) {
+        updateClientObj.flow = options.flow;
+      } else if (clientInfo.flow) {
+        updateClientObj.flow = clientInfo.flow;
+      }
+      logger.info(`更新客户端配置: email=${email}, options.flow=${options.flow}, clientInfo.flow=${clientInfo.flow}, 最终flow=${updateClientObj.flow || '无'}`);
       const updateConfig = {
         id: inboundId,
         settings: JSON.stringify({
-          clients: [{
-            id: clientInfo.uuid,
-            email: email,
-            enable: options.enabled !== undefined ? options.enabled : clientInfo.enable,
-            expiryTime: options.expiryTime !== undefined ? options.expiryTime : clientInfo.expiryTime,
-            totalGB: options.totalGB !== undefined ? options.totalGB * 1073741824 : clientInfo.totalGB, // GB 转字节
-            limitIp: 0,
-            tgId: 0,
-            subId: ''
-          }]
+          clients: [updateClientObj]
         })
       };
 

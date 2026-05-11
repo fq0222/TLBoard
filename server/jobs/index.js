@@ -200,41 +200,43 @@ async function syncUsersToServer(db, server, users) {
           // 为每个节点生成唯一的邮箱标识（邮箱-节点备注）
           const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
 
-          // 生成独立的 UUID 和 sub_id
-          const crypto = require('crypto');
-          const uuid = crypto.randomUUID();
-          const subId = crypto.randomBytes(8).toString('hex');
+          // 检查是否已有配置
+          const existingConfig = await db.prepare(
+            'SELECT id, uuid, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
+          ).get(user.id, server.id, inbound.id);
 
-          // 查找节点记录
-          const node = await db.prepare(
-            'SELECT id FROM xui_nodes WHERE server_id = ? AND inbound_id = ?'
-          ).get(server.id, inbound.id);
+          let configUuid, configSubId;
 
-          if (node) {
-            // 检查是否已有配置
-            const existingConfig = await db.prepare(
-              'SELECT id FROM user_node_configs WHERE user_id = ? AND node_id = ?'
-            ).get(user.id, node.id);
-
-            if (!existingConfig) {
-              // 保存到 user_node_configs 表
-              await db.prepare(
-                'INSERT INTO user_node_configs (user_id, node_id, uuid, sub_id) VALUES (?, ?, ?, ?)'
-              ).run(user.id, node.id, uuid, subId);
-              logger.info(`保存用户节点配置: user=${user.email}, node=${node.id}, uuid=${uuid}`);
-            }
+          if (existingConfig) {
+            // 使用数据库中的配置
+            configUuid = existingConfig.uuid;
+            configSubId = existingConfig.sub_id;
+          } else {
+            // 生成新的配置
+            const crypto = require('crypto');
+            configUuid = crypto.randomUUID();
+            configSubId = crypto.randomBytes(8).toString('hex');
+            await db.prepare(
+              'INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, sub_id) VALUES (?, ?, ?, ?, ?)'
+            ).run(user.id, server.id, inbound.id, configUuid, configSubId);
+            logger.info(`保存用户节点配置: user=${user.email}, server=${server.id}, inbound=${inbound.id}, uuid=${configUuid}, sub_id=${configSubId}`);
           }
 
-          const result = await xuiService.addClient(inbound.id, inbound.protocol, {
+          const addOpts = {
             email: nodeEmail,
-            id: uuid,
+            id: configUuid,
             enable: user.enabled === 1,
             expiryTime: expiryTime,
             totalGB: totalGB,
             limitIp: 0,
             tgId: 0,
-            subId: subId
-          });
+            subId: configSubId
+          };
+          // direct 节点需要 flow 参数
+          if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+            addOpts.flow = 'xtls-rprx-vision';
+          }
+          const result = await xuiService.addClient(inbound.id, inbound.protocol, addOpts);
 
           if (result.success) {
             syncCount++;
@@ -245,6 +247,94 @@ async function syncUsersToServer(db, server, users) {
           }
         } catch (error) {
           logger.error(`同步用户 ${user.email} 到inbound ${inbound.id} 失败: ${error.message}`);
+        }
+      }
+    }
+
+    // 检查已存在用户的 sub_id 是否一致
+    for (const inbound of inboundsResult.data) {
+      let existingClients = [];
+      try {
+        const settings = JSON.parse(inbound.settings || '{}');
+        existingClients = settings.clients || [];
+      } catch (e) {
+        continue;
+      }
+
+      logger.info(`检查 inbound ${inbound.id} (${inbound.remark}): ${existingClients.length} 个客户端`);
+
+      const existingClientsMap = {};
+      for (const client of existingClients) {
+        existingClientsMap[client.email] = client;
+      }
+
+      for (const user of users) {
+        const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
+        const xuiClient = existingClientsMap[nodeEmail];
+        if (!xuiClient) {
+          logger.info(`用户 ${user.email} 不在 inbound ${inbound.id} 中 (期望 email: ${nodeEmail})`);
+          continue;
+        }
+
+        logger.info(`找到用户: ${nodeEmail}, xuiClient.subId=${xuiClient.subId || '空'}, xuiClient.flow=${xuiClient.flow || '空'}`);
+
+        // 获取数据库中的配置
+        const dbConfig = await db.prepare(
+          'SELECT uuid, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
+        ).get(user.id, server.id, inbound.id);
+
+        if (!dbConfig) {
+          // 数据库中没有配置，创建一个
+          const crypto = require('crypto');
+          const newSubId = crypto.randomBytes(8).toString('hex');
+          await db.prepare(
+            'INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, sub_id) VALUES (?, ?, ?, ?, ?)'
+          ).run(user.id, server.id, inbound.id, xuiClient.id, newSubId);
+          logger.info(`为已存在用户创建配置: user=${user.email}, server=${server.id}, inbound=${inbound.id}, uuid=${xuiClient.id}, sub_id=${newSubId}`);
+
+          // 更新 3X-UI 中的 sub_id
+          const updateOpts = { subId: newSubId };
+          if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+            updateOpts.flow = 'xtls-rprx-vision';
+          }
+          logger.info(`更新 3X-UI: user=${user.email}, inbound=${inbound.id}, remark=${inbound.remark}, updateOpts=${JSON.stringify(updateOpts)}`);
+          const updateResult = await xuiService.updateClient(inbound.id, nodeEmail, updateOpts);
+          if (updateResult.success) {
+            logger.info(`更新 3X-UI sub_id 成功: user=${user.email}, inbound=${inbound.id}, sub_id=${newSubId}`);
+          } else {
+            logger.warn(`更新 3X-UI sub_id 失败: user=${user.email}, inbound=${inbound.id}, error=${updateResult.message}`);
+          }
+          continue;
+        }
+
+        // 检查 sub_id 是否一致
+        if (xuiClient.subId !== dbConfig.sub_id) {
+          logger.info(`sub_id 不一致，更新 3X-UI: user=${user.email}, inbound=${inbound.id}, db=${dbConfig.sub_id}, xui=${xuiClient.subId || '空'}`);
+          const updateOpts = { subId: dbConfig.sub_id };
+          if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+            updateOpts.flow = 'xtls-rprx-vision';
+          }
+          logger.info(`更新 3X-UI: user=${user.email}, inbound=${inbound.id}, remark=${inbound.remark}, updateOpts=${JSON.stringify(updateOpts)}`);
+          const updateResult = await xuiService.updateClient(inbound.id, nodeEmail, updateOpts);
+          if (updateResult.success) {
+            logger.info(`更新 sub_id 成功: user=${user.email}, inbound=${inbound.id}, sub_id=${dbConfig.sub_id}`);
+          } else {
+            logger.warn(`更新 sub_id 失败: user=${user.email}, inbound=${inbound.id}, error=${updateResult.message}`);
+          }
+        }
+
+        // direct 节点检查 flow 是否需要补充
+        if (inbound.remark && inbound.remark.toLowerCase().includes('direct') && !xuiClient.flow) {
+          logger.info(`direct 节点缺少 flow，补充: user=${user.email}, inbound=${inbound.id}`);
+          const updateResult = await xuiService.updateClient(inbound.id, nodeEmail, {
+            subId: dbConfig.sub_id,
+            flow: 'xtls-rprx-vision'
+          });
+          if (updateResult.success) {
+            logger.info(`补充 flow 成功: user=${user.email}, inbound=${inbound.id}`);
+          } else {
+            logger.warn(`补充 flow 失败: user=${user.email}, inbound=${inbound.id}, error=${updateResult.message}`);
+          }
         }
       }
     }

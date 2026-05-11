@@ -144,8 +144,8 @@ function applyCfStrategy(originalLink, cfConfig) {
     nodeInfo.port = cfConfig.clientPort;
   }
   
-  // 替换 host（对于 WS 模式）
-  if (cfConfig.host && nodeInfo.params.host) {
+  // 替换 host（无条件设置）
+  if (cfConfig.host) {
     nodeInfo.params.host = cfConfig.host;
   }
   

@@ -71,59 +71,66 @@ async function syncUserToXuiServers(db, user, plan) {
             const existingClient = await xuiService.getClientByEmail(inbound.id, nodeEmail);
             
             if (existingClient.success) {
-              // 用户已存在，更新用户
-              const updateResult = await xuiService.updateClient(inbound.id, nodeEmail, {
+              // 用户已存在，检查是否已有配置
+              const existingConfig = await db.prepare(
+                'SELECT id, uuid, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
+              ).get(user.id, server.id, inbound.id);
+
+              let configUuid = existingClient.uuid;
+              let configSubId = existingClient.subId;
+
+              if (!existingConfig) {
+                // 没有配置，使用 3X-UI 中已有的信息创建
+                const credentials = generateNodeCredentials();
+                configUuid = existingClient.uuid || credentials.uuid;
+                configSubId = existingClient.subId || credentials.subId;
+                await db.prepare(
+                  'INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, sub_id) VALUES (?, ?, ?, ?, ?)'
+                ).run(user.id, server.id, inbound.id, configUuid, configSubId);
+                logger.info(`补充用户节点配置: user=${user.email}, server=${server.id}, inbound=${inbound.id}, uuid=${configUuid}, sub_id=${configSubId}`);
+              } else {
+                // 已有配置，使用数据库中的值
+                configUuid = existingConfig.uuid;
+                configSubId = existingConfig.sub_id;
+              }
+
+              // 检查 3X-UI 中的 sub_id 是否与数据库一致
+              if (existingClient.subId !== configSubId) {
+                logger.info(`sub_id 不一致，更新 3X-UI: user=${user.email}, db=${configSubId}, xui=${existingClient.subId}`);
+              }
+
+              // 更新用户（使用数据库中的 sub_id）
+              const updateOpts = {
                 expiryTime: expiryTime,
                 totalGB: totalGB / (1024 * 1024 * 1024), // 字节转GB
-                enabled: true
-              });
+                enabled: true,
+                subId: configSubId
+              };
+              // direct 节点需要 flow 参数
+              if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+                updateOpts.flow = 'xtls-rprx-vision';
+              }
+              logger.info(`更新用户: user=${user.email}, inbound=${inbound.id}, remark=${inbound.remark}, updateOpts=${JSON.stringify(updateOpts)}`);
+              const updateResult = await xuiService.updateClient(inbound.id, nodeEmail, updateOpts);
               
               if (updateResult.success) {
                 logger.info(`更新用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功`);
               } else {
                 logger.warn(`更新用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${updateResult.message}`);
               }
-
-              // 查找节点记录，确保 user_node_configs 表中有配置
-              const node = await db.prepare(
-                'SELECT id FROM xui_nodes WHERE server_id = ? AND inbound_id = ?'
-              ).get(server.id, inbound.id);
-
-              if (node) {
-                // 检查是否已有配置
-                const existingConfig = await db.prepare(
-                  'SELECT id FROM user_node_configs WHERE user_id = ? AND node_id = ?'
-                ).get(user.id, node.id);
-
-                if (!existingConfig) {
-                  // 没有配置，需要创建
-                  const credentials = generateNodeCredentials();
-                  await db.prepare(
-                    'INSERT INTO user_node_configs (user_id, node_id, uuid, sub_id) VALUES (?, ?, ?, ?)'
-                  ).run(user.id, node.id, existingClient.uuid || credentials.uuid, credentials.subId);
-                  logger.info(`补充用户节点配置: user=${user.email}, node=${node.id}`);
-                }
-              }
             } else {
               // 用户不存在，添加新用户
               // 生成独立的 UUID 和 sub_id
               const credentials = generateNodeCredentials();
 
-              // 查找节点记录
-              const node = await db.prepare(
-                'SELECT id FROM xui_nodes WHERE server_id = ? AND inbound_id = ?'
-              ).get(server.id, inbound.id);
-
-              if (node) {
-                // 保存到 user_node_configs 表
-                await db.prepare(
-                  'INSERT INTO user_node_configs (user_id, node_id, uuid, sub_id) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, node_id) DO NOTHING'
-                ).run(user.id, node.id, credentials.uuid, credentials.subId);
-                logger.info(`保存用户节点配置: user=${user.email}, node=${node.id}, uuid=${credentials.uuid}`);
-              }
+              // 保存到 user_node_configs 表
+              await db.prepare(
+                'INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, sub_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT (user_id, server_id, inbound_id) DO NOTHING'
+              ).run(user.id, server.id, inbound.id, credentials.uuid, credentials.subId);
+              logger.info(`保存用户节点配置: user=${user.email}, server=${server.id}, inbound=${inbound.id}, uuid=${credentials.uuid}`);
 
               // 添加到 3X-UI
-              const addResult = await xuiService.addClient(inbound.id, inbound.protocol, {
+              const addOpts = {
                 email: nodeEmail,
                 id: credentials.uuid,
                 enable: true,
@@ -132,7 +139,13 @@ async function syncUserToXuiServers(db, user, plan) {
                 limitIp: 0,
                 tgId: 0,
                 subId: credentials.subId
-              });
+              };
+              // direct 节点需要 flow 参数
+              if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+                addOpts.flow = 'xtls-rprx-vision';
+              }
+              logger.info(`添加用户: user=${user.email}, inbound=${inbound.id}, remark=${inbound.remark}, addOpts=${JSON.stringify(addOpts)}`);
+              const addResult = await xuiService.addClient(inbound.id, inbound.protocol, addOpts);
 
               if (addResult.success) {
                 logger.info(`添加用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功，UUID: ${credentials.uuid}`);

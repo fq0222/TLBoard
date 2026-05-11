@@ -306,11 +306,12 @@ class DatabaseManager {
         CREATE TABLE IF NOT EXISTS user_node_configs (
           id SERIAL PRIMARY KEY,
           user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          node_id INTEGER NOT NULL REFERENCES xui_nodes(id) ON DELETE CASCADE,
+          server_id INTEGER NOT NULL,
+          inbound_id INTEGER NOT NULL,
           uuid VARCHAR(100) NOT NULL,
           sub_id VARCHAR(50) NOT NULL,
           created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          UNIQUE(user_id, node_id)
+          UNIQUE(user_id, server_id, inbound_id)
         )
       `);
       logger.info('用户节点配置表初始化完成');
@@ -411,17 +412,6 @@ class DatabaseManager {
 
       await client.query('COMMIT');
       logger.info('数据库表初始化完成');
-
-      // 迁移：为已存在的 xui_servers 表添加 sub_url 字段
-      try {
-        await client.query('ALTER TABLE xui_servers ADD COLUMN IF NOT EXISTS sub_url VARCHAR(500) DEFAULT \'\'');
-        logger.info('Migration: Added sub_url column to xui_servers table');
-      } catch (error) {
-        // 字段已存在时忽略错误
-        if (!error.message.includes('already exists')) {
-          logger.error(`Migration error: ${error.message}`);
-        }
-      }
     } catch (error) {
       await client.query('ROLLBACK');
       logger.error(`表结构初始化失败: ${error.message}`);
@@ -454,7 +444,8 @@ class DatabaseManager {
       await client.query('CREATE INDEX IF NOT EXISTS idx_traffic_sync_log_user_server ON traffic_sync_log(user_id, server_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_traffic_sync_log_last_sync_at ON traffic_sync_log(last_sync_at)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_user_id ON user_node_configs(user_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_node_id ON user_node_configs(node_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_server_id ON user_node_configs(server_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_inbound_id ON user_node_configs(inbound_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_sub_id ON user_node_configs(sub_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_id ON user_subscriptions(user_id)');
       logger.info('数据库索引创建完成');

@@ -224,9 +224,6 @@ router.post('/generate', authenticateUser, async (req, res) => {
     const syncResult = await syncAllServers(db);
     logger.info(`节点同步完成: ${syncResult.syncedCount}/${syncResult.totalCount} 台服务器`);
 
-    // 获取用户的 CF 优选 IP（取第一个）
-    const cfIp = cfIps[0].ip;
-
     // 获取所有在线服务器
     const servers = await db.prepare(`
       SELECT id, name, api_url, host, client_port, sub_url
@@ -243,8 +240,8 @@ router.post('/generate', authenticateUser, async (req, res) => {
         const nodeConfigs = await db.prepare(`
           SELECT unc.uuid, unc.sub_id, xn.remark, xn.protocol, xn.inbound_id
           FROM user_node_configs unc
-          JOIN xui_nodes xn ON unc.node_id = xn.id
-          WHERE unc.user_id = ? AND xn.server_id = ?
+          JOIN xui_nodes xn ON unc.server_id = xn.server_id AND unc.inbound_id = xn.inbound_id
+          WHERE unc.user_id = ? AND unc.server_id = ?
         `).all(userId, server.id);
 
         if (nodeConfigs.length === 0) {
@@ -258,29 +255,23 @@ router.post('/generate', authenticateUser, async (req, res) => {
           continue;
         }
 
-        // 获取第一个节点的 sub_id（用于获取原始订阅）
-        const firstConfig = nodeConfigs[0];
+        // 为每个节点分别获取原始订阅（每个 inbound 有独立的 sub_id）
+        for (const config of nodeConfigs) {
+          // 判断策略
+          const strategy = getStrategyFromRemark(config.remark);
 
-        // 从 3X-UI 获取原始订阅
-        let originalLinks = [];
-        try {
-          const originalContent = await fetchOriginalSubscription(server.sub_url, firstConfig.sub_id);
-          originalLinks = parseSubscriptionContent(originalContent);
-          logger.info(`从服务器 ${server.name} 获取到 ${originalLinks.length} 个原始节点`);
-        } catch (error) {
-          logger.error(`从服务器 ${server.name} 获取原始订阅失败: ${error.message}`);
-          continue;
-        }
-
-        // 处理每个节点
-        for (let i = 0; i < nodeConfigs.length; i++) {
-          const config = nodeConfigs[i];
-          
-          // 尝试从原始链接中找到匹配的节点
-          // 优先通过 UUID 匹配，如果找不到则按顺序取
-          let originalLink = originalLinks.find(link => link.includes(config.uuid));
-          if (!originalLink && i < originalLinks.length) {
-            originalLink = originalLinks[i];
+          // 从 3X-UI 获取该节点的原始订阅
+          let originalLink = null;
+          try {
+            const originalContent = await fetchOriginalSubscription(server.sub_url, config.sub_id);
+            const links = parseSubscriptionContent(originalContent);
+            if (links.length > 0) {
+              originalLink = links[0];
+              logger.info(`从服务器 ${server.name} 获取节点 ${config.remark} 的原始链接`);
+            }
+          } catch (error) {
+            logger.warn(`从服务器 ${server.name} 获取节点 ${config.remark} 原始订阅失败: ${error.message}`);
+            continue;
           }
 
           if (!originalLink) {
@@ -288,29 +279,36 @@ router.post('/generate', authenticateUser, async (req, res) => {
             continue;
           }
 
-          // 判断策略
-          const strategy = getStrategyFromRemark(config.remark);
-
           // 处理节点链接
           let processedLink;
           if (strategy === 'cf') {
-            processedLink = processNodeLink(originalLink, 'cf', {
-              cfIp: cfIp,
-              clientPort: server.client_port,
-              host: server.host
-            });
+            // 为每个 CF 优选 IP 生成一个节点
+            for (const cfIpItem of cfIps) {
+              processedLink = processNodeLink(originalLink, 'cf', {
+                cfIp: cfIpItem.ip,
+                clientPort: server.client_port,
+                host: server.host
+              });
+              allNodes.push({
+                server_name: server.name,
+                node_name: config.remark,
+                protocol: config.protocol,
+                strategy: strategy,
+                link: processedLink,
+                original_link: originalLink
+              });
+            }
           } else {
             processedLink = processNodeLink(originalLink, 'direct');
+            allNodes.push({
+              server_name: server.name,
+              node_name: config.remark,
+              protocol: config.protocol,
+              strategy: strategy,
+              link: processedLink,
+              original_link: originalLink
+            });
           }
-
-          allNodes.push({
-            server_name: server.name,
-            node_name: config.remark,
-            protocol: config.protocol,
-            strategy: strategy,
-            link: processedLink,
-            original_link: originalLink
-          });
         }
       } catch (error) {
         logger.error(`处理服务器 ${server.name} 错误: ${error.message}`);
