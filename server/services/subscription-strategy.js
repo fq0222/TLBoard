@@ -141,9 +141,13 @@ function applyCfStrategy(originalLink, cfConfig) {
   const nodeInfo = parseNodeLink(originalLink);
   if (!nodeInfo) return originalLink;
   
-  // 替换地址
+  // 替换地址（确保去除 IPv6 的 []）
   if (cfConfig.cfIp) {
-    nodeInfo.address = cfConfig.cfIp;
+    let ip = cfConfig.cfIp;
+    if (ip.startsWith('[') && ip.endsWith(']')) {
+      ip = ip.slice(1, -1);
+    }
+    nodeInfo.address = ip;
   }
   
   // 替换端口
