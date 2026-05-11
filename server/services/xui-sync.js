@@ -37,6 +37,14 @@ async function syncServerNodes(db, server) {
       oldNodeMap[node.inbound_id] = node.id;
     }
 
+    // 先更新 user_node_configs 中的 node_id 为临时值（避免外键约束删除）
+    const tempNodeId = -server.id * 1000; // 使用负数作为临时值
+    for (const oldNode of oldNodes) {
+      await db.prepare(
+        'UPDATE user_node_configs SET node_id = $1 WHERE node_id = $2'
+      ).run(tempNodeId + oldNode.inbound_id, oldNode.id);
+    }
+
     // 删除旧节点
     await db.prepare('DELETE FROM xui_nodes WHERE server_id = $1').run(server.id);
     
@@ -52,15 +60,13 @@ async function syncServerNodes(db, server) {
       `).run(server.id, inbound.id, inbound.remark, inbound.port, inbound.protocol, settings, streamSettings, clientStats.length, 0);
       
       const newNodeId = result.lastInsertRowid;
-      const oldNodeId = oldNodeMap[inbound.id];
       
-      // 更新 user_node_configs 表中的 node_id
-      if (oldNodeId && newNodeId && oldNodeId !== newNodeId) {
-        await db.prepare(
-          'UPDATE user_node_configs SET node_id = $1 WHERE node_id = $2'
-        ).run(newNodeId, oldNodeId);
-        logger.info(`更新 user_node_configs: ${oldNodeId} -> ${newNodeId}`);
-      }
+      // 更新 user_node_configs 表中的 node_id（从临时值更新为新值）
+      await db.prepare(
+        'UPDATE user_node_configs SET node_id = $1 WHERE node_id = $2'
+      ).run(newNodeId, tempNodeId + inbound.id);
+      
+      logger.info(`节点 ${inbound.remark}: node_id ${oldNodeMap[inbound.id] || '新增'} -> ${newNodeId}`);
     }
     
     logger.info(`同步服务器 ${server.name} 完成，${inboundsResult.data.length} 个节点`);
