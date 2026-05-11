@@ -161,7 +161,7 @@ const userApi = {
    * @returns {Promise<Object>} 响应数据
    */
   generateSubscription() {
-    return apiClient.post('/subscription/generate', null, { timeout: 120000 })
+    return apiClient.post('/subscription/generate', {}, { timeout: 120000 })
   },
 
   /**
