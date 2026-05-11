@@ -283,15 +283,17 @@ router.post('/generate', authenticateUser, async (req, res) => {
           let processedLink;
           if (strategy === 'cf') {
             // 为每个 CF 优选 IP 生成一个节点
-            for (const cfIpItem of cfIps) {
+            for (let i = 0; i < cfIps.length; i++) {
               processedLink = processNodeLink(originalLink, 'cf', {
-                cfIp: cfIpItem.ip,
+                cfIp: cfIps[i].ip,
                 clientPort: server.client_port,
                 host: server.host
               });
+              // 多个 CF IP 时添加序号后缀避免重名
+              const nodeName = cfIps.length > 1 ? `${config.remark}-${i + 1}` : config.remark;
               allNodes.push({
                 server_name: server.name,
-                node_name: config.remark,
+                node_name: nodeName,
                 protocol: config.protocol,
                 strategy: strategy,
                 link: processedLink,
@@ -632,9 +634,6 @@ function generateClashConfig(nodes, user) {
     if (!parsed) return '';
     
     const { protocol, uuid, address, port, params } = parsed;
-    const host = params.host || '';
-    const wsPath = params.path || '/';
-    const security = params.security || 'none';
     
     // 处理IPv6地址，去除方括号
     const serverAddress = address.startsWith('[') && address.endsWith(']') 
@@ -642,45 +641,123 @@ function generateClashConfig(nodes, user) {
       : address;
     
     if (protocol === 'vless') {
-      return `  - name: ${node_name}
+      const security = params.security || 'none';
+      const network = params.type || 'tcp';
+      const flow = params.flow || '';
+      const sni = params.sni || '';
+      const fp = params.fp || '';
+      const pbk = params.pbk || '';
+      const sid = params.sid || '';
+      const spx = params.spx || '';
+      const host = params.host || '';
+      const wsPath = params.path || '';
+      
+      let config = `  - name: ${node_name}
     type: vless
     server: ${serverAddress}
     port: ${port}
     uuid: ${uuid}
-    udp: true
-    tls: ${security === 'tls' || security === 'reality'}
-    network: ws
-    ws-opts:
-      path: ${wsPath}
-      headers:
-        Host: ${host || serverAddress}`;
+    udp: true`;
+      
+      // flow 参数
+      if (flow) {
+        config += `\n    flow: ${flow}`;
+      }
+      
+      // TLS 和 Reality 配置
+      if (security === 'reality') {
+        config += `\n    tls: true`;
+        if (sni) config += `\n    servername: ${sni}`;
+        if (fp) config += `\n    client-fingerprint: ${fp}`;
+        if (pbk || sid) {
+          config += `\n    reality-opts:`;
+          if (pbk) config += `\n      public-key: ${pbk}`;
+          if (sid) config += `\n      short-id: "${sid}"`;
+        }
+      } else if (security === 'tls') {
+        config += `\n    tls: true`;
+        if (sni) config += `\n    servername: ${sni}`;
+        if (fp) config += `\n    client-fingerprint: ${fp}`;
+      } else {
+        config += `\n    tls: false`;
+      }
+      
+      // 网络层配置
+      config += `\n    network: ${network}`;
+      
+      if (network === 'ws') {
+        config += `\n    ws-opts:`;
+        config += `\n      path: ${wsPath || '/'}`;
+        if (host) {
+          config += `\n      headers:`;
+          config += `\n        Host: ${host}`;
+        }
+      } else if (network === 'tcp') {
+        const headerType = params.headerType || 'none';
+        if (headerType !== 'none') {
+          config += `\n    tcp-opts:`;
+          config += `\n      header:`;
+          config += `\n        type: ${headerType}`;
+        }
+      }
+      
+      return config;
     } else if (protocol === 'vmess') {
-      return `  - name: ${node_name}
+      const security = params.security || 'none';
+      const network = params.type || 'tcp';
+      const host = params.host || '';
+      const wsPath = params.path || '';
+      
+      let config = `  - name: ${node_name}
     type: vmess
     server: ${serverAddress}
     port: ${port}
     uuid: ${uuid}
     alterId: 0
     cipher: auto
-    tls: ${security === 'tls'}
-    network: ws
-    ws-opts:
-      path: ${wsPath}
-      headers:
-        Host: ${host || serverAddress}`;
+    udp: true`;
+      
+      config += `\n    tls: ${security === 'tls'}`;
+      config += `\n    network: ${network}`;
+      
+      if (network === 'ws') {
+        config += `\n    ws-opts:`;
+        config += `\n      path: ${wsPath || '/'}`;
+        if (host) {
+          config += `\n      headers:`;
+          config += `\n        Host: ${host}`;
+        }
+      }
+      
+      return config;
     } else if (protocol === 'trojan') {
-      return `  - name: ${node_name}
+      const security = params.security || 'none';
+      const network = params.type || 'tcp';
+      const host = params.host || '';
+      const wsPath = params.path || '';
+      const sni = params.sni || host || serverAddress;
+      
+      let config = `  - name: ${node_name}
     type: trojan
     server: ${serverAddress}
     port: ${port}
     password: ${uuid}
-    tls: true
-    network: ws
-    ws-opts:
-      path: ${wsPath}
-      headers:
-        Host: ${host || serverAddress}
-    sni: ${host || serverAddress}`;
+    udp: true`;
+      
+      config += `\n    tls: true`;
+      if (sni) config += `\n    sni: ${sni}`;
+      config += `\n    network: ${network}`;
+      
+      if (network === 'ws') {
+        config += `\n    ws-opts:`;
+        config += `\n      path: ${wsPath || '/'}`;
+        if (host) {
+          config += `\n      headers:`;
+          config += `\n        Host: ${host}`;
+        }
+      }
+      
+      return config;
     }
     return '';
   }).filter(Boolean).join('\n');
