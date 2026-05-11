@@ -40,6 +40,7 @@ npx vite build --minify esbuild  # 绕过 terser 的构建方式
 ### 代码提交
 1. 可以 `git commit` 提交本地更改
 2. `git push` 前**必须**展示变更并获得用户同意
+3. **commit 信息必须使用中文书写**
 
 ### 验证要求
 - 后端修改：运行 `server/test/` 下的脚本验证
@@ -139,19 +140,6 @@ RATE_LIMIT_MAX=3          # 最大尝试次数
 **测试脚本：**
 ```bash
 node server/test/test-rate-limiter.js
-```
-
-## 项目开发经验
-
-### PostgreSQL 字段添加
-
-添加新字段时，`ALTER TABLE` 语句不能使用 `prepare().run()`（会自动添加 `RETURNING id`），需使用 `exec()` 方法：
-```javascript
-// 正确
-await db.exec('ALTER TABLE users ADD COLUMN traffic_used_at BIGINT');
-
-// 错误 - 会报 syntax error
-await db.prepare('ALTER TABLE users ADD COLUMN traffic_used_at BIGINT').run();
 ```
 
 ### 多台 3X-UI 服务器 UUID 同步问题
@@ -391,3 +379,48 @@ PostgreSQL 连接池已优化，防止空闲连接超时断开：
 - 删除工单会同时删除回复和已读记录
 - 已读状态通过比较 `last_reply_at` 和 `last_read_at` 判断
 - 定时任务每小时检查一次可自动关闭的工单
+
+## 节点订阅策略
+
+### 功能概述
+- 每个用户在每个节点上有独立的 UUID 和 sub_id
+- 通过节点备注（remark）判断策略类型：包含 "cf" 用 CF 策略，其他用 direct 策略
+- CF 策略：替换地址、端口、host；direct 策略：不修改
+- direct 节点同步到 3X-UI 时自动设置 `flow: 'xtls-rprx-vision'`
+
+### 关键文件
+- `server/services/subscription-strategy.js` - 策略解析和处理
+- `server/services/order-service.js` - 购买/续费时同步用户到 3X-UI
+- `server/services/xui-service.js` - 3X-UI API 交互（支持 flow 参数）
+- `server/services/xui-sync.js` - 节点信息同步
+- `server/jobs/index.js` - 定时任务（sub_id/flow 一致性检查）
+- `server/routes/user/subscription.js` - 订阅生成和获取
+- `server/db/migrations/` - 数据库迁移脚本
+
+### 数据库表
+- `user_node_configs` - 用户节点配置（`server_id` + `inbound_id` 关联，不依赖 xui_nodes 外键）
+- `user_subscriptions` - 订阅缓存（`nodes_data` JSON 字段）
+- `xui_servers.sub_url` - 服务器订阅地址
+
+### sub_id 规则
+- 格式：16 位十六进制（`crypto.randomBytes(8).toString('hex')`）
+- 数据库为主，定时任务同步到 3X-UI
+- 每个节点独立获取原始订阅（使用各自的 sub_id）
+
+### 数据库迁移
+- 迁移脚本：`server/db/migrations/001-node-subscription-strategy.js`
+- 支持幂等运行，已迁移的步骤自动跳过
+- 生产环境部署前需先运行迁移脚本
+
+## 项目开发经验
+
+### PostgreSQL 字段添加
+
+添加新字段时，`ALTER TABLE` 语句不能使用 `prepare().run()`（会自动添加 `RETURNING id`），需使用 `exec()` 方法：
+```javascript
+// 正确
+await db.exec('ALTER TABLE users ADD COLUMN traffic_used_at BIGINT');
+
+// 错误 - 会报 syntax error
+await db.prepare('ALTER TABLE users ADD COLUMN traffic_used_at BIGINT').run();
+```

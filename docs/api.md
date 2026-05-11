@@ -522,6 +522,15 @@
 | cf | 备注包含 "cf" | 替换地址为 CF 优选 IP，端口为 client_port，host 为 host |
 | direct | 其他格式 | 完全不修改，直接使用原始节点信息 |
 
+**CF 节点特殊处理**：每个 CF 优选 IP 生成独立节点，节点名添加序号后缀。
+
+**direct 节点特殊处理**：同步到 3X-UI 时自动设置 `flow: 'xtls-rprx-vision'`。
+
+**sub_id 说明**：
+- 每个用户在每个节点上有独立的 sub_id（16 位十六进制）
+- 数据库中的 sub_id 是权威数据，定时任务会同步到 3X-UI
+- 每个节点使用各自的 sub_id 从 3X-UI 获取原始订阅
+
 #### GET `/api/user/subscription`
 
 获取当前登录用户的订阅信息与节点列表。
