@@ -23,10 +23,17 @@ A complete subscription management system for proxy panels, supporting multiple 
 - **Server Management**: Multiple 3X-UI server management with one-click sync
 - **Ticket Management**: Handle user tickets with auto-close support
 
+### Subscription Strategy
+
+- **Node-level Independent Config**: Each user has independent UUID and sub_id for each node
+- **CF Strategy**: Replace address with CF optimal IP, generate independent node for each IP
+- **Direct Strategy**: Use original node info directly, auto-set flow: xtls-rprx-vision
+- **Strategy Detection**: Auto-detect via node remark (contains "cf" uses CF strategy)
+
 ### Technical Features
 
 - **Multi-Server Support**: Manage multiple 3X-UI servers simultaneously
-- **Auto Sync**: Scheduled synchronization of user and traffic data
+- **Auto Sync**: Scheduled synchronization of user and traffic data, check sub_id and flow consistency
 - **Security**: Login/registration rate limiting, payment signature verification
 - **High Performance**: Connection pool optimization, automatic retry mechanism
 
@@ -94,9 +101,14 @@ subscription-manager/
 │   │   ├── user/          # User API
 │   │   └── admin/         # Admin API
 │   ├── services/          # Business logic
+│   │   ├── subscription-strategy.js  # Subscription strategy
+│   │   ├── order-service.js          # Order processing
+│   │   ├── xui-service.js            # 3X-UI integration
+│   │   ├── xui-sync.js               # Node sync
+│   │   └── traffic-manager.js        # Traffic management
 │   ├── middleware/         # Middleware
 │   ├── jobs/              # Scheduled tasks
-│   ├── db/                # Database initialization
+│   ├── db/                # Database init and migrations
 │   └── app.js             # Entry file
 ├── client-user/           # User frontend
 │   └── src/
@@ -142,11 +154,12 @@ module.exports = {
 
 Add 3X-UI servers in the admin panel:
 
-- **Name**: Server identifier
+- **Name**: Server identifier (e.g., "US-01", "HK-01")
 - **API URL**: 3X-UI panel address
 - **Username/Password**: API authentication
 - **Host**: CF port forwarding hostname
-- **Port**: Client connection port
+- **Port**: Client connection port (for CF nodes)
+- **Subscription URL**: 3X-UI subscription link (e.g., `https://example.com/sub/aaa333/`)
 
 ## Deployment Guide
 
@@ -169,6 +182,23 @@ pm2 startup
 For complete API documentation, see [API.md](./docs/api.md)
 
 ## Changelog
+
+### V1.2.0 (2026-05-11)
+
+- ✨ Subscription strategy: Support CF and Direct strategies
+- ✨ Node-level independent config: Each user has independent UUID/sub_id per node
+- ✨ CF node multi-IP: Generate independent node for each optimal IP
+- ✨ Direct node flow: Auto-set xtls-rprx-vision
+- ✅ 3X-UI server subscription URL field
+- ✅ Scheduled task sync sub_id and flow consistency
+- ✅ Database migration script
+
+### V1.1.0 (2026-05-09)
+
+- ✨ Traffic statistics: Aggregate user traffic across all 3X-UI servers (incremental update)
+- ✨ Auto disable: Automatically disable users when traffic exceeds plan limit
+- ✨ Auto re-enable: Automatically re-enable users after plan renewal
+- ✨ Traffic sync frequency changed from 3 hours to 1 hour
 
 ### V1.0.0 (2026-05-09)
 
