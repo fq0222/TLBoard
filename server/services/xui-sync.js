@@ -28,6 +28,15 @@ async function syncServerNodes(db, server) {
       return { success: false, message: inboundsResult.message };
     }
 
+    // 获取旧的节点映射（inbound_id -> node_id）
+    const oldNodes = await db.prepare(
+      'SELECT id, inbound_id FROM xui_nodes WHERE server_id = $1'
+    ).all(server.id);
+    const oldNodeMap = {};
+    for (const node of oldNodes) {
+      oldNodeMap[node.inbound_id] = node.id;
+    }
+
     // 删除旧节点
     await db.prepare('DELETE FROM xui_nodes WHERE server_id = $1').run(server.id);
     
@@ -37,10 +46,22 @@ async function syncServerNodes(db, server) {
       const streamSettings = typeof inbound.streamSettings === 'string' ? inbound.streamSettings : JSON.stringify(inbound.streamSettings || {});
       const clientStats = inbound.clientStats || [];
       
-      await db.prepare(`
+      const result = await db.prepare(`
         INSERT INTO xui_nodes (server_id, inbound_id, remark, port, protocol, settings, stream_settings, user_count, online_count)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id
       `).run(server.id, inbound.id, inbound.remark, inbound.port, inbound.protocol, settings, streamSettings, clientStats.length, 0);
+      
+      const newNodeId = result.lastInsertRowid;
+      const oldNodeId = oldNodeMap[inbound.id];
+      
+      // 更新 user_node_configs 表中的 node_id
+      if (oldNodeId && newNodeId && oldNodeId !== newNodeId) {
+        await db.prepare(
+          'UPDATE user_node_configs SET node_id = $1 WHERE node_id = $2'
+        ).run(newNodeId, oldNodeId);
+        logger.info(`更新 user_node_configs: ${oldNodeId} -> ${newNodeId}`);
+      }
     }
     
     logger.info(`同步服务器 ${server.name} 完成，${inboundsResult.data.length} 个节点`);
