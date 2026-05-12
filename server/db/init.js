@@ -407,6 +407,67 @@ class DatabaseManager {
       `);
       logger.info('用户CF优选记录表初始化完成');
 
+      // 系统配置表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS system_settings (
+          key VARCHAR(50) PRIMARY KEY,
+          value TEXT,
+          updated_at BIGINT
+        )
+      `);
+      logger.info('系统配置表初始化完成');
+
+      // 邮件模板表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS email_templates (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100) NOT NULL,
+          subject VARCHAR(200) NOT NULL,
+          content TEXT NOT NULL,
+          variables TEXT,
+          created_at BIGINT,
+          updated_at BIGINT
+        )
+      `);
+      logger.info('邮件模板表初始化完成');
+
+      // 群发任务表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS email_campaigns (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100),
+          template_id INT,
+          subject VARCHAR(200),
+          content TEXT,
+          target_type VARCHAR(20),
+          target_users TEXT,
+          total_count INT DEFAULT 0,
+          sent_count INT DEFAULT 0,
+          failed_count INT DEFAULT 0,
+          status VARCHAR(20) DEFAULT 'pending',
+          daily_limit INT DEFAULT 200,
+          created_at BIGINT,
+          updated_at BIGINT
+        )
+      `);
+      logger.info('群发任务表初始化完成');
+
+      // 邮件日志表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS email_logs (
+          id SERIAL PRIMARY KEY,
+          campaign_id INT,
+          user_id INT,
+          email VARCHAR(200),
+          subject VARCHAR(200),
+          status VARCHAR(20),
+          error_message TEXT,
+          sent_at BIGINT,
+          created_at BIGINT
+        )
+      `);
+      logger.info('邮件日志表初始化完成');
+
       // 创建索引
       await this.createIndexes(client);
 
