@@ -40,6 +40,18 @@
           <el-icon><ChatDotRound /></el-icon>
           <span v-if="!isCollapsed">工单管理</span>
         </router-link>
+        <router-link to="/admin/email-sender" class="nav-item" active-class="active">
+          <el-icon><Message /></el-icon>
+          <span v-if="!isCollapsed">发送邮件</span>
+        </router-link>
+        <router-link to="/admin/email-campaigns" class="nav-item" active-class="active">
+          <el-icon><Promotion /></el-icon>
+          <span v-if="!isCollapsed">群发任务</span>
+        </router-link>
+        <router-link to="/admin/email-templates" class="nav-item" active-class="active">
+          <el-icon><Notebook /></el-icon>
+          <span v-if="!isCollapsed">邮件模板</span>
+        </router-link>
         <router-link to="/admin/settings" class="nav-item" active-class="active">
           <el-icon><Setting /></el-icon>
           <span v-if="!isCollapsed">系统设置</span>
@@ -108,7 +120,8 @@ import { useAdminStore } from '@/stores/admin'
 import { 
   DataBoard, Monitor, Goods, User, Document, 
   Bell, Connection, Setting, SwitchButton, 
-  Expand, Fold, ArrowDown, ChatDotRound 
+  Expand, Fold, ArrowDown, ChatDotRound,
+  Message, Promotion, Notebook
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 
