@@ -429,6 +429,94 @@ const adminApi = {
    */
   deleteTicket(id) {
     return apiClient.delete(`/tickets/${id}`)
+  },
+
+  // ========== 邮件管理 ==========
+
+  // 邮件配置
+  getEmailConfig() {
+    return apiClient.get('/email/config')
+  },
+
+  updateEmailConfig(data) {
+    return apiClient.put('/email/config', data)
+  },
+
+  sendTestEmail(data) {
+    return apiClient.post('/email/test', data)
+  },
+
+  // 邮件模板
+  getEmailTemplates() {
+    return apiClient.get('/email/templates')
+  },
+
+  createEmailTemplate(data) {
+    return apiClient.post('/email/templates', data)
+  },
+
+  updateEmailTemplate(id, data) {
+    return apiClient.put(`/email/templates/${id}`, data)
+  },
+
+  deleteEmailTemplate(id) {
+    return apiClient.delete(`/email/templates/${id}`)
+  },
+
+  previewEmailTemplate(id, params) {
+    return apiClient.get(`/email/templates/${id}/preview`, { params })
+  },
+
+  // 邮件发送
+  sendEmail(data) {
+    return apiClient.post('/email/send', data)
+  },
+
+  // 群发任务
+  getEmailCampaigns() {
+    return apiClient.get('/email/campaigns')
+  },
+
+  getEmailCampaign(id) {
+    return apiClient.get(`/email/campaigns/${id}`)
+  },
+
+  createEmailCampaign(data) {
+    return apiClient.post('/email/campaigns', data)
+  },
+
+  pauseEmailCampaign(id) {
+    return apiClient.post(`/email/campaigns/${id}/pause`)
+  },
+
+  resumeEmailCampaign(id) {
+    return apiClient.post(`/email/campaigns/${id}/resume`)
+  },
+
+  deleteEmailCampaign(id) {
+    return apiClient.delete(`/email/campaigns/${id}`)
+  },
+
+  getEmailCampaignLogs(id, params) {
+    return apiClient.get(`/email/campaigns/${id}/logs`, { params })
+  },
+
+  // 邮件日志
+  deleteEmailLog(id) {
+    return apiClient.delete(`/email/logs/${id}`)
+  },
+
+  batchDeleteEmailLogs(ids) {
+    return apiClient.delete('/email/logs/batch', { data: { ids } })
+  },
+
+  clearEmailLogs(beforeDays) {
+    return apiClient.delete('/email/logs/clear', { data: { before_days: beforeDays } })
+  },
+
+  // 用户搜索
+  searchUsers(keyword) {
+    return apiClient.get('/email/users/search', { params: { keyword } })
   }
 }
 
