@@ -68,9 +68,53 @@
       :current-plan-id="userInfo.plan_id"
       @renew="handleRenew"
     />
-    
+
+    <!-- 帮助弹窗 -->
+    <el-dialog v-model="showHelpDialog" title="使用帮助" width="400px">
+      <div class="help-content">
+        <el-alert
+          title="每天只可以收到 1 封教程邮件"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 20px;"
+        />
+        <p class="help-tip">点击获得按钮后，请到注册用的邮箱内查看教程。</p>
+        <div class="help-items">
+          <div class="help-item">
+            <span class="help-label">Android-App教程</span>
+            <el-button 
+              type="primary" 
+              size="small" 
+              @click="requestTutorial('android')"
+              :loading="tutorialLoading.android"
+            >
+              获得
+            </el-button>
+          </div>
+          <div class="help-item">
+            <span class="help-label">Windows教程</span>
+            <el-button 
+              type="primary" 
+              size="small" 
+              @click="requestTutorial('windows')"
+              :loading="tutorialLoading.windows"
+            >
+              获得
+            </el-button>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
+
     <div class="content-card">
-      <h2 class="card-title">订阅链接</h2>
+      <div class="card-header">
+        <h2 class="card-title">订阅链接</h2>
+        <el-button type="primary" link @click="showHelpDialog = true">
+          <el-icon><QuestionFilled /></el-icon>
+          帮助
+        </el-button>
+      </div>
       
       <!-- 未优选或优选完成：显示引导说明和按钮 -->
       <div v-if="!optimizing" class="optimize-guide">
@@ -199,7 +243,7 @@
 
 import { ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { CopyDocument, MagicStick, Link, Refresh, InfoFilled } from '@element-plus/icons-vue'
+import { CopyDocument, MagicStick, Link, Refresh, InfoFilled, QuestionFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import RenewDialog from '@/components/RenewDialog.vue'
@@ -219,6 +263,11 @@ const optimizeStatusText = ref('')
 const subscriptionGenerated = ref(false)
 const generatingSubscription = ref(false)
 const showRenewDialog = ref(false)
+const showHelpDialog = ref(false)
+const tutorialLoading = ref({
+  android: false,
+  windows: false
+})
 const TEST_COUNT = 3
 const TEST_TIMEOUT = 5000
 const TEST_INTERVAL = 200
@@ -293,6 +342,28 @@ async function generateSubscription() {
     ElMessage.error('生成订阅链接失败')
   } finally {
     generatingSubscription.value = false
+  }
+}
+
+/**
+ * 请求教程邮件
+ * @param {string} type - 教程类型：android 或 windows
+ */
+async function requestTutorial(type) {
+  tutorialLoading.value[type] = true
+  try {
+    const response = await api.user.requestTutorial(type)
+    if (response.code === 0) {
+      ElMessage.success('教程邮件已发送，请到邮箱查看')
+      showHelpDialog.value = false
+    } else {
+      ElMessage.error(response.message)
+    }
+  } catch (error) {
+    console.error('请求教程失败:', error)
+    ElMessage.error('请求教程失败')
+  } finally {
+    tutorialLoading.value[type] = false
   }
 }
 
@@ -676,5 +747,49 @@ onMounted(() => {
   color: #666;
   font-size: 14px;
   text-align: center;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.card-header .card-title {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.help-content {
+  padding: 10px 0;
+}
+
+.help-tip {
+  color: #666;
+  margin-bottom: 20px;
+}
+
+.help-items {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.help-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-radius: 8px;
+}
+
+.help-label {
+  font-weight: 500;
+  color: #333;
 }
 </style>

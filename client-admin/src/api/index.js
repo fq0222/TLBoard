@@ -271,10 +271,11 @@ const adminApi = {
    * 修改用户信息
    * @param {number} id - 用户ID
    * @param {Object} data - 用户数据
+   * @param {Object} config - axios 配置（可选，用于自定义超时等）
    * @returns {Promise<Object>} 响应数据
    */
-  updateUser(id, data) {
-    return apiClient.put(`/users/${id}`, data)
+  updateUser(id, data, config = {}) {
+    return apiClient.put(`/users/${id}`, data, config)
   },
 
   /**

@@ -200,7 +200,7 @@ async function handleSubmit() {
       traffic_limit: userForm.traffic_bytes,  // 直接使用存储的字节值
       expire_at: userForm.expire_at ? Math.floor(userForm.expire_at.getTime() / 1000) : null
     }
-    const response = await api.admin.updateUser(editingId.value, data)
+    const response = await api.admin.updateUser(editingId.value, data, { timeout: 60000 })
     if (response.code === 0) {
       ElMessage.success('用户信息更新成功')
       dialogVisible.value = false

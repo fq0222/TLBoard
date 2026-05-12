@@ -252,6 +252,15 @@ const userApi = {
    */
   closeTicket(id) {
     return apiClient.put(`/tickets/${id}/close`)
+  },
+
+  /**
+   * 请求教程邮件
+   * @param {string} type - 教程类型：android 或 windows
+   * @returns {Promise<Object>} 响应数据
+   */
+  requestTutorial(type) {
+    return apiClient.post('/email/tutorial', { type })
   }
 }
 

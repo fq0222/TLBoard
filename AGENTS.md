@@ -415,6 +415,15 @@ PostgreSQL 连接池已优化，防止空闲连接超时断开：
 
 ## 项目开发经验
 
+### API 超时时间
+
+对于需要同步到多台 3X-UI 服务器的操作（如编辑用户），默认的 10 秒超时可能不够。需要在调用时单独设置更长的超时时间：
+
+```javascript
+// 编辑用户时设置 60 秒超时
+const response = await api.admin.updateUser(id, data, { timeout: 60000 })
+```
+
 ### PostgreSQL 布尔类型
 
 PostgreSQL 的布尔类型字段返回的是 `0` 和 `1`，而不是 JavaScript 的 `true` 和 `false`。在前端使用时需要转换：

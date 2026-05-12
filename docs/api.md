@@ -1124,6 +1124,51 @@ md5(payId + param + type + price + reallyPrice + key)
 - `user_id` 从 JWT Token 中获取
 - 后端自动填充用户信息变量（`username`、`email`、`plan_name` 等）
 
+#### POST `/api/user/email/tutorial`
+
+请求教程邮件。
+
+请求体：
+
+```json
+{
+  "type": "android"
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| type | string | 是 | 教程类型：`android` 或 `windows` |
+
+模板匹配规则：
+- `android`：模糊匹配模板名称包含 `v2rayNg-App` 的模板
+- `windows`：模糊匹配模板名称包含 `v2rayN-windows` 的模板
+
+限制：
+- 每个用户每天只能收到 1 封教程邮件
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "教程邮件已发送，请到邮箱查看",
+  "data": null
+}
+```
+
+失败响应：
+
+```json
+{
+  "code": 6006,
+  "message": "今天已经发送过教程邮件，请明天再试",
+  "data": null
+}
+```
+
 ---
 
 ## 4. 本次与代码对齐的修正点
