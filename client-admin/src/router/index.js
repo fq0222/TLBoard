@@ -81,22 +81,10 @@ const routes = [
         meta: { title: '工单详情' }
       },
       {
-        path: 'email-sender',
-        name: 'EmailSender',
-        component: () => import('@/views/EmailSender.vue'),
-        meta: { title: '发送邮件' }
-      },
-      {
-        path: 'email-campaigns',
-        name: 'EmailCampaigns',
-        component: () => import('@/views/EmailCampaigns.vue'),
-        meta: { title: '群发任务' }
-      },
-      {
-        path: 'email-templates',
-        name: 'EmailTemplates',
-        component: () => import('@/views/EmailTemplates.vue'),
-        meta: { title: '邮件模板' }
+        path: 'email',
+        name: 'Email',
+        component: () => import('@/views/Email.vue'),
+        meta: { title: '邮件管理' }
       },
       {
         path: 'settings',

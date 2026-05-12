@@ -241,7 +241,8 @@ const handleSend = async () => {
         await api.admin.sendEmail({
           to: user.email,
           subject: form.value.subject,
-          content: form.value.content
+          content: form.value.content,
+          user_id: user.id
         })
       }
       ElMessage.success(`已发送 ${selectedUsers.value.length} 封邮件`)

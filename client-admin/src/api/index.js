@@ -502,6 +502,10 @@ const adminApi = {
   },
 
   // 邮件日志
+  getEmailLogs(params) {
+    return apiClient.get('/email/logs', { params })
+  },
+
   deleteEmailLog(id) {
     return apiClient.delete(`/email/logs/${id}`)
   },

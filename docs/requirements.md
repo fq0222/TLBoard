@@ -1,7 +1,7 @@
 # 机场面板系统需求文档
 
-> 版本：V1.7  
-> 更新日期：2026-05-11
+> 版本：V1.8  
+> 更新日期：2026-05-12
 
 ---
 
@@ -10,7 +10,7 @@
 本项目是一套订阅管理系统，分为用户端和管理端两个独立子系统：
 
 - 用户端：套餐展示、注册登录、在线支付、订阅管理、Cloudflare IP 优选、工单支持
-- 管理端：套餐管理、订单管理、用户管理、公告管理、3X-UI 服务端管理、工单管理
+- 管理端：套餐管理、订单管理、用户管理、公告管理、3X-UI 服务端管理、工单管理、邮件管理
 
 系统采用前后端分离架构，用户端和管理端分别运行在不同端口，通过 Nginx 统一代理对外提供服务。
 
@@ -25,6 +25,7 @@
 | 数据库 | PostgreSQL | 核心业务数据存储 |
 | 3X-UI 对接 | `3xui-api-client` | 服务端同步与用户下发 |
 | 支付 | VMQ | 创建订单、支付通知、订单状态查询 |
+| 邮件 | Brevo (@getbrevo/brevo) | 邮件发送服务 |
 | 部署 | Nginx + PM2 | 前后端反向代理与进程托管 |
 
 ---
@@ -391,6 +392,88 @@ VMQ 后台需要配置以下两个地址：
 - 删除工单：管理员可删除工单（同时删除回复和已读记录）
 - 已读状态：显示用户是否已读管理员的回复
 
+### 6.9 邮件管理
+
+管理员可通过 Brevo 平台发送邮件，支持群发和单发。
+
+#### 6.9.1 Brevo 配置
+
+在系统设置页面配置 Brevo 邮件服务：
+
+- API Key：Brevo API 密钥
+- 发件人邮箱：显示的发件人地址
+- 发件人名称：显示的发件人名称
+- 每日发送配额：所有邮件发送的总上限（默认 200）
+- 每日群发配额：群发任务专用配额（默认 100）
+
+#### 6.9.2 邮件模板管理
+
+支持创建和管理邮件模板：
+
+- 模板名称
+- 邮件主题（支持变量）
+- HTML 邮件内容（支持变量）
+- 可用变量列表
+
+模板变量：
+
+| 变量名 | 说明 | 示例值 |
+|--------|------|--------|
+| `{{username}}` | 用户邮箱前缀 | `fuqiang` |
+| `{{email}}` | 用户邮箱 | `fuqiang@example.com` |
+| `{{user_id}}` | 用户 ID | `123` |
+| `{{plan_name}}` | 套餐名称 | `基础套餐` |
+| `{{expire_date}}` | 到期时间 | `2026/6/12` |
+| `{{traffic_used}}` | 已用流量 | `1.5 GB` |
+| `{{traffic_limit}}` | 流量上限 | `100 GB` |
+
+#### 6.9.3 邮件发送
+
+支持多种发送方式：
+
+- 单发：选择用户发送邮件
+- 群发所有用户
+- 群发禁用用户
+- 自定义收件人列表
+
+发送特性：
+
+- HTML 邮件支持
+- 邮件预览
+- 模板变量自动替换
+- 发送日志记录
+
+#### 6.9.4 群发任务管理
+
+群发任务采用队列机制：
+
+- 每日群发配额限制（默认 100 封/天）
+- 断点续发：未完成的任务第二天继续发送
+- 任务状态：待发送、发送中、已完成、已暂停
+- 支持暂停/恢复任务
+- 查看发送日志
+
+#### 6.9.5 发送日志
+
+记录每封邮件的发送状态：
+
+- 收件人邮箱
+- 邮件主题
+- 发送状态（成功/失败）
+- 错误信息
+- 发送时间
+- 支持删除过期日志（默认 30 天）
+- 分页显示，每页 10 条
+
+#### 6.9.6 用户端邮件触发
+
+用户可通过预设场景触发邮件发送：
+
+- 发送教程邮件
+- 发送账单邮件
+
+使用白名单机制，只能调用预设的模板。
+
 ---
 
 ## 7. 当前接口总览
@@ -464,6 +547,27 @@ VMQ 后台需要配置以下两个地址：
 | POST | `/api/admin/tickets/:id/replies` | 回复工单 |
 | PUT | `/api/admin/tickets/:id/close` | 关闭工单 |
 | DELETE | `/api/admin/tickets/:id` | 删除工单 |
+| GET | `/api/admin/email/config` | 获取 Brevo 配置 |
+| PUT | `/api/admin/email/config` | 更新 Brevo 配置 |
+| POST | `/api/admin/email/test` | 发送测试邮件 |
+| GET | `/api/admin/email/templates` | 邮件模板列表 |
+| POST | `/api/admin/email/templates` | 创建邮件模板 |
+| PUT | `/api/admin/email/templates/:id` | 编辑邮件模板 |
+| DELETE | `/api/admin/email/templates/:id` | 删除邮件模板 |
+| GET | `/api/admin/email/templates/:id/preview` | 预览邮件模板 |
+| POST | `/api/admin/email/send` | 发送单封邮件 |
+| GET | `/api/admin/email/campaigns` | 群发任务列表 |
+| POST | `/api/admin/email/campaigns` | 创建群发任务 |
+| GET | `/api/admin/email/campaigns/:id` | 群发任务详情 |
+| POST | `/api/admin/email/campaigns/:id/pause` | 暂停群发任务 |
+| POST | `/api/admin/email/campaigns/:id/resume` | 恢复群发任务 |
+| DELETE | `/api/admin/email/campaigns/:id` | 删除群发任务 |
+| GET | `/api/admin/email/campaigns/:id/logs` | 群发任务日志 |
+| DELETE | `/api/admin/email/logs/:id` | 删除单条日志 |
+| DELETE | `/api/admin/email/logs/batch` | 批量删除日志 |
+| DELETE | `/api/admin/email/logs/clear` | 清空过期日志 |
+| GET | `/api/admin/email/users/search` | 搜索用户 |
+| POST | `/api/user/email/:action` | 用户端触发邮件发送 |
 
 ---
 
@@ -485,9 +589,11 @@ project/
 │  │  │  ├─ announcements.js
 │  │  │  ├─ cf-optimize.js
 │  │  │  ├─ renew.js
-│  │  │  └─ tickets.js
+│  │  │  ├─ tickets.js
+│  │  │  └─ email.js
 │  │  └─ admin/
 │  │     ├─ tickets.js
+│  │     ├─ email.js
 │  │     └─ ...
 │  ├─ services/
 │  │  ├─ vmq-service.js
@@ -495,7 +601,11 @@ project/
 │  │  ├─ xui-service.js
 │  │  ├─ xui-sync.js
 │  │  ├─ traffic-manager.js
-│  │  └─ ticket-service.js
+│  │  ├─ ticket-service.js
+│  │  └─ email-service.js
+│  ├─ jobs/
+│  │  ├─ index.js
+│  │  └─ email-campaign.js
 │  └─ config.js
 ├─ client-user/
 │  └─ src/
@@ -514,6 +624,7 @@ project/
 │     ├─ views/
 │     │  ├─ Tickets.vue
 │     │  ├─ TicketDetail.vue
+│     │  ├─ Email.vue
 │     │  └─ ...
 │     ├─ api/
 │     └─ stores/
@@ -543,6 +654,8 @@ project/
 | 流量同步与禁用检查 | 是 | 10 分钟 | 1 小时 | 同步用户流量数据并自动禁用超量用户 |
 | 工单自动关闭 | 是 | 3 分钟 | 1 小时 | 关闭超时未回复的工单 |
 | 释放过期名额 | 是 | 15 分钟 | 1 小时 | 释放流量用完超3天的用户名额 |
+| 邮件群发任务 | 是 | 5 分钟 | 每天 9:00 | 处理待发送的群发任务 |
+| 清理邮件日志 | 是 | 20 分钟 | 每天 3:00 | 删除 30 天前的邮件日志 |
 
 ### 10.1 标记过期订单
 
@@ -610,6 +723,24 @@ project/
   - 流量用完时间 (`traffic_used_at`) 超过 3 天
   - 3 天内没有续费订单
 - 效果：对应套餐的 `sales_count` 减少
+
+### 10.8 邮件群发任务
+
+- 执行频率：每天 9:00（首次延迟 5 分钟）
+- 逻辑：
+  1. 查询状态为 `pending` 或 `sending` 的群发任务
+  2. 从数据库读取每日群发配额（默认 100）
+  3. 检查今日已发送数量
+  4. 计算剩余配额（取总配额和群发配额的较小值）
+  5. 获取待发送用户列表（排除已发送的用户）
+  6. 逐个发送邮件，替换模板变量
+  7. 记录发送日志
+  8. 更新任务状态（完成或等待明天继续）
+
+### 10.9 清理邮件日志
+
+- 执行频率：每天 3:00（首次延迟 20 分钟）
+- 逻辑：删除 30 天前的邮件发送日志
 
 ---
 

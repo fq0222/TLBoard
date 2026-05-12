@@ -45,6 +45,26 @@
           <div class="stat-label">服务器数量</div>
         </div>
       </div>
+
+      <div class="stat-card">
+        <div class="stat-icon" style="background: #9c27b0;">
+          <el-icon><Message /></el-icon>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.emailTodayCount }} <span class="stat-limit">/ {{ stats.emailDailyLimit }}</span></div>
+          <div class="stat-label">今日邮件发送</div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon" style="background: #ff9800;">
+          <el-icon><Promotion /></el-icon>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats.campaignDailyLimit }}</div>
+          <div class="stat-label">每日群发配额</div>
+        </div>
+      </div>
     </div>
     
     <div class="content-grid">
@@ -102,7 +122,7 @@
  */
 
 import { ref, onMounted } from 'vue'
-import { User, Goods, Document, Monitor } from '@element-plus/icons-vue'
+import { User, Goods, Document, Monitor, Message, Promotion } from '@element-plus/icons-vue'
 import api from '@/api'
 
 // 响应式数据
@@ -110,25 +130,25 @@ const stats = ref({
   userCount: 0,
   planCount: 0,
   orderCount: 0,
-  serverCount: 0
+  serverCount: 0,
+  emailTodayCount: 0,
+  emailDailyLimit: 200,
+  campaignDailyLimit: 100
 })
 
-const recentOrders = ref([])
-const servers = ref([])
-
-/**
- * 获取统计数据
- */
-async function fetchStats() {
+const fetchStats = async () => {
   try {
-    const response = await api.admin.getDashboardStats()
-    if (response.code === 0) {
-      stats.value = response.data
+    const res = await api.admin.getDashboardStats()
+    if (res.code === 0) {
+      stats.value = res.data
     }
   } catch (error) {
     console.error('获取统计数据失败:', error)
   }
 }
+
+const recentOrders = ref([])
+const servers = ref([])
 
 /**
  * 获取最近订单
@@ -202,7 +222,7 @@ onMounted(() => {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 20px;
   margin-bottom: 30px;
 }
@@ -232,6 +252,12 @@ onMounted(() => {
   font-size: 32px;
   font-weight: bold;
   color: #333;
+}
+
+.stat-limit {
+  font-size: 16px;
+  color: #999;
+  font-weight: normal;
 }
 
 .stat-label {

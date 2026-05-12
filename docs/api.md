@@ -837,10 +837,292 @@ md5(payId + param + type + price + reallyPrice + key)
     "userCount": 150,
     "planCount": 3,
     "orderCount": 420,
-    "serverCount": 5
+    "serverCount": 5,
+    "emailTodayCount": 25,
+    "emailDailyLimit": 200,
+    "campaignDailyLimit": 100
   }
 }
 ```
+
+新增字段说明：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| emailTodayCount | number | 今日邮件发送数量 |
+| emailDailyLimit | number | 每日发送配额 |
+| campaignDailyLimit | number | 每日群发配额 |
+
+---
+
+### 3.9 邮件管理
+
+#### 3.9.1 Brevo 配置
+
+##### GET `/api/admin/email/config`
+
+获取 Brevo 配置。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "api_key": "xkeysib-xxx...",
+    "sender_email": "noreply@example.com",
+    "sender_name": "机场面板",
+    "daily_limit": 200,
+    "campaign_daily_limit": 100
+  }
+}
+```
+
+##### PUT `/api/admin/email/config`
+
+更新 Brevo 配置。
+
+请求体：
+
+```json
+{
+  "api_key": "xkeysib-xxx...",
+  "sender_email": "noreply@example.com",
+  "sender_name": "机场面板",
+  "daily_limit": 200,
+  "campaign_daily_limit": 100
+}
+```
+
+##### POST `/api/admin/email/test`
+
+发送测试邮件。
+
+请求体：
+
+```json
+{
+  "email": "test@example.com"
+}
+```
+
+#### 3.9.2 邮件模板
+
+##### GET `/api/admin/email/templates`
+
+获取邮件模板列表。
+
+##### POST `/api/admin/email/templates`
+
+创建邮件模板。
+
+请求体：
+
+```json
+{
+  "name": "教程邮件",
+  "subject": "{{username}} 使用教程",
+  "content": "<h1>欢迎 {{username}}</h1><p>您的套餐: {{plan_name}}</p>",
+  "variables": ["username", "plan_name"]
+}
+```
+
+##### PUT `/api/admin/email/templates/:id`
+
+编辑邮件模板。
+
+##### DELETE `/api/admin/email/templates/:id`
+
+删除邮件模板。
+
+##### GET `/api/admin/email/templates/:id/preview`
+
+预览邮件模板。
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| user_id | number | 否 | 用于填充变量的用户 ID |
+
+#### 3.9.3 邮件发送
+
+##### POST `/api/admin/email/send`
+
+发送单封邮件。
+
+请求体：
+
+```json
+{
+  "to": "user@example.com",
+  "subject": "邮件主题",
+  "content": "<h1>邮件内容</h1>",
+  "user_id": 123
+}
+```
+
+说明：如果提供 `user_id`，会自动获取用户变量并替换模板中的变量。
+
+#### 3.9.4 群发任务
+
+##### GET `/api/admin/email/campaigns`
+
+获取群发任务列表。
+
+##### POST `/api/admin/email/campaigns`
+
+创建群发任务。
+
+请求体：
+
+```json
+{
+  "name": "群发任务 - 2026/5/12",
+  "template_id": 1,
+  "target_type": "all"
+}
+```
+
+`target_type` 可选值：
+- `all`：所有启用用户
+- `disabled`：所有禁用用户
+- `custom`：自定义用户列表（需提供 `target_users`）
+
+##### GET `/api/admin/email/campaigns/:id`
+
+获取群发任务详情。
+
+##### POST `/api/admin/email/campaigns/:id/pause`
+
+暂停群发任务。
+
+##### POST `/api/admin/email/campaigns/:id/resume`
+
+恢复群发任务。
+
+##### DELETE `/api/admin/email/campaigns/:id`
+
+删除群发任务（同时删除相关日志）。
+
+##### GET `/api/admin/email/campaigns/:id/logs`
+
+获取群发任务日志。
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| page | number | 否 | 页码，默认 1 |
+| limit | number | 否 | 每页条数，默认 50 |
+
+#### 3.9.5 邮件日志
+
+##### GET `/api/admin/email/logs`
+
+获取所有邮件日志（分页）。
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| page | number | 否 | 页码，默认 1 |
+| limit | number | 否 | 每页条数，默认 10 |
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 100,
+    "page": 1,
+    "limit": 10,
+    "list": [
+      {
+        "id": 1,
+        "campaign_id": 1,
+        "user_id": 123,
+        "email": "user@example.com",
+        "subject": "邮件主题",
+        "status": "sent",
+        "error_message": null,
+        "sent_at": 1747000000,
+        "created_at": 1747000000
+      }
+    ]
+  }
+}
+```
+
+##### DELETE `/api/admin/email/logs/:id`
+
+删除单条日志。
+
+##### DELETE `/api/admin/email/logs/batch`
+
+批量删除日志。
+
+请求体：
+
+```json
+{
+  "ids": [1, 2, 3]
+}
+```
+
+##### DELETE `/api/admin/email/logs/clear`
+
+清空过期日志。
+
+请求体：
+
+```json
+{
+  "before_days": 30
+}
+```
+
+#### 3.9.6 用户搜索
+
+##### GET `/api/admin/email/users/search`
+
+搜索用户（用于选择收件人）。
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| keyword | string | 是 | 搜索关键词（匹配邮箱） |
+
+---
+
+### 3.10 用户端邮件接口
+
+#### POST `/api/user/email/:action`
+
+用户端触发邮件发送（预设模板）。
+
+`:action` 可选值：
+- `send-tutorial`：发送教程邮件
+- `send-invoice`：发送账单邮件
+
+请求体：
+
+```json
+{
+  "variables": {
+    "custom_var": "value"
+  }
+}
+```
+
+说明：
+- 使用白名单机制，只能调用预设的模板
+- `user_id` 从 JWT Token 中获取
+- 后端自动填充用户信息变量（`username`、`email`、`plan_name` 等）
 
 ---
 

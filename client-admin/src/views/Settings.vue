@@ -46,7 +46,7 @@
             </el-table-column>
             <el-table-column label="操作" width="120">
               <template #default="scope">
-                <el-button size="small" type="danger" @click="deleteAdmin(scope.row)" :disabled="scope.row.is_super">
+                <el-button size="small" type="danger" @click="deleteAdmin(scope.row)" :disabled="!!scope.row.is_super">
                   删除
                 </el-button>
               </template>
@@ -78,6 +78,24 @@
                 v-model="emailForm.sender_name"
                 placeholder="机场面板"
               />
+            </el-form-item>
+            <el-form-item label="每日发送配额">
+              <el-input-number
+                v-model="emailForm.daily_limit"
+                :min="1"
+                :max="300"
+                placeholder="每日发送配额"
+              />
+              <span style="margin-left: 10px; color: #666;">封/天（所有邮件发送的总上限）</span>
+            </el-form-item>
+            <el-form-item label="每日群发配额">
+              <el-input-number
+                v-model="emailForm.campaign_daily_limit"
+                :min="1"
+                :max="300"
+                placeholder="每日群发配额"
+              />
+              <span style="margin-left: 10px; color: #666;">封/天（群发任务专用配额）</span>
             </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="saveEmailConfig" :loading="emailSaving">保存配置</el-button>
@@ -137,7 +155,9 @@ const activeTab = ref('password')
 const emailForm = ref({
   api_key: '',
   sender_email: '',
-  sender_name: ''
+  sender_name: '',
+  daily_limit: 200,
+  campaign_daily_limit: 100
 })
 const showTestDialog = ref(false)
 const testEmail = ref('')
@@ -234,7 +254,7 @@ function formatTime(timestamp) {
 
 async function loadEmailConfig() {
   try {
-    const res = await api.getEmailConfig()
+    const res = await api.admin.getEmailConfig()
     if (res.code === 0) {
       emailForm.value = res.data
     }
@@ -246,7 +266,7 @@ async function loadEmailConfig() {
 async function saveEmailConfig() {
   try {
     emailSaving.value = true
-    const res = await api.updateEmailConfig(emailForm.value)
+    const res = await api.admin.updateEmailConfig(emailForm.value)
     if (res.code === 0) {
       ElMessage.success('配置已保存')
     } else {
@@ -266,7 +286,7 @@ async function handleSendTest() {
   }
   try {
     testSending.value = true
-    const res = await api.sendTestEmail({ email: testEmail.value })
+    const res = await api.admin.sendTestEmail({ email: testEmail.value })
     if (res.code === 0) {
       ElMessage.success('测试邮件已发送')
       showTestDialog.value = false

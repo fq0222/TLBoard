@@ -31,6 +31,7 @@ const userCfOptimizeRoutes = require('./routes/user/cf-optimize');
 const userPaymentRoutes = require('./routes/user/payment');
 const userRenewRoutes = require('./routes/user/renew');
 const userTicketsRoutes = require('./routes/user/tickets');
+const userEmailRoutes = require('./routes/user/email');
 
 // ============ 管理端路由 ============
 const adminAuthRoutes = require('./routes/admin/auth');
@@ -43,6 +44,7 @@ const adminAnnouncementsRoutes = require('./routes/admin/announcements');
 const adminCfIpsRoutes = require('./routes/admin/cf-ips');
 const adminDashboardRoutes = require('./routes/admin/dashboard');
 const adminTicketsRoutes = require('./routes/admin/tickets');
+const adminEmailRoutes = require('./routes/admin/email');
 
 async function startApp() {
   // 初始化数据库
@@ -81,6 +83,7 @@ async function startApp() {
   userApp.use(`${userPrefix}/payment`, userPaymentRoutes);
   userApp.use(`${userPrefix}/renew`, userRenewRoutes);
   userApp.use(`${userPrefix}/tickets`, userTicketsRoutes);
+userApp.use(`${userPrefix}/email`, userEmailRoutes);
 
   userApp.use((req, res) => {
     res.status(404).json({ code: 404, message: '接口不存在', data: null });
@@ -122,6 +125,7 @@ async function startApp() {
   adminApp.use(`${adminPrefix}/cf-ips`, adminCfIpsRoutes);
   adminApp.use(`${adminPrefix}/dashboard`, adminDashboardRoutes);
   adminApp.use(`${adminPrefix}/tickets`, adminTicketsRoutes);
+adminApp.use(`${adminPrefix}/email`, adminEmailRoutes);
 
   adminApp.use((req, res) => {
     res.status(404).json({ code: 404, message: '接口不存在', data: null });

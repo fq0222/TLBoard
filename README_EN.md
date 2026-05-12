@@ -2,7 +2,7 @@
 
 English | [简体中文](./README.md)
 
-A complete subscription management system for proxy panels, supporting multiple 3X-UI servers, online payments, Cloudflare IP optimization, and more.
+A complete subscription management system for proxy panels, supporting multiple 3X-UI servers, online payments, Cloudflare IP optimization, email management, and more.
 
 ## Features
 
@@ -13,6 +13,7 @@ A complete subscription management system for proxy panels, supporting multiple 
 - **IP Optimization**: One-click Cloudflare node latency testing, automatic optimal IP selection
 - **Plan Renewal**: Traffic accumulation mechanism, supporting plan switching
 - **Ticket System**: Users can submit issues, admins respond promptly
+- **Email Trigger**: Users can request tutorials, invoices, and other emails
 
 ### Admin Panel
 
@@ -22,6 +23,16 @@ A complete subscription management system for proxy panels, supporting multiple 
 - **Announcement Management**: Markdown syntax support, pinning feature
 - **Server Management**: Multiple 3X-UI server management with one-click sync
 - **Ticket Management**: Handle user tickets with auto-close support
+- **Email Management**: Brevo-based email sending with templates, campaigns, and logs
+
+### Email Management
+
+- **Brevo Integration**: Send emails via Brevo API
+- **Email Templates**: HTML templates with automatic variable substitution
+- **Campaign Tasks**: Send to all users, disabled users, or custom lists
+- **Quota Management**: Configurable daily sending and campaign quotas
+- **Sending Logs**: Complete record of each email's sending status
+- **Scheduled Tasks**: Daily campaign processing and log cleanup
 
 ### Subscription Strategy
 
@@ -45,6 +56,7 @@ A complete subscription management system for proxy panels, supporting multiple 
 | Frontend | Vue 3 + Vite + Element Plus |
 | Database | PostgreSQL |
 | Payment | VMQ |
+| Email | Brevo |
 | 3X-UI Integration | 3xui-api-client |
 | Deployment | PM2 + OpenResty + Cloudflare Tunnel |
 
@@ -105,9 +117,12 @@ subscription-manager/
 │   │   ├── order-service.js          # Order processing
 │   │   ├── xui-service.js            # 3X-UI integration
 │   │   ├── xui-sync.js               # Node sync
-│   │   └── traffic-manager.js        # Traffic management
+│   │   ├── traffic-manager.js        # Traffic management
+│   │   └── email-service.js          # Email service
 │   ├── middleware/         # Middleware
 │   ├── jobs/              # Scheduled tasks
+│   │   ├── index.js       # Task registration
+│   │   └── email-campaign.js  # Email campaign task
 │   ├── db/                # Database init and migrations
 │   └── app.js             # Entry file
 ├── client-user/           # User frontend
@@ -118,6 +133,7 @@ subscription-manager/
 ├── client-admin/          # Admin frontend
 │   └── src/
 │       ├── views/         # Page components
+│       │   └── Email.vue  # Email management (send, templates, campaigns)
 │       ├── api/           # API interfaces
 │       └── stores/        # State management
 └── docs/                  # Documentation
@@ -182,6 +198,17 @@ pm2 startup
 For complete API documentation, see [API.md](./docs/api.md)
 
 ## Changelog
+
+### V1.3.0 (2026-05-12)
+
+- ✨ Email management: Brevo-based email sending
+- ✨ Email templates: HTML templates with automatic variable substitution
+- ✨ Campaign tasks: Send to all users, disabled users, or custom lists
+- ✨ Quota management: Configurable daily sending and campaign quotas
+- ✨ Sending logs: Complete record of each email's sending status with pagination
+- ✨ Scheduled tasks: Daily campaign processing and log cleanup
+- ✨ Dashboard: Display today's email count and quotas
+- ✨ Page merge: Email-related pages merged into unified email management page
 
 ### V1.2.0 (2026-05-11)
 

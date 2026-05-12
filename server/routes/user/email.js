@@ -27,11 +27,10 @@ router.post('/:action', authenticateUser, async (req, res) => {
     }
 
     // 获取模板
-    const templateResult = await db.query('SELECT * FROM email_templates WHERE id = $1', [templateId])
-    if (templateResult.rows.length === 0) {
+    const template = await db.prepare('SELECT * FROM email_templates WHERE id = ?').get(templateId)
+    if (!template) {
       return res.json({ code: 6003, message: '模板不存在', data: null })
     }
-    const template = templateResult.rows[0]
 
     // 获取用户信息变量
     const userVariables = await emailService.getUserVariables(db, userId)
@@ -56,11 +55,10 @@ router.post('/:action', authenticateUser, async (req, res) => {
 
     if (result.success) {
       const now = Math.floor(Date.now() / 1000)
-      await db.query(
+      await db.prepare(
         `INSERT INTO email_logs (user_id, email, subject, status, sent_at, created_at)
-         VALUES ($1, $2, $3, 'sent', $4, $5)`,
-        [userId, userVariables.email, subject, now, now]
-      )
+         VALUES (?, ?, ?, 'sent', ?, ?)`
+      ).run(userId, userVariables.email, subject, now, now)
       logger.info(`用户 ${req.user.email} 发送邮件成功: ${action}`)
       res.json({ code: 0, message: '邮件已发送', data: null })
     } else {

@@ -67,6 +67,7 @@ npx vite build --minify esbuild  # 绕过 terser 的构建方式
 - `services/xui-service.js` - 3X-UI 服务器交互
 - `services/xui-sync.js` - 节点信息同步工具
 - `services/traffic-manager.js` - 流量统计与自动禁用管理
+- `services/email-service.js` - Brevo 邮件发送服务
 
 ## 关键配置
 
@@ -413,6 +414,22 @@ PostgreSQL 连接池已优化，防止空闲连接超时断开：
 - 生产环境部署前需先运行迁移脚本
 
 ## 项目开发经验
+
+### PostgreSQL 布尔类型
+
+PostgreSQL 的布尔类型字段返回的是 `0` 和 `1`，而不是 JavaScript 的 `true` 和 `false`。在前端使用时需要转换：
+
+```javascript
+// Element Plus 的 el-switch 等组件需要布尔值
+// 错误：直接使用数据库返回的值
+<el-switch v-model="row.enabled" />
+
+// 正确：使用 !! 转换
+<el-switch :model-value="!!row.enabled" />
+
+// 或者在比较时转换
+if (!!row.enabled) { ... }
+```
 
 ### PostgreSQL 字段添加
 
