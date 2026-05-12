@@ -1,4 +1,7 @@
 const brevo = require('@getbrevo/brevo')
+const { createLogger } = require('../utils/logger')
+
+const logger = createLogger('EMAIL-SERVICE')
 
 class EmailService {
   constructor() {
@@ -29,23 +32,33 @@ class EmailService {
   }
 
   async initClient(db) {
-    const config = await this.getConfig(db)
-    if (!config.brevo_api_key) {
-      throw new Error('Brevo API Key 未配置')
-    }
+    try {
+      const config = await this.getConfig(db)
+      if (!config.brevo_api_key) {
+        throw new Error('Brevo API Key 未配置')
+      }
 
-    const defaultClient = brevo.ApiClient.instance
-    const apiKey = defaultClient.authentications['api-key']
-    apiKey.apiKey = config.brevo_api_key
-    this.apiInstance = new brevo.TransactionalEmailsApi()
+      const defaultClient = brevo.ApiClient.instance
+      const apiKey = defaultClient.authentications['api-key']
+      apiKey.apiKey = config.brevo_api_key
+      this.apiInstance = new brevo.TransactionalEmailsApi()
 
-    return {
-      senderEmail: config.brevo_sender_email,
-      senderName: config.brevo_sender_name
+      logger.info('Brevo 客户端初始化成功')
+      return {
+        senderEmail: config.brevo_sender_email,
+        senderName: config.brevo_sender_name
+      }
+    } catch (error) {
+      logger.error('Brevo 客户端初始化失败:', error.message)
+      throw error
     }
   }
 
   async sendEmail(db, { to, subject, content, senderEmail, senderName }) {
+    if (!this.apiInstance) {
+      await this.initClient(db)
+    }
+
     const config = await this.getConfig(db)
     const sendSmtpEmail = new brevo.SendSmtpEmail()
 
@@ -59,13 +72,16 @@ class EmailService {
 
     try {
       const result = await this.apiInstance.sendTransacEmail(sendSmtpEmail)
+      logger.info(`邮件发送成功: ${to}`)
       return { success: true, messageId: result.messageId }
     } catch (error) {
+      logger.error(`邮件发送失败: ${to}`, error.message)
       return { success: false, error: error.message }
     }
   }
 
   async sendTestEmail(db, { to }) {
+    logger.info(`发送测试邮件: ${to}`)
     await this.initClient(db)
     const subject = '测试邮件 - 机场面板'
     const content = '<h1>测试邮件</h1><p>这是一封测试邮件，用于验证 Brevo 配置是否正确。</p>'
