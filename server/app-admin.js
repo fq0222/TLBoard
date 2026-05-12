@@ -23,6 +23,7 @@ const ordersRoutes = require('./routes/admin/orders');
 const announcementsRoutes = require('./routes/admin/announcements');
 const cfIpsRoutes = require('./routes/admin/cf-ips');
 const dashboardRoutes = require('./routes/admin/dashboard');
+const emailRoutes = require('./routes/admin/email');
 
 const logger = createLogger('ADMIN-APP');
 
@@ -140,6 +141,9 @@ app.use(`${apiPrefix}/cf-ips`, cfIpsRoutes);
 
 // 仪表盘统计路由
 app.use(`${apiPrefix}/dashboard`, dashboardRoutes);
+
+// 邮件管理路由
+app.use(`${apiPrefix}/email`, emailRoutes);
 
 // ============ 错误处理 ============
 
