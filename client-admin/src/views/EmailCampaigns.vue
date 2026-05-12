@@ -92,13 +92,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import {
-  getEmailCampaigns,
-  pauseEmailCampaign,
-  resumeEmailCampaign,
-  deleteEmailCampaign,
-  getEmailCampaignLogs
-} from '@/api'
+import api from '@/api'
 
 const loading = ref(false)
 const logsLoading = ref(false)
@@ -139,7 +133,7 @@ const formatTime = (timestamp) => {
 const loadCampaigns = async () => {
   loading.value = true
   try {
-    const res = await getEmailCampaigns()
+    const res = await api.admin.getEmailCampaigns()
     if (res.code === 0) {
       campaigns.value = res.data
     }
@@ -155,7 +149,7 @@ const viewDetail = async (row) => {
   showDetail.value = true
   logsLoading.value = true
   try {
-    const res = await getEmailCampaignLogs(row.id, { limit: 100 })
+    const res = await api.admin.getEmailCampaignLogs(row.id, { limit: 100 })
     if (res.code === 0) {
       logs.value = res.data.list
     }
@@ -168,7 +162,7 @@ const viewDetail = async (row) => {
 
 const handlePause = async (row) => {
   try {
-    const res = await pauseEmailCampaign(row.id)
+    const res = await api.admin.pauseEmailCampaign(row.id)
     if (res.code === 0) {
       ElMessage.success('任务已暂停')
       loadCampaigns()
@@ -182,7 +176,7 @@ const handlePause = async (row) => {
 
 const handleResume = async (row) => {
   try {
-    const res = await resumeEmailCampaign(row.id)
+    const res = await api.admin.resumeEmailCampaign(row.id)
     if (res.code === 0) {
       ElMessage.success('任务已恢复')
       loadCampaigns()
@@ -200,7 +194,7 @@ const handleDelete = async (row) => {
       confirmButtonText: '确定',
       cancelButtonText: '取消'
     })
-    const res = await deleteEmailCampaign(row.id)
+    const res = await api.admin.deleteEmailCampaign(row.id)
     if (res.code === 0) {
       ElMessage.success('任务已删除')
       loadCampaigns()

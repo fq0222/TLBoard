@@ -43,7 +43,7 @@
             @click="insertVariable(varName)"
             style="cursor: pointer; margin-right: 8px;"
           >
-            {{ '{{' + varName + '}}' }}
+            {{ formatVariableDisplay(varName) }}
           </el-tag>
         </el-form-item>
         <el-form-item label="邮件内容">
@@ -75,13 +75,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import {
-  getEmailTemplates,
-  createEmailTemplate,
-  updateEmailTemplate,
-  deleteEmailTemplate,
-  previewEmailTemplate
-} from '@/api'
+import api from '@/api'
 
 const loading = ref(false)
 const templates = ref([])
@@ -91,6 +85,8 @@ const editingId = ref(null)
 const previewData = ref({ subject: '', content: '' })
 
 const availableVariables = ['username', 'email', 'user_id', 'plan_name', 'expire_date', 'traffic_used', 'traffic_limit']
+
+const formatVariableDisplay = (varName) => `{{${varName}}}`
 
 const form = ref({
   name: '',
@@ -102,7 +98,7 @@ const form = ref({
 const loadTemplates = async () => {
   loading.value = true
   try {
-    const res = await getEmailTemplates()
+    const res = await api.admin.getEmailTemplates()
     if (res.code === 0) {
       templates.value = res.data
     }
@@ -146,7 +142,7 @@ const insertVariable = (varName) => {
 
 const handlePreview = async () => {
   try {
-    const res = await previewEmailTemplate(editingId.value || 0, {
+    const res = await api.admin.previewEmailTemplate(editingId.value || 0, {
       content: form.value.content,
       subject: form.value.subject
     })
@@ -172,9 +168,9 @@ const handleSave = async () => {
   try {
     let res
     if (editingId.value) {
-      res = await updateEmailTemplate(editingId.value, form.value)
+      res = await api.admin.updateEmailTemplate(editingId.value, form.value)
     } else {
-      res = await createEmailTemplate(form.value)
+      res = await api.admin.createEmailTemplate(form.value)
     }
     if (res.code === 0) {
       ElMessage.success(editingId.value ? '模板已更新' : '模板已创建')
@@ -194,7 +190,7 @@ const handleDelete = async (row) => {
       confirmButtonText: '确定',
       cancelButtonText: '取消'
     })
-    const res = await deleteEmailTemplate(row.id)
+    const res = await api.admin.deleteEmailTemplate(row.id)
     if (res.code === 0) {
       ElMessage.success('模板已删除')
       loadTemplates()

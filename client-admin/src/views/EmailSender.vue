@@ -74,7 +74,7 @@
               type="info"
               style="margin-right: 8px; margin-bottom: 8px;"
             >
-              {{ '{{' + varName + '}}' }} - {{ getVariableLabel(varName) }}
+              {{ formatVariableDisplay(varName) }} - {{ getVariableLabel(varName) }}
             </el-tag>
           </div>
           <div class="variables-tip">
@@ -116,13 +116,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
-import {
-  getEmailTemplates,
-  previewEmailTemplate,
-  sendEmail,
-  createEmailCampaign,
-  searchUsers
-} from '@/api'
+import api from '@/api'
 
 const router = useRouter()
 const loading = ref(false)
@@ -159,9 +153,11 @@ const variableLabels = {
 
 const getVariableLabel = (varName) => variableLabels[varName] || varName
 
+const formatVariableDisplay = (varName) => `{{${varName}}}`
+
 const loadTemplates = async () => {
   try {
-    const res = await getEmailTemplates()
+    const res = await api.admin.getEmailTemplates()
     if (res.code === 0) {
       templates.value = res.data
     }
@@ -184,7 +180,7 @@ const handleSearch = async () => {
     return
   }
   try {
-    const res = await searchUsers(searchKeyword.value)
+    const res = await api.admin.searchUsers(searchKeyword.value)
     if (res.code === 0) {
       searchResults.value = res.data.filter(
         user => !selectedUsers.value.find(u => u.id === user.id)
@@ -209,7 +205,7 @@ const removeUser = (user) => {
 
 const handlePreview = async () => {
   try {
-    const res = await previewEmailTemplate(form.value.template_id, {})
+    const res = await api.admin.previewEmailTemplate(form.value.template_id, {})
     if (res.code === 0) {
       previewData.value = res.data
     } else {
@@ -242,7 +238,7 @@ const handleSend = async () => {
     sending.value = true
     try {
       for (const user of selectedUsers.value) {
-        await sendEmail({
+        await api.admin.sendEmail({
           to: user.email,
           subject: form.value.subject,
           content: form.value.content
@@ -265,7 +261,7 @@ const handleSend = async () => {
   }
   sending.value = true
   try {
-    const res = await createEmailCampaign({
+    const res = await api.admin.createEmailCampaign({
       name: `群发任务 - ${new Date().toLocaleString()}`,
       template_id: form.value.template_id,
       target_type: form.value.target_type
