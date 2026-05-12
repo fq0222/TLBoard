@@ -36,8 +36,11 @@ async function processCampaigns(db) {
 
     await emailService.initClient(db)
 
+    let remaining = remainingQuota
     for (const campaign of campaignResult.rows) {
-      await processCampaign(db, campaign, remainingQuota)
+      const used = await processCampaign(db, campaign, remaining)
+      remaining -= used
+      if (remaining <= 0) break
     }
 
     logger.info('处理完成')
@@ -67,7 +70,7 @@ async function processCampaign(db, campaign, remainingQuota) {
         [Math.floor(Date.now() / 1000), campaign.id]
       )
       logger.info(`任务 ${campaign.id} 已完成`)
-      return
+      return 0
     }
 
     const sendCount = Math.min(pendingUserIds.length, remainingQuota)
@@ -113,8 +116,8 @@ async function processCampaign(db, campaign, remainingQuota) {
       }
     }
 
-    const newSentCount = campaign.sent_count + sentCount
-    const newFailedCount = campaign.failed_count + failedCount
+    const newSentCount = (campaign.sent_count || 0) + sentCount
+    const newFailedCount = (campaign.failed_count || 0) + failedCount
     const isCompleted = (newSentCount + newFailedCount) >= campaign.total_count
 
     await db.query(
@@ -125,12 +128,14 @@ async function processCampaign(db, campaign, remainingQuota) {
     )
 
     logger.info(`任务 ${campaign.id}: 发送 ${sentCount}, 失败 ${failedCount}`)
+    return sentCount
   } catch (error) {
     logger.error(`任务 ${campaign.id} 处理失败: ${error.message}`)
     await db.query(
       "UPDATE email_campaigns SET status = 'pending', updated_at = $1 WHERE id = $2",
       [Math.floor(Date.now() / 1000), campaign.id]
     )
+    return 0
   }
 }
 
