@@ -15,25 +15,32 @@
     "dev:all": "concurrently \"npm run dev:user\" \"npm run dev:admin\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["subscription", "manager", "vpn", "proxy"],
+  "keywords": [
+    "subscription",
+    "manager",
+    "vpn",
+    "proxy"
+  ],
   "author": "Airport Panel System",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
-    "express-rate-limit": "^7.1.5",
-    "pg": "^8.12.0",
-    "jsonwebtoken": "^9.0.2",
-    "bcrypt": "^5.1.1",
-    "express-validator": "^7.0.1",
-    "helmet": "^7.1.0",
-    "cors": "^2.8.5",
-    "morgan": "^1.10.0",
+    "@getbrevo/brevo": "^5.0.4",
     "3xui-api-client": "^1.0.0",
     "axios": "^1.6.2",
-    "dotenv": "^16.3.1"
+    "bcrypt": "^5.1.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "node-cron": "^4.2.1",
+    "pg": "^8.12.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2",
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.0.2"
   }
 }

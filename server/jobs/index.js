@@ -13,6 +13,8 @@
  * | 流量同步               | 是             | 10 分钟        | 1 小时           |
  * | 工单自动关闭           | 是             | 3 分钟         | 1 小时           |
  * | 释放过期名额           | 否             | 15 分钟        | 1 小时           |
+ * | 邮件群发               | 否             | 无             | 每天 9:00        |
+ * | 清理邮件日志           | 否             | 无             | 每天 3:00        |
  * +------------------------+----------------+----------------+------------------+
  * 
  * 任务说明：
@@ -23,16 +25,21 @@
  * - 流量同步：从 3X-UI 服务器同步用户流量数据到本地数据库
  * - 工单自动关闭：关闭用户已读后超过24小时无新回复的 pending 工单
  * - 释放过期名额：释放流量用完超过3天且未续费的用户名额
+ * - 邮件群发：处理待发送的邮件群发任务，每日限额 200 封
+ * - 清理邮件日志：清理超过 30 天的邮件发送日志
  */
 
+const cron = require('node-cron');
 const XuiService = require('../services/xui-service');
 const trafficManager = require('../services/traffic-manager');
+const { processCampaigns, cleanLogs } = require('./email-campaign');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('JOBS');
 
 // 保存所有定时任务引用，便于统一清理
 const intervals = [];
+const cronTasks = [];
 
 /**
  * 注册标记过期订单任务
@@ -540,6 +547,34 @@ async function runReleaseExpiredSales(db) {
 }
 
 /**
+ * 注册邮件群发任务
+ * 每天 9:00 执行，处理待发送的群发任务
+ * @param {Object} db - 数据库实例
+ */
+function registerEmailCampaignJob(db) {
+  const task = cron.schedule('0 9 * * *', async () => {
+    logger.info('处理邮件群发任务')
+    await processCampaigns(db)
+  })
+  cronTasks.push(task)
+  logger.info('邮件群发任务已注册（每天 9:00 执行）');
+}
+
+/**
+ * 注册清理邮件日志任务
+ * 每天 3:00 执行，清理超过 30 天的日志
+ * @param {Object} db - 数据库实例
+ */
+function registerCleanEmailLogsJob(db) {
+  const task = cron.schedule('0 3 * * *', async () => {
+    logger.info('清理邮件日志')
+    await cleanLogs(db, 30)
+  })
+  cronTasks.push(task)
+  logger.info('清理邮件日志任务已注册（每天 3:00 执行）');
+}
+
+/**
  * 启动所有定时任务
  * @param {Object} db - 数据库实例
  */
@@ -552,7 +587,9 @@ function startAllJobs(db) {
   registerTrafficSyncJob(db);
   registerTicketAutoCloseJob(db);
   registerReleaseExpiredSalesJob(db);
-  logger.info(`所有定时任务已启动，共 ${intervals.length} 个任务`);
+  registerEmailCampaignJob(db);
+  registerCleanEmailLogsJob(db);
+  logger.info(`所有定时任务已启动，共 ${intervals.length} 个间隔任务，${cronTasks.length} 个定时任务`);
 }
 
 /**
@@ -562,6 +599,8 @@ function stopAllJobs() {
   logger.info('正在停止所有定时任务...');
   intervals.forEach(interval => clearInterval(interval));
   intervals.length = 0;
+  cronTasks.forEach(task => task.stop());
+  cronTasks.length = 0;
   logger.info('所有定时任务已停止');
 }
 
