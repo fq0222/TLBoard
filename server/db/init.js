@@ -412,7 +412,7 @@ class DatabaseManager {
         CREATE TABLE IF NOT EXISTS system_settings (
           key VARCHAR(50) PRIMARY KEY,
           value TEXT,
-          updated_at BIGINT
+          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
         )
       `);
       logger.info('系统配置表初始化完成');
@@ -421,12 +421,12 @@ class DatabaseManager {
       await client.query(`
         CREATE TABLE IF NOT EXISTS email_templates (
           id SERIAL PRIMARY KEY,
-          name VARCHAR(100) NOT NULL,
+          name VARCHAR(100) NOT NULL UNIQUE,
           subject VARCHAR(200) NOT NULL,
           content TEXT NOT NULL,
           variables TEXT,
-          created_at BIGINT,
-          updated_at BIGINT
+          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
         )
       `);
       logger.info('邮件模板表初始化完成');
@@ -446,8 +446,8 @@ class DatabaseManager {
           failed_count INT DEFAULT 0,
           status VARCHAR(20) DEFAULT 'pending',
           daily_limit INT DEFAULT 200,
-          created_at BIGINT,
-          updated_at BIGINT
+          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
         )
       `);
       logger.info('群发任务表初始化完成');
@@ -458,12 +458,12 @@ class DatabaseManager {
           id SERIAL PRIMARY KEY,
           campaign_id INT,
           user_id INT,
-          email VARCHAR(200),
+          email VARCHAR(255),
           subject VARCHAR(200),
           status VARCHAR(20),
           error_message TEXT,
           sent_at BIGINT,
-          created_at BIGINT
+          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
         )
       `);
       logger.info('邮件日志表初始化完成');
@@ -509,6 +509,9 @@ class DatabaseManager {
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_inbound_id ON user_node_configs(inbound_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_sub_id ON user_node_configs(sub_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_id ON user_subscriptions(user_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_email_logs_campaign_id ON email_logs(campaign_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_email_logs_user_id ON email_logs(user_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_email_campaigns_status ON email_campaigns(status)');
       logger.info('数据库索引创建完成');
     } catch (error) {
       logger.error(`索引创建失败: ${error.message}`);
