@@ -179,7 +179,8 @@ async function syncUserToXuiServers(db, user, plan) {
 async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   // 查询订单及用户当前到期时间，用于续费场景累计有效期
   const order = await db.prepare(`
-    SELECT o.*, u.expire_at as current_expire_at, u.traffic_limit as current_traffic_limit, u.email, u.subscription_token
+    SELECT o.*, u.expire_at as current_expire_at, u.traffic_limit as current_traffic_limit, 
+           u.email, u.subscription_token, u.plan_id as current_plan_id
     FROM orders o
     LEFT JOIN users u ON o.user_id = u.id
     WHERE o.out_trade_no = ?
@@ -243,6 +244,27 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
         updated_at = ?
       WHERE id = ?
     `).run(plan.id, newTrafficLimit, expireAt, now, order.user_id);
+
+    // 更新套餐销售数量
+    if (isRenewOrder) {
+      // 续费订单
+      const currentPlanId = order.current_plan_id;
+      if (currentPlanId && currentPlanId !== plan.id) {
+        // 切换套餐：旧套餐 -1，新套餐 +1
+        await db.prepare('UPDATE plans SET sales_count = GREATEST(0, sales_count - 1) WHERE id = ?').run(currentPlanId);
+        await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(plan.id);
+        logger.info(`续费切换套餐: 旧套餐 ${currentPlanId} -1, 新套餐 ${plan.id} +1`);
+      } else if (!currentPlanId) {
+        // 用户之前没有套餐：新套餐 +1
+        await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(plan.id);
+        logger.info(`续费新套餐: ${plan.id} +1`);
+      }
+      // 续费相同套餐：不变
+    } else {
+      // 新购订单：新套餐 +1
+      await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(plan.id);
+      logger.info(`新购订单: ${plan.id} +1`);
+    }
   });
 
   await transaction();

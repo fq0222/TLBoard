@@ -128,17 +128,6 @@ router.post('/', authenticateUser, [
 
       orderId = orderResult.lastInsertRowid;
 
-      // 处理名额变化
-      if (user.plan_id !== plan_id) {
-        // 更换套餐：旧套餐名额 -1，新套餐名额 +1
-        await db.prepare('UPDATE plans SET sales_count = GREATEST(0, sales_count - 1) WHERE id = ?').run(user.plan_id);
-        await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(plan_id);
-      } else if (!user.plan_id) {
-        // 新用户：新套餐名额 +1
-        await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(plan_id);
-      }
-      // 续费相同套餐：名额不变
-
       // 重置流量用完时间
       await db.prepare('UPDATE users SET traffic_used_at = NULL WHERE id = ?').run(userId);
 

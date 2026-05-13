@@ -146,9 +146,6 @@ router.post('/register-and-pay', [
         VALUES (?, ?, ?, ?, ?, 'pending')
       `).run(userId, email, plan_id, plan.price, outTradeNo);
 
-      // 增加销售计数
-      await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(plan_id);
-
       return { userId, orderId: orderResult.lastInsertRowid, outTradeNo };
     });
 
