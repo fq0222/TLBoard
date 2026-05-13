@@ -183,7 +183,7 @@ const adminApi = {
    * @returns {Promise<Object>} 响应数据
    */
   syncServer(id) {
-    return apiClient.post(`/servers/${id}/sync`, null, { timeout: 60000 })
+    return apiClient.post(`/servers/${id}/sync`, {}, { timeout: 60000 })
   },
 
   /**
