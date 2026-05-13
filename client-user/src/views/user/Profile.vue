@@ -152,15 +152,6 @@
       
       <!-- 未优选或优选完成：显示引导说明和按钮 -->
       <div v-if="!optimizing" class="optimize-guide">
-        <el-alert
-          v-if="!cfOptimized"
-          title="使用订阅前需要先进行 IP 优选"
-          description="IP 优选会测试您的网络到 Cloudflare CDN 各节点的延迟，自动选择最快的 5 个 IP 地址，以提供最佳的连接速度。"
-          type="info"
-          :closable="false"
-          show-icon
-          style="margin-bottom: 20px;"
-        />
         <div class="button-group">
           <el-button 
             type="primary" 
