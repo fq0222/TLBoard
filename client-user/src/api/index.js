@@ -92,7 +92,7 @@ const userApi = {
    * @returns {Promise<Object>} 响应数据
    */
   registerAndPay(data) {
-    return apiClient.post('/register-and-pay', data)
+    return apiClient.post('/register-and-pay', data, { timeout: 30000 })
   },
 
   /**
