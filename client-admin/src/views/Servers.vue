@@ -70,7 +70,7 @@
               <el-icon><View /></el-icon>
               详情
             </el-button>
-            <el-button size="small" @click="syncServer(server)">
+            <el-button size="small" @click="syncServer(server)" :loading="syncingId === server.id">
               <el-icon><Refresh /></el-icon>
               同步
             </el-button>
@@ -152,6 +152,7 @@ const isEditing = ref(false)
 const submitting = ref(false)
 const editingId = ref(null)
 const serverFormRef = ref(null)
+const syncingId = ref(null)
 
 const serverForm = reactive({
   name: '',
@@ -255,6 +256,7 @@ function viewDetail(server) {
 
 async function syncServer(server) {
   try {
+    syncingId.value = server.id
     const response = await api.admin.syncServer(server.id)
     if (response.code === 0) {
       ElMessage.success('同步成功')
@@ -262,6 +264,8 @@ async function syncServer(server) {
     }
   } catch (error) {
     console.error('同步失败:', error)
+  } finally {
+    syncingId.value = null
   }
 }
 
