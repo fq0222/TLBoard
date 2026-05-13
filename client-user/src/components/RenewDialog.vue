@@ -4,6 +4,7 @@
     title="续费套餐"
     width="800px"
     :before-close="handleClose"
+    class="renew-dialog"
   >
     <div class="renew-dialog-content">
       <el-alert
@@ -410,5 +411,54 @@ async function handleRenew() {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  :deep(.renew-dialog) {
+    width: 95% !important;
+    max-width: none !important;
+    margin: 10px auto !important;
+  }
+  
+  :deep(.el-dialog__body) {
+    padding: 15px !important;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  
+  .renew-dialog-content {
+    min-height: auto;
+  }
+  
+  .plans-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  .plan-card {
+    padding: 15px;
+  }
+  
+  .plan-price .amount {
+    font-size: 24px;
+  }
+  
+  .pay-type-options {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .pay-type-card {
+    padding: 12px;
+  }
+  
+  .dialog-footer {
+    flex-direction: column;
+  }
+  
+  .dialog-footer .el-button {
+    width: 100%;
+  }
 }
 </style>
