@@ -112,20 +112,6 @@
         <h2 class="card-title">订阅链接</h2>
       </div>
       
-      <!-- 新手教程引导 -->
-      <div class="tutorial-guide">
-        <div class="tutorial-icon">
-          <el-icon :size="24"><QuestionFilled /></el-icon>
-        </div>
-        <div class="tutorial-content">
-          <div class="tutorial-title">首次使用？获取客户端配置教程</div>
-          <div class="tutorial-desc">我们提供 Android 和 Windows 客户端的详细图文教程，帮助您快速完成配置</div>
-        </div>
-        <el-button type="primary" @click="showHelpDialog = true">
-          获取教程
-        </el-button>
-      </div>
-      
       <!-- 首次使用步骤提示 -->
       <div v-if="!subscriptionGenerated" class="steps-guide">
         <div class="steps-title">快速开始</div>
@@ -148,6 +134,20 @@
             </div>
           </div>
         </div>
+      </div>
+      
+      <!-- 新手教程引导 -->
+      <div class="tutorial-guide">
+        <div class="tutorial-icon">
+          <el-icon :size="24"><QuestionFilled /></el-icon>
+        </div>
+        <div class="tutorial-content">
+          <div class="tutorial-title">首次使用？获取客户端配置教程</div>
+          <div class="tutorial-desc">我们提供 Android 和 Windows 客户端的详细图文教程，帮助您快速完成配置</div>
+        </div>
+        <el-button type="primary" @click="showHelpDialog = true">
+          获取教程
+        </el-button>
       </div>
       
       <!-- 未优选或优选完成：显示引导说明和按钮 -->
