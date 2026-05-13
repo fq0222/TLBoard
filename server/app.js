@@ -62,6 +62,7 @@ async function startApp() {
   // ============ 用户端应用 ============
   const userApp = express();
   userApp.locals.db = db;
+  userApp.set('trust proxy', true);
 
   userApp.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
   userApp.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'], allowedHeaders: ['Content-Type', 'Authorization'] }));
@@ -96,6 +97,7 @@ userApp.use(`${userPrefix}/email`, userEmailRoutes);
   // ============ 管理端应用 ============
   const adminApp = express();
   adminApp.locals.db = db;
+  adminApp.set('trust proxy', true);
 
   adminApp.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
   adminApp.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'], allowedHeaders: ['Content-Type', 'Authorization'], credentials: true }));
