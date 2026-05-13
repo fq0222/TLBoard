@@ -78,6 +78,23 @@ npx vite build --minify esbuild  # 绕过 terser 的构建方式
 ### config.js (本地开发)
 - **允许写入真实数据**，严禁提交至远程仓库
 - 包含数据库连接、JWT 密钥等
+- 包含站点配置 `site.protocol` 和 `site.host`
+
+### 站点配置
+
+用于生成订阅链接等需要完整 URL 的场景：
+
+```javascript
+// config.js
+site: {
+  protocol: process.env.SITE_PROTOCOL || 'http',
+  host: process.env.SITE_HOST || '',
+}
+```
+
+**生产环境**：设置 `SITE_PROTOCOL=https` 和 `SITE_HOST=yourdomain.com`
+
+**工具函数**：`server/utils/site-url.js` 提供 `getSiteBaseUrl()` 和 `generateSubscriptionUrls()`
 
 ## 3X-UI API 注意事项
 
@@ -450,3 +467,40 @@ await db.exec('ALTER TABLE users ADD COLUMN traffic_used_at BIGINT');
 // 错误 - 会报 syntax error
 await db.prepare('ALTER TABLE users ADD COLUMN traffic_used_at BIGINT').run();
 ```
+
+## 用户端移动端适配
+
+用户端支持移动端访问，采用响应式设计：
+
+### 布局结构 (`client-user/src/views/user/Layout.vue`)
+
+- **桌面端（> 1024px）**：左侧固定侧边栏 240px
+- **平板端（768-1024px）**：侧边栏缩小为 200px
+- **移动端（< 768px）**：
+  - 顶部固定导航栏（56px）
+  - 汉堡菜单展开/收起侧边栏
+  - 侧边栏宽度 280px，带滑入动画
+  - 点击遮罩层自动关闭
+  - 内容区域全宽显示，padding-top 72px
+
+### 关键 CSS
+
+```css
+/* 移动端侧边栏默认隐藏 */
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+  
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+}
+```
+
+### 注意事项
+
+- 桌面端样式完全不受影响
+- 使用媒体查询 `@media` 分段处理
+- 侧边栏打开/关闭使用 `sidebarOpen` 状态控制
