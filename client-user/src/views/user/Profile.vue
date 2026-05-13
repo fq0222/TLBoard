@@ -110,9 +110,19 @@
     <div class="content-card">
       <div class="card-header">
         <h2 class="card-title">订阅链接</h2>
-        <el-button type="primary" link @click="showHelpDialog = true">
-          <el-icon><QuestionFilled /></el-icon>
-          帮助
+      </div>
+      
+      <!-- 新手教程引导 -->
+      <div class="tutorial-guide">
+        <div class="tutorial-icon">
+          <el-icon :size="24"><QuestionFilled /></el-icon>
+        </div>
+        <div class="tutorial-content">
+          <div class="tutorial-title">首次使用？获取客户端配置教程</div>
+          <div class="tutorial-desc">我们提供 Android 和 Windows 客户端的详细图文教程，帮助您快速完成配置</div>
+        </div>
+        <el-button type="primary" @click="showHelpDialog = true">
+          获取教程
         </el-button>
       </div>
       
@@ -762,6 +772,55 @@ onMounted(() => {
   margin: 0;
   padding: 0;
   border: none;
+}
+
+.tutorial-guide {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  margin-bottom: 24px;
+  color: #fff;
+}
+
+.tutorial-icon {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+}
+
+.tutorial-content {
+  flex: 1;
+}
+
+.tutorial-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.tutorial-desc {
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.tutorial-guide .el-button {
+  flex-shrink: 0;
+  background: #fff;
+  color: #667eea;
+  border: none;
+  font-weight: 600;
+}
+
+.tutorial-guide .el-button:hover {
+  background: #f0f0f0;
 }
 
 .help-content {
