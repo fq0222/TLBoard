@@ -32,34 +32,59 @@
             </el-form-item>
 
             <!-- 自定义收件人 -->
-            <el-form-item v-if="senderForm.target_type === 'custom'" label="搜索用户">
-              <el-input
-                v-model="searchKeyword"
-                placeholder="输入邮箱搜索"
-                @input="handleSearch"
-              >
-                <template #append>
-                  <el-button @click="handleSearch">搜索</el-button>
-                </template>
-              </el-input>
-              <div v-if="searchResults.length > 0" class="search-results">
-                <div
-                  v-for="user in searchResults"
-                  :key="user.id"
-                  class="search-item"
-                  @click="addUser(user)"
+            <el-form-item v-if="senderForm.target_type === 'custom'" label="收件人">
+              <div class="custom-recipient">
+                <el-input
+                  v-model="customEmail"
+                  placeholder="输入邮箱地址，按回车添加"
+                  @keyup.enter="addCustomEmail"
                 >
-                  {{ user.email }}
+                  <template #append>
+                    <el-button @click="addCustomEmail">添加</el-button>
+                  </template>
+                </el-input>
+                <div class="email-type-switch">
+                  <el-radio-group v-model="emailInputType" size="small">
+                    <el-radio-button value="manual">手动输入</el-radio-button>
+                    <el-radio-button value="search">搜索用户</el-radio-button>
+                  </el-radio-group>
                 </div>
               </div>
-              <div v-if="selectedUsers.length > 0" class="selected-users">
-                <el-tag
-                  v-for="user in selectedUsers"
-                  :key="user.id"
-                  closable
-                  @close="removeUser(user)"
+              
+              <!-- 搜索用户 -->
+              <div v-if="emailInputType === 'search'" class="search-section">
+                <el-input
+                  v-model="searchKeyword"
+                  placeholder="输入邮箱搜索系统用户"
+                  @input="handleSearch"
                 >
-                  {{ user.email }}
+                  <template #append>
+                    <el-button @click="handleSearch">搜索</el-button>
+                  </template>
+                </el-input>
+                <div v-if="searchResults.length > 0" class="search-results">
+                  <div
+                    v-for="user in searchResults"
+                    :key="user.id"
+                    class="search-item"
+                    @click="addUser(user)"
+                  >
+                    {{ user.email }}
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 已选收件人 -->
+              <div v-if="selectedRecipients.length > 0" class="selected-users">
+                <el-tag
+                  v-for="(recipient, index) in selectedRecipients"
+                  :key="index"
+                  :type="recipient.type === 'external' ? 'warning' : ''"
+                  closable
+                  @close="removeRecipient(index)"
+                >
+                  {{ recipient.email }}
+                  <span v-if="recipient.type === 'external'" class="external-badge">外部</span>
                 </el-tag>
               </div>
             </el-form-item>
@@ -322,6 +347,9 @@ const sending = ref(false)
 const searchKeyword = ref('')
 const searchResults = ref([])
 const selectedUsers = ref([])
+const customEmail = ref('')
+const emailInputType = ref('manual')
+const selectedRecipients = ref([])
 
 const senderForm = ref({
   template_id: null,
@@ -382,8 +410,12 @@ const handleSearch = async () => {
 }
 
 const addUser = (user) => {
-  if (!selectedUsers.value.find(u => u.id === user.id)) {
-    selectedUsers.value.push(user)
+  if (!selectedRecipients.value.find(r => r.id === user.id)) {
+    selectedRecipients.value.push({
+      id: user.id,
+      email: user.email,
+      type: 'internal'
+    })
   }
   searchResults.value = []
   searchKeyword.value = ''
@@ -391,6 +423,34 @@ const addUser = (user) => {
 
 const removeUser = (user) => {
   selectedUsers.value = selectedUsers.value.filter(u => u.id !== user.id)
+}
+
+const addCustomEmail = () => {
+  const email = customEmail.value.trim()
+  if (!email) return
+  
+  // 简单的邮箱格式验证
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(email)) {
+    ElMessage.warning('请输入有效的邮箱地址')
+    return
+  }
+  
+  // 检查是否已存在
+  if (selectedRecipients.value.find(r => r.email === email)) {
+    ElMessage.warning('该邮箱已添加')
+    return
+  }
+  
+  selectedRecipients.value.push({
+    email: email,
+    type: 'external'
+  })
+  customEmail.value = ''
+}
+
+const removeRecipient = (index) => {
+  selectedRecipients.value.splice(index, 1)
 }
 
 const handleSenderPreview = () => {
@@ -409,22 +469,28 @@ const handleSenderSend = async () => {
 
   // 自定义模式：单发
   if (senderForm.value.target_type === 'custom') {
-    if (selectedUsers.value.length === 0) {
-      ElMessage.warning('请选择收件人')
+    if (selectedRecipients.value.length === 0) {
+      ElMessage.warning('请添加收件人')
       return
     }
     sending.value = true
     try {
-      for (const user of selectedUsers.value) {
-        await api.admin.sendEmail({
-          to: user.email,
-          subject: senderForm.value.subject,
-          content: senderForm.value.content,
-          user_id: user.id
-        })
+      let successCount = 0
+      for (const recipient of selectedRecipients.value) {
+        try {
+          await api.admin.sendEmail({
+            to: recipient.email,
+            subject: senderForm.value.subject,
+            content: senderForm.value.content,
+            user_id: recipient.id || null
+          })
+          successCount++
+        } catch (error) {
+          console.error(`发送失败: ${recipient.email}`, error)
+        }
       }
-      ElMessage.success(`已发送 ${selectedUsers.value.length} 封邮件`)
-      selectedUsers.value = []
+      ElMessage.success(`已成功发送 ${successCount} 封邮件`)
+      selectedRecipients.value = []
     } catch (error) {
       ElMessage.error('发送失败')
     } finally {
@@ -809,6 +875,19 @@ onMounted(() => {
   background-color: #f5f7fa;
 }
 
+.custom-recipient {
+  width: 100%;
+}
+
+.email-type-switch {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.search-section {
+  margin-top: 8px;
+}
+
 .selected-users {
   margin-top: 8px;
 }
@@ -816,6 +895,12 @@ onMounted(() => {
 .selected-users .el-tag {
   margin-right: 8px;
   margin-bottom: 8px;
+}
+
+.external-badge {
+  font-size: 10px;
+  margin-left: 4px;
+  opacity: 0.7;
 }
 
 .variables-info {
