@@ -113,7 +113,7 @@
       </div>
       
       <!-- 首次使用步骤提示 -->
-      <div v-if="!subscriptionGenerated" class="steps-guide">
+      <div v-if="!userInfo.subscription_url" class="steps-guide">
         <div class="steps-title">快速开始</div>
         <div class="steps-container">
           <div class="step-item" :class="{ 'step-active': !cfOptimized }">
@@ -197,7 +197,7 @@
       </div>
 
       <!-- 已生成：显示订阅链接 -->
-      <div v-if="subscriptionGenerated" class="subscription-links">
+      <div v-if="userInfo.subscription_url" class="subscription-links">
         <div class="link-group">
           <span class="link-label">通用订阅：</span>
           <el-input 
