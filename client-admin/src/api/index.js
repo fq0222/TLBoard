@@ -174,7 +174,7 @@ const adminApi = {
    * @returns {Promise<Object>} 响应数据
    */
   getServerDetail(id) {
-    return apiClient.get(`/servers/${id}/detail`)
+    return apiClient.get(`/servers/${id}/detail`, { timeout: 60000 })
   },
 
   /**
@@ -183,7 +183,7 @@ const adminApi = {
    * @returns {Promise<Object>} 响应数据
    */
   syncServer(id) {
-    return apiClient.post(`/servers/${id}/sync`)
+    return apiClient.post(`/servers/${id}/sync`, null, { timeout: 60000 })
   },
 
   /**
