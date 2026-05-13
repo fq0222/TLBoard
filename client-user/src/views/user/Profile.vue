@@ -127,7 +127,7 @@
       </div>
       
       <!-- 首次使用步骤提示 -->
-      <div v-if="!cfOptimized && !subscriptionGenerated" class="steps-guide">
+      <div v-if="!subscriptionGenerated" class="steps-guide">
         <div class="steps-title">快速开始</div>
         <div class="steps-container">
           <div class="step-item" :class="{ 'step-active': !cfOptimized }">
