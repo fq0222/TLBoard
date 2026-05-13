@@ -415,7 +415,7 @@ async function handleRenew() {
 
 /* 移动端适配 */
 @media (max-width: 768px) {
-  :deep(.renew-dialog) {
+  :deep(.el-dialog) {
     width: 95% !important;
     max-width: none !important;
     margin: 10px auto !important;
