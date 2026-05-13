@@ -70,9 +70,14 @@
               <el-icon><View /></el-icon>
               详情
             </el-button>
-            <el-button size="small" @click="syncServer(server)" :loading="syncingId === server.id">
-              <el-icon><Refresh /></el-icon>
-              同步
+            <el-button 
+              size="small" 
+              class="sync-btn"
+              @click="syncServer(server)" 
+              :loading="syncingId === server.id"
+            >
+              <el-icon v-if="syncingId !== server.id"><Refresh /></el-icon>
+              {{ syncingId === server.id ? '同步中' : '同步' }}
             </el-button>
             <el-button size="small" type="primary" @click="showEditDialog(server)">
               <el-icon><Edit /></el-icon>
@@ -459,5 +464,9 @@ onMounted(() => {
 
 .server-footer .el-button {
   flex: 1;
+}
+
+.sync-btn {
+  min-width: 72px;
 }
 </style>
