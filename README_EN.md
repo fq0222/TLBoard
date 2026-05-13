@@ -14,6 +14,8 @@ A complete subscription management system for proxy panels, supporting multiple 
 - **Plan Renewal**: Traffic accumulation mechanism, supporting plan switching
 - **Ticket System**: Users can submit issues, admins respond promptly
 - **Email Trigger**: Users can request tutorials, invoices, and other emails
+- **Mobile Responsive**: Responsive layout supporting mobile browser access
+- **Getting Started Guide**: Step-by-step guide for first-time users
 
 ### Admin Panel
 
@@ -33,6 +35,7 @@ A complete subscription management system for proxy panels, supporting multiple 
 - **Quota Management**: Configurable daily sending and campaign quotas
 - **Sending Logs**: Complete record of each email's sending status
 - **Scheduled Tasks**: Daily campaign processing and log cleanup
+- **External Recipients**: Support sending to emails outside the system
 
 ### Subscription Strategy
 
@@ -162,8 +165,24 @@ module.exports = {
   },
   admin: {
     jwtSecret: 'your_admin_jwt_secret'
+  },
+
+  // Site configuration (required for production)
+  site: {
+    protocol: 'https',  // Use https for production
+    host: 'yourdomain.com'
   }
 };
+```
+
+### Production Configuration
+
+Use environment variables or PM2 configuration:
+
+```bash
+# Environment variables
+SITE_PROTOCOL=https
+SITE_HOST=yourdomain.com
 ```
 
 ### 3X-UI Server Configuration
@@ -198,6 +217,17 @@ pm2 startup
 For complete API documentation, see [API.md](./docs/api.md)
 
 ## Changelog
+
+### V1.4.0 (2026-05-13)
+
+- ✨ Mobile responsive: User panel responsive layout for mobile browsers
+- ✨ Getting started guide: Step-by-step guide for first-time users
+- ✨ Tutorial emails: Support Android and Windows client tutorial emails
+- ✨ Site configuration: Support HTTPS protocol for production environment
+- ✨ External recipients: Email sending supports addresses outside the system
+- ✨ Server management: Sync button with loading state, timeout extended to 60s
+- ✅ Subscription link persistence: Display after page refresh
+- ✅ Real IP retrieval: Enable Express trust proxy
 
 ### V1.3.0 (2026-05-12)
 
