@@ -7,6 +7,7 @@ const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { authenticateAdmin } = require('../../middleware/auth-admin');
 const { createLogger } = require('../../utils/logger');
+const { generateSubscriptionUrls } = require('../../utils/site-url');
 const XuiService = require('../../services/xui-service');
 
 const router = express.Router();
@@ -222,7 +223,7 @@ router.get('/:id', authenticateAdmin, [
       WHERE uci.user_id = ?
     `).all(userId);
 
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const urls = generateSubscriptionUrls(req, user.sub_id);
 
     logger.info(`获取用户详情成功: ${user.email}`);
 
@@ -235,7 +236,7 @@ router.get('/:id', authenticateAdmin, [
           email: user.email,
           plan_id: user.plan_id,
           plan_name: user.plan_name,
-          subscription_url: `${baseUrl}/api/user/subscription/sub/${user.sub_id}`,
+          subscription_url: urls.subscription_url,
           traffic_used: user.traffic_used,
           traffic_limit: user.traffic_limit,
           traffic_used_text: formatTraffic(user.traffic_used),

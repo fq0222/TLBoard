@@ -9,6 +9,7 @@ const { authenticateUser } = require('../../middleware/auth-user');
 const { createLogger } = require('../../utils/logger');
 const { syncAllServers } = require('../../services/xui-sync');
 const { getStrategyFromRemark, processNodeLink, parseNodeLink } = require('../../services/subscription-strategy');
+const { generateSubscriptionUrls } = require('../../utils/site-url');
 const https = require('https');
 const http = require('http');
 
@@ -344,17 +345,12 @@ router.post('/generate', authenticateUser, async (req, res) => {
     logger.info(`用户 ${user.email} 生成订阅链接成功，共 ${allNodes.length} 个节点`);
 
     // 返回订阅链接
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.sub_id}`;
+    const urls = generateSubscriptionUrls(req, user.sub_id);
 
     res.json({
       code: 0,
       message: 'ok',
-      data: {
-        subscription_url: subscriptionUrl,
-        clash_url: `${subscriptionUrl}?clash=1`,
-        v2ray_url: `${subscriptionUrl}?v2ray=1`
-      }
+      data: urls
     });
   } catch (error) {
     logger.error(`生成订阅链接错误: ${error.message}`);
@@ -510,8 +506,7 @@ router.get('/', authenticateUser, async (req, res) => {
       return new Date(timestamp * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     };
 
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.sub_id}`;
+    const urls = generateSubscriptionUrls(req, user.sub_id);
 
     // 检查用户是否已完成 CF 优选
     const cfOptimized = cfIps.length > 0;
@@ -522,9 +517,9 @@ router.get('/', authenticateUser, async (req, res) => {
       code: 0,
       message: 'ok',
       data: {
-        subscription_url: cfOptimized ? subscriptionUrl : '',
-        clash_url: cfOptimized ? `${subscriptionUrl}?clash=1` : '',
-        v2ray_url: cfOptimized ? `${subscriptionUrl}?v2ray=1` : '',
+        subscription_url: cfOptimized ? urls.subscription_url : '',
+        clash_url: cfOptimized ? urls.clash_url : '',
+        v2ray_url: cfOptimized ? urls.v2ray_url : '',
         cf_optimized: cfOptimized,
         expire_at: user.expire_at,
         expire_text: formatTime(user.expire_at),

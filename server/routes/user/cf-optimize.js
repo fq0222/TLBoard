@@ -6,6 +6,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateUser } = require('../../middleware/auth-user');
 const { createLogger } = require('../../utils/logger');
+const { generateSubscriptionUrls } = require('../../utils/site-url');
 
 const router = express.Router();
 const logger = createLogger('USER-CF');
@@ -103,8 +104,7 @@ router.post('/apply', authenticateUser, [
     await transaction();
 
     const user = await db.prepare('SELECT sub_id FROM users WHERE id = $1').get(userId);
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.sub_id}`;
+    const urls = generateSubscriptionUrls(req, user.sub_id);
 
     const nodes = validIps.map(ip => ({
       server_name: 'CF优选',
@@ -120,7 +120,7 @@ router.post('/apply', authenticateUser, [
       code: 0, message: 'ok',
       data: {
         applied_count: ip_ids.length,
-        subscription_url: subscriptionUrl,
+        subscription_url: urls.subscription_url,
         nodes,
         message: `已成功应用 ${ip_ids.length} 个优选 IP，请重新获取订阅`
       }
@@ -170,8 +170,7 @@ router.post('/apply-by-ip', authenticateUser, [
     await transaction();
 
     const user = await db.prepare('SELECT sub_id FROM users WHERE id = $1').get(userId);
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const subscriptionUrl = `${baseUrl}/api/user/subscription/sub/${user.sub_id}`;
+    const urls = generateSubscriptionUrls(req, user.sub_id);
 
     logger.info(`应用优选IP成功，用户: ${req.user.email}，选择了 ${validIps.length} 个IP`);
 
@@ -179,7 +178,7 @@ router.post('/apply-by-ip', authenticateUser, [
       code: 0, message: 'ok',
       data: {
         applied_count: validIps.length,
-        subscription_url: subscriptionUrl,
+        subscription_url: urls.subscription_url,
         message: `已成功应用 ${validIps.length} 个优选 IP`
       }
     });

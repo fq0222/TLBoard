@@ -13,6 +13,7 @@ const { authenticateUser } = require('../../middleware/auth-user');
 const { userLoginLimiter, userRegisterLimiter } = require('../../middleware/rate-limiter');
 const vmqService = require('../../services/vmq-service');
 const { createLogger } = require('../../utils/logger');
+const { generateSubscriptionUrls } = require('../../utils/site-url');
 
 const router = express.Router();
 const logger = createLogger('USER-AUTH');
@@ -411,6 +412,8 @@ router.get('/profile', authenticateUser, async (req, res) => {
 
     logger.info(`获取用户信息成功: ${user.email}`);
 
+    const urls = generateSubscriptionUrls(req, user.sub_id);
+
     res.json({
       code: 0,
       message: 'ok',
@@ -419,8 +422,8 @@ router.get('/profile', authenticateUser, async (req, res) => {
         email: user.email,
         plan_id: user.plan_id,
         plan_name: user.plan_name,
-        subscription_url: cfOptimized ? `${req.protocol}://${req.get('host')}/api/user/subscription/sub/${user.sub_id}` : '',
-        clash_url: cfOptimized ? `${req.protocol}://${req.get('host')}/api/user/subscription/sub/${user.sub_id}?clash=1` : '',
+        subscription_url: cfOptimized ? urls.subscription_url : '',
+        clash_url: cfOptimized ? urls.clash_url : '',
         cf_optimized: cfOptimized,
         traffic_used: user.traffic_used,
         traffic_limit: user.traffic_limit,
