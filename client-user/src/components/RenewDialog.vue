@@ -2,7 +2,7 @@
   <el-dialog
     v-model="dialogVisible"
     title="续费套餐"
-    width="800px"
+    :width="dialogWidth"
     :before-close="handleClose"
     class="renew-dialog"
   >
@@ -106,7 +106,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { Loading, DataLine, CircleCheck } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
@@ -134,6 +134,28 @@ const submitting = ref(false)
 const plans = ref([])
 const selectedPlanId = ref(null)
 const payType = ref(2) // 默认支付宝，1=微信，2=支付宝
+const windowWidth = ref(window.innerWidth)
+
+// 根据屏幕宽度计算弹窗宽度
+const dialogWidth = computed(() => {
+  if (windowWidth.value <= 768) {
+    return '95%'
+  }
+  return '800px'
+})
+
+// 监听窗口大小变化
+function handleResize() {
+  windowWidth.value = window.innerWidth
+}
+
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+})
 
 watch(() => props.visible, (newVal) => {
   if (newVal) {
@@ -415,16 +437,14 @@ async function handleRenew() {
 
 /* 移动端适配 */
 @media (max-width: 768px) {
-  :deep(.el-dialog) {
-    width: 95% !important;
-    max-width: none !important;
-    margin: 10px auto !important;
-  }
-  
   :deep(.el-dialog__body) {
     padding: 15px !important;
     max-height: 70vh;
     overflow-y: auto;
+  }
+  
+  :deep(.el-dialog__footer) {
+    padding: 15px !important;
   }
   
   .renew-dialog-content {
@@ -454,7 +474,14 @@ async function handleRenew() {
   }
   
   .dialog-footer {
+    display: flex;
     flex-direction: column;
+    gap: 10px;
+  }
+  
+  .dialog-footer .el-button {
+    width: 100%;
+    margin-left: 0;
   }
   
   .dialog-footer .el-button {
