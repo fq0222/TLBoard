@@ -73,13 +73,13 @@
     <el-dialog v-model="showHelpDialog" title="使用帮助" width="400px">
       <div class="help-content">
         <el-alert
-          title="每天只可以收到 1 封教程邮件"
+          title="每天可以获取 2 封教程邮件"
           type="info"
           :closable="false"
           show-icon
           style="margin-bottom: 20px;"
         />
-        <p class="help-tip">点击获得按钮后，请到注册用的邮箱内查看教程。</p>
+        <p class="help-tip">点击获取按钮后，请到注册用的邮箱内查看教程。</p>
         <div class="help-items">
           <div class="help-item">
             <span class="help-label">Android-App教程</span>
@@ -89,7 +89,7 @@
               @click="requestTutorial('android')"
               :loading="tutorialLoading.android"
             >
-              获得
+              获取
             </el-button>
           </div>
           <div class="help-item">
@@ -100,7 +100,29 @@
               @click="requestTutorial('windows')"
               :loading="tutorialLoading.windows"
             >
-              获得
+              获取
+            </el-button>
+          </div>
+          <div class="help-item">
+            <span class="help-label">国内访问GitHub教程</span>
+            <el-button 
+              type="primary" 
+              size="small" 
+              @click="requestTutorial('github')"
+              :loading="tutorialLoading.github"
+            >
+              获取
+            </el-button>
+          </div>
+          <div class="help-item">
+            <span class="help-label">外区苹果ID注册教程</span>
+            <el-button 
+              type="primary" 
+              size="small" 
+              @click="requestTutorial('apple-id')"
+              :loading="tutorialLoading['apple-id']"
+            >
+              获取
             </el-button>
           </div>
         </div>
@@ -143,7 +165,7 @@
         </div>
         <div class="tutorial-content">
           <div class="tutorial-title">首次使用？获取客户端配置教程</div>
-          <div class="tutorial-desc">我们提供 Android 和 Windows 客户端的详细图文教程，帮助您快速完成配置</div>
+          <div class="tutorial-desc">我们提供 Android、Windows 客户端配置教程，以及 GitHub 访问和外区苹果 ID 注册教程</div>
         </div>
         <el-button type="primary" @click="showHelpDialog = true">
           获取教程
@@ -295,7 +317,9 @@ const showRenewDialog = ref(false)
 const showHelpDialog = ref(false)
 const tutorialLoading = ref({
   android: false,
-  windows: false
+  windows: false,
+  github: false,
+  'apple-id': false
 })
 const TEST_COUNT = 3
 const TEST_TIMEOUT = 5000

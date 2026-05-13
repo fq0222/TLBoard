@@ -68,7 +68,7 @@ const commonValidations = {
     body('email')
       .isEmail()
       .withMessage('请输入有效的邮箱地址')
-      .normalizeEmail()
+      .normalizeEmail({ gmail_remove_dots: false })
   ],
 
   // 密码

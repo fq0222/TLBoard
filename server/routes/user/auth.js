@@ -27,7 +27,7 @@ router.post('/register-and-pay', [
   body('email')
     .isEmail()
     .withMessage('请输入有效的邮箱地址')
-    .normalizeEmail(),
+    .normalizeEmail({ gmail_remove_dots: false }),
   body('password')
     .isLength({ min: 8 })
     .withMessage('密码长度至少8位')
@@ -244,7 +244,7 @@ router.post('/login', [
   body('email')
     .isEmail()
     .withMessage('请输入有效的邮箱地址')
-    .normalizeEmail(),
+    .normalizeEmail({ gmail_remove_dots: false }),
   body('password')
     .notEmpty()
     .withMessage('密码不能为空')

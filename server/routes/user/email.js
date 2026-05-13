@@ -15,7 +15,9 @@ const ALLOWED_TEMPLATES = {
 // 教程类型与模板名称的映射（模糊匹配）
 const TUTORIAL_TEMPLATE_MAP = {
   'android': 'v2rayNg-App',
-  'windows': 'v2rayN-windows'
+  'windows': 'v2rayN-windows',
+  'github': 'GitHub',
+  'apple-id': '苹果ID'
 }
 
 // 请求教程邮件
@@ -40,8 +42,8 @@ router.post('/tutorial', authenticateUser, async (req, res) => {
       'SELECT COUNT(*) as count FROM email_logs WHERE user_id = ? AND created_at >= ? AND status = ?'
     ).get(userId, todayTimestamp, 'sent')
 
-    if (todayMailCount.count >= 1) {
-      return res.json({ code: 6006, message: '今天已经发送过教程邮件，请明天再试', data: null })
+    if (todayMailCount.count >= 2) {
+      return res.json({ code: 6006, message: '今天已经发送过2封教程邮件，请明天再试', data: null })
     }
 
     // 模糊匹配邮件模板

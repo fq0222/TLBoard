@@ -256,11 +256,11 @@ const userApi = {
 
   /**
    * 请求教程邮件
-   * @param {string} type - 教程类型：android 或 windows
+   * @param {string} type - 教程类型：android、windows、github、apple-id
    * @returns {Promise<Object>} 响应数据
    */
   requestTutorial(type) {
-    return apiClient.post('/email/tutorial', { type })
+    return apiClient.post('/email/tutorial', { type }, { timeout: 20000 })
   }
 }
 
