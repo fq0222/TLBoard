@@ -126,6 +126,30 @@
         </el-button>
       </div>
       
+      <!-- 首次使用步骤提示 -->
+      <div v-if="!cfOptimized && !subscriptionGenerated" class="steps-guide">
+        <div class="steps-title">快速开始</div>
+        <div class="steps-container">
+          <div class="step-item" :class="{ 'step-active': !cfOptimized }">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <div class="step-name">优选 IP</div>
+              <div class="step-desc">自动测试并选择最快的节点</div>
+            </div>
+          </div>
+          <div class="step-arrow">
+            <el-icon><ArrowRight /></el-icon>
+          </div>
+          <div class="step-item" :class="{ 'step-active': cfOptimized }">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <div class="step-name">生成链接</div>
+              <div class="step-desc">获取订阅链接导入客户端</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
       <!-- 未优选或优选完成：显示引导说明和按钮 -->
       <div v-if="!optimizing" class="optimize-guide">
         <el-alert
@@ -253,7 +277,7 @@
 
 import { ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { CopyDocument, MagicStick, Link, Refresh, InfoFilled, QuestionFilled } from '@element-plus/icons-vue'
+import { CopyDocument, MagicStick, Link, Refresh, InfoFilled, QuestionFilled, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import RenewDialog from '@/components/RenewDialog.vue'
@@ -821,6 +845,88 @@ onMounted(() => {
 
 .tutorial-guide .el-button:hover {
   background: #f0f0f0;
+}
+
+.steps-guide {
+  margin: 20px 0;
+  padding: 20px;
+  background: #f8f9fb;
+  border-radius: 12px;
+  border: 1px solid #e8eaed;
+}
+
+.steps-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 16px;
+}
+
+.steps-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+}
+
+.step-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: #fff;
+  border-radius: 10px;
+  border: 2px solid #e8eaed;
+  transition: all 0.3s ease;
+}
+
+.step-item.step-active {
+  border-color: #667eea;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+}
+
+.step-number {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e8eaed;
+  color: #666;
+  font-size: 16px;
+  font-weight: 700;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+}
+
+.step-active .step-number {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+}
+
+.step-content {
+  flex: 1;
+}
+
+.step-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 2px;
+}
+
+.step-desc {
+  font-size: 12px;
+  color: #999;
+}
+
+.step-arrow {
+  color: #ccc;
+  font-size: 20px;
+}
+
+.step-active + .step-arrow {
+  color: #667eea;
 }
 
 .help-content {
