@@ -19,27 +19,25 @@
       <div v-else class="pending-state">
         <el-icon class="pending-icon"><Wallet /></el-icon>
         <h2>等待支付完成</h2>
-        <p class="state-text">{{ errorMessage || '请使用下方二维码扫码支付，系统会自动确认付款结果。' }}</p>
-
-        <div v-if="paymentUrl" class="payment-actions">
+        <p class="state-text">{{ errorMessage || `请使用` }}<span class="pay-type-name" v-if="!errorMessage">{{ payTypeName }}</span>{{ errorMessage ? '' : `扫码支付，系统会自动确认付款结果。` }}</p>
+        
+        <div v-if="paymentUrl && countdown > 0" class="payment-actions">
           <div class="qr-panel">
             <img v-if="qrCodeDataUrl" :src="qrCodeDataUrl" alt="支付二维码" class="qr-image" />
             <div v-else class="qr-fallback">
-              二维码生成失败，请使用下方支付链接完成付款
+              二维码生成失败
             </div>
           </div>
-
-          <div class="button-row">
-            <el-button type="primary" size="large" @click="openPaymentUrl">
-              打开支付链接
-            </el-button>
-            <el-button size="large" @click="copyPaymentUrl">
-              复制支付链接
-            </el-button>
+          <div class="countdown-section">
+            <p class="countdown-text">支付剩余时间：<span class="countdown-value">{{ formatCountdown }}</span></p>
           </div>
         </div>
+        
+        <div v-if="countdown <= 0 && !paymentSuccess" class="expired-state">
+          <p class="expired-text">支付超时，请返回重新下单</p>
+        </div>
 
-        <el-button size="large" @click="retryCheck">
+        <el-button size="large" @click="retryCheck" v-if="countdown > 0">
           重新检查支付状态
         </el-button>
       </div>
@@ -71,11 +69,26 @@ const errorMessage = ref('')
 const successMessage = ref('您的订阅已激活，正在为您跳转。')
 const timer = ref(null)
 const qrCodeDataUrl = ref('')
+const countdown = ref(300) // 5分钟倒计时
+const countdownTimer = ref(null)
 // 自动轮询间隔 5 秒
 const pollInterval = 5000
 
 const paymentUrl = computed(() => String(route.query.payment_url || ''))
 const orderId = computed(() => String(route.query.order_id || ''))
+const payType = computed(() => Number(route.query.pay_type || 2))
+
+// 支付方式名称
+const payTypeName = computed(() => {
+  return payType.value === 1 ? '微信' : '支付宝'
+})
+
+// 格式化倒计时
+const formatCountdown = computed(() => {
+  const minutes = Math.floor(countdown.value / 60)
+  const seconds = countdown.value % 60
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+})
 
 /**
  * 根据支付链接生成二维码
@@ -183,25 +196,6 @@ async function tryAutoLogin() {
   }
 }
 
-function openPaymentUrl() {
-  if (!paymentUrl.value) {
-    ElMessage.warning('当前没有可用的支付链接')
-    return
-  }
-
-  window.open(paymentUrl.value, '_blank', 'noopener,noreferrer')
-}
-
-function copyPaymentUrl() {
-  if (!paymentUrl.value) {
-    ElMessage.warning('当前没有可用的支付链接')
-    return
-  }
-
-  navigator.clipboard.writeText(paymentUrl.value)
-  ElMessage.success('支付链接已复制')
-}
-
 /**
  * 手动重新查单
  * 保持即时反馈，不受定时轮询间隔限制
@@ -226,9 +220,28 @@ function clearTimer() {
   }
 }
 
+function clearCountdownTimer() {
+  if (countdownTimer.value) {
+    clearInterval(countdownTimer.value)
+    countdownTimer.value = null
+  }
+}
+
+function startCountdown() {
+  countdownTimer.value = setInterval(() => {
+    if (countdown.value > 0) {
+      countdown.value--
+    } else {
+      clearCountdownTimer()
+      clearTimer()
+    }
+  }, 1000)
+}
+
 onMounted(() => {
   generateQrCode()
   checkPaymentStatus()
+  startCountdown()
 })
 
 watch(paymentUrl, () => {
@@ -237,6 +250,7 @@ watch(paymentUrl, () => {
 
 onBeforeUnmount(() => {
   clearTimer()
+  clearCountdownTimer()
 })
 </script>
 
@@ -290,6 +304,11 @@ onBeforeUnmount(() => {
   line-height: 1.6;
 }
 
+.pay-type-name {
+  color: #409eff;
+  font-weight: 600;
+}
+
 .payment-actions {
   width: 100%;
   display: flex;
@@ -331,6 +350,32 @@ onBeforeUnmount(() => {
   gap: 12px;
   justify-content: center;
   flex-wrap: wrap;
+}
+
+.countdown-section {
+  margin: 5px 0;
+}
+
+.countdown-text {
+  color: #666;
+  font-size: 14px;
+  margin: 0;
+}
+
+.countdown-value {
+  color: #e6a23c;
+  font-weight: 600;
+  font-size: 18px;
+}
+
+.expired-state {
+  margin: 10px 0;
+}
+
+.expired-text {
+  color: #f56c6c;
+  font-size: 16px;
+  margin: 0;
 }
 
 h2 {

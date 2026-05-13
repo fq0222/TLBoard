@@ -644,7 +644,8 @@ async function handleRenew({ planId, payType }) {
           order_id: response.data.order_id,
           out_trade_no: response.data.out_trade_no,
           payment_url: response.data.payment_url,
-          expire_in: response.data.expire_in
+          expire_in: response.data.expire_in,
+          pay_type: payType
         }
       })
     } else {

@@ -242,7 +242,8 @@ async function handleSubmit() {
         name: 'PaymentCallback',
         query: {
           order_id: result.data.out_trade_no,
-          payment_url: result.data.payment_url
+          payment_url: result.data.payment_url,
+          pay_type: form.pay_type
         }
       })
       return
