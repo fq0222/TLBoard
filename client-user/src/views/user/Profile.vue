@@ -230,6 +230,10 @@
           </el-input>
           <p class="link-tip">适用于 Clash、Clash Verge、ClashX、Clash for Windows 等</p>
         </div>
+        <div class="regenerate-tip">
+          <el-icon><InfoFilled /></el-icon>
+          <span>如果您的订阅链接无效，请点击上方「生成订阅链接」按钮重新生成</span>
+        </div>
       </div>
     </div>
     
@@ -745,6 +749,18 @@ onMounted(() => {
 .link-tip {
   margin-top: 8px;
   color: #999;
+  font-size: 13px;
+}
+
+.regenerate-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #fdf6ec;
+  border-radius: 8px;
+  color: #e6a23c;
   font-size: 13px;
 }
 
