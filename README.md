@@ -62,7 +62,7 @@
 | 数据库 | PostgreSQL |
 | 支付 | VMQ |
 | 邮件 | Brevo |
-| 3X-UI 对接 | 3xui-api-client |
+| 3X-UI 对接 | 3xui-api-client（仅支持 v2.9.4） |
 | 部署 | PM2 + OpenResty + Cloudflare Tunnel |
 
 ## 快速开始
@@ -188,6 +188,8 @@ SITE_HOST=yourdomain.com
 ```
 
 ### 3X-UI 服务器配置
+
+> ⚠️ **版本要求**：当前仅支持 3X-UI **v2.9.4** 版本，其他版本可能存在 API 不兼容问题。
 
 在管理端后台添加 3X-UI 服务器：
 
