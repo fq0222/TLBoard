@@ -306,15 +306,17 @@
           <el-input v-model="templateForm.subject" placeholder="支持变量，如 {{username}}" />
         </el-form-item>
         <el-form-item label="可用变量">
-          <el-tag
-            v-for="varName in availableVariables"
-            :key="varName"
-            class="variable-tag"
-            @click="insertVariable(varName)"
-            style="cursor: pointer; margin-right: 8px;"
-          >
-            {{ formatVariable(varName) }}
-          </el-tag>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <el-tag
+              v-for="varName in availableVariables"
+              :key="varName"
+              class="variable-tag"
+              @click="insertVariable(varName)"
+              style="cursor: pointer;"
+            >
+              {{ formatVariable(varName) }}
+            </el-tag>
+          </div>
         </el-form-item>
         <el-form-item label="邮件内容">
           <el-input
@@ -648,7 +650,7 @@ const showPreview = ref(false)
 const previewData = ref({ subject: '', content: '' })
 const editingTemplateId = ref(null)
 
-const availableVariables = ['username', 'email', 'user_id', 'plan_name', 'expire_date', 'traffic_used', 'traffic_limit']
+const availableVariables = ['username', 'email', 'user_id', 'plan_name', 'expire_date', 'traffic_used', 'traffic_limit', 'download_url']
 
 const templateForm = ref({
   name: '',
@@ -935,6 +937,10 @@ onMounted(() => {
 
 .variable-tag:hover {
   opacity: 0.8;
+}
+
+:deep(.el-form-item__content) {
+  flex-wrap: wrap;
 }
 
 .pagination {

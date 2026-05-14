@@ -36,13 +36,24 @@
           <el-input v-model="form.subject" placeholder="支持变量，如 {{username}}" />
         </el-form-item>
         <el-form-item label="可用变量">
-          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <div>
             <el-tag
-              v-for="varName in availableVariables"
+              v-for="varName in availableVariables.slice(0, 4)"
               :key="varName"
               class="variable-tag"
               @click="insertVariable(varName)"
-              style="cursor: pointer;"
+              style="cursor: pointer; margin-right: 8px; margin-bottom: 8px;"
+            >
+              {{ formatVariableDisplay(varName) }}
+            </el-tag>
+          </div>
+          <div>
+            <el-tag
+              v-for="varName in availableVariables.slice(4)"
+              :key="varName"
+              class="variable-tag"
+              @click="insertVariable(varName)"
+              style="cursor: pointer; margin-right: 8px;"
             >
               {{ formatVariableDisplay(varName) }}
             </el-tag>
