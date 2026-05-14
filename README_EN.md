@@ -60,7 +60,7 @@ A complete subscription management system for proxy panels, supporting multiple 
 | Database | PostgreSQL |
 | Payment | VMQ |
 | Email | Brevo |
-| 3X-UI Integration | 3xui-api-client |
+| 3X-UI Integration | 3xui-api-client (v2.9.4 only) |
 | Deployment | PM2 + OpenResty + Cloudflare Tunnel |
 
 ## Quick Start
@@ -186,6 +186,8 @@ SITE_HOST=yourdomain.com
 ```
 
 ### 3X-UI Server Configuration
+
+> ⚠️ **Version Requirement**: Only 3X-UI **v2.9.4** is currently supported. Other versions may have API compatibility issues.
 
 Add 3X-UI servers in the admin panel:
 
