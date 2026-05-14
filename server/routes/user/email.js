@@ -145,11 +145,12 @@ router.post('/download', authenticateUser, async (req, res) => {
 
     // 如果没有有效分发记录，自动创建
     if (!distribution) {
-      // 获取第一个可用资源
-      const resource = await db.prepare(
-        'SELECT * FROM resources WHERE enabled = 1 ORDER BY created_at DESC LIMIT 1'
-      ).get()
+      // 根据关键词模糊匹配资源，多个匹配取最新的
+      let resource = await db.prepare(
+        'SELECT * FROM resources WHERE enabled = 1 AND name LIKE ? ORDER BY created_at DESC LIMIT 1'
+      ).get(`%${DOWNLOAD_TEMPLATE_KEYWORD}%`)
 
+      // 如果没有匹配到，返回提示
       if (!resource) {
         return res.json({ code: 7005, message: '暂无可用资源，请联系管理员', data: null })
       }
