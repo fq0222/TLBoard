@@ -522,6 +522,77 @@ const adminApi = {
   // 用户搜索
   searchUsers(keyword) {
     return apiClient.get('/email/users/search', { params: { keyword } })
+  },
+
+  // ========== 资源管理 ==========
+
+  // 获取资源列表
+  getResources(params = {}) {
+    return apiClient.get('/resources', { params })
+  },
+
+  // 上传文件
+  uploadResource(formData) {
+    return apiClient.post('/resources/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+  },
+
+  // 更新资源
+  updateResource(id, data) {
+    return apiClient.put(`/resources/${id}`, data)
+  },
+
+  // 删除资源
+  deleteResource(id) {
+    return apiClient.delete(`/resources/${id}`)
+  },
+
+  // 刷新下载 token
+  refreshResourceToken(id) {
+    return apiClient.post(`/resources/${id}/refresh-token`)
+  },
+
+  // 设置过期时间
+  setResourceExpire(id, expireAt) {
+    return apiClient.put(`/resources/${id}/expire`, { expire_at: expireAt })
+  },
+
+  // 获取资源配置
+  getResourceConfig() {
+    return apiClient.get('/resources/config')
+  },
+
+  // 保存资源配置
+  saveResourceConfig(data) {
+    return apiClient.put('/resources/config', data)
+  },
+
+  // 分发资源给用户
+  distributeResource(resourceId, data) {
+    return apiClient.post(`/resources/${resourceId}/distribute`, data)
+  },
+
+  // 获取资源的分发列表
+  getResourceDistributions(resourceId) {
+    return apiClient.get(`/resources/${resourceId}/distributions`)
+  },
+
+  // 批量设置过期时间
+  batchExpireDistributions(data) {
+    return apiClient.put('/resources/distributions/batch-expire', data)
+  },
+
+  // 删除分发记录
+  deleteDistribution(id) {
+    return apiClient.delete(`/resources/distributions/${id}`)
+  },
+
+  // 搜索用户（用于分发）
+  searchUsers(keyword) {
+    return apiClient.get('/email/users/search', { params: { keyword } })
   }
 }
 

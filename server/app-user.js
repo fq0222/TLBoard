@@ -21,6 +21,7 @@ const announcementsRoutes = require('./routes/user/announcements');
 const cfOptimizeRoutes = require('./routes/user/cf-optimize');
 const paymentRoutes = require('./routes/user/payment');
 const emailRoutes = require('./routes/user/email');
+const downloadRoutes = require('./routes/user/download');
 
 const logger = createLogger('USER-APP');
 
@@ -112,6 +113,9 @@ app.use(`${apiPrefix}/payment`, paymentRoutes);
 
 // 邮件相关路由
 app.use(`${apiPrefix}/email`, emailRoutes);
+
+// 下载路由
+app.use(`${apiPrefix}/download`, downloadRoutes);
 
 // ============ 错误处理 ============
 

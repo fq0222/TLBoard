@@ -144,5 +144,6 @@ vite.config.ts.timestamp-*
 
 server/test/
 server/config.js
+server/uploads/
 
 .vscode/

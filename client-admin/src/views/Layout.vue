@@ -44,6 +44,10 @@
           <el-icon><Message /></el-icon>
           <span v-if="!isCollapsed">邮件管理</span>
         </router-link>
+        <router-link to="/admin/resources" class="nav-item" active-class="active">
+          <el-icon><Folder /></el-icon>
+          <span v-if="!isCollapsed">资源管理</span>
+        </router-link>
         <router-link to="/admin/settings" class="nav-item" active-class="active">
           <el-icon><Setting /></el-icon>
           <span v-if="!isCollapsed">系统设置</span>
@@ -113,7 +117,7 @@ import {
   DataBoard, Monitor, Goods, User, Document, 
   Bell, Connection, Setting, SwitchButton, 
   Expand, Fold, ArrowDown, ChatDotRound,
-  Message
+  Message, Folder
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 

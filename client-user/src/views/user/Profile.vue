@@ -82,6 +82,17 @@
         <p class="help-tip">点击获取按钮后，请到注册用的邮箱内查看教程。</p>
         <div class="help-items">
           <div class="help-item">
+            <span class="help-label">Android-App下载</span>
+            <el-button 
+              type="success" 
+              size="small" 
+              @click="requestDownload()"
+              :loading="downloadLoading"
+            >
+              获取
+            </el-button>
+          </div>
+          <div class="help-item">
             <span class="help-label">Android-App教程</span>
             <el-button 
               type="primary" 
@@ -321,6 +332,7 @@ const tutorialLoading = ref({
   github: false,
   'apple-id': false
 })
+const downloadLoading = ref(false)
 const TEST_COUNT = 3
 const TEST_TIMEOUT = 5000
 const TEST_INTERVAL = 200
@@ -417,6 +429,27 @@ async function requestTutorial(type) {
     ElMessage.error('请求教程失败')
   } finally {
     tutorialLoading.value[type] = false
+  }
+}
+
+/**
+ * 请求下载链接邮件
+ */
+async function requestDownload() {
+  downloadLoading.value = true
+  try {
+    const response = await api.user.requestDownload()
+    if (response.code === 0) {
+      ElMessage.success('下载链接已发送到邮箱，请查收')
+      showHelpDialog.value = false
+    } else {
+      ElMessage.error(response.message)
+    }
+  } catch (error) {
+    console.error('请求下载链接失败:', error)
+    ElMessage.error('请求下载链接失败')
+  } finally {
+    downloadLoading.value = false
   }
 }
 

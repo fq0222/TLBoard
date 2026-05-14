@@ -567,6 +567,9 @@ VMQ 后台需要配置以下两个地址：
 | GET | `/api/user/tickets/:id` | 获取工单详情 |
 | POST | `/api/user/tickets/:id/replies` | 回复工单 |
 | PUT | `/api/user/tickets/:id/close` | 关闭工单 |
+| POST | `/api/user/email/tutorial` | 请求教程邮件 |
+| POST | `/api/user/email/download` | 请求下载链接邮件 |
+| GET | `/api/user/download/:token` | 下载文件 |
 
 ### 7.2 管理端
 
@@ -630,6 +633,16 @@ VMQ 后台需要配置以下两个地址：
 | DELETE | `/api/admin/email/logs/clear` | 清空过期日志 |
 | GET | `/api/admin/email/users/search` | 搜索用户 |
 | POST | `/api/user/email/:action` | 用户端触发邮件发送 |
+| GET | `/api/admin/resources/config` | 获取资源配置 |
+| PUT | `/api/admin/resources/config` | 保存资源配置 |
+| GET | `/api/admin/resources` | 资源列表 |
+| POST | `/api/admin/resources/upload` | 上传文件 |
+| PUT | `/api/admin/resources/:id` | 更新资源 |
+| DELETE | `/api/admin/resources/:id` | 删除资源 |
+| POST | `/api/admin/resources/:id/distribute` | 分发资源给用户 |
+| GET | `/api/admin/resources/:id/distributions` | 获取分发列表 |
+| PUT | `/api/admin/resources/distributions/batch-expire` | 批量设置过期时间 |
+| DELETE | `/api/admin/resources/distributions/:id` | 删除分发记录 |
 
 ---
 
@@ -652,10 +665,12 @@ project/
 │  │  │  ├─ cf-optimize.js
 │  │  │  ├─ renew.js
 │  │  │  ├─ tickets.js
-│  │  │  └─ email.js
+│  │  │  ├─ email.js
+│  │  │  └─ download.js
 │  │  └─ admin/
 │  │     ├─ tickets.js
 │  │     ├─ email.js
+│  │     ├─ resources.js
 │  │     └─ ...
 │  ├─ services/
 │  │  ├─ vmq-service.js
@@ -668,6 +683,12 @@ project/
 │  ├─ jobs/
 │  │  ├─ index.js
 │  │  └─ email-campaign.js
+│  ├─ db/
+│  │  ├─ init.js
+│  │  └─ migrations/
+│  │     ├─ 001-node-subscription-strategy.js
+│  │     ├─ 002-resources-table.js
+│  │     └─ 003-resource-distributions.js
 │  └─ config.js
 ├─ client-user/
 │  └─ src/
@@ -687,6 +708,7 @@ project/
 │     │  ├─ Tickets.vue
 │     │  ├─ TicketDetail.vue
 │     │  ├─ Email.vue
+│     │  ├─ Resources.vue
 │     │  └─ ...
 │     ├─ api/
 │     └─ stores/
@@ -876,7 +898,109 @@ node server/db/migrations/001-node-subscription-strategy.js
 
 ---
 
-## 13. 与旧文档相比的关键修正
+## 13. 资源下载功能
+
+### 13.1 功能概述
+
+系统支持管理员上传文件资源，并为不同用户分配独立的下载链接，支持设置有效期。用户可通过帮助弹窗获取下载链接邮件。
+
+### 13.2 数据库设计
+
+**`resources` 表**：存储资源文件信息
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | SERIAL | 主键 |
+| name | VARCHAR(255) | 资源显示名称 |
+| filename | VARCHAR(255) | 存储文件名（UUID） |
+| original_name | VARCHAR(255) | 原始文件名 |
+| size | BIGINT | 文件大小（字节） |
+| mimetype | VARCHAR(100) | MIME 类型 |
+| path | VARCHAR(500) | 存储路径 |
+| download_token | VARCHAR(32) | 全局下载 token |
+| expire_at | BIGINT | 过期时间戳 |
+| download_count | INTEGER | 下载次数 |
+| enabled | INTEGER | 是否启用 |
+| created_at | BIGINT | 创建时间 |
+| updated_at | BIGINT | 更新时间 |
+
+**`resource_distributions` 表**：存储用户独立下载链接
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | SERIAL | 主键 |
+| resource_id | INTEGER | 关联资源 ID |
+| user_id | INTEGER | 关联用户 ID |
+| download_token | VARCHAR(32) | 独立下载 token |
+| expire_at | BIGINT | 过期时间戳 |
+| download_count | INTEGER | 下载次数 |
+| enabled | INTEGER | 是否启用 |
+| created_at | BIGINT | 创建时间 |
+
+### 13.3 资源配置
+
+在系统设置页面可配置：
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| 最大文件大小 | 单个文件最大允许上传大小 | 100MB |
+| 总下载流量限制 | 所有用户共享的总下载速度 | 0（不限速） |
+
+配置存储在 `system_settings` 表，key 为 `resource_config`。
+
+### 13.4 管理端功能
+
+**资源管理页面**：
+- 上传文件（支持拖拽，最多 5 个文件）
+- 资源列表展示（名称、大小、下载次数、状态、过期时间）
+- 重命名资源
+- 删除资源（同时删除文件）
+- 分发资源给用户（支持批量选择用户、设置有效期）
+- 查看分发列表
+- 批量设置分发有效期
+
+### 13.5 用户端功能
+
+**帮助弹窗**：
+- 新增"Android-App下载"按钮
+- 点击后系统自动：
+  1. 检查用户是否已有有效分发记录
+  2. 如果没有，自动创建分发记录（关联最新资源，默认 60 分钟有效期）
+  3. 模糊匹配模板名称包含 "Android-App" 的邮件模板
+  4. 发送包含下载链接的邮件给用户
+
+**下载文件**：
+- 通过分发链接下载（用户独立 token，优先验证）
+- 通过全局链接下载（资源全局 token）
+- 全局限速：所有用户共享总下载速度限制
+
+### 13.6 邮件模板变量
+
+邮件模板支持以下变量：
+
+| 变量名 | 说明 |
+|--------|------|
+| `{{username}}` | 用户邮箱前缀 |
+| `{{email}}` | 用户邮箱 |
+| `{{user_id}}` | 用户 ID |
+| `{{plan_name}}` | 套餐名称 |
+| `{{expire_date}}` | 到期时间 |
+| `{{traffic_used}}` | 已用流量 |
+| `{{traffic_limit}}` | 流量上限 |
+| `{{download_url}}` | 下载链接（根据用户自动匹配） |
+
+### 13.7 工作流程
+
+1. 管理员上传资源文件
+2. 管理员可选择分发给指定用户（设置有效期）
+3. 用户在帮助弹窗中点击"获取"
+4. 系统自动创建分发记录（如果没有）
+5. 系统发送包含下载链接的邮件
+6. 用户点击链接下载文件
+
+---
+
+## 14. 与旧文档相比的关键修正
 
 本次已按当前代码实现修正文档中的以下不一致项：
 

@@ -1,7 +1,15 @@
 const { BrevoClient } = require('@getbrevo/brevo')
+const config = require('../config')
 const { createLogger } = require('../utils/logger')
 
 const logger = createLogger('EMAIL-SERVICE')
+
+// 获取站点基础 URL
+function getSiteBaseUrl() {
+  const protocol = config.site?.protocol || 'http'
+  const host = config.site?.host || 'localhost:30000'
+  return `${protocol}://${host}`
+}
 
 class EmailService {
   constructor() {
@@ -111,6 +119,17 @@ class EmailService {
       return gb >= 1 ? `${gb.toFixed(2)} GB` : `${(bytes / (1024 * 1024)).toFixed(2)} MB`
     }
 
+    // 获取用户有效的下载链接
+    const now = Math.floor(Date.now() / 1000)
+    const downloadUrl = await db.prepare(
+      `SELECT download_token FROM resource_distributions 
+       WHERE user_id = ? AND enabled = 1 
+       AND (expire_at IS NULL OR expire_at > ?)
+       ORDER BY created_at DESC LIMIT 1`
+    ).get(userId, now)
+
+    const siteBaseUrl = getSiteBaseUrl()
+
     return {
       username,
       email: user.email,
@@ -118,7 +137,8 @@ class EmailService {
       plan_name: user.plan_name || '无套餐',
       expire_date: user.expire_at ? new Date(user.expire_at * 1000).toLocaleDateString('zh-CN') : '无限期',
       traffic_used: formatTraffic(user.traffic_used),
-      traffic_limit: formatTraffic(user.traffic_limit)
+      traffic_limit: formatTraffic(user.traffic_limit),
+      download_url: downloadUrl ? `${siteBaseUrl}/api/user/download/${downloadUrl.download_token}` : ''
     }
   }
 }

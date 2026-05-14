@@ -87,6 +87,12 @@ const routes = [
         meta: { title: '邮件管理' }
       },
       {
+        path: 'resources',
+        name: 'Resources',
+        component: () => import('@/views/Resources.vue'),
+        meta: { title: '资源管理' }
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),

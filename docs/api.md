@@ -1411,3 +1411,281 @@ md5(payId + param + type + price + reallyPrice + key)
 - 用户已读后超过 24 小时无新回复
 
 定时任务每小时检查一次。
+
+---
+
+## 6. 资源下载 API
+
+### 6.1 管理端资源接口
+
+所有管理端资源接口前缀：`/api/admin/resources`
+
+#### GET `/api/admin/resources/config`
+
+获取资源配置。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "max_file_size": 100,
+    "download_speed_limit": 0
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| max_file_size | number | 最大文件大小（MB） |
+| download_speed_limit | number | 总下载流量限制（KB/s），0 表示不限速 |
+
+#### PUT `/api/admin/resources/config`
+
+保存资源配置。
+
+请求体：
+
+```json
+{
+  "max_file_size": 100,
+  "download_speed_limit": 1024
+}
+```
+
+#### GET `/api/admin/resources`
+
+获取资源列表。
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| page | number | 否 | 页码，默认 1 |
+| limit | number | 否 | 每页条数，默认 20 |
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 10,
+    "page": 1,
+    "limit": 20,
+    "list": [
+      {
+        "id": 1,
+        "name": "Android App",
+        "filename": "uuid.apk",
+        "original_name": "app.apk",
+        "size": 10485760,
+        "mimetype": "application/vnd.android.package-archive",
+        "download_token": "abc123...",
+        "expire_at": null,
+        "download_count": 5,
+        "enabled": 1,
+        "created_at": 1746260000,
+        "updated_at": 1746260000
+      }
+    ]
+  }
+}
+```
+
+#### POST `/api/admin/resources/upload`
+
+上传文件。
+
+请求格式：`multipart/form-data`
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| file | File | 是 | 上传的文件 |
+| name | string | 否 | 资源名称，默认使用文件名 |
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 1,
+    "name": "Android App",
+    "filename": "uuid.apk",
+    "original_name": "app.apk",
+    "size": 10485760,
+    "download_token": "abc123...",
+    "enabled": 1
+  }
+}
+```
+
+#### PUT `/api/admin/resources/:id`
+
+更新资源信息（重命名等）。
+
+请求体：
+
+```json
+{
+  "name": "新名称",
+  "enabled": true
+}
+```
+
+#### DELETE `/api/admin/resources/:id`
+
+删除资源（同时删除文件）。
+
+#### POST `/api/admin/resources/:id/distribute`
+
+分发资源给用户。
+
+请求体：
+
+```json
+{
+  "user_ids": [1, 2, 3],
+  "expire_minutes": 60
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| user_ids | array | 是 | 用户 ID 列表 |
+| expire_minutes | number | 否 | 有效期（分钟），不填表示永不过期 |
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "resource_id": 1,
+    "distributions": [
+      { "user_id": 1, "distribution_id": 1, "action": "created" },
+      { "user_id": 2, "distribution_id": 2, "action": "created" }
+    ]
+  }
+}
+```
+
+#### GET `/api/admin/resources/:id/distributions`
+
+获取资源的分发列表。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": [
+    {
+      "id": 1,
+      "resource_id": 1,
+      "user_id": 1,
+      "email": "user@example.com",
+      "download_token": "xyz789...",
+      "expire_at": 1746263600,
+      "download_count": 2,
+      "enabled": 1,
+      "created_at": 1746260000
+    }
+  ]
+}
+```
+
+#### PUT `/api/admin/resources/distributions/batch-expire`
+
+批量设置过期时间。
+
+请求体：
+
+```json
+{
+  "ids": [1, 2, 3],
+  "expire_minutes": 30
+}
+```
+
+#### DELETE `/api/admin/resources/distributions/:id`
+
+删除分发记录。
+
+### 6.2 用户端下载接口
+
+#### POST `/api/user/email/download`
+
+请求下载链接邮件。
+
+说明：
+- 自动为用户创建分发记录（如果没有有效记录）
+- 模糊匹配模板名称包含 "Android-App" 的邮件模板
+- 每天限制发送 2 封邮件
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "下载链接已发送到邮箱，请查收",
+  "data": null
+}
+```
+
+失败响应：
+
+```json
+{
+  "code": 6006,
+  "message": "今天已经发送过2封邮件，请明天再试",
+  "data": null
+}
+```
+
+#### GET `/api/user/download/:token`
+
+下载文件。
+
+支持两种 token：
+1. 分发表中的用户独立 token（优先）
+2. 资源表中的全局 token
+
+响应：
+- 成功：返回文件流，带 `Content-Disposition` 头
+- 链接无效：`7001`
+- 已禁用：`7002`
+- 已过期：`7003`
+- 文件不存在：`7004`
+
+### 6.3 邮件模板变量
+
+邮件模板支持以下变量：
+
+| 变量名 | 说明 |
+|--------|------|
+| `{{username}}` | 用户邮箱前缀 |
+| `{{email}}` | 用户邮箱 |
+| `{{user_id}}` | 用户 ID |
+| `{{plan_name}}` | 套餐名称 |
+| `{{expire_date}}` | 到期时间 |
+| `{{traffic_used}}` | 已用流量 |
+| `{{traffic_limit}}` | 流量上限 |
+| `{{download_url}}` | 下载链接（根据用户自动匹配） |
+
+### 6.4 错误码
+
+| code | 说明 |
+|------|------|
+| 7001 | 下载链接无效或资源不存在 |
+| 7002 | 该资源已被禁用 |
+| 7003 | 下载链接已过期 |
+| 7004 | 文件不存在 |
+| 7005 | 暂无可用资源 |

@@ -260,7 +260,15 @@ const userApi = {
    * @returns {Promise<Object>} 响应数据
    */
   requestTutorial(type) {
-    return apiClient.post('/email/tutorial', { type }, { timeout: 20000 })
+    return apiClient.post('/email/tutorial', { type }, { timeout: 30000 })
+  },
+
+  /**
+   * 请求下载链接邮件
+   * @returns {Promise<Object>} 响应数据
+   */
+  requestDownload() {
+    return apiClient.post('/email/download', {}, { timeout: 30000 })
   }
 }
 

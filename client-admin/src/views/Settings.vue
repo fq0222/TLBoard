@@ -104,6 +104,34 @@
           </el-form>
         </div>
       </el-tab-pane>
+
+      <el-tab-pane label="资源管理" name="resource">
+        <div class="content-card">
+          <h2 class="card-title">资源管理配置</h2>
+          <el-form :model="resourceForm" label-width="140px" style="max-width: 600px;">
+            <el-form-item label="最大文件大小">
+              <el-input-number
+                v-model="resourceForm.max_file_size"
+                :min="1"
+                :max="1024"
+                placeholder="最大文件大小"
+              />
+              <span style="margin-left: 10px; color: #666;">MB（单个文件最大允许上传大小）</span>
+            </el-form-item>
+            <el-form-item label="总下载流量限制">
+              <el-input-number
+                v-model="resourceForm.download_speed_limit"
+                :min="0"
+                placeholder="总下载流量限制"
+              />
+              <span style="margin-left: 10px; color: #666;">KB/s（所有用户共享，0 表示不限速）</span>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="saveResourceConfig" :loading="resourceSaving">保存配置</el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog v-model="adminDialogVisible" title="添加管理员" width="400px">
@@ -163,6 +191,12 @@ const showTestDialog = ref(false)
 const testEmail = ref('')
 const emailSaving = ref(false)
 const testSending = ref(false)
+
+const resourceForm = ref({
+  max_file_size: 100,
+  download_speed_limit: 0
+})
+const resourceSaving = ref(false)
 
 const passwordForm = reactive({
   old_password: '',
@@ -301,9 +335,37 @@ async function handleSendTest() {
   }
 }
 
+async function loadResourceConfig() {
+  try {
+    const res = await api.admin.getResourceConfig()
+    if (res.code === 0) {
+      resourceForm.value = res.data
+    }
+  } catch (error) {
+    console.error('加载资源配置失败:', error)
+  }
+}
+
+async function saveResourceConfig() {
+  try {
+    resourceSaving.value = true
+    const res = await api.admin.saveResourceConfig(resourceForm.value)
+    if (res.code === 0) {
+      ElMessage.success('资源配置已保存')
+    } else {
+      ElMessage.error(res.message)
+    }
+  } catch (error) {
+    ElMessage.error('保存失败')
+  } finally {
+    resourceSaving.value = false
+  }
+}
+
 onMounted(() => {
   fetchAdmins()
   loadEmailConfig()
+  loadResourceConfig()
 })
 </script>
 
