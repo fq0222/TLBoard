@@ -36,15 +36,17 @@
           <el-input v-model="form.subject" placeholder="支持变量，如 {{username}}" />
         </el-form-item>
         <el-form-item label="可用变量">
-          <el-tag
-            v-for="varName in availableVariables"
-            :key="varName"
-            class="variable-tag"
-            @click="insertVariable(varName)"
-            style="cursor: pointer; margin-right: 8px;"
-          >
-            {{ formatVariableDisplay(varName) }}
-          </el-tag>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <el-tag
+              v-for="varName in availableVariables"
+              :key="varName"
+              class="variable-tag"
+              @click="insertVariable(varName)"
+              style="cursor: pointer;"
+            >
+              {{ formatVariableDisplay(varName) }}
+            </el-tag>
+          </div>
         </el-form-item>
         <el-form-item label="邮件内容">
           <el-input
