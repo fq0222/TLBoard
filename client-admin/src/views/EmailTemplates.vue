@@ -84,7 +84,7 @@ const showPreview = ref(false)
 const editingId = ref(null)
 const previewData = ref({ subject: '', content: '' })
 
-const availableVariables = ['username', 'email', 'user_id', 'plan_name', 'expire_date', 'traffic_used', 'traffic_limit']
+const availableVariables = ['username', 'email', 'user_id', 'plan_name', 'expire_date', 'traffic_used', 'traffic_limit', 'download_url']
 
 const formatVariableDisplay = (varName) => `{{${varName}}}`
 

@@ -148,7 +148,8 @@ const variableLabels = {
   plan_name: '套餐名称',
   expire_date: '到期时间',
   traffic_used: '已用流量',
-  traffic_limit: '流量上限'
+  traffic_limit: '流量上限',
+  download_url: '下载链接'
 }
 
 const getVariableLabel = (varName) => variableLabels[varName] || varName
