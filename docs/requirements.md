@@ -472,6 +472,7 @@ VMQ 后台需要配置以下两个地址：
 | `{{expire_date}}` | 到期时间 | `2026/6/12` |
 | `{{traffic_used}}` | 已用流量 | `1.5 GB` |
 | `{{traffic_limit}}` | 流量上限 | `100 GB` |
+| `{{download_url}}` | 下载链接 | `https://example.com/api/user/download/xxx` |
 
 #### 6.9.3 邮件发送
 
