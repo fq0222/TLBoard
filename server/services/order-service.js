@@ -43,6 +43,10 @@ async function syncUserToXuiServers(db, user, plan) {
 
     logger.info(`开始同步用户 ${user.email} 到 ${servers.length} 个 3X-UI 服务器`);
 
+    // 同步开始时更新状态
+    await db.prepare('UPDATE users SET sync_status = 1 WHERE id = ?').run(user.id);
+    logger.info(`用户 ${user.email} 同步状态更新为 1（同步中）`);
+
     for (const server of servers) {
       try {
         const xuiService = new XuiService(server.api_url, server.api_username, server.api_password);
@@ -165,6 +169,10 @@ async function syncUserToXuiServers(db, user, plan) {
     logger.info(`用户 ${user.email} 同步完成`);
   } catch (error) {
     logger.error(`同步用户到 3X-UI 错误: ${error.message}`);
+  } finally {
+    // 同步完成时更新状态（包括失败）
+    await db.prepare('UPDATE users SET sync_status = 2 WHERE id = ?').run(user.id);
+    logger.info(`用户 ${user.email} 同步状态更新为 2（已完成）`);
   }
 }
 

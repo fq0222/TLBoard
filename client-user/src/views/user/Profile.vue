@@ -69,6 +69,22 @@
       @renew="handleRenew"
     />
 
+    <!-- 同步中弹窗 -->
+    <el-dialog 
+      v-model="syncLoading" 
+      title="账号同步中" 
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+      width="400px"
+    >
+      <div class="sync-loading-content">
+        <el-icon class="sync-loading-icon"><Loading /></el-icon>
+        <p>您的账号信息正在同步到服务器，请稍候...</p>
+        <p class="sync-loading-tip">同步完成后将自动关闭此窗口</p>
+      </div>
+    </el-dialog>
+
     <!-- 帮助弹窗 -->
     <el-dialog v-model="showHelpDialog" title="使用帮助" width="400px">
       <div class="help-content">
@@ -303,9 +319,9 @@
  * 展示用户信息、流量使用、订阅链接和订单记录
  */
 
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { CopyDocument, MagicStick, Link, Refresh, InfoFilled, QuestionFilled, ArrowRight } from '@element-plus/icons-vue'
+import { CopyDocument, MagicStick, Link, Refresh, InfoFilled, QuestionFilled, ArrowRight, Loading } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import RenewDialog from '@/components/RenewDialog.vue'
@@ -333,6 +349,8 @@ const tutorialLoading = ref({
   'apple-id': false
 })
 const downloadLoading = ref(false)
+const syncLoading = ref(false)
+const syncTimer = ref(null)
 const TEST_COUNT = 3
 const TEST_TIMEOUT = 5000
 const TEST_INTERVAL = 200
@@ -368,6 +386,48 @@ async function fetchOrders() {
   } catch (error) {
     console.error('获取订单列表失败:', error)
   }
+}
+
+/**
+ * 检查同步状态
+ * 新用户首次登录时，如果同步未完成则显示loading弹窗
+ */
+async function checkSyncStatus() {
+  try {
+    const result = await userStore.fetchUserProfile()
+    if (result.success) {
+      userInfo.value = result.data
+      
+      // 判断是否是新用户且同步未完成
+      if (result.data.payment_count === 1 && result.data.sync_status === 1) {
+        syncLoading.value = true
+        startSyncPolling()
+      }
+    }
+  } catch (error) {
+    console.error('获取用户信息失败:', error)
+  }
+}
+
+/**
+ * 开始轮询同步状态
+ */
+function startSyncPolling() {
+  syncTimer.value = setInterval(async () => {
+    try {
+      const response = await api.user.getSyncStatus()
+      if (response.code === 0 && response.data.sync_status === 2) {
+        // 同步完成，隐藏弹窗
+        syncLoading.value = false
+        clearInterval(syncTimer.value)
+        syncTimer.value = null
+        // 刷新用户信息
+        await fetchUserInfo()
+      }
+    } catch (error) {
+      console.error('检查同步状态失败:', error)
+    }
+  }, 5000)
 }
 
 /**
@@ -694,6 +754,14 @@ async function handleRenew({ planId, payType }) {
 onMounted(() => {
   fetchUserInfo()
   fetchOrders()
+  checkSyncStatus()
+})
+
+onBeforeUnmount(() => {
+  if (syncTimer.value) {
+    clearInterval(syncTimer.value)
+    syncTimer.value = null
+  }
 })
 </script>
 
@@ -1021,5 +1089,33 @@ onMounted(() => {
 .help-label {
   font-weight: 500;
   color: #333;
+}
+
+.sync-loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 0;
+}
+
+.sync-loading-icon {
+  font-size: 48px;
+  color: #409eff;
+  animation: spin 2s linear infinite;
+}
+
+.sync-loading-tip {
+  color: #909399;
+  font-size: 13px;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

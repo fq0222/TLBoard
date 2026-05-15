@@ -355,6 +355,7 @@ router.get('/profile', authenticateUser, async (req, res) => {
       SELECT 
         u.id, u.email, u.plan_id, u.subscription_token, u.sub_id,
         u.traffic_used, u.traffic_limit, u.expire_at, u.enabled, u.created_at,
+        u.payment_count, u.sync_status,
         p.name as plan_name
       FROM users u
       LEFT JOIN plans p ON u.plan_id = p.id
@@ -437,7 +438,9 @@ router.get('/profile', authenticateUser, async (req, res) => {
         expire_at: user.expire_at,
         expire_text: formatTime(user.expire_at),
         enabled: user.enabled,
-        created_at: user.created_at
+        created_at: user.created_at,
+        payment_count: user.payment_count,
+        sync_status: user.sync_status
       }
     });
   } catch (error) {

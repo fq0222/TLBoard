@@ -201,6 +201,14 @@ const userApi = {
   },
 
   /**
+   * 获取同步状态
+   * @returns {Promise<Object>} 响应数据
+   */
+  getSyncStatus() {
+    return apiClient.get('/sync-status')
+  },
+
+  /**
    * 获取未读工单数量
    * @returns {Promise<Object>} 响应数据
    */

@@ -33,6 +33,7 @@ const userRenewRoutes = require('./routes/user/renew');
 const userTicketsRoutes = require('./routes/user/tickets');
 const userEmailRoutes = require('./routes/user/email');
 const userDownloadRoutes = require('./routes/user/download');
+const userSyncStatusRoutes = require('./routes/user/sync-status');
 
 // ============ 管理端路由 ============
 const adminAuthRoutes = require('./routes/admin/auth');
@@ -88,6 +89,7 @@ async function startApp() {
   userApp.use(`${userPrefix}/tickets`, userTicketsRoutes);
 userApp.use(`${userPrefix}/email`, userEmailRoutes);
 userApp.use(`${userPrefix}/download`, userDownloadRoutes);
+  userApp.use(`${userPrefix}/sync-status`, userSyncStatusRoutes);
 
   userApp.use((req, res) => {
     res.status(404).json({ code: 404, message: '接口不存在', data: null });
