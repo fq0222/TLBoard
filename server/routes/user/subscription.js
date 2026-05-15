@@ -801,3 +801,5 @@ function generateV2RayConfig(nodes, user) {
 }
 
 module.exports = router;
+module.exports.fetchOriginalSubscription = fetchOriginalSubscription;
+module.exports.parseSubscriptionContent = parseSubscriptionContent;

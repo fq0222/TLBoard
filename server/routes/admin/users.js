@@ -8,6 +8,9 @@ const { body, param, query, validationResult } = require('express-validator');
 const { authenticateAdmin } = require('../../middleware/auth-admin');
 const { createLogger } = require('../../utils/logger');
 const { generateSubscriptionUrls } = require('../../utils/site-url');
+const { syncAllServers } = require('../../services/xui-sync');
+const { getStrategyFromRemark, processNodeLink } = require('../../services/subscription-strategy');
+const { fetchOriginalSubscription, parseSubscriptionContent } = require('../../routes/user/subscription');
 const XuiService = require('../../services/xui-service');
 
 const router = express.Router();
@@ -429,8 +432,11 @@ router.put('/:id/cf-ips', authenticateAdmin, [
     }
 
     const userId = parseInt(req.params.id);
-    const { ip_pool_ids } = req.body;
+    let { ip_pool_ids } = req.body;
     const db = req.app.locals.db;
+
+    // 去重
+    ip_pool_ids = [...new Set(ip_pool_ids)];
 
     // 验证用户存在
     const user = await db.prepare('SELECT id, email FROM users WHERE id = ?').get(userId);
@@ -445,7 +451,7 @@ router.put('/:id/cf-ips', authenticateAdmin, [
 
     // 验证 IP ID 有效性
     const validIps = await db.prepare(`
-      SELECT id, ip FROM cf_ip_pool 
+      SELECT id, ip, port, location FROM cf_ip_pool 
       WHERE id IN (${ip_pool_ids.map(() => '?').join(',')}) AND enabled = 1
     `).all(...ip_pool_ids);
 
@@ -480,6 +486,222 @@ router.put('/:id/cf-ips', authenticateAdmin, [
     });
   } catch (error) {
     logger.error(`更新用户CF IP错误: ${error.message}`);
+    res.status(500).json({
+      code: 500,
+      message: '服务器内部错误',
+      data: null
+    });
+  }
+});
+
+/**
+ * POST /api/admin/users/:id/generate-subscription
+ * 为用户生成订阅链接
+ */
+router.post('/:id/generate-subscription', authenticateAdmin, [
+  param('id')
+    .isInt({ min: 1 })
+    .withMessage('ID必须是大于0的整数')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      logger.warn('生成用户订阅链接参数验证失败');
+      return res.status(400).json({
+        code: 1001,
+        message: '参数校验失败',
+        data: null
+      });
+    }
+
+    const userId = parseInt(req.params.id);
+    const db = req.app.locals.db;
+
+    // 查询用户信息
+    const user = await db.prepare(`
+      SELECT 
+        u.id, u.email, u.subscription_token, u.sub_id,
+        u.traffic_used, u.traffic_limit, u.expire_at, u.enabled,
+        p.name as plan_name
+      FROM users u
+      LEFT JOIN plans p ON u.plan_id = p.id
+      WHERE u.id = ?
+    `).get(userId);
+
+    if (!user) {
+      logger.warn(`生成订阅链接失败: 用户不存在 - ${userId}`);
+      return res.status(400).json({
+        code: 2004,
+        message: '用户不存在',
+        data: null
+      });
+    }
+
+    // 检查账号是否启用
+    if (!user.enabled) {
+      logger.warn(`生成订阅链接失败: 账号已禁用 - ${user.email}`);
+      return res.status(400).json({
+        code: 2003,
+        message: '账号已被禁用',
+        data: null
+      });
+    }
+
+    // 检查是否已配置 CF IP
+    const cfIps = await db.prepare(`
+      SELECT cp.ip
+      FROM user_cf_ips uci
+      JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
+      WHERE uci.user_id = ? AND cp.enabled = 1
+    `).all(userId);
+
+    if (cfIps.length === 0) {
+      logger.warn(`生成订阅链接失败: 未配置CF IP - ${user.email}`);
+      return res.status(400).json({
+        code: 3001,
+        message: '请先配置优选 IP',
+        data: null
+      });
+    }
+
+    // 同步服务器节点信息
+    logger.info(`用户 ${user.email} 生成订阅链接，开始同步节点信息`);
+    const syncResult = await syncAllServers(db);
+    logger.info(`节点同步完成: ${syncResult.syncedCount}/${syncResult.totalCount} 台服务器`);
+
+    // 获取所有在线服务器
+    const servers = await db.prepare(`
+      SELECT id, name, api_url, host, client_port, sub_url
+      FROM xui_servers
+      WHERE status = 1
+    `).all();
+
+    // 聚合所有节点
+    const allNodes = [];
+
+    for (const server of servers) {
+      try {
+        // 获取用户在该服务器的节点配置
+        const nodeConfigs = await db.prepare(`
+          SELECT unc.uuid, unc.sub_id, xn.remark, xn.protocol, xn.inbound_id
+          FROM user_node_configs unc
+          JOIN xui_nodes xn ON unc.server_id = xn.server_id AND unc.inbound_id = xn.inbound_id
+          WHERE unc.user_id = ? AND unc.server_id = ?
+        `).all(userId, server.id);
+
+        if (nodeConfigs.length === 0) {
+          logger.warn(`服务器 ${server.name} 没有用户 ${user.email} 的节点配置`);
+          continue;
+        }
+
+        // 检查服务器是否有订阅地址
+        if (!server.sub_url) {
+          logger.warn(`服务器 ${server.name} 没有设置订阅地址`);
+          continue;
+        }
+
+        // 为每个节点分别获取原始订阅
+        for (const config of nodeConfigs) {
+          // 判断策略
+          const strategy = getStrategyFromRemark(config.remark);
+
+          // 从 3X-UI 获取该节点的原始订阅
+          let originalLink = null;
+          try {
+            const originalContent = await fetchOriginalSubscription(server.sub_url, config.sub_id);
+            const links = parseSubscriptionContent(originalContent);
+            if (links.length > 0) {
+              originalLink = links[0];
+              logger.info(`从服务器 ${server.name} 获取节点 ${config.remark} 的原始链接`);
+            }
+          } catch (error) {
+            logger.warn(`从服务器 ${server.name} 获取节点 ${config.remark} 原始订阅失败: ${error.message}`);
+            continue;
+          }
+
+          if (!originalLink) {
+            logger.warn(`找不到节点 ${config.remark} 的原始链接`);
+            continue;
+          }
+
+          // 处理节点链接
+          let processedLink;
+          if (strategy === 'cf') {
+            // 为每个 CF 优选 IP 生成一个节点
+            for (let i = 0; i < cfIps.length; i++) {
+              processedLink = processNodeLink(originalLink, 'cf', {
+                cfIp: cfIps[i].ip,
+                clientPort: server.client_port,
+                host: server.host
+              });
+              // 节点名：服务器名-remark，多个 CF IP 时添加序号后缀
+              const baseName = `${server.name}-${config.remark}`;
+              const nodeName = cfIps.length > 1 ? `${baseName}-${i + 1}` : baseName;
+              // 替换链接中的 remark
+              const hashIdx = processedLink.indexOf('#');
+              if (hashIdx > 0) {
+                processedLink = processedLink.substring(0, hashIdx + 1) + encodeURIComponent(nodeName);
+              }
+              logger.info(`生成CF节点: nodeName=${nodeName}`);
+              allNodes.push({
+                server_name: server.name,
+                node_name: nodeName,
+                protocol: config.protocol,
+                strategy: strategy,
+                link: processedLink,
+                original_link: originalLink
+              });
+            }
+          } else {
+            processedLink = processNodeLink(originalLink, 'direct');
+            const nodeName = `${server.name}-${config.remark}`;
+            // 替换链接中的 remark
+            const hashIdx = processedLink.indexOf('#');
+            if (hashIdx > 0) {
+              processedLink = processedLink.substring(0, hashIdx + 1) + encodeURIComponent(nodeName);
+            }
+            logger.info(`生成Direct节点: nodeName=${nodeName}`);
+            allNodes.push({
+              server_name: server.name,
+              node_name: nodeName,
+              protocol: config.protocol,
+              strategy: strategy,
+              link: processedLink,
+              original_link: originalLink
+            });
+          }
+        }
+      } catch (error) {
+        logger.error(`处理服务器 ${server.name} 错误: ${error.message}`);
+      }
+    }
+
+    // 存储到 user_subscriptions 表
+    const now = Math.floor(Date.now() / 1000);
+    await db.prepare(`
+      INSERT INTO user_subscriptions (user_id, sub_id, nodes_data, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT (sub_id) DO UPDATE SET
+        nodes_data = ?,
+        updated_at = ?
+    `).run(userId, user.sub_id, JSON.stringify(allNodes), now, JSON.stringify(allNodes), now);
+
+    logger.info(`用户 ${user.email} 生成订阅链接成功，共 ${allNodes.length} 个节点`);
+
+    // 返回订阅链接
+    const urls = generateSubscriptionUrls(req, user.sub_id);
+
+    res.json({
+      code: 0,
+      message: 'ok',
+      data: {
+        subscription_url: urls.subscription_url,
+        clash_url: urls.clash_url,
+        node_count: allNodes.length
+      }
+    });
+  } catch (error) {
+    logger.error(`生成用户订阅链接错误: ${error.message}`);
     res.status(500).json({
       code: 500,
       message: '服务器内部错误',
