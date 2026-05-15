@@ -508,33 +508,62 @@ function registerReleaseExpiredSalesJob(db) {
  */
 async function runReleaseExpiredSales(db) {
   try {
-    // 查找需要释放名额的用户（流量用完超过3天且未续费）
+    const now = Math.floor(Date.now() / 1000);
+    
+    // 查找需要释放名额的用户
+    // 条件：付过款、流量用完超过3天、未续费
+    // 说明：从未付款的用户不会增加 sales_count，所以不需要释放
     const expiredUsers = await db.prepare(`
-      SELECT u.plan_id, COUNT(*) as expired_count
+      SELECT u.id, u.email, u.plan_id, u.traffic_used_at, u.payment_count,
+             p.name as plan_name, p.sales_count, p.sales_limit
       FROM users u
+      JOIN plans p ON u.plan_id = p.id
       WHERE u.plan_id IS NOT NULL
         AND u.traffic_used_at IS NOT NULL
-        AND u.traffic_used_at < EXTRACT(EPOCH FROM NOW()) - 259200
+        AND u.traffic_used_at < ? - 259200
+        AND u.payment_count > 0
         AND NOT EXISTS (
           SELECT 1 FROM orders o 
           WHERE o.user_id = u.id 
             AND o.status = 'paid'
             AND o.created_at > u.traffic_used_at
         )
-      GROUP BY u.plan_id
-    `).all();
+    `).all(now);
+
+    if (expiredUsers.length === 0) {
+      return;
+    }
+
+    logger.info(`发现 ${expiredUsers.length} 个用户需要释放名额`);
+
+    // 按套餐分组统计
+    const planGroups = {};
+    for (const user of expiredUsers) {
+      logger.info(`待释放用户: ${user.email}, 套餐: ${user.plan_name}, 付款次数: ${user.payment_count}, 流量用完: ${new Date(user.traffic_used_at * 1000).toLocaleString()}, 当前已售: ${user.sales_count}/${user.sales_limit === -1 ? '不限' : user.sales_limit}`);
+      
+      if (!planGroups[user.plan_id]) {
+        planGroups[user.plan_id] = {
+          plan_name: user.plan_name,
+          count: 0,
+          current_sales: user.sales_count,
+          sales_limit: user.sales_limit
+        };
+      }
+      planGroups[user.plan_id].count++;
+    }
 
     let releasedCount = 0;
 
-    for (const row of expiredUsers) {
+    for (const [planId, group] of Object.entries(planGroups)) {
       const result = await db.prepare(`
         UPDATE plans 
         SET sales_count = GREATEST(0, sales_count - ?)
         WHERE id = ?
-      `).run(row.expired_count, row.plan_id);
+      `).run(group.count, planId);
       
       if (result.changes > 0) {
-        releasedCount += row.expired_count;
+        releasedCount += group.count;
+        logger.info(`释放套餐 ${group.plan_name} 名额 ${group.count} 个，已售: ${group.current_sales} -> ${group.current_sales - group.count}`);
       }
     }
 
