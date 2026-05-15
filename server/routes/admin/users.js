@@ -192,7 +192,7 @@ router.get('/:id', authenticateAdmin, [
     // 查询用户信息
     const user = await db.prepare(`
       SELECT 
-        u.id, u.email, u.plan_id, u.subscription_token,
+        u.id, u.email, u.plan_id, u.subscription_token, u.sub_id,
         u.traffic_used, u.traffic_limit, u.expire_at, u.enabled, u.created_at,
         p.name as plan_name
       FROM users u
@@ -240,6 +240,7 @@ router.get('/:id', authenticateAdmin, [
           plan_id: user.plan_id,
           plan_name: user.plan_name,
           subscription_url: urls.subscription_url,
+          clash_url: urls.clash_url,
           traffic_used: user.traffic_used,
           traffic_limit: user.traffic_limit,
           traffic_used_text: formatTraffic(user.traffic_used),
