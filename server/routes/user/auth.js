@@ -407,6 +407,12 @@ router.get('/profile', authenticateUser, async (req, res) => {
     `).get(userId);
     const cfOptimized = !!cfIps;
 
+    // 检查用户是否已生成订阅链接
+    const subscription = await db.prepare(`
+      SELECT 1 FROM user_subscriptions WHERE sub_id = ?
+    `).get(user.sub_id);
+    const subscriptionReady = cfOptimized && !!subscription;
+
     logger.info(`获取用户信息成功: ${user.email}`);
 
     const urls = generateSubscriptionUrls(req, user.sub_id);
@@ -422,6 +428,7 @@ router.get('/profile', authenticateUser, async (req, res) => {
         subscription_url: cfOptimized ? urls.subscription_url : '',
         clash_url: cfOptimized ? urls.clash_url : '',
         cf_optimized: cfOptimized,
+        subscription_ready: subscriptionReady,
         traffic_used: user.traffic_used,
         traffic_limit: user.traffic_limit,
         traffic_used_text: formatTraffic(user.traffic_used),
