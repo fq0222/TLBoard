@@ -220,7 +220,7 @@ router.get('/:id', authenticateAdmin, [
 
     // 查询用户CF优选IP
     const cfIps = await db.prepare(`
-      SELECT cp.ip, cp.port, cp.location
+      SELECT cp.id, cp.ip
       FROM user_cf_ips uci
       JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
       WHERE uci.user_id = ?
