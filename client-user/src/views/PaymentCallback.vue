@@ -74,6 +74,7 @@ const countdownTimer = ref(null)
 // 自动轮询间隔 5 秒
 const pollInterval = 5000
 const isPageVisible = ref(true)
+const hiddenTimestamp = ref(null)
 
 const paymentUrl = computed(() => String(route.query.payment_url || ''))
 const orderId = computed(() => String(route.query.order_id || ''))
@@ -163,9 +164,22 @@ async function checkPaymentStatus() {
 function handleVisibilityChange() {
   if (document.visibilityState === 'visible') {
     isPageVisible.value = true
-    checkPaymentStatus()
+    // 计算离开时间，减少相应的倒计时
+    if (hiddenTimestamp.value) {
+      const elapsedSeconds = Math.floor((Date.now() - hiddenTimestamp.value) / 1000)
+      countdown.value = Math.max(0, countdown.value - elapsedSeconds)
+      hiddenTimestamp.value = null
+    }
+    // 检查倒计时是否已结束
+    if (countdown.value <= 0) {
+      clearCountdownTimer()
+      clearTimer()
+    } else {
+      checkPaymentStatus()
+    }
   } else {
     isPageVisible.value = false
+    hiddenTimestamp.value = Date.now()
     clearTimer()
   }
 }
