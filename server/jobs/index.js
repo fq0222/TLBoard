@@ -9,7 +9,7 @@
  * | 标记过期订单           | 是             | 无             | 10 分钟          |
  * | 删除过期订单           | 是             | 5 分钟         | 1 小时           |
  * | 清理僵尸用户           | 是             | 2 分钟         | 30 分钟          |
- * | 3X-UI 用户同步         | 是             | 7 分钟         | 4 小时           |
+ * | 3X-UI 用户同步         | 是             | 1 分钟         | 4 小时           |
  * | 流量同步               | 是             | 10 分钟        | 1 小时           |
  * | 工单自动关闭           | 是             | 3 分钟         | 1 小时           |
  * | 释放过期名额           | 否             | 无             | 每天 5:00        |
@@ -360,7 +360,7 @@ async function syncUsersToServer(db, server, users) {
  * @param {Object} db - 数据库实例
  */
 function registerXuiSyncJob(db) {
-  // 启动时延迟7分钟执行第一次，避免启动时负载过高
+  // 启动时延迟1分钟执行第一次
   setTimeout(async () => {
     await runXuiSync(db);
   }, 1 * 60 * 1000);
