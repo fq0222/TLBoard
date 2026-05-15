@@ -53,8 +53,10 @@
       </div>
     </div>
     
-    <el-dialog v-model="dialogVisible" title="编辑用户" width="500px" :close-on-click-modal="!submitting">
+    <el-dialog v-model="dialogVisible" title="编辑用户" width="600px" :close-on-click-modal="!submitting">
       <el-form :model="userForm" label-width="100px">
+        <!-- 基本信息 -->
+        <el-divider content-position="left">基本信息</el-divider>
         <el-form-item label="启用">
           <el-switch v-model="userForm.enabled" :disabled="submitting" />
         </el-form-item>
@@ -73,11 +75,83 @@
         <el-form-item label="到期时间">
           <el-date-picker v-model="userForm.expire_at" type="datetime" placeholder="选择到期时间" :disabled="submitting" />
         </el-form-item>
+        
+        <!-- CF IP 管理 -->
+        <el-divider content-position="left">优选 IP（最多 5 个）</el-divider>
+        <el-form-item>
+          <div style="width: 100%;">
+            <!-- 已选择的 IP 列表 -->
+            <div v-for="(ip, index) in cfIps" :key="ip.id" style="display: flex; align-items: center; margin-bottom: 8px; padding: 8px; background: #f5f7fa; border-radius: 4px;">
+              <span style="flex: 1;">{{ ip.ip }}</span>
+              <el-button type="danger" size="small" text @click="removeCfIp(index)" :disabled="submitting">
+                <el-icon><Delete /></el-icon>
+              </el-button>
+            </div>
+            
+            <!-- 添加 IP -->
+            <div v-if="cfIps.length < 5" style="display: flex; gap: 10px;">
+              <el-select
+                v-model="selectedCfIpId"
+                filterable
+                placeholder="搜索并选择 IP"
+                style="flex: 1;"
+                :disabled="submitting"
+              >
+                <el-option
+                  v-for="ip in getSelectableCfIps()"
+                  :key="ip.id"
+                  :label="ip.ip"
+                  :value="ip.id"
+                />
+              </el-select>
+              <el-button type="primary" @click="addCfIp" :disabled="!selectedCfIpId || submitting">
+                添加
+              </el-button>
+            </div>
+            
+            <div v-if="cfIps.length === 0" style="color: #909399; font-size: 12px; margin-top: 5px;">
+              未配置优选 IP
+            </div>
+          </div>
+        </el-form-item>
+        
+        <!-- 订阅链接 -->
+        <el-divider content-position="left">订阅链接</el-divider>
+        <el-form-item>
+          <div style="width: 100%;">
+            <div v-if="subscriptionUrl" style="display: flex; gap: 10px; margin-bottom: 10px;">
+              <el-input v-model="subscriptionUrl" readonly>
+                <template #append>
+                  <el-button @click="copySubscriptionUrl">
+                    <el-icon><CopyDocument /></el-icon>
+                  </el-button>
+                </template>
+              </el-input>
+            </div>
+            <div v-else style="color: #909399; font-size: 12px; margin-bottom: 10px;">
+              未生成订阅链接
+            </div>
+            <el-button 
+              type="success" 
+              @click="generateSubscription" 
+              :loading="generatingSubscription"
+              :disabled="cfIps.length === 0 || submitting"
+            >
+              <el-icon><Link /></el-icon>
+              {{ generatingSubscription ? '正在生成...' : '生成订阅链接' }}
+            </el-button>
+            <div v-if="cfIps.length === 0" style="color: #e6a23c; font-size: 12px; margin-top: 5px;">
+              请先配置优选 IP 后再生成订阅链接
+            </div>
+          </div>
+        </el-form-item>
       </el-form>
+      
       <div v-if="submitting" style="text-align: center; color: #409eff; margin-top: 10px;">
         <el-icon class="is-loading"><Loading /></el-icon>
         正在同步到 3X-UI 服务器，请稍候...
       </div>
+      
       <template #footer>
         <el-button @click="dialogVisible = false" :disabled="submitting">取消</el-button>
         <el-button type="primary" @click="handleSubmit" :loading="submitting">确定</el-button>
@@ -88,7 +162,7 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { Search, Loading } from '@element-plus/icons-vue'
+import { Search, Loading, Delete, CopyDocument, Link } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 
@@ -101,6 +175,14 @@ const total = ref(0)
 const dialogVisible = ref(false)
 const submitting = ref(false)
 const editingId = ref(null)
+
+// CF IP 相关
+const cfIps = ref([])
+const selectedCfIpId = ref('')
+const cfIpPool = ref([])
+const generatingSubscription = ref(false)
+const subscriptionUrl = ref('')
+const clashUrl = ref('')
 
 const userForm = reactive({
   enabled: true,
@@ -173,6 +255,84 @@ async function fetchUsers() {
   }
 }
 
+/**
+ * 获取 CF IP 池列表
+ */
+async function fetchCfIpPool() {
+  try {
+    const response = await api.admin.getCfIps({ limit: 1000 })
+    if (response.code === 0) {
+      cfIpPool.value = response.data.list || []
+    }
+  } catch (error) {
+    console.error('获取CF IP池失败:', error)
+  }
+}
+
+/**
+ * 获取可选择的 CF IP（过滤已选择的）
+ */
+function getSelectableCfIps() {
+  const selectedIds = cfIps.value.map(ip => ip.id)
+  return cfIpPool.value.filter(ip => !selectedIds.includes(ip.id) && ip.enabled)
+}
+
+/**
+ * 添加 CF IP
+ */
+function addCfIp() {
+  if (!selectedCfIpId.value) return
+  const ip = cfIpPool.value.find(ip => ip.id === selectedCfIpId.value)
+  if (ip && cfIps.value.length < 5) {
+    cfIps.value.push({ id: ip.id, ip: ip.ip })
+    selectedCfIpId.value = ''
+  }
+}
+
+/**
+ * 删除 CF IP
+ */
+function removeCfIp(index) {
+  cfIps.value.splice(index, 1)
+}
+
+/**
+ * 生成订阅链接
+ */
+async function generateSubscription() {
+  if (cfIps.value.length === 0) {
+    ElMessage.warning('请先配置优选 IP')
+    return
+  }
+  
+  try {
+    generatingSubscription.value = true
+    const response = await api.admin.generateUserSubscription(editingId.value)
+    if (response.code === 0) {
+      subscriptionUrl.value = response.data.subscription_url
+      clashUrl.value = response.data.clash_url
+      ElMessage.success(`订阅链接已生成，共 ${response.data.node_count} 个节点`)
+    } else {
+      ElMessage.error(response.message || '生成订阅链接失败')
+    }
+  } catch (error) {
+    console.error('生成订阅链接失败:', error)
+    ElMessage.error('生成订阅链接失败')
+  } finally {
+    generatingSubscription.value = false
+  }
+}
+
+/**
+ * 复制订阅链接
+ */
+function copySubscriptionUrl() {
+  if (subscriptionUrl.value) {
+    navigator.clipboard.writeText(subscriptionUrl.value)
+    ElMessage.success('订阅链接已复制')
+  }
+}
+
 function showEditDialog(user) {
   editingId.value = user.id
   // 将数字转换为布尔值（0 = false, 1 = true）
@@ -188,6 +348,17 @@ function showEditDialog(user) {
   // 处理到期时间：0 或 "0" 表示无限期，应设为 null
   const expireAt = Number(user.expire_at) || 0
   userForm.expire_at = expireAt > 0 ? new Date(expireAt * 1000) : null
+  
+  // 加载用户 CF IP
+  cfIps.value = user.cf_ips || []
+  
+  // 加载订阅链接
+  subscriptionUrl.value = user.subscription_url || ''
+  clashUrl.value = user.clash_url || ''
+  
+  // 获取 CF IP 池
+  fetchCfIpPool()
+  
   dialogVisible.value = true
 }
 
@@ -195,19 +366,24 @@ async function handleSubmit() {
   try {
     submitting.value = true
     
+    // 保存基本信息
     const data = {
       enabled: userForm.enabled,
-      traffic_limit: userForm.traffic_bytes,  // 直接使用存储的字节值
+      traffic_limit: userForm.traffic_bytes,
       expire_at: userForm.expire_at ? Math.floor(userForm.expire_at.getTime() / 1000) : null
     }
-    const response = await api.admin.updateUser(editingId.value, data, { timeout: 60000 })
-    if (response.code === 0) {
-      ElMessage.success('用户信息更新成功')
-      dialogVisible.value = false
-      fetchUsers()
-    }
+    await api.admin.updateUser(editingId.value, data, { timeout: 60000 })
+    
+    // 保存 CF IP
+    const ipPoolIds = cfIps.value.map(ip => ip.id)
+    await api.admin.updateUserCfIps(editingId.value, ipPoolIds)
+    
+    ElMessage.success('用户信息更新成功')
+    dialogVisible.value = false
+    fetchUsers()
   } catch (error) {
     console.error('更新失败:', error)
+    ElMessage.error('更新失败')
   } finally {
     submitting.value = false
   }
