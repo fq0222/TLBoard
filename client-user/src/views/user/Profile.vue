@@ -230,7 +230,7 @@
       </div>
 
       <!-- 已生成：显示订阅链接 -->
-      <div v-if="userInfo.subscription_url && subscriptionGenerated" class="subscription-links">
+      <div v-if="userInfo.subscription_ready" class="subscription-links">
         <div class="link-group">
           <span class="link-label">通用订阅：</span>
           <el-input 
@@ -322,7 +322,7 @@ const cfOptimized = ref(false)
 const optimizing = ref(false)
 const optimizeProgress = ref(0)
 const optimizeStatusText = ref('')
-const subscriptionGenerated = ref(false)
+
 const generatingSubscription = ref(false)
 const showRenewDialog = ref(false)
 const showHelpDialog = ref(false)
@@ -397,7 +397,6 @@ async function generateSubscription() {
       // 更新订阅链接
       userInfo.value.subscription_url = response.data.subscription_url
       userInfo.value.clash_url = response.data.clash_url
-      subscriptionGenerated.value = true
       ElMessage.success('订阅链接已生成')
     } else {
       ElMessage.error(response.message || '生成订阅链接失败')
