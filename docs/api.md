@@ -212,6 +212,7 @@
     "subscription_url": "https://example.com/api/user/sub/abc123",
     "clash_url": "https://example.com/api/user/sub/abc123?clash=1",
     "cf_optimized": true,
+    "subscription_ready": true,
     "traffic_used": 1073741824,
     "traffic_limit": 107374182400,
     "traffic_used_text": "1 GB",
@@ -236,6 +237,7 @@
 | subscription_url | string | 通用订阅链接，未优选时为空字符串 |
 | clash_url | string | Clash 订阅链接，未优选时为空字符串 |
 | cf_optimized | boolean | 是否已完成 CF IP 优选 |
+| subscription_ready | boolean | 是否已完成优选IP且生成订阅链接（用于控制导航栏显示） |
 | traffic_used | number | 已用流量（字节） |
 | traffic_limit | number | 流量上限（字节） |
 | traffic_used_text | string | 格式化的已用流量 |
