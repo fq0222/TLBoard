@@ -37,6 +37,13 @@ npx vite build --minify esbuild  # 绕过 terser 的构建方式
 
 ## 工作流规范
 
+### 需求处理
+用户提出的需求优先使用 superpowers 插件处理，包括：
+- 新功能开发：使用 `brainstorming` → `writing-plans` → `subagent-driven-development` 流程
+- Bug 修复：使用 `systematic-debugging` 技能
+- 代码审查：使用 `requesting-code-review` 技能
+- 实施计划：使用 `executing-plans` 或 `subagent-driven-development` 技能
+
 ### 代码提交
 1. 可以 `git commit` 提交本地更改
 2. `git push` 前**必须**展示变更并获得用户同意
