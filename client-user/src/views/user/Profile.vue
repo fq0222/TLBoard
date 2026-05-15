@@ -399,7 +399,7 @@ async function checkSyncStatus() {
       userInfo.value = result.data
       
       // 判断是否是新用户且同步未完成
-      if (result.data.payment_count === 1 && result.data.sync_status === 1) {
+      if (result.data.payment_count === 1 && result.data.sync_status !== 2) {
         syncLoading.value = true
         startSyncPolling()
       }
