@@ -12,7 +12,7 @@
  * | 3X-UI 用户同步         | 是             | 7 分钟         | 4 小时           |
  * | 流量同步               | 是             | 10 分钟        | 1 小时           |
  * | 工单自动关闭           | 是             | 3 分钟         | 1 小时           |
- * | 释放过期名额           | 否             | 15 分钟        | 1 小时           |
+ * | 释放过期名额           | 否             | 无             | 每天 5:00        |
  * | 邮件群发               | 否             | 无             | 每天 9:00        |
  * | 清理邮件日志           | 否             | 无             | 每天 3:00        |
  * +------------------------+----------------+----------------+------------------+
@@ -485,21 +485,16 @@ async function runTicketAutoClose(db) {
 
 /**
  * 注册释放过期名额任务
- * 每小时检查一次，释放流量用完超过3天且未续费的用户名额
+ * 每天5点执行一次，释放流量用完超过3天且未续费的用户名额
  * @param {Object} db - 数据库实例
  */
 function registerReleaseExpiredSalesJob(db) {
-  // 启动时延迟15分钟执行第一次
-  setTimeout(async () => {
+  const task = cron.schedule('0 5 * * *', async () => {
+    logger.info('开始执行释放过期名额任务...');
     await runReleaseExpiredSales(db);
-  }, 15 * 60 * 1000);
-
-  const interval = setInterval(async () => {
-    await runReleaseExpiredSales(db);
-  }, 60 * 60 * 1000); // 每1小时执行一次
-  
-  intervals.push(interval);
-  logger.info('释放过期名额任务已注册（每1小时执行一次）');
+  });
+  cronTasks.push(task);
+  logger.info('释放过期名额任务已注册（每天5:00执行）');
 }
 
 /**
