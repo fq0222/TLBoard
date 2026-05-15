@@ -29,11 +29,23 @@
           <el-icon><User /></el-icon>
           <span>个人中心</span>
         </router-link>
-        <router-link to="/user/subscription" class="nav-item" active-class="active" @click="closeSidebar">
+        <router-link 
+          v-if="subscriptionReady" 
+          to="/user/subscription" 
+          class="nav-item" 
+          active-class="active" 
+          @click="closeSidebar"
+        >
           <el-icon><Link /></el-icon>
           <span>订阅信息</span>
         </router-link>
-        <router-link to="/user/cf-optimize" class="nav-item" active-class="active" @click="closeSidebar">
+        <router-link 
+          v-if="subscriptionReady" 
+          to="/user/cf-optimize" 
+          class="nav-item" 
+          active-class="active" 
+          @click="closeSidebar"
+        >
           <el-icon><Connection /></el-icon>
           <span>CF IP优选</span>
         </router-link>
@@ -77,6 +89,7 @@ const route = useRoute()
 const userStore = useUserStore()
 const unreadTicketCount = ref(0)
 const sidebarOpen = ref(false)
+const subscriptionReady = ref(false)
 
 // 监听路由变化，切换导航时刷新未读数量
 watch(() => route.path, () => {
@@ -112,6 +125,20 @@ async function fetchUnreadCount() {
 }
 
 /**
+ * 获取用户信息
+ */
+async function fetchUserInfo() {
+  try {
+    const result = await userStore.fetchUserProfile()
+    if (result.success) {
+      subscriptionReady.value = result.data.subscription_ready || false
+    }
+  } catch (error) {
+    console.error('获取用户信息失败:', error)
+  }
+}
+
+/**
  * 处理退出登录
  */
 async function handleLogout() {
@@ -135,6 +162,7 @@ async function handleLogout() {
 
 onMounted(() => {
   fetchUnreadCount()
+  fetchUserInfo()
 })
 </script>
 
