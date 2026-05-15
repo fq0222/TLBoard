@@ -119,14 +119,27 @@
         <el-divider content-position="left">订阅链接</el-divider>
         <el-form-item>
           <div style="width: 100%;">
-            <div v-if="subscriptionUrl" style="display: flex; gap: 10px; margin-bottom: 10px;">
-              <el-input v-model="subscriptionUrl" readonly>
-                <template #append>
-                  <el-button @click="copySubscriptionUrl">
-                    <el-icon><CopyDocument /></el-icon>
-                  </el-button>
-                </template>
-              </el-input>
+            <div v-if="subscriptionUrl" style="margin-bottom: 10px;">
+              <div style="margin-bottom: 5px; font-size: 12px; color: #606266;">通用订阅：</div>
+              <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <el-input v-model="subscriptionUrl" readonly>
+                  <template #append>
+                    <el-button @click="copySubscriptionUrl('subscription')">
+                      <el-icon><CopyDocument /></el-icon>
+                    </el-button>
+                  </template>
+                </el-input>
+              </div>
+              <div style="margin-bottom: 5px; font-size: 12px; color: #606266;">Clash 订阅：</div>
+              <div style="display: flex; gap: 10px;">
+                <el-input v-model="clashUrl" readonly>
+                  <template #append>
+                    <el-button @click="copySubscriptionUrl('clash')">
+                      <el-icon><CopyDocument /></el-icon>
+                    </el-button>
+                  </template>
+                </el-input>
+              </div>
             </div>
             <div v-else style="color: #909399; font-size: 12px; margin-bottom: 10px;">
               未生成订阅链接
@@ -326,9 +339,10 @@ async function generateSubscription() {
 /**
  * 复制订阅链接
  */
-function copySubscriptionUrl() {
-  if (subscriptionUrl.value) {
-    navigator.clipboard.writeText(subscriptionUrl.value)
+function copySubscriptionUrl(type = 'subscription') {
+  const url = type === 'clash' ? clashUrl.value : subscriptionUrl.value
+  if (url) {
+    navigator.clipboard.writeText(url)
     ElMessage.success('订阅链接已复制')
   }
 }
@@ -356,7 +370,7 @@ async function showEditDialog(user) {
   try {
     const response = await api.admin.getUserDetail(user.id)
     if (response.code === 0) {
-      cfIps.value = response.data.user.cf_ips || []
+      cfIps.value = response.data.cf_ips || []
       subscriptionUrl.value = response.data.user.subscription_url || ''
       clashUrl.value = response.data.user.clash_url || ''
     }
