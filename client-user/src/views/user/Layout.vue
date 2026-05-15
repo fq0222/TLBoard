@@ -89,7 +89,9 @@ const route = useRoute()
 const userStore = useUserStore()
 const unreadTicketCount = ref(0)
 const sidebarOpen = ref(false)
-const subscriptionReady = ref(false)
+
+// 使用 computed 从 store 中获取 subscription_ready，确保与 Profile 组件同步
+const subscriptionReady = computed(() => userStore.userInfo?.subscription_ready || false)
 
 // 监听路由变化，切换导航时刷新未读数量
 watch(() => route.path, () => {
@@ -125,20 +127,6 @@ async function fetchUnreadCount() {
 }
 
 /**
- * 获取用户信息
- */
-async function fetchUserInfo() {
-  try {
-    const result = await userStore.fetchUserProfile()
-    if (result.success) {
-      subscriptionReady.value = result.data.subscription_ready || false
-    }
-  } catch (error) {
-    console.error('获取用户信息失败:', error)
-  }
-}
-
-/**
  * 处理退出登录
  */
 async function handleLogout() {
@@ -162,7 +150,6 @@ async function handleLogout() {
 
 onMounted(() => {
   fetchUnreadCount()
-  fetchUserInfo()
 })
 </script>
 
