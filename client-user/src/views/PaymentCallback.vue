@@ -73,6 +73,7 @@ const countdown = ref(300) // 5分钟倒计时
 const countdownTimer = ref(null)
 // 自动轮询间隔 5 秒
 const pollInterval = 5000
+const isPageVisible = ref(true)
 
 const paymentUrl = computed(() => String(route.query.payment_url || ''))
 const orderId = computed(() => String(route.query.order_id || ''))
@@ -159,15 +160,27 @@ async function checkPaymentStatus() {
   }
 }
 
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    isPageVisible.value = true
+    checkPaymentStatus()
+  } else {
+    isPageVisible.value = false
+    clearTimer()
+  }
+}
+
 /**
  * 安排下一次静默轮询
  * 不切回整页 loading，避免页面闪烁
  */
 function scheduleNextCheck() {
   clearTimer()
-  timer.value = setTimeout(() => {
-    checkPaymentStatus()
-  }, pollInterval)
+  if (isPageVisible.value) {
+    timer.value = setTimeout(() => {
+      checkPaymentStatus()
+    }, pollInterval)
+  }
 }
 
 /**
@@ -229,9 +242,9 @@ function clearCountdownTimer() {
 
 function startCountdown() {
   countdownTimer.value = setInterval(() => {
-    if (countdown.value > 0) {
+    if (isPageVisible.value && countdown.value > 0) {
       countdown.value--
-    } else {
+    } else if (countdown.value <= 0) {
       clearCountdownTimer()
       clearTimer()
     }
@@ -242,6 +255,7 @@ onMounted(() => {
   generateQrCode()
   checkPaymentStatus()
   startCountdown()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 watch(paymentUrl, () => {
@@ -251,6 +265,7 @@ watch(paymentUrl, () => {
 onBeforeUnmount(() => {
   clearTimer()
   clearCountdownTimer()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 
