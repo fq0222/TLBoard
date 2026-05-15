@@ -746,6 +746,8 @@ md5(payId + param + type + price + reallyPrice + key)
 | GET | `/users` | 用户列表 |
 | GET | `/users/:id` | 用户详情 |
 | PUT | `/users/:id` | 更新用户（自动同步到所有 3X-UI 服务器） |
+| PUT | `/users/:id/cf-ips` | 更新用户 CF 优选 IP |
+| POST | `/users/:id/generate-subscription` | 为用户生成订阅链接 |
 
 #### PUT `/api/admin/users/:id`
 
@@ -765,6 +767,61 @@ md5(payId + param + type + price + reallyPrice + key)
 - 修改 `enabled` 会同步启用/禁用状态到 3X-UI
 - 修改 `expire_at` 会同步到期时间到 3X-UI（0 表示无限期）
 - 修改 `traffic_limit` 会同步流量上限到 3X-UI
+
+#### PUT `/api/admin/users/:id/cf-ips`
+
+更新用户的 CF 优选 IP。
+
+请求体：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| ip_pool_ids | array | 是 | CF IP 池 ID 列表（1-5 个） |
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "cf_ips": [
+      { "id": 1, "ip": "104.16.132.229" },
+      { "id": 2, "ip": "104.16.133.229" }
+    ]
+  }
+}
+```
+
+错误码：
+
+- `2004`：用户不存在
+- `1001`：参数校验失败（IP 数量超过限制）
+- `4002`：IP ID 无效或已禁用
+
+#### POST `/api/admin/users/:id/generate-subscription`
+
+为用户生成订阅链接。会同步所有 3X-UI 服务器节点信息，并生成与用户自己生成的 URL 一致的订阅链接。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "subscription_url": "https://example.com/api/user/sub/abc123",
+    "clash_url": "https://example.com/api/user/sub/abc123?clash=1",
+    "node_count": 10
+  }
+}
+```
+
+错误码：
+
+- `2004`：用户不存在
+- `2003`：账号已禁用
+- `3001`：请先配置优选 IP
 
 ### 3.4 套餐管理
 

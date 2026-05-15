@@ -21,7 +21,7 @@ A complete subscription management system for proxy panels, supporting multiple 
 
 - **Plan Management**: Flexible configuration of plan pricing, traffic, and duration with sales limit support
 - **Order Management**: View all orders with status filtering
-- **User Management**: Adjust user plans, traffic, and expiration dates
+- **User Management**: Adjust user plans, traffic, and expiration dates, manage user CF optimal IPs, generate subscription links for users
 - **Announcement Management**: Markdown syntax support, pinning feature
 - **Server Management**: Multiple 3X-UI server management with one-click sync
 - **Ticket Management**: Handle user tickets with auto-close support
@@ -219,6 +219,13 @@ pm2 startup
 For complete API documentation, see [API.md](./docs/api.md)
 
 ## Changelog
+
+### V1.5.0 (2026-05-15)
+
+- ✨ Admin user management: Support managing user CF optimal IPs (up to 5)
+- ✨ Admin user management: Support generating subscription links for users (consistent with user-generated URLs)
+- ✅ Fix release expired quota logic: Only release users who have paid and traffic exhausted over 3 days without renewal
+- ✅ Release expired quota scheduled task changed to run daily at 5:00 AM
 
 ### V1.4.0 (2026-05-13)
 
