@@ -397,6 +397,7 @@ async function generateSubscription() {
       // 更新订阅链接
       userInfo.value.subscription_url = response.data.subscription_url
       userInfo.value.clash_url = response.data.clash_url
+      userInfo.value.subscription_ready = true
       ElMessage.success('订阅链接已生成')
     } else {
       ElMessage.error(response.message || '生成订阅链接失败')
