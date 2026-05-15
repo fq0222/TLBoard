@@ -77,7 +77,7 @@
  * 提供侧边栏导航和内容区域
  */
 
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { User, Link, Connection, SwitchButton, ChatDotRound, Expand, Close } from '@element-plus/icons-vue'
