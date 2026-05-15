@@ -452,7 +452,7 @@ router.put('/:id/cf-ips', authenticateAdmin, [
 
     // 验证 IP ID 有效性
     const validIps = await db.prepare(`
-      SELECT id, ip, port, location FROM cf_ip_pool 
+      SELECT id, ip FROM cf_ip_pool 
       WHERE id IN (${ip_pool_ids.map(() => '?').join(',')}) AND enabled = 1
     `).all(...ip_pool_ids);
 
