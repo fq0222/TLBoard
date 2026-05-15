@@ -10,7 +10,7 @@ const { createLogger } = require('../../utils/logger');
 const { generateSubscriptionUrls } = require('../../utils/site-url');
 const { syncAllServers } = require('../../services/xui-sync');
 const { getStrategyFromRemark, processNodeLink } = require('../../services/subscription-strategy');
-const { fetchOriginalSubscription, parseSubscriptionContent } = require('../../routes/user/subscription');
+const { fetchOriginalSubscription, parseSubscriptionContent } = require('../../services/subscription-service');
 const XuiService = require('../../services/xui-service');
 
 const router = express.Router();
@@ -520,11 +520,8 @@ router.post('/:id/generate-subscription', authenticateAdmin, [
     // 查询用户信息
     const user = await db.prepare(`
       SELECT 
-        u.id, u.email, u.subscription_token, u.sub_id,
-        u.traffic_used, u.traffic_limit, u.expire_at, u.enabled,
-        p.name as plan_name
+        u.id, u.email, u.sub_id, u.enabled
       FROM users u
-      LEFT JOIN plans p ON u.plan_id = p.id
       WHERE u.id = ?
     `).get(userId);
 
@@ -600,32 +597,33 @@ router.post('/:id/generate-subscription', authenticateAdmin, [
           continue;
         }
 
-        // 为每个节点分别获取原始订阅
-        for (const config of nodeConfigs) {
-          // 判断策略
-          const strategy = getStrategyFromRemark(config.remark);
-
-          // 从 3X-UI 获取该节点的原始订阅
-          let originalLink = null;
+        // 并发获取所有节点的原始订阅
+        const subscriptionPromises = nodeConfigs.map(async (config) => {
           try {
             const originalContent = await fetchOriginalSubscription(server.sub_url, config.sub_id);
             const links = parseSubscriptionContent(originalContent);
             if (links.length > 0) {
-              originalLink = links[0];
               logger.info(`从服务器 ${server.name} 获取节点 ${config.remark} 的原始链接`);
+              return { config, originalLink: links[0] };
             }
           } catch (error) {
             logger.warn(`从服务器 ${server.name} 获取节点 ${config.remark} 原始订阅失败: ${error.message}`);
-            continue;
           }
+          return { config, originalLink: null };
+        });
 
+        const subscriptionResults = await Promise.all(subscriptionPromises);
+
+        // 处理节点链接
+        for (const { config, originalLink } of subscriptionResults) {
           if (!originalLink) {
             logger.warn(`找不到节点 ${config.remark} 的原始链接`);
             continue;
           }
 
-          // 处理节点链接
+          const strategy = getStrategyFromRemark(config.remark);
           let processedLink;
+
           if (strategy === 'cf') {
             // 为每个 CF 优选 IP 生成一个节点
             for (let i = 0; i < cfIps.length; i++) {
@@ -634,10 +632,8 @@ router.post('/:id/generate-subscription', authenticateAdmin, [
                 clientPort: server.client_port,
                 host: server.host
               });
-              // 节点名：服务器名-remark，多个 CF IP 时添加序号后缀
               const baseName = `${server.name}-${config.remark}`;
               const nodeName = cfIps.length > 1 ? `${baseName}-${i + 1}` : baseName;
-              // 替换链接中的 remark
               const hashIdx = processedLink.indexOf('#');
               if (hashIdx > 0) {
                 processedLink = processedLink.substring(0, hashIdx + 1) + encodeURIComponent(nodeName);
@@ -655,7 +651,6 @@ router.post('/:id/generate-subscription', authenticateAdmin, [
           } else {
             processedLink = processNodeLink(originalLink, 'direct');
             const nodeName = `${server.name}-${config.remark}`;
-            // 替换链接中的 remark
             const hashIdx = processedLink.indexOf('#');
             if (hashIdx > 0) {
               processedLink = processedLink.substring(0, hashIdx + 1) + encodeURIComponent(nodeName);
