@@ -230,7 +230,7 @@
       </div>
 
       <!-- 已生成：显示订阅链接 -->
-      <div v-if="userInfo.subscription_url" class="subscription-links">
+      <div v-if="userInfo.subscription_url && subscriptionGenerated" class="subscription-links">
         <div class="link-group">
           <span class="link-label">通用订阅：</span>
           <el-input 
