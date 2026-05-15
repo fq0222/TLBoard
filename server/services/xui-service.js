@@ -46,7 +46,7 @@ class XuiService {
           maxRequestsPerMinute: 60,
           maxLoginAttemptsPerHour: 10,
           isDevelopment: process.env.NODE_ENV !== 'production',
-          timeout: config.xui.timeout || 10000
+          timeout: config.xui.timeout || 20000
         }
       );
       logger.info(`初始化 3X-UI 客户端: ${this.apiUrl}`);
