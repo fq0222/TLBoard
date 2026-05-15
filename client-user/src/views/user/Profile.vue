@@ -146,7 +146,7 @@
       </div>
       
       <!-- 首次使用步骤提示 -->
-      <div v-if="!userInfo.subscription_url" class="steps-guide">
+      <div v-if="!userInfo.subscription_ready" class="steps-guide">
         <div class="steps-title">快速开始</div>
         <div class="steps-container">
           <div class="step-item" :class="{ 'step-active': !cfOptimized }">
