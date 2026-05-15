@@ -279,6 +279,25 @@ const adminApi = {
   },
 
   /**
+   * 更新用户 CF IP
+   * @param {number} id - 用户ID
+   * @param {Array} ipPoolIds - CF IP 池 ID 列表
+   * @returns {Promise<Object>} 响应数据
+   */
+  updateUserCfIps(id, ipPoolIds) {
+    return apiClient.put(`/users/${id}/cf-ips`, { ip_pool_ids: ipPoolIds })
+  },
+
+  /**
+   * 生成用户订阅链接
+   * @param {number} id - 用户ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  generateUserSubscription(id) {
+    return apiClient.post(`/users/${id}/generate-subscription`)
+  },
+
+  /**
    * 获取订单列表
    * @param {Object} params - 查询参数
    * @returns {Promise<Object>} 响应数据
