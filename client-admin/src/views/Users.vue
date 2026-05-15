@@ -333,7 +333,7 @@ function copySubscriptionUrl() {
   }
 }
 
-function showEditDialog(user) {
+async function showEditDialog(user) {
   editingId.value = user.id
   // 将数字转换为布尔值（0 = false, 1 = true）
   userForm.enabled = !!user.enabled
@@ -349,15 +349,23 @@ function showEditDialog(user) {
   const expireAt = Number(user.expire_at) || 0
   userForm.expire_at = expireAt > 0 ? new Date(expireAt * 1000) : null
   
-  // 加载用户 CF IP
-  cfIps.value = user.cf_ips || []
-  
-  // 加载订阅链接
-  subscriptionUrl.value = user.subscription_url || ''
-  clashUrl.value = user.clash_url || ''
-  
   // 获取 CF IP 池
   fetchCfIpPool()
+  
+  // 获取完整用户详情（包含 CF IP 和订阅链接）
+  try {
+    const response = await api.admin.getUserDetail(user.id)
+    if (response.code === 0) {
+      cfIps.value = response.data.user.cf_ips || []
+      subscriptionUrl.value = response.data.user.subscription_url || ''
+      clashUrl.value = response.data.user.clash_url || ''
+    }
+  } catch (error) {
+    console.error('获取用户详情失败:', error)
+    cfIps.value = []
+    subscriptionUrl.value = ''
+    clashUrl.value = ''
+  }
   
   dialogVisible.value = true
 }
