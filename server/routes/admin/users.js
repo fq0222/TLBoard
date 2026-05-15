@@ -403,6 +403,92 @@ router.put('/:id', authenticateAdmin, [
 });
 
 /**
+ * PUT /api/admin/users/:id/cf-ips
+ * 更新用户的 CF 优选 IP
+ */
+router.put('/:id/cf-ips', authenticateAdmin, [
+  param('id')
+    .isInt({ min: 1 })
+    .withMessage('ID必须是大于0的整数'),
+  body('ip_pool_ids')
+    .isArray({ min: 1, max: 5 })
+    .withMessage('IP数量必须在1-5之间'),
+  body('ip_pool_ids.*')
+    .isInt({ min: 1 })
+    .withMessage('IP ID必须是大于0的整数')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      logger.warn('更新用户CF IP参数验证失败');
+      return res.status(400).json({
+        code: 1001,
+        message: '参数校验失败',
+        data: null
+      });
+    }
+
+    const userId = parseInt(req.params.id);
+    const { ip_pool_ids } = req.body;
+    const db = req.app.locals.db;
+
+    // 验证用户存在
+    const user = await db.prepare('SELECT id, email FROM users WHERE id = ?').get(userId);
+    if (!user) {
+      logger.warn(`更新用户CF IP失败: 用户不存在 - ${userId}`);
+      return res.status(400).json({
+        code: 2004,
+        message: '用户不存在',
+        data: null
+      });
+    }
+
+    // 验证 IP ID 有效性
+    const validIps = await db.prepare(`
+      SELECT id, ip FROM cf_ip_pool 
+      WHERE id IN (${ip_pool_ids.map(() => '?').join(',')}) AND enabled = 1
+    `).all(...ip_pool_ids);
+
+    if (validIps.length !== ip_pool_ids.length) {
+      logger.warn(`更新用户CF IP失败: 部分IP无效 - ${JSON.stringify(ip_pool_ids)}`);
+      return res.status(400).json({
+        code: 4002,
+        message: 'IP ID 无效或已禁用',
+        data: null
+      });
+    }
+
+    // 事务中删除旧记录，插入新记录
+    const transaction = db.transaction(async () => {
+      await db.prepare('DELETE FROM user_cf_ips WHERE user_id = ?').run(userId);
+      const insertStmt = db.prepare('INSERT INTO user_cf_ips (user_id, ip_pool_id) VALUES (?, ?)');
+      for (const ipId of ip_pool_ids) {
+        await insertStmt.run(userId, ipId);
+      }
+    });
+
+    await transaction();
+
+    logger.info(`更新用户CF IP成功: ${user.email}, ${validIps.length}个IP`);
+
+    res.json({
+      code: 0,
+      message: 'ok',
+      data: {
+        cf_ips: validIps
+      }
+    });
+  } catch (error) {
+    logger.error(`更新用户CF IP错误: ${error.message}`);
+    res.status(500).json({
+      code: 500,
+      message: '服务器内部错误',
+      data: null
+    });
+  }
+});
+
+/**
  * 同步用户状态到所有3X-UI服务器
  * @param {Object} db - 数据库实例
  * @param {Object} user - 用户信息
