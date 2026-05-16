@@ -169,7 +169,7 @@ async function runCleanZombieUsers(db) {
  */
 async function syncUsersToServer(db, server, users) {
   try {
-    const xuiService = new XuiService(server.api_url, server.api_username, server.api_password);
+    const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
     await xuiService.init();
 
     // 获取所有inbounds
