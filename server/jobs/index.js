@@ -506,7 +506,7 @@ async function runReleaseExpiredSales(db) {
     const now = Math.floor(Date.now() / 1000);
     
     // 查找需要释放名额的用户
-    // 条件：付过款、流量用完超过3天、未续费
+    // 条件：被禁用、付过款、流量用完超过3天、未续费
     // 说明：从未付款的用户不会增加 sales_count，所以不需要释放
     const expiredUsers = await db.prepare(`
       SELECT u.id, u.email, u.plan_id, u.traffic_used_at, u.payment_count,
@@ -514,6 +514,7 @@ async function runReleaseExpiredSales(db) {
       FROM users u
       JOIN plans p ON u.plan_id = p.id
       WHERE u.plan_id IS NOT NULL
+        AND u.enabled = 0
         AND u.traffic_used_at IS NOT NULL
         AND u.traffic_used_at < ? - 259200
         AND u.payment_count > 0
