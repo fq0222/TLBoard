@@ -20,6 +20,40 @@ delete process.env.HTTPS_PROXY;
  * 封装与 3X-UI 面板的所有交互
  */
 class XuiService {
+  // 静态缓存：存储已创建的实例
+  static instanceCache = new Map();
+
+  /**
+   * 获取 XuiService 实例（带缓存）
+   * @param {string} apiUrl - 面板地址
+   * @param {string} username - 用户名
+   * @param {string} password - 密码
+   * @returns {XuiService} 实例
+   */
+  static getInstance(apiUrl, username, password) {
+    const key = `${apiUrl}:${username}`;
+    if (!this.instanceCache.has(key)) {
+      this.instanceCache.set(key, new XuiService(apiUrl, username, password));
+    }
+    return this.instanceCache.get(key);
+  }
+
+  /**
+   * 清除指定服务器的缓存
+   * @param {string} apiUrl - 面板地址
+   * @param {string} username - 用户名
+   */
+  static removeInstance(apiUrl, username) {
+    this.instanceCache.delete(`${apiUrl}:${username}`);
+  }
+
+  /**
+   * 清除所有缓存
+   */
+  static clearCache() {
+    this.instanceCache.clear();
+  }
+
   /**
    * 创建 XuiService 实例
    * @param {string} apiUrl - 面板地址
