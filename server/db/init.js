@@ -342,6 +342,21 @@ class DatabaseManager {
       `);
       logger.info('公告表初始化完成');
 
+      // 博客文章表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS blog_articles (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(200) NOT NULL,
+          summary VARCHAR(500) NOT NULL,
+          category VARCHAR(100),
+          content TEXT NOT NULL,
+          status VARCHAR(20) DEFAULT 'draft',
+          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+        )
+      `);
+      logger.info('博客文章表初始化完成');
+
       // 工单表
       await client.query(`
         CREATE TABLE IF NOT EXISTS tickets (
@@ -498,6 +513,9 @@ class DatabaseManager {
       await client.query('CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets(created_at)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_blog_articles_status ON blog_articles(status)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_blog_articles_category ON blog_articles(category)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_blog_articles_updated_at ON blog_articles(updated_at)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_replies_ticket_id ON ticket_replies(ticket_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_replies_created_at ON ticket_replies(created_at)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_reads_ticket_id ON ticket_reads(ticket_id)');

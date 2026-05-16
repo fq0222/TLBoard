@@ -142,7 +142,9 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 
-server/test/
+server/test/*
+!server/test/
+!server/test/test-blog-articles.js
 server/config.js
 server/uploads/
 

@@ -277,6 +277,32 @@ const userApi = {
    */
   requestDownload() {
     return apiClient.post('/email/download', {}, { timeout: 30000 })
+  },
+
+  /**
+   * 获取帮助中心文章列表
+   * @param {Object} params - 查询参数
+   * @returns {Promise<Object>} 响应数据
+   */
+  getHelpArticles(params) {
+    return apiClient.get('/help/articles', { params })
+  },
+
+  /**
+   * 获取帮助文章详情
+   * @param {number|string} id - 文章ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  getHelpArticle(id) {
+    return apiClient.get(`/help/articles/${id}`)
+  },
+
+  /**
+   * 获取帮助中心分类
+   * @returns {Promise<Object>} 响应数据
+   */
+  getHelpCategories() {
+    return apiClient.get('/help/categories')
   }
 }
 

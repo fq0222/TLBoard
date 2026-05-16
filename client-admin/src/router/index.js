@@ -93,6 +93,12 @@ const routes = [
         meta: { title: '资源管理' }
       },
       {
+        path: 'blogs',
+        name: 'Blogs',
+        component: () => import('@/views/Blogs.vue'),
+        meta: { title: '博客管理' }
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),

@@ -61,6 +61,18 @@ const routes = [
         name: 'TicketDetail',
         component: () => import('@/views/user/TicketDetail.vue'),
         meta: { title: '工单详情' }
+      },
+      {
+        path: 'help',
+        name: 'HelpCenter',
+        component: () => import('@/views/user/HelpCenter.vue'),
+        meta: { title: '帮助中心' }
+      },
+      {
+        path: 'help/:id',
+        name: 'HelpArticle',
+        component: () => import('@/views/user/HelpArticle.vue'),
+        meta: { title: '帮助文章' }
       }
     ]
   },

@@ -54,6 +54,10 @@
           <span>工单支持</span>
           <span v-if="unreadTicketCount > 0" class="badge"></span>
         </router-link>
+        <router-link to="/user/help" class="nav-item" active-class="active" @click="closeSidebar">
+          <el-icon><QuestionFilled /></el-icon>
+          <span>帮助中心</span>
+        </router-link>
       </nav>
       
       <div class="sidebar-footer">
@@ -80,7 +84,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { User, Link, Connection, SwitchButton, ChatDotRound, Expand, Close } from '@element-plus/icons-vue'
+import { User, Link, Connection, SwitchButton, ChatDotRound, Expand, Close, QuestionFilled } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import api from '@/api'
 

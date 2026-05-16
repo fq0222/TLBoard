@@ -25,6 +25,7 @@ const cfIpsRoutes = require('./routes/admin/cf-ips');
 const dashboardRoutes = require('./routes/admin/dashboard');
 const emailRoutes = require('./routes/admin/email');
 const resourcesRoutes = require('./routes/admin/resources');
+const blogsRoutes = require('./routes/admin/blogs');
 
 const logger = createLogger('ADMIN-APP');
 
@@ -148,6 +149,9 @@ app.use(`${apiPrefix}/email`, emailRoutes);
 
 // 资源管理路由
 app.use(`${apiPrefix}/resources`, resourcesRoutes);
+
+// 博客管理路由
+app.use(`${apiPrefix}/blogs`, blogsRoutes);
 
 // ============ 错误处理 ============
 

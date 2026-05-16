@@ -344,6 +344,71 @@ const adminApi = {
   },
 
   /**
+   * 获取博客文章列表
+   * @param {Object} params - 查询参数
+   * @returns {Promise<Object>} 响应数据
+   */
+  getBlogs(params) {
+    return apiClient.get('/blogs', { params })
+  },
+
+  /**
+   * 获取博客文章详情
+   * @param {number|string} id - 文章ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  getBlog(id) {
+    return apiClient.get(`/blogs/${id}`)
+  },
+
+  /**
+   * 添加博客文章
+   * @param {Object} data - 文章数据
+   * @returns {Promise<Object>} 响应数据
+   */
+  addBlog(data) {
+    return apiClient.post('/blogs', data)
+  },
+
+  /**
+   * 修改博客文章
+   * @param {number|string} id - 文章ID
+   * @param {Object} data - 文章数据
+   * @returns {Promise<Object>} 响应数据
+   */
+  updateBlog(id, data) {
+    return apiClient.put(`/blogs/${id}`, data)
+  },
+
+  /**
+   * 删除博客文章
+   * @param {number|string} id - 文章ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  deleteBlog(id) {
+    return apiClient.delete(`/blogs/${id}`)
+  },
+
+  /**
+   * 上传博客图片
+   * @param {FormData} formData - 图片表单
+   * @returns {Promise<Object>} 响应数据
+   */
+  uploadBlogImage(formData) {
+    return apiClient.post('/blogs/upload-image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
+
+  /**
+   * 获取博客分类列表
+   * @returns {Promise<Object>} 响应数据
+   */
+  getBlogCategories() {
+    return apiClient.get('/blogs/categories')
+  },
+
+  /**
    * 获取CF IP池列表
    * @param {Object} params - 查询参数
    * @returns {Promise<Object>} 响应数据

@@ -34,6 +34,7 @@ const userTicketsRoutes = require('./routes/user/tickets');
 const userEmailRoutes = require('./routes/user/email');
 const userDownloadRoutes = require('./routes/user/download');
 const userSyncStatusRoutes = require('./routes/user/sync-status');
+const userHelpRoutes = require('./routes/user/help');
 
 // ============ 管理端路由 ============
 const adminAuthRoutes = require('./routes/admin/auth');
@@ -48,6 +49,7 @@ const adminDashboardRoutes = require('./routes/admin/dashboard');
 const adminTicketsRoutes = require('./routes/admin/tickets');
 const adminEmailRoutes = require('./routes/admin/email');
 const adminResourcesRoutes = require('./routes/admin/resources');
+const adminBlogsRoutes = require('./routes/admin/blogs');
 
 async function startApp() {
   // 初始化数据库
@@ -88,8 +90,9 @@ async function startApp() {
   userApp.use(`${userPrefix}/renew`, userRenewRoutes);
   userApp.use(`${userPrefix}/tickets`, userTicketsRoutes);
 userApp.use(`${userPrefix}/email`, userEmailRoutes);
-userApp.use(`${userPrefix}/download`, userDownloadRoutes);
+  userApp.use(`${userPrefix}/download`, userDownloadRoutes);
   userApp.use(`${userPrefix}/sync-status`, userSyncStatusRoutes);
+  userApp.use(`${userPrefix}/help`, userHelpRoutes);
 
   userApp.use((req, res) => {
     res.status(404).json({ code: 404, message: '接口不存在', data: null });
@@ -133,6 +136,7 @@ userApp.use(`${userPrefix}/download`, userDownloadRoutes);
   adminApp.use(`${adminPrefix}/tickets`, adminTicketsRoutes);
 adminApp.use(`${adminPrefix}/email`, adminEmailRoutes);
 adminApp.use(`${adminPrefix}/resources`, adminResourcesRoutes);
+adminApp.use(`${adminPrefix}/blogs`, adminBlogsRoutes);
 
   adminApp.use((req, res) => {
     res.status(404).json({ code: 404, message: '接口不存在', data: null });
