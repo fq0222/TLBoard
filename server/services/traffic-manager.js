@@ -34,7 +34,7 @@ async function fetchAllServerTraffic(db) {
     // 并行获取所有服务器的流量数据
     const promises = servers.map(async (server) => {
       try {
-        const xuiService = new XuiService(server.api_url, server.api_username, server.api_password);
+        const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
         await xuiService.init();
 
         // 获取所有inbounds
@@ -343,7 +343,7 @@ async function syncDisableStatusToXui(db, userId, disable) {
     let successCount = 0;
     for (const server of servers) {
       try {
-        const xuiService = new XuiService(server.api_url, server.api_username, server.api_password);
+        const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
         await xuiService.init();
         
         // 获取所有inbound
