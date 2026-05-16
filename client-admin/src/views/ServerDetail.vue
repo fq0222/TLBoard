@@ -51,6 +51,12 @@
         
         <el-table :data="node.users" style="width: 100%" size="small">
           <el-table-column prop="email" label="用户标识" min-width="120" />
+          <el-table-column label="在线" width="60" align="center">
+            <template #default="scope">
+              <span v-if="scope.row.is_online" class="online-dot" title="在线"></span>
+              <span v-else class="offline-dot" title="离线"></span>
+            </template>
+          </el-table-column>
           <el-table-column prop="enabled" label="状态" width="80">
             <template #default="scope">
               <el-tag :type="scope.row.enabled ? 'success' : 'danger'" size="small">
@@ -334,4 +340,19 @@ onMounted(() => {
 .node-header h3 { margin: 0; color: #333; }
 .node-stats { display: flex; align-items: center; gap: 15px; color: #666; font-size: 14px; }
 .form-tip { margin-top: 8px; color: #999; font-size: 12px; display: flex; gap: 8px; }
+.online-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #67c23a;
+  box-shadow: 0 0 4px #67c23a;
+}
+.offline-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #dcdfe6;
+}
 </style>
