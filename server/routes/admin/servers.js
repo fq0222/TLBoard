@@ -254,6 +254,11 @@ router.put('/:id', authenticateAdmin, [
     values.push(serverId);
     await db.prepare(`UPDATE xui_servers SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
+    // 如果密码或凭据有变更，清除旧的缓存实例
+    if (req.body.api_password !== undefined || req.body.api_username !== undefined || req.body.api_url !== undefined) {
+      XuiService.removeInstance(existingServer.api_url, existingServer.api_username);
+    }
+
     // 查询更新后的服务器
     const updatedServer = await db.prepare('SELECT * FROM xui_servers WHERE id = ?').get(serverId);
 
@@ -384,7 +389,7 @@ router.get('/:id/detail', authenticateAdmin, [
     let nodesWithUsers = [];
     
     try {
-      const xuiService = new XuiService(server.api_url, server.api_username, server.api_password);
+      const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
       await xuiService.init();
       
       // 获取所有 inbounds
@@ -648,7 +653,7 @@ router.put('/:id/users', authenticateAdmin, [
     }
 
     // 调用 XuiService 更新用户
-    const xuiService = new XuiService(server.api_url, server.api_username, server.api_password);
+    const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
     const result = await xuiService.updateClient(inboundId, email, {
       expiryTime,
       totalGB,
@@ -725,7 +730,7 @@ router.delete('/:id/users', authenticateAdmin, [
     }
 
     // 调用 XuiService 删除用户
-    const xuiService = new XuiService(server.api_url, server.api_username, server.api_password);
+    const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
     const result = await xuiService.deleteClientByEmail(inboundId, email);
 
     if (result.success) {
@@ -765,7 +770,7 @@ router.delete('/:id/users', authenticateAdmin, [
 async function testXuiConnection(apiUrl, username, password) {
   try {
     logger.info(`测试3X-UI连接: ${apiUrl}`);
-    const xuiService = new XuiService(apiUrl, username, password);
+    const xuiService = XuiService.getInstance(apiUrl, username, password);
     const isConnected = await xuiService.testConnection();
     return isConnected;
   } catch (error) {
@@ -782,7 +787,7 @@ async function testXuiConnection(apiUrl, username, password) {
 async function syncServerStatus(server) {
   try {
     logger.info(`同步服务器状态: ${server.name}`);
-    const xuiService = new XuiService(server.api_url, server.api_username, server.api_password);
+    const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
     const syncResult = await xuiService.syncServerStatus();
     
     logger.info(`同步结果: ${JSON.stringify(syncResult)}`);
