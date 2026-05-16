@@ -389,8 +389,7 @@ router.get('/:id/detail', authenticateAdmin, [
     let nodesWithUsers = [];
     
     try {
-      const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
-      await xuiService.init();
+      const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
       
       // 获取所有 inbounds
       const inboundsResult = await xuiService.getInbounds();
@@ -653,7 +652,7 @@ router.put('/:id/users', authenticateAdmin, [
     }
 
     // 调用 XuiService 更新用户
-    const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
     const result = await xuiService.updateClient(inboundId, email, {
       expiryTime,
       totalGB,
@@ -730,7 +729,7 @@ router.delete('/:id/users', authenticateAdmin, [
     }
 
     // 调用 XuiService 删除用户
-    const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
     const result = await xuiService.deleteClientByEmail(inboundId, email);
 
     if (result.success) {
@@ -770,7 +769,7 @@ router.delete('/:id/users', authenticateAdmin, [
 async function testXuiConnection(apiUrl, username, password) {
   try {
     logger.info(`测试3X-UI连接: ${apiUrl}`);
-    const xuiService = XuiService.getInstance(apiUrl, username, password);
+    const xuiService = await XuiService.getInstance(apiUrl, username, password);
     const isConnected = await xuiService.testConnection();
     return isConnected;
   } catch (error) {
@@ -787,7 +786,7 @@ async function testXuiConnection(apiUrl, username, password) {
 async function syncServerStatus(server) {
   try {
     logger.info(`同步服务器状态: ${server.name}`);
-    const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
     const syncResult = await xuiService.syncServerStatus();
     
     logger.info(`同步结果: ${JSON.stringify(syncResult)}`);

@@ -49,8 +49,7 @@ async function syncUserToXuiServers(db, user, plan) {
 
     for (const server of servers) {
       try {
-        const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
-        await xuiService.init();
+        const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
 
         // 获取该服务器的所有 inbounds
         const inboundsResult = await xuiService.getInbounds();

@@ -751,7 +751,7 @@ async function syncToXuiServers(db, user) {
 
       try {
         // 创建 XuiService 实例
-        const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+        const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
         
         // 计算到期时间（3XUI 使用毫秒时间戳，0 表示无限期）
         const expireAt = Number(user.expire_at) || 0;

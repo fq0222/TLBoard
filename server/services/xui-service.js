@@ -24,16 +24,18 @@ class XuiService {
   static instanceCache = new Map();
 
   /**
-   * 获取 XuiService 实例（带缓存）
+   * 获取 XuiService 实例（带缓存，自动初始化）
    * @param {string} apiUrl - 面板地址
    * @param {string} username - 用户名
    * @param {string} password - 密码
-   * @returns {XuiService} 实例
+   * @returns {Promise<XuiService>} 已初始化的实例
    */
-  static getInstance(apiUrl, username, password) {
+  static async getInstance(apiUrl, username, password) {
     const key = `${apiUrl}:${username}`;
     if (!this.instanceCache.has(key)) {
-      this.instanceCache.set(key, new XuiService(apiUrl, username, password));
+      const instance = new XuiService(apiUrl, username, password);
+      await instance.init();
+      this.instanceCache.set(key, instance);
     }
     return this.instanceCache.get(key);
   }

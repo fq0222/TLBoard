@@ -18,8 +18,7 @@ async function syncServerNodes(db, server) {
   try {
     logger.info(`开始同步服务器 ${server.name} 的节点信息`);
     
-    const xuiService = XuiService.getInstance(server.api_url, server.api_username, server.api_password);
-    await xuiService.init();
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
     
     const inboundsResult = await xuiService.getInbounds();
     
