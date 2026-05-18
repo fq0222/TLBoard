@@ -145,6 +145,7 @@ vite.config.ts.timestamp-*
 server/test/*
 !server/test/
 !server/test/test-blog-articles.js
+!server/test/migrate-xui-traffic.js
 server/config.js
 server/uploads/
 
