@@ -62,6 +62,84 @@ async function connectServer(serverInfo) {
   return xuiService;
 }
 
+// 获取服务器所有用户流量
+async function getAllUsersTraffic(xuiService, serverName) {
+  console.log(`读取 ${serverName} 的用户流量...`);
+  
+  // 获取所有节点
+  const inboundsResult = await xuiService.getInbounds();
+  
+  if (!inboundsResult.success) {
+    throw new Error(`获取节点失败: ${inboundsResult.message}`);
+  }
+  
+  const inbounds = inboundsResult.data;
+  const allUsers = [];
+  let totalTraffic = 0;
+  
+  // 遍历每个节点
+  for (const inbound of inbounds) {
+    const settings = JSON.parse(inbound.settings || '{}');
+    const clients = settings.clients || [];
+    
+    // 遍历每个用户
+    for (const client of clients) {
+      try {
+        // 获取用户流量
+        const trafficResult = await xuiService.getClientTrafficsByEmail(client.email);
+        
+        let trafficUsed = 0;
+        let trafficLimit = client.totalGB || 0;
+        
+        if (trafficResult.success && trafficResult.data) {
+          trafficUsed = (trafficResult.data.up || 0) + (trafficResult.data.down || 0);
+          trafficLimit = trafficResult.data.total || trafficLimit;
+        }
+        
+        allUsers.push({
+          email: client.email,
+          uuid: client.id,
+          inbound_id: inbound.id,
+          inbound_remark: inbound.remark,
+          traffic_used: trafficUsed,
+          traffic_limit: trafficLimit,
+          enable: client.enable,
+          expiry_time: client.expiryTime
+        });
+        
+        totalTraffic += trafficUsed;
+        
+      } catch (error) {
+        console.warn(`  警告：获取用户 ${client.email} 流量失败: ${error.message}`);
+      }
+    }
+  }
+  
+  console.log(`  共读取 ${allUsers.length} 个用户，总流量: ${formatTraffic(totalTraffic)}\n`);
+  
+  return {
+    success: true,
+    users: allUsers,
+    totalTraffic: totalTraffic,
+    userCount: allUsers.length
+  };
+}
+
+// 格式化流量显示
+function formatTraffic(bytes) {
+  if (bytes === null || bytes === undefined || bytes === '') return '0 B';
+  
+  const numBytes = Number(bytes);
+  
+  if (isNaN(numBytes)) return '0 B';
+  if (numBytes === 0) return '0 B';
+  
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(numBytes) / Math.log(k));
+  return parseFloat((numBytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 // 主函数
 async function main() {
   console.log('=== 3X-UI 用户流量迁移工具 ===\n');
@@ -92,6 +170,13 @@ async function main() {
     const targetXui = await connectServer(targetServerInfo);
     
     console.log('服务器连接完成\n');
+    
+    // 读取用户流量
+    console.log('[2/4] 读取源服务器用户流量...');
+    const sourceTraffic = await getAllUsersTraffic(sourceXui, sourceServerInfo.name);
+    
+    console.log('[2/4] 读取目标服务器用户流量...');
+    const targetTraffic = await getAllUsersTraffic(targetXui, targetServerInfo.name);
     
     // TODO: 实现后续步骤
     
