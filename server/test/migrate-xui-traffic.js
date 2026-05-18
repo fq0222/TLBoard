@@ -8,6 +8,24 @@
 const XuiService = require('../services/xui-service');
 const config = require('../config');
 const readline = require('readline');
+const fs = require('fs');
+const path = require('path');
+
+// 日志文件路径
+const LOG_DIR = path.join(__dirname, '../logs');
+const LOG_FILE = path.join(LOG_DIR, `migration-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
+
+// 确保日志目录存在
+if (!fs.existsSync(LOG_DIR)) {
+  fs.mkdirSync(LOG_DIR, { recursive: true });
+}
+
+// 写入日志
+function writeLog(message) {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ${message}\n`;
+  fs.appendFileSync(LOG_FILE, logMessage);
+}
 
 // 命令行参数解析
 function parseArgs() {
@@ -200,6 +218,7 @@ async function waitForConfirmation() {
 // 执行流量迁移
 async function migrateTraffic(sourceUsers, targetXuiService, targetUsers) {
   console.log('[4/4] 执行迁移...');
+  writeLog('开始执行迁移');
   
   const results = {
     success: 0,
@@ -225,7 +244,9 @@ async function migrateTraffic(sourceUsers, targetXuiService, targetUsers) {
       const targetUser = targetUserMap.get(sourceUser.email);
       
       if (!targetUser) {
-        console.log(`${progress} 跳过 ${sourceUser.email} - 目标服务器不存在`);
+        const msg = `${progress} 跳过 ${sourceUser.email} - 目标服务器不存在`;
+        console.log(msg);
+        writeLog(msg);
         results.skipped++;
         continue;
       }
@@ -243,10 +264,14 @@ async function migrateTraffic(sourceUsers, targetXuiService, targetUsers) {
       );
       
       if (updateResult.success) {
-        console.log(`${progress} 成功 ${sourceUser.email} - 流量已累加`);
+        const msg = `${progress} 成功 ${sourceUser.email} - 流量已累加`;
+        console.log(msg);
+        writeLog(msg);
         results.success++;
       } else {
-        console.log(`${progress} 失败 ${sourceUser.email} - ${updateResult.message}`);
+        const msg = `${progress} 失败 ${sourceUser.email} - ${updateResult.message}`;
+        console.log(msg);
+        writeLog(msg);
         results.failed++;
         results.errors.push({
           email: sourceUser.email,
@@ -255,7 +280,9 @@ async function migrateTraffic(sourceUsers, targetXuiService, targetUsers) {
       }
       
     } catch (error) {
-      console.log(`${progress} 失败 ${sourceUser.email} - ${error.message}`);
+      const msg = `${progress} 失败 ${sourceUser.email} - ${error.message}`;
+      console.log(msg);
+      writeLog(msg);
       results.failed++;
       results.errors.push({
         email: sourceUser.email,
@@ -263,6 +290,8 @@ async function migrateTraffic(sourceUsers, targetXuiService, targetUsers) {
       });
     }
   }
+  
+  writeLog(`迁移完成: 成功=${results.success}, 失败=${results.failed}, 跳过=${results.skipped}`);
   
   return results;
 }
@@ -287,6 +316,7 @@ function showResults(results) {
 // 主函数
 async function main() {
   console.log('=== 3X-UI 用户流量迁移工具 ===\n');
+  writeLog('=== 3X-UI 用户流量迁移工具 ===');
   
   const params = parseArgs();
   
@@ -298,6 +328,7 @@ async function main() {
   
   console.log(`源服务器 ID: ${params.source}`);
   console.log(`目标服务器 ID: ${params.target}\n`);
+  writeLog(`源服务器 ID: ${params.source}, 目标服务器 ID: ${params.target}`);
   
   // 初始化数据库
   const dbManager = require('../db/init');
@@ -306,6 +337,8 @@ async function main() {
   try {
     // 获取服务器信息
     console.log('[1/4] 连接服务器...');
+    writeLog('开始连接服务器');
+    
     const sourceServerInfo = await getServerInfo(db, params.source);
     const targetServerInfo = await getServerInfo(db, params.target);
     
@@ -314,16 +347,24 @@ async function main() {
     const targetXui = await connectServer(targetServerInfo);
     
     console.log('服务器连接完成\n');
+    writeLog('服务器连接完成');
     
     // 读取用户流量
     console.log('[2/4] 读取源服务器用户流量...');
+    writeLog('开始读取源服务器用户流量');
+    
     const sourceTraffic = await getAllUsersTraffic(sourceXui, sourceServerInfo.name);
+    writeLog(`源服务器用户数: ${sourceTraffic.userCount}, 总流量: ${sourceTraffic.totalTraffic}`);
     
     console.log('[2/4] 读取目标服务器用户流量...');
+    writeLog('开始读取目标服务器用户流量');
+    
     const targetTraffic = await getAllUsersTraffic(targetXui, targetServerInfo.name);
+    writeLog(`目标服务器用户数: ${targetTraffic.userCount}, 总流量: ${targetTraffic.totalTraffic}`);
     
     // 显示统计信息
     const { matchedUsers, newUsers } = showSummary(sourceTraffic.users, targetTraffic.users);
+    writeLog(`匹配用户数: ${matchedUsers.length}, 新用户数: ${newUsers.length}`);
     
     // 显示详细列表
     if (matchedUsers.length > 0) {
@@ -339,10 +380,12 @@ async function main() {
     
     if (!confirmed) {
       console.log('用户取消迁移');
+      writeLog('用户取消迁移');
       return;
     }
     
     console.log('\n用户确认执行迁移\n');
+    writeLog('用户确认执行迁移');
     
     // 执行迁移
     const results = await migrateTraffic(sourceTraffic.users, targetXui, targetTraffic.users);
@@ -351,6 +394,7 @@ async function main() {
     showResults(results);
     
     console.log('\n迁移完成！');
+    console.log(`\n日志文件: ${LOG_FILE}`);
     
   } finally {
     await dbManager.close();
