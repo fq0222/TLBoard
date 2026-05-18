@@ -150,7 +150,7 @@ const form = reactive({
   email: '',
   password: '',
   confirmPassword: '',
-  pay_type: 2
+  pay_type: 1
 })
 
 // 注册场景的密码规则与后端保持一致：至少 8 位，且必须包含字母和数字
