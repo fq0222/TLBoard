@@ -197,6 +197,93 @@ async function waitForConfirmation() {
   });
 }
 
+// 执行流量迁移
+async function migrateTraffic(sourceUsers, targetXuiService, targetUsers) {
+  console.log('[4/4] 执行迁移...');
+  
+  const results = {
+    success: 0,
+    failed: 0,
+    skipped: 0,
+    errors: []
+  };
+  
+  // 创建目标服务器用户邮箱映射
+  const targetUserMap = new Map();
+  for (const user of targetUsers) {
+    targetUserMap.set(user.email, user);
+  }
+  
+  const total = sourceUsers.length;
+  
+  for (let i = 0; i < sourceUsers.length; i++) {
+    const sourceUser = sourceUsers[i];
+    const progress = `[${i + 1}/${total}]`;
+    
+    try {
+      // 检查目标服务器是否有该用户
+      const targetUser = targetUserMap.get(sourceUser.email);
+      
+      if (!targetUser) {
+        console.log(`${progress} 跳过 ${sourceUser.email} - 目标服务器不存在`);
+        results.skipped++;
+        continue;
+      }
+      
+      // 计算新流量：目标流量 + 源流量
+      const newTrafficLimit = targetUser.traffic_limit + sourceUser.traffic_used;
+      
+      // 更新目标服务器用户流量
+      const updateResult = await targetXuiService.updateClient(
+        targetUser.inbound_id,
+        sourceUser.email,
+        {
+          totalGB: newTrafficLimit / (1024 * 1024 * 1024) // 字节转GB
+        }
+      );
+      
+      if (updateResult.success) {
+        console.log(`${progress} 成功 ${sourceUser.email} - 流量已累加`);
+        results.success++;
+      } else {
+        console.log(`${progress} 失败 ${sourceUser.email} - ${updateResult.message}`);
+        results.failed++;
+        results.errors.push({
+          email: sourceUser.email,
+          error: updateResult.message
+        });
+      }
+      
+    } catch (error) {
+      console.log(`${progress} 失败 ${sourceUser.email} - ${error.message}`);
+      results.failed++;
+      results.errors.push({
+        email: sourceUser.email,
+        error: error.message
+      });
+    }
+  }
+  
+  return results;
+}
+
+// 显示迁移结果
+function showResults(results) {
+  console.log('\n迁移结果汇总:');
+  console.log('========================================');
+  console.log(`成功: ${results.success}`);
+  console.log(`失败: ${results.failed}`);
+  console.log(`跳过: ${results.skipped}`);
+  console.log('========================================');
+  
+  if (results.errors.length > 0) {
+    console.log('\n失败详情:');
+    results.errors.forEach(err => {
+      console.log(`  - ${err.email}: ${err.error}`);
+    });
+  }
+}
+
 // 主函数
 async function main() {
   console.log('=== 3X-UI 用户流量迁移工具 ===\n');
@@ -257,7 +344,13 @@ async function main() {
     
     console.log('\n用户确认执行迁移\n');
     
-    // TODO: 实现迁移步骤
+    // 执行迁移
+    const results = await migrateTraffic(sourceTraffic.users, targetXui, targetTraffic.users);
+    
+    // 显示结果
+    showResults(results);
+    
+    console.log('\n迁移完成！');
     
   } finally {
     await dbManager.close();
