@@ -182,6 +182,21 @@ function showDetailedList(users, title) {
   console.log('');
 }
 
+// 等待用户确认
+async function waitForConfirmation() {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+  
+  return new Promise((resolve) => {
+    rl.question('确认执行迁移？(y/n): ', (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
+    });
+  });
+}
+
 // 主函数
 async function main() {
   console.log('=== 3X-UI 用户流量迁移工具 ===\n');
@@ -232,7 +247,17 @@ async function main() {
       showDetailedList(newUsers, '新用户列表');
     }
     
-    // TODO: 实现确认和迁移步骤
+    // 等待用户确认
+    const confirmed = await waitForConfirmation();
+    
+    if (!confirmed) {
+      console.log('用户取消迁移');
+      return;
+    }
+    
+    console.log('\n用户确认执行迁移\n');
+    
+    // TODO: 实现迁移步骤
     
   } finally {
     await dbManager.close();
