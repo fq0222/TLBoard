@@ -88,14 +88,6 @@
     <!-- 帮助弹窗 -->
     <el-dialog v-model="showHelpDialog" title="使用帮助" width="400px">
       <div class="help-content">
-        <el-alert
-          title="每天可以获取 2 封教程邮件"
-          type="info"
-          :closable="false"
-          show-icon
-          style="margin-bottom: 20px;"
-        />
-        <p class="help-tip">点击获取按钮后，请到注册用的邮箱内查看教程。</p>
         <div class="help-items">
           <div class="help-item">
             <span class="help-label">Android-App下载</span>
@@ -108,51 +100,21 @@
               获取
             </el-button>
           </div>
-          <div class="help-item">
-            <span class="help-label">Android-App教程</span>
-            <el-button 
-              type="primary" 
-              size="small" 
-              @click="requestTutorial('android')"
-              :loading="tutorialLoading.android"
-            >
-              获取
-            </el-button>
-          </div>
-          <div class="help-item">
-            <span class="help-label">Windows教程</span>
-            <el-button 
-              type="primary" 
-              size="small" 
-              @click="requestTutorial('windows')"
-              :loading="tutorialLoading.windows"
-            >
-              获取
-            </el-button>
-          </div>
-          <div class="help-item">
-            <span class="help-label">国内访问GitHub教程</span>
-            <el-button 
-              type="primary" 
-              size="small" 
-              @click="requestTutorial('github')"
-              :loading="tutorialLoading.github"
-            >
-              获取
-            </el-button>
-          </div>
-          <div class="help-item">
-            <span class="help-label">外区苹果ID注册教程</span>
-            <el-button 
-              type="primary" 
-              size="small" 
-              @click="requestTutorial('apple-id')"
-              :loading="tutorialLoading['apple-id']"
-            >
-              获取
-            </el-button>
-          </div>
         </div>
+        <el-alert
+          title="点击获取按钮后，请到注册用的邮箱内查看教程，如果没有请到垃圾邮件中寻找"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-top: 20px;"
+        />
+        <el-alert
+          title="获取更多帮助请到左侧导航栏的帮助中心。手机点击左上角3条横线进入"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-top: 12px;"
+        />
       </div>
     </el-dialog>
 
