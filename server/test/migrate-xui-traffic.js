@@ -140,6 +140,48 @@ function formatTraffic(bytes) {
   return parseFloat((numBytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// 显示汇总统计
+function showSummary(sourceUsers, targetUsers) {
+  console.log('[3/4] 迁移确认');
+  console.log('========================================');
+  
+  // 统计匹配用户
+  const targetEmails = new Set(targetUsers.map(u => u.email));
+  const matchedUsers = sourceUsers.filter(u => targetEmails.has(u.email));
+  const newUsers = sourceUsers.filter(u => !targetEmails.has(u.email));
+  
+  console.log(`源服务器用户数: ${sourceUsers.length}`);
+  console.log(`目标服务器用户数: ${targetUsers.length}`);
+  console.log(`匹配用户数: ${matchedUsers.length}`);
+  console.log(`新用户数: ${newUsers.length}`);
+  console.log(`总流量: ${formatTraffic(sourceUsers.reduce((sum, u) => sum + u.traffic_used, 0))}`);
+  console.log('========================================\n');
+  
+  return {
+    matchedUsers,
+    newUsers
+  };
+}
+
+// 显示详细列表
+function showDetailedList(users, title) {
+  console.log(`${title}:`);
+  console.log('序号 | 邮箱                | 节点       | 已用流量  | 流量限制');
+  console.log('-----|--------------------|-----------|---------|---------');
+  
+  users.forEach((user, index) => {
+    const num = String(index + 1).padStart(4);
+    const email = user.email.padEnd(20);
+    const remark = user.inbound_remark.substring(0, 10).padEnd(10);
+    const used = formatTraffic(user.traffic_used).padStart(8);
+    const limit = user.traffic_limit > 0 ? formatTraffic(user.traffic_limit).padStart(8) : '无限制'.padStart(8);
+    
+    console.log(`${num} | ${email} | ${remark} | ${used} | ${limit}`);
+  });
+  
+  console.log('');
+}
+
 // 主函数
 async function main() {
   console.log('=== 3X-UI 用户流量迁移工具 ===\n');
@@ -178,7 +220,19 @@ async function main() {
     console.log('[2/4] 读取目标服务器用户流量...');
     const targetTraffic = await getAllUsersTraffic(targetXui, targetServerInfo.name);
     
-    // TODO: 实现后续步骤
+    // 显示统计信息
+    const { matchedUsers, newUsers } = showSummary(sourceTraffic.users, targetTraffic.users);
+    
+    // 显示详细列表
+    if (matchedUsers.length > 0) {
+      showDetailedList(matchedUsers, '匹配用户列表');
+    }
+    
+    if (newUsers.length > 0) {
+      showDetailedList(newUsers, '新用户列表');
+    }
+    
+    // TODO: 实现确认和迁移步骤
     
   } finally {
     await dbManager.close();
