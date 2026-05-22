@@ -736,10 +736,22 @@ md5(payId + param + type + price + reallyPrice + key)
 |------|------|------|------|
 | name | string | 是 | 服务器名称 |
 | api_url | string | 是 | 3X-UI 面板地址 |
-| api_username | string | 是 | API 用户名 |
-| api_password | string | 是 | API 密码 |
+| api_token | string | 新增必填，编辑可留空 | 3X-UI API Token，编辑时留空表示不修改 |
 | host | string | 否 | CF 端口转发主机名，用于生成订阅节点的 `host` 参数 |
 | client_port | number | 否 | 客户端连接端口，用于生成订阅节点的端口号 |
+
+服务端列表返回字段说明：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | number | 服务器 ID |
+| name | string | 服务器名称 |
+| api_url | string | 3X-UI 面板地址 |
+| has_api_token | boolean | 是否已配置 API Token |
+| host | string | CF 端口转发主机名 |
+| client_port | number | 客户端连接端口 |
+| sub_url | string | 3X-UI 原始订阅地址 |
+| status | number | 在线状态，1=在线，0=离线 |
 
 ### 3.3 用户管理
 
@@ -914,9 +926,53 @@ md5(payId + param + type + price + reallyPrice + key)
 
 ---
 
-### 3.9 邮件管理
+### 3.9 系统设置
 
-#### 3.9.1 Brevo 配置
+#### GET `/api/admin/system-settings/traffic`
+
+获取流量统计配置。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "traffic_usage_multiplier": 1
+  }
+}
+```
+
+#### PUT `/api/admin/system-settings/traffic`
+
+更新流量统计倍率。
+
+请求体：
+
+```json
+{
+  "traffic_usage_multiplier": 1.5
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| traffic_usage_multiplier | number | 是 | 流量统计倍率，范围 0-100 |
+
+说明：
+
+- 默认值为 `1`
+- 流量同步任务会将本次新增流量乘以该倍率后累加到用户已用流量
+- 设置为 `0` 时，新增流量不会计入本地已用流量
+
+---
+
+### 3.10 邮件管理
+
+#### 3.10.1 Brevo 配置
 
 ##### GET `/api/admin/email/config`
 
@@ -966,7 +1022,7 @@ md5(payId + param + type + price + reallyPrice + key)
 }
 ```
 
-#### 3.9.2 邮件模板
+#### 3.10.2 邮件模板
 
 ##### GET `/api/admin/email/templates`
 
@@ -1005,7 +1061,7 @@ md5(payId + param + type + price + reallyPrice + key)
 |------|------|------|------|
 | user_id | number | 否 | 用于填充变量的用户 ID |
 
-#### 3.9.3 邮件发送
+#### 3.10.3 邮件发送
 
 ##### POST `/api/admin/email/send`
 
@@ -1024,7 +1080,7 @@ md5(payId + param + type + price + reallyPrice + key)
 
 说明：如果提供 `user_id`，会自动获取用户变量并替换模板中的变量。
 
-#### 3.9.4 群发任务
+#### 3.10.4 群发任务
 
 ##### GET `/api/admin/email/campaigns`
 
@@ -1076,7 +1132,7 @@ md5(payId + param + type + price + reallyPrice + key)
 | page | number | 否 | 页码，默认 1 |
 | limit | number | 否 | 每页条数，默认 50 |
 
-#### 3.9.5 邮件日志
+#### 3.10.5 邮件日志
 
 ##### GET `/api/admin/email/logs`
 
@@ -1144,7 +1200,7 @@ md5(payId + param + type + price + reallyPrice + key)
 }
 ```
 
-#### 3.9.6 用户搜索
+#### 3.10.6 用户搜索
 
 ##### GET `/api/admin/email/users/search`
 
@@ -1245,10 +1301,14 @@ md5(payId + param + type + price + reallyPrice + key)
 - 补充"金额校验"和"拒绝手输金额通道"的当前实现规则
 - 补充订阅接口 `cf_optimized` 返回字段
 - 补充服务端管理 `host`、`client_port` 参数说明
+- 服务端管理认证方式更新为 3X-UI API Token，并返回 `has_api_token`
+- 补充管理端系统设置接口 `/api/admin/system-settings/traffic`
 - 补充仪表盘统计接口 `/api/admin/dashboard/stats`
 - 补充节点链接格式说明（VLESS/VMess/Trojan）
 - 新增用户端工单接口（创建、查看、回复、关闭、未读数量）
 - 新增管理端工单接口（查看、回复、关闭、删除、统计）
+- 补充资源分发按用户唯一记录的接口行为
+- 补充用户端下载链接获取接口 `/api/user/download/link`
 
 ---
 
@@ -1680,6 +1740,42 @@ md5(payId + param + type + price + reallyPrice + key)
 
 ### 6.2 用户端下载接口
 
+#### POST `/api/user/download/link`
+
+获取当前用户的 Android-App 下载链接。
+
+说明：
+
+- 如果用户没有分发记录，系统会自动创建一条分发记录
+- 如果已有分发记录但已过期或禁用，系统会重置 token 和有效期
+- 如果已有有效分发记录，系统会复用原链接
+- 同一用户只保留一条分发记录，避免重复分发
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "download_url": "https://example.com/api/user/download/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "resource_name": "Android-App",
+    "expire_at": 1770000000,
+    "expire_text": "2026/6/1 12:00:00",
+    "action": "created",
+    "removed_duplicates": 0
+  }
+}
+```
+
+`action` 可选值：
+
+| 值 | 说明 |
+|----|------|
+| created | 新建分发记录 |
+| reset | 重置已有分发记录 |
+| reused | 复用有效分发记录 |
+
 #### POST `/api/user/email/download`
 
 请求下载链接邮件。
@@ -1748,3 +1844,29 @@ md5(payId + param + type + price + reallyPrice + key)
 | 7003 | 下载链接已过期 |
 | 7004 | 文件不存在 |
 | 7005 | 暂无可用资源 |
+
+---
+
+## 7. 3X-UI 外部 API 调用
+
+系统通过 `server/services/xui-api-client.js` 使用 3X-UI API Token 访问 3X-UI 面板。
+
+认证方式：
+
+```http
+Authorization: Bearer <api_token>
+X-Requested-With: XMLHttpRequest
+```
+
+当前内部使用的关键接口：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/panel/api/inbounds/list` | 获取 inbound 列表 |
+| GET | `/panel/api/inbounds/get/:id` | 获取 inbound 详情 |
+| POST | `/panel/api/inbounds/addClient` | 添加用户到 inbound |
+| POST | `/panel/api/inbounds/updateClient/:clientId` | 更新用户配置 |
+| POST | `/panel/api/inbounds/:inboundId/delClient/:clientId` | 删除用户 |
+| GET | `/panel/api/server/getDb` | 下载 3X-UI 数据库文件 `x-ui.db` |
+
+`/panel/api/server/getDb` 用于每天 4:00 的 3X-UI 数据库自动备份，备份文件保存到 `server/backupDB/<服务器名称>-x-ui.db`。

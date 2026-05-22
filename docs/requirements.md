@@ -1,7 +1,7 @@
 # 机场面板系统需求文档
 
-> 版本：V1.9  
-> 更新日期：2026-05-13
+> 版本：V1.10
+> 更新日期：2026-05-22
 
 ---
 
@@ -23,7 +23,7 @@
 | 后端 | Node.js + Express | RESTful API |
 | 前端 | Vue 3 + Vite | 用户端与管理端分别为独立 SPA |
 | 数据库 | PostgreSQL | 核心业务数据存储 |
-| 3X-UI 对接 | `3xui-api-client` | 服务端同步与用户下发 |
+| 3X-UI 对接 | API Token 认证的 3X-UI API 客户端 | 服务端同步、用户下发与数据库备份 |
 | 支付 | VMQ | 创建订单、支付通知、订单状态查询 |
 | 邮件 | Brevo (@getbrevo/brevo) | 邮件发送服务 |
 | 部署 | Nginx + PM2 | 前后端反向代理与进程托管 |
@@ -152,6 +152,31 @@ VMQ 后台需要配置以下两个地址：
 
 - `idx_traffic_sync_log_user_server`：复合索引 (user_id, server_id)
 - `idx_traffic_sync_log_last_sync_at`：时间戳索引
+
+### 4.5 `xui_servers`
+
+用于保存 3X-UI 服务器连接信息与订阅生成所需配置。
+
+关键字段：
+
+- `name`：服务器名称，也用于数据库备份文件名前缀
+- `api_url`：3X-UI 面板 API 地址
+- `api_token`：新版 3X-UI API Token，用于替代旧的账号密码登录方式
+- `host`：CF 端口转发规则中的主机名
+- `client_port`：客户端连接端口
+- `sub_url`：3X-UI 原始订阅地址
+- `status`：服务器在线状态
+
+### 4.6 `resource_distributions`
+
+用于保存用户独立下载链接。
+
+当前规则：
+
+- 以 `user_id` 为唯一维度，一个用户只保留一条有效分发记录
+- 重新分发资源时更新该用户已有记录，而不是创建重复记录
+- 下载时优先匹配 `resource_distributions.download_token`，找不到时再匹配资源全局 token
+- 迁移脚本 `005-resource-distributions-unique-user.js` 会清理历史重复记录，并创建 `user_id` 唯一索引
 
 ---
 
@@ -446,8 +471,7 @@ VMQ 后台需要配置以下两个地址：
 
 - `name`：服务器名称
 - `api_url`：3X-UI 面板地址
-- `api_username`：API 用户名
-- `api_password`：API 密码
+- `api_token`：3X-UI API Token，新版认证方式；编辑服务器时留空表示不修改
 - `host`：CF 端口转发规则中的主机名，用于生成订阅节点的 `host` 参数
 - `client_port`：客户端连接端口，用于生成订阅节点的端口号（如 v2rayN 中配置的端口）
 
@@ -568,6 +592,16 @@ VMQ 后台需要配置以下两个地址：
 - 每个用户每天只能收到 1 封教程邮件
 - 点击"获得"按钮后，教程邮件会发送到用户注册邮箱
 
+### 6.10 系统设置
+
+管理端系统设置支持配置流量统计倍率：
+
+- 配置项：`traffic_usage_multiplier`
+- 默认值：`1.0`
+- 范围：`0` 到 `100`
+- 用途：流量同步时对本次新增流量应用倍率后再累加到用户已用流量
+- 说明：3X-UI 服务器上的原始同步记录仍保存未倍率处理的当前流量值，倍率只影响本地用户流量累加结果
+
 ---
 
 ## 7. 当前接口总览
@@ -675,6 +709,8 @@ VMQ 后台需要配置以下两个地址：
 | GET | `/api/admin/resources/:id/distributions` | 获取分发列表 |
 | PUT | `/api/admin/resources/distributions/batch-expire` | 批量设置过期时间 |
 | DELETE | `/api/admin/resources/distributions/:id` | 删除分发记录 |
+| GET | `/api/admin/system-settings/traffic` | 获取流量统计配置 |
+| PUT | `/api/admin/system-settings/traffic` | 更新流量统计倍率 |
 
 ---
 
@@ -714,7 +750,10 @@ project/
 │  │  └─ email-service.js
 │  ├─ jobs/
 │  │  ├─ index.js
-│  │  └─ email-campaign.js
+│  │  ├─ email-campaign.js
+│  │  └─ backupDB.js
+│  ├─ backupDB/
+│  │  └─ *.db
 │  ├─ db/
 │  │  ├─ init.js
 │  │  └─ migrations/
@@ -753,6 +792,7 @@ project/
 
 - `vmq-service.js`：VMQ 下单、查单、关单、回调验签
 - `order-service.js`：订单完成后的统一激活逻辑（含同步到 3X-UI）
+- `backupDB.js`：每天凌晨 4 点备份所有 3X-UI 服务器的 `x-ui.db`
 - 不再使用旧的 `payment-service.js`
 
 ---
@@ -772,6 +812,7 @@ project/
 | 释放过期名额 | 是 | 15 分钟 | 1 小时 | 释放流量用完超3天的用户名额 |
 | 邮件群发任务 | 是 | 5 分钟 | 每天 9:00 | 处理待发送的群发任务 |
 | 清理邮件日志 | 是 | 20 分钟 | 每天 3:00 | 删除 30 天前的邮件日志 |
+| 3X-UI 数据库备份 | 否 | 无 | 每天 4:00 | 备份所有 3X-UI 服务器数据库 |
 
 ### 10.1 标记过期订单
 
@@ -857,6 +898,18 @@ project/
 
 - 执行频率：每天 3:00（首次延迟 20 分钟）
 - 逻辑：删除 30 天前的邮件发送日志
+
+### 10.10 3X-UI 数据库备份
+
+- 执行频率：每天 4:00（启动时不立即执行）
+- 逻辑：
+  1. 查询 `xui_servers` 表中的所有服务器
+  2. 跳过 `api_token` 为空的服务器
+  3. 使用 API Token 调用 3X-UI `/panel/api/server/getDb`
+  4. 将返回的 `x-ui.db` 保存到 `server/backupDB`
+  5. 文件名使用服务器 `name` 作为前缀：`<name>-x-ui.db`
+  6. 同名文件存在时直接覆盖，保证保留最新备份
+- 安全说明：`server/backupDB/` 已加入 `.gitignore`，避免真实数据库备份被提交
 
 ---
 
@@ -1048,3 +1101,7 @@ node server/db/migrations/001-node-subscription-strategy.js
 - 增加少付金额不得激活订单的要求
 - 新增工单系统功能（用户端和管理端）
 - 新增工单自动关闭定时任务
+- 3X-UI 服务端认证更新为 API Token 模式
+- 新增管理端流量统计倍率设置
+- 资源下载分发改为按用户唯一分发，避免同一用户重复分发记录
+- 新增 3X-UI 数据库每日自动备份任务

@@ -26,6 +26,8 @@ A complete subscription management system for proxy panels, supporting multiple 
 - **Server Management**: Multiple 3X-UI server management with one-click sync
 - **Ticket Management**: Handle user tickets with auto-close support
 - **Email Management**: Brevo-based email sending with templates, campaigns, and logs
+- **System Settings**: Configure the traffic usage multiplier
+- **Database Backup**: Automatically back up all 3X-UI server databases every day
 
 ### Email Management
 
@@ -48,6 +50,8 @@ A complete subscription management system for proxy panels, supporting multiple 
 
 - **Multi-Server Support**: Manage multiple 3X-UI servers simultaneously
 - **Auto Sync**: Scheduled synchronization of user and traffic data, check sub_id and flow consistency
+- **Traffic Multiplier**: Configure how new traffic increments are counted locally
+- **Database Backup**: Download and overwrite the latest `x-ui.db` via 3X-UI API Token
 - **Security**: Login/registration rate limiting, payment signature verification
 - **High Performance**: Connection pool optimization, automatic retry mechanism
 
@@ -60,7 +64,7 @@ A complete subscription management system for proxy panels, supporting multiple 
 | Database | PostgreSQL |
 | Payment | VMQ |
 | Email | Brevo |
-| 3X-UI Integration | 3xui-api-client (v2.9.4 only) |
+| 3X-UI Integration | API Token based 3X-UI API client |
 | Deployment | PM2 + OpenResty + Cloudflare Tunnel |
 
 ## Quick Start
@@ -125,7 +129,9 @@ subscription-manager/
 │   ├── middleware/         # Middleware
 │   ├── jobs/              # Scheduled tasks
 │   │   ├── index.js       # Task registration
-│   │   └── email-campaign.js  # Email campaign task
+│   │   ├── email-campaign.js  # Email campaign task
+│   │   └── backupDB.js    # 3X-UI database backup task
+│   ├── backupDB/          # 3X-UI database backups (git ignored)
 │   ├── db/                # Database init and migrations
 │   └── app.js             # Entry file
 ├── client-user/           # User frontend
@@ -187,16 +193,25 @@ SITE_HOST=yourdomain.com
 
 ### 3X-UI Server Configuration
 
-> ⚠️ **Version Requirement**: Only 3X-UI **v2.9.4** is currently supported. Other versions may have API compatibility issues.
+> ⚠️ **Authentication Requirement**: The system now uses 3X-UI API Token authentication. Generate and keep the API Token securely in your 3X-UI panel.
 
 Add 3X-UI servers in the admin panel:
 
 - **Name**: Server identifier (e.g., "US-01", "HK-01")
 - **API URL**: 3X-UI panel address
-- **Username/Password**: API authentication
+- **API Token**: 3X-UI panel API Token
 - **Host**: CF port forwarding hostname
 - **Port**: Client connection port (for CF nodes)
 - **Subscription URL**: 3X-UI subscription link (e.g., `https://example.com/sub/aaa333/`)
+
+### 3X-UI Database Backup
+
+The backend automatically backs up every 3X-UI server with an API Token at 4:00 AM every day:
+
+- Backup directory: `server/backupDB`
+- File name: `<server-name>-x-ui.db`
+- Existing files with the same name are overwritten to keep the latest backup
+- `server/backupDB/` is git ignored to avoid committing real database backups
 
 ## Deployment Guide
 
@@ -219,6 +234,14 @@ pm2 startup
 For complete API documentation, see [API.md](./docs/api.md)
 
 ## Changelog
+
+### V1.6.0 (2026-05-22)
+
+- ✨ 3X-UI authentication: Adapted to the newer API Token authentication flow
+- ✨ Traffic multiplier: Admin panel can configure the traffic usage multiplier
+- ✨ 3X-UI database backup: Back up every server's `x-ui.db` at 4:00 AM daily
+- ✅ Resource distribution: Keep one distribution record per user to avoid duplicate links
+- ✅ Download link retrieval: User panel can create, reset, or reuse download links automatically
 
 ### V1.5.0 (2026-05-15)
 
