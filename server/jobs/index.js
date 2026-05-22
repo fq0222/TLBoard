@@ -15,6 +15,7 @@
  * | 释放过期名额           | 否             | 无             | 每天 5:00        |
  * | 邮件群发               | 否             | 无             | 每天 9:00        |
  * | 清理邮件日志           | 否             | 无             | 每天 3:00        |
+ * | 3X-UI 数据库备份       | 否             | 无             | 每天 4:00        |
  * +------------------------+----------------+----------------+------------------+
  * 
  * 任务说明：
@@ -27,12 +28,14 @@
  * - 释放过期名额：释放流量用完超过3天且未续费的用户名额
  * - 邮件群发：处理待发送的邮件群发任务，每日限额 200 封
  * - 清理邮件日志：清理超过 30 天的邮件发送日志
+ * - 3X-UI 数据库备份：备份所有 3X-UI 服务器的 x-ui.db 到 server/backupDB
  */
 
 const cron = require('node-cron');
 const XuiService = require('../services/xui-service');
 const trafficManager = require('../services/traffic-manager');
 const { processCampaigns, cleanLogs } = require('./email-campaign');
+const { registerXuiDbBackupJob } = require('./backupDB');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('JOBS');
@@ -613,6 +616,7 @@ function startAllJobs(db) {
   registerReleaseExpiredSalesJob(db);
   registerEmailCampaignJob(db);
   registerCleanEmailLogsJob(db);
+  registerXuiDbBackupJob(db, cronTasks);
   logger.info(`所有定时任务已启动，共 ${intervals.length} 个间隔任务，${cronTasks.length} 个定时任务`);
 }
 

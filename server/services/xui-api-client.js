@@ -17,6 +17,7 @@ class XuiApiClient {
     this.baseURL = baseURL.replace(/\/$/, '');
     this.apiToken = apiToken;
     this.basePath = '/panel/api/inbounds';
+    this.serverBasePath = '/panel/api/server';
     this.api = axios.create({
       baseURL: this.baseURL,
       timeout: options.timeout || 30000,
@@ -65,6 +66,15 @@ class XuiApiClient {
       method,
       url: path,
       ...(data !== undefined ? { data } : {})
+    });
+    return response.data;
+  }
+
+  async download(path) {
+    const response = await this.api.request({
+      method: 'get',
+      url: path,
+      responseType: 'arraybuffer'
     });
     return response.data;
   }
@@ -155,6 +165,10 @@ class XuiApiClient {
 
   createBackup() {
     return this.request('get', `${this.basePath}/createbackup`);
+  }
+
+  getDb() {
+    return this.download(`${this.serverBasePath}/getDb`);
   }
 }
 

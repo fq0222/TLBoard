@@ -148,6 +148,7 @@ server/test/*
 !server/test/migrate-xui-traffic.js
 server/config.js
 server/uploads/
+server/backupDB/
 
 .vscode/
 .codex/*
