@@ -17,7 +17,7 @@ async function fetchAllServerTraffic(db) {
   try {
     // 查询所有在线服务器
     const servers = await db.prepare(`
-      SELECT id, name, api_url, api_username, api_password
+      SELECT id, name, api_url, api_token
       FROM xui_servers
       WHERE status = 1
     `).all();
@@ -34,7 +34,7 @@ async function fetchAllServerTraffic(db) {
     // 并行获取所有服务器的流量数据
     const promises = servers.map(async (server) => {
       try {
-        const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+        const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
 
         // 获取所有inbounds
         const inboundsResult = await xuiService.getInbounds();
@@ -326,7 +326,7 @@ async function syncDisableStatusToXui(db, userId, disable) {
     
     // 查询所有在线服务器
     const servers = await db.prepare(`
-      SELECT id, name, api_url, api_username, api_password
+      SELECT id, name, api_url, api_token
       FROM xui_servers
       WHERE status = 1
     `).all();
@@ -342,7 +342,7 @@ async function syncDisableStatusToXui(db, userId, disable) {
     let successCount = 0;
     for (const server of servers) {
       try {
-        const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+        const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
         
         // 获取所有inbound
         const inboundsResult = await xuiService.getInbounds();

@@ -716,7 +716,7 @@ async function syncToXuiServers(db, user) {
     logger.info(`开始同步用户到3X-UI服务器: ${user.email}`);
 
     // 查询所有在线的3X-UI服务器
-    const servers = await db.prepare('SELECT id, name, api_url, api_username, api_password FROM xui_servers WHERE status = 1').all();
+    const servers = await db.prepare('SELECT id, name, api_url, api_token FROM xui_servers WHERE status = 1').all();
 
     if (servers.length === 0) {
       logger.warn('没有在线的3X-UI服务器');
@@ -751,7 +751,7 @@ async function syncToXuiServers(db, user) {
 
       try {
         // 创建 XuiService 实例
-        const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+        const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
         
         // 计算到期时间（3XUI 使用毫秒时间戳，0 表示无限期）
         const expireAt = Number(user.expire_at) || 0;

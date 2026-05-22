@@ -141,8 +141,7 @@ const adminApi = {
    * @param {Object} data - 服务器数据
    * @param {string} data.name - 服务器名称
    * @param {string} data.api_url - 面板地址
-   * @param {string} data.api_username - API用户名
-   * @param {string} data.api_password - API密码
+   * @param {string} data.api_token - API Token
    * @returns {Promise<Object>} 响应数据
    */
   addServer(data) {

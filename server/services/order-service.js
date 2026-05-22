@@ -31,7 +31,7 @@ async function syncUserToXuiServers(db, user, plan) {
   try {
     // 查询所有在线的 3X-UI 服务器
     const servers = await db.prepare(`
-      SELECT id, name, api_url, api_username, api_password
+      SELECT id, name, api_url, api_token
       FROM xui_servers
       WHERE status = 1
     `).all();
@@ -49,7 +49,7 @@ async function syncUserToXuiServers(db, user, plan) {
 
     for (const server of servers) {
       try {
-        const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+        const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
 
         // 获取该服务器的所有 inbounds
         const inboundsResult = await xuiService.getInbounds();

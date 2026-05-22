@@ -110,14 +110,11 @@
         <el-form-item label="面板地址" prop="api_url">
           <el-input v-model="serverForm.api_url" placeholder="http://ip:port" />
         </el-form-item>
-        <el-form-item label="API用户名" prop="api_username">
-          <el-input v-model="serverForm.api_username" placeholder="请输入API用户名" />
-        </el-form-item>
-        <el-form-item label="API密码" prop="api_password">
+        <el-form-item label="API Token" prop="api_token">
           <el-input 
-            v-model="serverForm.api_password" 
+            v-model="serverForm.api_token" 
             type="password"
-            placeholder="请输入API密码"
+            :placeholder="isEditing ? '留空表示不修改 API Token' : '请输入3X-UI API Token'"
             show-password
           />
         </el-form-item>
@@ -162,8 +159,7 @@ const syncingId = ref(null)
 const serverForm = reactive({
   name: '',
   api_url: '',
-  api_username: '',
-  api_password: '',
+  api_token: '',
   host: '',
   client_port: 0,
   sub_url: ''
@@ -177,11 +173,17 @@ const serverRules = {
     { required: true, message: '请输入面板地址', trigger: 'blur' },
     { pattern: /^https?:\/\/.+/, message: '请输入有效的URL', trigger: 'blur' }
   ],
-  api_username: [
-    { required: true, message: '请输入API用户名', trigger: 'blur' }
-  ],
-  api_password: [
-    { required: true, message: '请输入API密码', trigger: 'blur' }
+  api_token: [
+    {
+      validator: (rule, value, callback) => {
+        if (!isEditing.value && !value) {
+          callback(new Error('请输入API Token'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur'
+    }
   ]
 }
 
@@ -209,8 +211,7 @@ function showEditDialog(server) {
   
   serverForm.name = server.name
   serverForm.api_url = server.api_url
-  serverForm.api_username = ''
-  serverForm.api_password = ''
+  serverForm.api_token = ''
   serverForm.host = server.host || ''
   serverForm.client_port = server.client_port || 0
   serverForm.sub_url = server.sub_url || ''
@@ -221,8 +222,7 @@ function showEditDialog(server) {
 function resetForm() {
   serverForm.name = ''
   serverForm.api_url = ''
-  serverForm.api_username = ''
-  serverForm.api_password = ''
+  serverForm.api_token = ''
   serverForm.host = ''
   serverForm.client_port = 0
   serverForm.sub_url = ''
@@ -232,16 +232,20 @@ async function handleSubmit() {
   try {
     await serverFormRef.value.validate()
     submitting.value = true
+    const payload = { ...serverForm }
+    if (isEditing.value && !payload.api_token) {
+      delete payload.api_token
+    }
     
     if (isEditing.value) {
-      const response = await api.admin.updateServer(editingId.value, serverForm)
+      const response = await api.admin.updateServer(editingId.value, payload)
       if (response.code === 0) {
         ElMessage.success('服务器更新成功')
         dialogVisible.value = false
         fetchServers()
       }
     } else {
-      const response = await api.admin.addServer(serverForm)
+      const response = await api.admin.addServer(payload)
       if (response.code === 0) {
         ElMessage.success('服务器添加成功')
         dialogVisible.value = false

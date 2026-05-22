@@ -48,7 +48,7 @@ function parseArgs() {
 // 从数据库获取服务器信息
 async function getServerInfo(db, serverId) {
   const server = await db.prepare(`
-    SELECT id, name, api_url, api_username, api_password
+    SELECT id, name, api_url, api_token
     FROM xui_servers
     WHERE id = $1
   `).get(serverId);
@@ -66,8 +66,7 @@ async function connectServer(serverInfo) {
   
   const xuiService = await XuiService.getInstance(
     serverInfo.api_url,
-    serverInfo.api_username,
-    serverInfo.api_password
+    serverInfo.api_token
   );
   
   const isConnected = await xuiService.testConnection();

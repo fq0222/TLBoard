@@ -22,7 +22,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
 
     // 查询所有服务器
     const servers = await db.prepare(`
-      SELECT id, name, api_url, host, client_port, sub_url, status, last_check_at, created_at
+      SELECT id, name, api_url, api_token, host, client_port, sub_url, status, last_check_at, created_at
       FROM xui_servers
       ORDER BY created_at DESC
     `).all();
@@ -43,6 +43,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
         id: server.id,
         name: server.name,
         api_url: server.api_url,
+        has_api_token: !!server.api_token,
         host: server.host || '',
         client_port: server.client_port || 0,
         sub_url: server.sub_url || '',
@@ -88,12 +89,9 @@ router.post('/', authenticateAdmin, [
     .withMessage('面板地址不能为空')
     .matches(/^https?:\/\/.+/)
     .withMessage('面板地址格式不正确'),
-  body('api_username')
+  body('api_token')
     .notEmpty()
-    .withMessage('API用户名不能为空'),
-  body('api_password')
-    .notEmpty()
-    .withMessage('API密码不能为空')
+    .withMessage('API Token不能为空')
 ], async (req, res) => {
   try {
     // 验证请求参数
@@ -107,13 +105,13 @@ router.post('/', authenticateAdmin, [
       });
     }
 
-    const { name, api_url, api_username, api_password, sub_url } = req.body;
+    const { name, api_url, api_token, sub_url } = req.body;
     const host = req.body.host || '';
     const clientPort = parseInt(req.body.client_port, 10) || 0;
     const db = req.app.locals.db;
 
     // 测试连接（模拟）
-    const isConnected = await testXuiConnection(api_url, api_username, api_password);
+    const isConnected = await testXuiConnection(api_url, api_token);
     
     if (!isConnected) {
       logger.warn(`添加服务器失败: 连接测试失败 - ${api_url}`);
@@ -126,9 +124,9 @@ router.post('/', authenticateAdmin, [
 
     // 插入服务器记录
     const result = await db.prepare(`
-      INSERT INTO xui_servers (name, api_url, api_username, api_password, host, client_port, sub_url, status, last_check_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-    `).run(name, api_url, api_username, api_password, host, clientPort, sub_url || '', Math.floor(Date.now() / 1000));
+      INSERT INTO xui_servers (name, api_url, api_username, api_password, api_token, host, client_port, sub_url, status, last_check_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+    `).run(name, api_url, '', '', api_token, host, clientPort, sub_url || '', Math.floor(Date.now() / 1000));
 
     logger.info(`添加服务器成功: ${name} (ID: ${result.lastInsertRowid})`);
 
@@ -139,6 +137,7 @@ router.post('/', authenticateAdmin, [
         id: result.lastInsertRowid,
         name,
         api_url,
+        has_api_token: true,
         host,
         client_port: clientPort,
         sub_url: sub_url || '',
@@ -172,14 +171,10 @@ router.put('/:id', authenticateAdmin, [
     .optional()
     .matches(/^https?:\/\/.+/)
     .withMessage('面板地址格式不正确'),
-  body('api_username')
-    .optional()
+  body('api_token')
+    .optional({ checkFalsy: true })
     .notEmpty()
-    .withMessage('API用户名不能为空'),
-  body('api_password')
-    .optional()
-    .notEmpty()
-    .withMessage('API密码不能为空')
+    .withMessage('API Token不能为空')
 ], async (req, res) => {
   try {
     // 验证请求参数
@@ -220,13 +215,9 @@ router.put('/:id', authenticateAdmin, [
       updates.push('api_url = ?');
       values.push(req.body.api_url);
     }
-    if (req.body.api_username !== undefined) {
-      updates.push('api_username = ?');
-      values.push(req.body.api_username);
-    }
-    if (req.body.api_password !== undefined) {
-      updates.push('api_password = ?');
-      values.push(req.body.api_password);
+    if (req.body.api_token !== undefined && req.body.api_token !== '') {
+      updates.push('api_token = ?');
+      values.push(req.body.api_token);
     }
     if (req.body.host !== undefined) {
       updates.push('host = ?');
@@ -254,9 +245,9 @@ router.put('/:id', authenticateAdmin, [
     values.push(serverId);
     await db.prepare(`UPDATE xui_servers SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-    // 如果密码或凭据有变更，清除旧的缓存实例
-    if (req.body.api_password !== undefined || req.body.api_username !== undefined || req.body.api_url !== undefined) {
-      XuiService.removeInstance(existingServer.api_url, existingServer.api_username);
+    // 如果面板地址或 Token 有变更，清除旧的缓存实例
+    if (req.body.api_token !== undefined || req.body.api_url !== undefined) {
+      XuiService.removeInstance(existingServer.api_url, existingServer.api_token);
     }
 
     // 查询更新后的服务器
@@ -271,6 +262,7 @@ router.put('/:id', authenticateAdmin, [
         id: updatedServer.id,
         name: updatedServer.name,
         api_url: updatedServer.api_url,
+        has_api_token: !!updatedServer.api_token,
         host: updatedServer.host || '',
         client_port: updatedServer.client_port || 0,
         sub_url: updatedServer.sub_url || '',
@@ -389,7 +381,7 @@ router.get('/:id/detail', authenticateAdmin, [
     let nodesWithUsers = [];
     
     try {
-      const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+      const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
       
       // 获取所有 inbounds
       const inboundsResult = await xuiService.getInbounds();
@@ -652,7 +644,7 @@ router.put('/:id/users', authenticateAdmin, [
     }
 
     // 调用 XuiService 更新用户
-    const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
     const result = await xuiService.updateClient(inboundId, email, {
       expiryTime,
       totalGB,
@@ -729,7 +721,7 @@ router.delete('/:id/users', authenticateAdmin, [
     }
 
     // 调用 XuiService 删除用户
-    const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
     const result = await xuiService.deleteClientByEmail(inboundId, email);
 
     if (result.success) {
@@ -762,14 +754,13 @@ router.delete('/:id/users', authenticateAdmin, [
 /**
  * 测试3X-UI连接
  * @param {string} apiUrl - 面板地址
- * @param {string} username - 用户名
- * @param {string} password - 密码
+ * @param {string} apiToken - API Token
  * @returns {Promise<boolean>} 连接是否成功
  */
-async function testXuiConnection(apiUrl, username, password) {
+async function testXuiConnection(apiUrl, apiToken) {
   try {
     logger.info(`测试3X-UI连接: ${apiUrl}`);
-    const xuiService = await XuiService.getInstance(apiUrl, username, password);
+    const xuiService = await XuiService.getInstance(apiUrl, apiToken);
     const isConnected = await xuiService.testConnection();
     return isConnected;
   } catch (error) {
@@ -786,7 +777,7 @@ async function testXuiConnection(apiUrl, username, password) {
 async function syncServerStatus(server) {
   try {
     logger.info(`同步服务器状态: ${server.name}`);
-    const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
     const syncResult = await xuiService.syncServerStatus();
     
     logger.info(`同步结果: ${JSON.stringify(syncResult)}`);

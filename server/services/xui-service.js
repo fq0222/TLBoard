@@ -1,9 +1,9 @@
 /**
  * 3X-UI API 服务封装
- * 使用 3xui-api-client 库与 3X-UI 面板通信
+ * 使用本地 API Token 客户端与 3X-UI 面板通信
  */
 
-const ThreeXUI = require('3xui-api-client');
+const XuiApiClient = require('./xui-api-client');
 const config = require('../config');
 const { createLogger } = require('../utils/logger');
 
@@ -26,14 +26,13 @@ class XuiService {
   /**
    * 获取 XuiService 实例（带缓存，自动初始化）
    * @param {string} apiUrl - 面板地址
-   * @param {string} username - 用户名
-   * @param {string} password - 密码
+   * @param {string} apiToken - API Token
    * @returns {Promise<XuiService>} 已初始化的实例
    */
-  static async getInstance(apiUrl, username, password) {
-    const key = `${apiUrl}:${username}`;
+  static async getInstance(apiUrl, apiToken) {
+    const key = `${apiUrl}:${apiToken}`;
     if (!this.instanceCache.has(key)) {
-      const instance = new XuiService(apiUrl, username, password);
+      const instance = new XuiService(apiUrl, apiToken);
       await instance.init();
       this.instanceCache.set(key, instance);
     }
@@ -43,10 +42,10 @@ class XuiService {
   /**
    * 清除指定服务器的缓存
    * @param {string} apiUrl - 面板地址
-   * @param {string} username - 用户名
+   * @param {string} apiToken - API Token
    */
-  static removeInstance(apiUrl, username) {
-    this.instanceCache.delete(`${apiUrl}:${username}`);
+  static removeInstance(apiUrl, apiToken) {
+    this.instanceCache.delete(`${apiUrl}:${apiToken}`);
   }
 
   /**
@@ -59,13 +58,11 @@ class XuiService {
   /**
    * 创建 XuiService 实例
    * @param {string} apiUrl - 面板地址
-   * @param {string} username - API 用户名
-   * @param {string} password - API 密码
+   * @param {string} apiToken - API Token
    */
-  constructor(apiUrl, username, password) {
+  constructor(apiUrl, apiToken) {
     this.apiUrl = apiUrl;
-    this.username = username;
-    this.password = password;
+    this.apiToken = apiToken;
     this.client = null;
   }
 
@@ -74,14 +71,10 @@ class XuiService {
    */
   async init() {
     try {
-      this.client = new ThreeXUI(
+      this.client = new XuiApiClient(
         this.apiUrl,
-        this.username,
-        this.password,
+        this.apiToken,
         {
-          maxRequestsPerMinute: 60,
-          maxLoginAttemptsPerHour: 10,
-          isDevelopment: process.env.NODE_ENV !== 'production',
           timeout: config.xui.timeout || 20000
         }
       );

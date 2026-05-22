@@ -273,6 +273,7 @@ class DatabaseManager {
           api_url VARCHAR(500) NOT NULL,
           api_username VARCHAR(255) NOT NULL,
           api_password VARCHAR(255) NOT NULL,
+          api_token TEXT DEFAULT '',
           host VARCHAR(500) DEFAULT '',
           client_port INTEGER DEFAULT 0,
           sub_url VARCHAR(500) DEFAULT '',

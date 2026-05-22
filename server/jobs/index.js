@@ -169,7 +169,7 @@ async function runCleanZombieUsers(db) {
  */
 async function syncUsersToServer(db, server, users) {
   try {
-    const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
 
     // 获取所有inbounds
     const inboundsResult = await xuiService.getInbounds();
@@ -416,7 +416,7 @@ async function runXuiSync(db) {
 
     // 查询所有在线服务器
     const servers = await db.prepare(`
-      SELECT id, name, api_url, api_username, api_password
+      SELECT id, name, api_url, api_token
       FROM xui_servers
       WHERE status = 1
     `).all();

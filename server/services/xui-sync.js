@@ -11,14 +11,14 @@ const logger = createLogger('XUI-SYNC');
 /**
  * 同步单台服务器的节点信息到 xui_nodes 表
  * @param {Object} db - 数据库实例
- * @param {Object} server - 服务器信息 { id, name, api_url, api_username, api_password }
+ * @param {Object} server - 服务器信息 { id, name, api_url, api_token }
  * @returns {Promise<Object>} 同步结果
  */
 async function syncServerNodes(db, server) {
   try {
     logger.info(`开始同步服务器 ${server.name} 的节点信息`);
     
-    const xuiService = await XuiService.getInstance(server.api_url, server.api_username, server.api_password);
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
     
     const inboundsResult = await xuiService.getInbounds();
     
@@ -64,7 +64,7 @@ async function syncServerNodes(db, server) {
 async function syncAllServers(db) {
   try {
     const servers = await db.prepare(`
-      SELECT id, name, api_url, api_username, api_password
+      SELECT id, name, api_url, api_token
       FROM xui_servers
       WHERE status = 1
     `).all();
