@@ -653,6 +653,14 @@ const adminApi = {
     return apiClient.put('/resources/config', data)
   },
 
+  getTrafficConfig() {
+    return apiClient.get('/system-settings/traffic')
+  },
+
+  saveTrafficConfig(data) {
+    return apiClient.put('/system-settings/traffic', data)
+  },
+
   // 分发资源给用户
   distributeResource(resourceId, data) {
     return apiClient.post(`/resources/${resourceId}/distribute`, data)

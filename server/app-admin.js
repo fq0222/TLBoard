@@ -26,6 +26,7 @@ const dashboardRoutes = require('./routes/admin/dashboard');
 const emailRoutes = require('./routes/admin/email');
 const resourcesRoutes = require('./routes/admin/resources');
 const blogsRoutes = require('./routes/admin/blogs');
+const systemSettingsRoutes = require('./routes/admin/system-settings');
 
 const logger = createLogger('ADMIN-APP');
 
@@ -152,6 +153,9 @@ app.use(`${apiPrefix}/resources`, resourcesRoutes);
 
 // 博客管理路由
 app.use(`${apiPrefix}/blogs`, blogsRoutes);
+
+// 系统设置路由
+app.use(`${apiPrefix}/system-settings`, systemSettingsRoutes);
 
 // ============ 错误处理 ============
 

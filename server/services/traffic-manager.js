@@ -8,6 +8,22 @@ const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('TRAFFIC-MANAGER');
 
+const DEFAULT_TRAFFIC_USAGE_MULTIPLIER = 1.0;
+
+async function getTrafficUsageMultiplier(db) {
+  try {
+    const row = await db.prepare("SELECT value FROM system_settings WHERE key = 'traffic_usage_multiplier'").get();
+    const multiplier = Number(row?.value);
+    if (!Number.isFinite(multiplier) || multiplier < 0) {
+      return DEFAULT_TRAFFIC_USAGE_MULTIPLIER;
+    }
+    return multiplier;
+  } catch (error) {
+    logger.warn(`获取流量统计倍率失败，使用默认倍率: ${error.message}`);
+    return DEFAULT_TRAFFIC_USAGE_MULTIPLIER;
+  }
+}
+
 /**
  * 获取所有服务器的流量数据
  * @param {Object} db - 数据库实例
@@ -114,6 +130,8 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
   logger.info(`开始计算 ${users.length} 个用户的流量，${serverIds.length} 台服务器`);
 
   const now = Math.floor(Date.now() / 1000);
+  const trafficUsageMultiplier = await getTrafficUsageMultiplier(db);
+  logger.info(`当前流量统计倍率: ${trafficUsageMultiplier}`);
 
   // 获取专用连接用于事务
   const client = await db.pool.connect();
@@ -155,11 +173,22 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
         const currentTraffic = userTotalTraffic;
 
         let increment = 0;
+        let rawIncrement = 0;
         if (currentTraffic >= lastSyncTraffic) {
-          increment = currentTraffic - lastSyncTraffic;
+          rawIncrement = currentTraffic - lastSyncTraffic;
+          increment = Math.round(rawIncrement * trafficUsageMultiplier);
         } else {
           logger.warn(`服务器 ${serverId} 用户 ${user.email} 流量重置: 当前 ${currentTraffic} < 上次 ${lastSyncTraffic}`);
+          rawIncrement = currentTraffic;
           increment = currentTraffic;
+        }
+
+        if (increment > 0) {
+          logger.info(
+            `用户流量增量: email=${user.email}, 已用流量=${user.traffic_used || 0}, ` +
+            `上次流量=${lastSyncTraffic}, 当前流量=${currentTraffic}, 本次增量=${rawIncrement}, ` +
+            `倍率=${trafficUsageMultiplier}, 倍率后增量=${increment}`
+          );
         }
 
         totalIncrement += increment;
@@ -417,5 +446,6 @@ module.exports = {
   calculateUserTotalTraffic,
   updateTrafficInDatabase,
   checkAndDisableOverLimitUsers,
-  syncDisableStatusToXui
+  syncDisableStatusToXui,
+  getTrafficUsageMultiplier
 };

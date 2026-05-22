@@ -50,6 +50,7 @@ const adminTicketsRoutes = require('./routes/admin/tickets');
 const adminEmailRoutes = require('./routes/admin/email');
 const adminResourcesRoutes = require('./routes/admin/resources');
 const adminBlogsRoutes = require('./routes/admin/blogs');
+const adminSystemSettingsRoutes = require('./routes/admin/system-settings');
 
 async function startApp() {
   // 初始化数据库
@@ -137,6 +138,7 @@ userApp.use(`${userPrefix}/email`, userEmailRoutes);
 adminApp.use(`${adminPrefix}/email`, adminEmailRoutes);
 adminApp.use(`${adminPrefix}/resources`, adminResourcesRoutes);
 adminApp.use(`${adminPrefix}/blogs`, adminBlogsRoutes);
+adminApp.use(`${adminPrefix}/system-settings`, adminSystemSettingsRoutes);
 
   adminApp.use((req, res) => {
     res.status(404).json({ code: 404, message: '接口不存在', data: null });

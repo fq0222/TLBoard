@@ -132,6 +132,28 @@
           </el-form>
         </div>
       </el-tab-pane>
+
+      <el-tab-pane label="流量配置" name="traffic">
+        <div class="content-card">
+          <h2 class="card-title">流量统计配置</h2>
+          <el-form :model="trafficForm" label-width="140px" style="max-width: 600px;">
+            <el-form-item label="流量统计倍率">
+              <el-input-number
+                v-model="trafficForm.traffic_usage_multiplier"
+                :min="0"
+                :max="100"
+                :step="0.1"
+                :precision="2"
+                placeholder="流量统计倍率"
+              />
+              <span style="margin-left: 10px; color: #666;">倍（默认 1.0，仅影响后续新增流量）</span>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="saveTrafficConfig" :loading="trafficSaving">保存配置</el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog v-model="adminDialogVisible" title="添加管理员" width="400px">
@@ -197,6 +219,11 @@ const resourceForm = ref({
   download_speed_limit: 0
 })
 const resourceSaving = ref(false)
+
+const trafficForm = ref({
+  traffic_usage_multiplier: 1.0
+})
+const trafficSaving = ref(false)
 
 const passwordForm = reactive({
   old_password: '',
@@ -362,10 +389,38 @@ async function saveResourceConfig() {
   }
 }
 
+async function loadTrafficConfig() {
+  try {
+    const res = await api.admin.getTrafficConfig()
+    if (res.code === 0) {
+      trafficForm.value = res.data
+    }
+  } catch (error) {
+    console.error('加载流量配置失败:', error)
+  }
+}
+
+async function saveTrafficConfig() {
+  try {
+    trafficSaving.value = true
+    const res = await api.admin.saveTrafficConfig(trafficForm.value)
+    if (res.code === 0) {
+      ElMessage.success('流量配置已保存')
+    } else {
+      ElMessage.error(res.message)
+    }
+  } catch (error) {
+    ElMessage.error('保存失败')
+  } finally {
+    trafficSaving.value = false
+  }
+}
+
 onMounted(() => {
   fetchAdmins()
   loadEmailConfig()
   loadResourceConfig()
+  loadTrafficConfig()
 })
 </script>
 
