@@ -94,7 +94,7 @@
             <el-button 
               type="success" 
               size="small" 
-              @click="requestDownload()"
+              @click="getDownloadLink()"
               :loading="downloadLoading"
             >
               获取
@@ -102,7 +102,7 @@
           </div>
         </div>
         <el-alert
-          title="点击获取按钮后，请到注册用的邮箱内查看教程，如果没有请到垃圾邮件中寻找"
+          title="点击获取按钮后，将在新标签页打开下载链接。链接默认有效期为 60 分钟"
           type="info"
           :closable="false"
           show-icon
@@ -304,12 +304,6 @@ const optimizeStatusText = ref('')
 const generatingSubscription = ref(false)
 const showRenewDialog = ref(false)
 const showHelpDialog = ref(false)
-const tutorialLoading = ref({
-  android: false,
-  windows: false,
-  github: false,
-  'apple-id': false
-})
 const downloadLoading = ref(false)
 const syncLoading = ref(false)
 const syncTimer = ref(null)
@@ -433,43 +427,32 @@ async function generateSubscription() {
 }
 
 /**
- * 请求教程邮件
- * @param {string} type - 教程类型：android 或 windows
+ * 获取下载链接并在新标签页打开
  */
-async function requestTutorial(type) {
-  tutorialLoading.value[type] = true
-  try {
-    const response = await api.user.requestTutorial(type)
-    if (response.code === 0) {
-      ElMessage.success('教程邮件已发送，请到邮箱查看')
-      showHelpDialog.value = false
-    } else {
-      ElMessage.error(response.message)
-    }
-  } catch (error) {
-    console.error('请求教程失败:', error)
-    ElMessage.error('请求教程失败')
-  } finally {
-    tutorialLoading.value[type] = false
+async function getDownloadLink() {
+  if (downloadLoading.value) {
+    ElMessage.info('下载处理中，请在浏览器的下载中查看')
+    return
   }
-}
 
-/**
- * 请求下载链接邮件
- */
-async function requestDownload() {
   downloadLoading.value = true
   try {
-    const response = await api.user.requestDownload()
+    const response = await api.user.getDownloadLink()
     if (response.code === 0) {
-      ElMessage.success('下载链接已发送到邮箱，请查收')
+      const downloadUrl = response.data?.download_url
+      if (!downloadUrl) {
+        ElMessage.error('下载链接为空，请联系管理员')
+        return
+      }
+      window.open(downloadUrl, '_blank', 'noopener')
+      ElMessage.success('下载已开始，请在浏览器的下载中查看')
       showHelpDialog.value = false
     } else {
       ElMessage.error(response.message)
     }
   } catch (error) {
-    console.error('请求下载链接失败:', error)
-    ElMessage.error('请求下载链接失败')
+    console.error('获取下载链接失败:', error)
+    ElMessage.error('获取下载链接失败')
   } finally {
     downloadLoading.value = false
   }

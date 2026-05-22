@@ -484,6 +484,41 @@ class DatabaseManager {
       `);
       logger.info('邮件日志表初始化完成');
 
+      // 资源表（用户端下载资源、管理端资源管理）
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS resources (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(255) NOT NULL,
+          filename VARCHAR(255) NOT NULL,
+          original_name VARCHAR(255) NOT NULL,
+          size BIGINT NOT NULL,
+          mimetype VARCHAR(100),
+          path VARCHAR(500) NOT NULL,
+          download_token VARCHAR(32) UNIQUE NOT NULL,
+          expire_at BIGINT,
+          download_count INTEGER DEFAULT 0,
+          enabled INTEGER DEFAULT 1,
+          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+        )
+      `);
+      logger.info('资源表初始化完成');
+
+      // 资源分发表：以 user_id 为唯一维度，一个用户只保留一条分发记录
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS resource_distributions (
+          id SERIAL PRIMARY KEY,
+          resource_id INTEGER NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          download_token VARCHAR(32) UNIQUE NOT NULL,
+          expire_at BIGINT,
+          download_count INTEGER DEFAULT 0,
+          enabled INTEGER DEFAULT 1,
+          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+        )
+      `);
+      logger.info('资源分发表初始化完成');
+
       // 创建索引
       await this.createIndexes(client);
 
@@ -531,6 +566,13 @@ class DatabaseManager {
       await client.query('CREATE INDEX IF NOT EXISTS idx_email_logs_campaign_id ON email_logs(campaign_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_email_logs_user_id ON email_logs(user_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_email_campaigns_status ON email_campaigns(status)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_resources_download_token ON resources(download_token)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_resources_enabled ON resources(enabled)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_resources_expire_at ON resources(expire_at)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_resource_distributions_resource_id ON resource_distributions(resource_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_resource_distributions_download_token ON resource_distributions(download_token)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_resource_distributions_expire_at ON resource_distributions(expire_at)');
+      await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_distributions_user_id_unique ON resource_distributions(user_id)');
       logger.info('数据库索引创建完成');
     } catch (error) {
       logger.error(`索引创建失败: ${error.message}`);

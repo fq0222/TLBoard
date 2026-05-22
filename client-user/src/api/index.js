@@ -263,20 +263,11 @@ const userApi = {
   },
 
   /**
-   * 请求教程邮件
-   * @param {string} type - 教程类型：android、windows、github、apple-id
+   * 获取 Android-App 下载链接
    * @returns {Promise<Object>} 响应数据
    */
-  requestTutorial(type) {
-    return apiClient.post('/email/tutorial', { type }, { timeout: 30000 })
-  },
-
-  /**
-   * 请求下载链接邮件
-   * @returns {Promise<Object>} 响应数据
-   */
-  requestDownload() {
-    return apiClient.post('/email/download', {}, { timeout: 30000 })
+  getDownloadLink() {
+    return apiClient.post('/download/link', {}, { timeout: 30000 })
   },
 
   /**

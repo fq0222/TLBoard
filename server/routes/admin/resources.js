@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { body, param, query, validationResult } = require('express-validator');
 const { authenticateAdmin } = require('../../middleware/auth-admin');
 const { createLogger } = require('../../utils/logger');
+const { upsertUserDistribution } = require('../../services/resource-distribution-service');
 
 const router = express.Router();
 const logger = createLogger('ADMIN-RESOURCES');
@@ -543,30 +544,21 @@ router.post('/:id/distribute', authenticateAdmin, [
     }
 
     const results = [];
+    let removedDuplicateCount = 0;
     for (const userId of user_ids) {
-      // 检查是否已存在分发记录
-      const existing = await db.prepare(
-        'SELECT * FROM resource_distributions WHERE resource_id = ? AND user_id = ?'
-      ).get(resourceId, userId);
-
-      if (existing) {
-        // 更新现有记录
-        const newToken = generateToken();
-        await db.prepare(
-          'UPDATE resource_distributions SET download_token = ?, expire_at = ?, enabled = 1, download_count = 0 WHERE id = ?'
-        ).run(newToken, expireAt, existing.id);
-        results.push({ user_id: userId, distribution_id: existing.id, action: 'updated' });
-      } else {
-        // 创建新记录
-        const newToken = generateToken();
-        const result = await db.prepare(
-          'INSERT INTO resource_distributions (resource_id, user_id, download_token, expire_at) VALUES (?, ?, ?, ?)'
-        ).run(resourceId, userId, newToken, expireAt);
-        results.push({ user_id: userId, distribution_id: result.lastInsertRowid, action: 'created' });
-      }
+      // 以 user_id 为唯一维度分发；已有记录时更新同一条记录，避免分发列表出现重复用户
+      const result = await upsertUserDistribution({
+        db,
+        resourceId,
+        userId,
+        expireAt,
+        tokenFactory: generateToken
+      });
+      removedDuplicateCount += result.removed_duplicates;
+      results.push({ user_id: userId, distribution_id: result.distribution_id, action: result.action });
     }
 
-    logger.info(`分发资源成功: 资源ID ${resourceId}, 用户数 ${user_ids.length}`);
+    logger.info(`分发资源成功: 资源ID ${resourceId}, 用户数 ${user_ids.length}, 清理重复记录 ${removedDuplicateCount} 条`);
 
     res.json({
       code: 0,
@@ -607,11 +599,15 @@ router.get('/:id/distributions', authenticateAdmin, [
     const db = req.app.locals.db;
 
     const distributions = await db.prepare(`
-      SELECT rd.*, u.email 
-      FROM resource_distributions rd
-      LEFT JOIN users u ON rd.user_id = u.id
-      WHERE rd.resource_id = ?
-      ORDER BY rd.created_at DESC
+      SELECT *
+      FROM (
+        SELECT DISTINCT ON (rd.user_id) rd.*, u.email
+        FROM resource_distributions rd
+        LEFT JOIN users u ON rd.user_id = u.id
+        WHERE rd.resource_id = ?
+        ORDER BY rd.user_id, rd.created_at DESC, rd.id DESC
+      ) latest
+      ORDER BY latest.created_at DESC
     `).all(resourceId);
 
     logger.info(`获取分发列表成功: 资源ID ${resourceId}, 共 ${distributions.length} 条`);

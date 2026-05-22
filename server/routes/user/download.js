@@ -3,10 +3,24 @@ const path = require('path');
 const fs = require('fs');
 const { Transform } = require('stream');
 const { param, validationResult } = require('express-validator');
+const { authenticateUser } = require('../../middleware/auth-user');
 const { createLogger } = require('../../utils/logger');
+const { getSiteBaseUrl } = require('../../utils/site-url');
+const { getOrCreateDownloadLink } = require('../../services/download-link-service');
 
 const router = express.Router();
 const logger = createLogger('USER-DOWNLOAD');
+
+function formatExpireTime(timestamp) {
+  if (!timestamp) {
+    return '无限期';
+  }
+
+  return new Date(Number(timestamp) * 1000).toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour12: false
+  });
+}
 
 // 全局限速器
 class GlobalThrottle {
@@ -88,6 +102,37 @@ class GlobalThrottle {
 
 // 全局限速器实例
 const globalThrottle = new GlobalThrottle();
+
+/**
+ * POST /api/user/download/link
+ * 获取当前用户的 Android-App 下载链接
+ * 未分发时自动分发，已过期时重置有效期，未过期时复用原链接
+ */
+router.post('/link', authenticateUser, async (req, res) => {
+  try {
+    const db = req.app.locals.db;
+    const siteBaseUrl = getSiteBaseUrl(req);
+    const data = await getOrCreateDownloadLink({
+      db,
+      userId: req.user.id,
+      siteBaseUrl
+    });
+
+    logger.info(`获取下载链接成功: 用户 ${req.user.email}, 资源 ${data.resource_name}, 动作 ${data.action}, 过期时间 ${formatExpireTime(data.expire_at)}`);
+    res.json({
+      code: 0,
+      message: 'ok',
+      data
+    });
+  } catch (error) {
+    logger.error(`获取下载链接错误: 用户 ${req.user?.email || 'unknown'}, ${error.message}`);
+    res.json({
+      code: error.code || 500,
+      message: error.message,
+      data: null
+    });
+  }
+});
 
 // 获取资源配置
 async function getResourceConfig(db) {
