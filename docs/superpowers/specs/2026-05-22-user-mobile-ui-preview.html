@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>用户端移动端改版方案预览</title>
+  <style>
+    :root {
+      --bg: #eef3f7;
+      --panel: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --line: #dbe3ec;
+      --dark: #0f172a;
+      --dark-2: #1e293b;
+      --blue: #2563eb;
+      --blue-soft: #eff6ff;
+      --shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+      --radius: 24px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(180deg, #f6f8fb 0%, #edf2f7 100%);
+      color: var(--text);
+    }
+
+    .page {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 32px 20px 60px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #0f172a 0%, #243b53 100%);
+      color: #fff;
+      border-radius: 28px;
+      padding: 28px;
+      box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
+    }
+
+    .hero h1 {
+      margin: 0 0 10px;
+      font-size: 32px;
+    }
+
+    .hero p {
+      margin: 0;
+      color: rgba(255, 255, 255, 0.82);
+      line-height: 1.7;
+    }
+
+    .chips {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    .chip {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      font-size: 12px;
+    }
+
+    .section-title {
+      margin: 32px 0 18px;
+      font-size: 24px;
+    }
+
+    .section-desc {
+      margin: 0 0 20px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(320px, 1fr));
+      gap: 24px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid #e8edf3;
+      border-radius: 28px;
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .panel h2 {
+      margin: 0 0 8px;
+      font-size: 20px;
+    }
+
+    .panel > p {
+      margin: 0 0 18px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .phone {
+      width: 100%;
+      max-width: 390px;
+      margin: 0 auto;
+      background: linear-gradient(180deg, #f4f7fb 0%, #f8fafc 100%);
+      border-radius: 32px;
+      padding: 16px;
+      border: 10px solid #111827;
+      box-shadow: 0 28px 56px rgba(15, 23, 42, 0.16);
+      min-height: 760px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .statusbar {
+      height: 22px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: #475569;
+      margin-bottom: 10px;
+    }
+
+    .screen-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .screen-head h3 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .avatar {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: #dbeafe;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 22px;
+      padding: 16px;
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+      margin-bottom: 14px;
+    }
+
+    .card.dark {
+      background: linear-gradient(135deg, var(--dark) 0%, var(--dark-2) 100%);
+      color: #fff;
+      box-shadow: 0 18px 36px rgba(15, 23, 42, 0.18);
+    }
+
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .tiny {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .dark .tiny {
+      color: rgba(255, 255, 255, 0.72);
+    }
+
+    .title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+
+    .big {
+      font-size: 18px;
+      font-weight: 800;
+      margin-top: 6px;
+    }
+
+    .progress {
+      height: 10px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 12px;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      width: 72%;
+      background: linear-gradient(90deg, #0ea5e9, #22c55e);
+      border-radius: 999px;
+    }
+
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .mini-grid.three {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .mini {
+      background: #f8fafc;
+      border-radius: 14px;
+      padding: 10px;
+      min-height: 72px;
+    }
+
+    .dark .mini {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .feature-box {
+      background: #f8fafc;
+      border-radius: 14px;
+      padding: 12px;
+      font-size: 13px;
+    }
+
+    .plan-card {
+      background: #fff;
+      border: 2px solid #dbeafe;
+      border-radius: 20px;
+      padding: 16px;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+      margin-bottom: 12px;
+    }
+
+    .plan-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .tag {
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      white-space: nowrap;
+    }
+
+    .price-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+      margin-top: 14px;
+    }
+
+    .price {
+      font-size: 32px;
+      font-weight: 900;
+    }
+
+    .buy-btn {
+      margin-top: 14px;
+      background: var(--dark);
+      color: #fff;
+      border-radius: 14px;
+      text-align: center;
+      padding: 12px 0;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .buy-btn.ghost {
+      background: #e2e8f0;
+      color: #64748b;
+    }
+
+    .step-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #0f172a;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+
+    .step-title {
+      display: flex;
+      align-items: center;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .tip-box {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: #fff7ed;
+      color: #9a3412;
+      font-size: 12px;
+      line-height: 1.7;
+      border: 1px solid #fed7aa;
+    }
+
+    .seg-tabs {
+      display: flex;
+      gap: 8px;
+      overflow: auto;
+      margin-bottom: 12px;
+      padding-bottom: 2px;
+    }
+
+    .seg-tab {
+      white-space: nowrap;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: #fff;
+      color: #475569;
+      font-size: 12px;
+    }
+
+    .seg-tab.active {
+      background: #111827;
+      color: #fff;
+    }
+
+    .list {
+      margin-top: 6px;
+    }
+
+    .list-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 4px;
+      border-bottom: 1px solid #eef2f7;
+      font-size: 14px;
+    }
+
+    .list-item:last-child {
+      border-bottom: 0;
+    }
+
+    .danger {
+      color: #ef4444;
+    }
+
+    .bottom-nav {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      background: #fff;
+      border-radius: 18px;
+      box-shadow: 0 -8px 24px rgba(17, 24, 39, 0.08);
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      padding: 10px 8px;
+    }
+
+    .nav-item {
+      text-align: center;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    .nav-item.active {
+      color: #0f172a;
+      font-weight: 700;
+    }
+
+    .summary {
+      margin-top: 28px;
+      background: #fff;
+      border-radius: 24px;
+      padding: 22px;
+      box-shadow: var(--shadow);
+    }
+
+    .summary ul {
+      margin: 10px 0 0;
+      padding-left: 20px;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+
+    @media (max-width: 980px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .page {
+        padding: 20px 14px 40px;
+      }
+
+      .hero h1 {
+        font-size: 26px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="hero">
+      <h1>用户端移动端改版方案预览</h1>
+      <p>本方案采用你刚才选中的 B 风格，也就是“会员面板型 + 卡片运营型”的折中方向。整体目标是让登录后更像成熟 App，未登录套餐页更像移动端购买页。</p>
+      <div class="chips">
+        <div class="chip">底部导航：首页 / 订阅 / 帮助 / 我的</div>
+        <div class="chip">工单入口收进“我的”</div>
+        <div class="chip">移动端优先</div>
+        <div class="chip">不改业务流程，先改页面结构与视觉层级</div>
+      </div>
+    </div>
+
+    <h2 class="section-title">方案一：登录后首页</h2>
+    <p class="section-desc">首页不再堆很多表格和长块内容，而是先展示套餐状态、流量进度和两个最核心动作：复制订阅、续费套餐。这样更适合老用户频繁回访，也更像 App 的“工作台首页”。</p>
+
+    <div class="grid">
+      <div class="panel">
+        <h2>登录后首页</h2>
+        <p>核心关键词：状态优先、动作聚焦、减少滚动、底部导航直达。</p>
+        <div class="phone">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span>5G 100%</span>
+          </div>
+          <div class="screen-head">
+            <div>
+              <div class="tiny">订阅管理</div>
+              <h3>欢迎回来</h3>
+            </div>
+            <div class="avatar"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-top">
+              <div class="title">套餐使用情况</div>
+              <div class="tiny" style="color:#16a34a;">正常</div>
+            </div>
+            <div class="progress"><span></span></div>
+            <div class="mini-grid three">
+              <div class="mini">
+                <div class="tiny">已用</div>
+                <div class="big">118 GB</div>
+              </div>
+              <div class="mini">
+                <div class="tiny">总量</div>
+                <div class="big">200 GB</div>
+              </div>
+              <div class="mini">
+                <div class="tiny">到期</div>
+                <div class="big">长期</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mini-grid">
+            <div class="card dark" style="margin-bottom:0;">
+              <div class="step-title"><span class="step-chip">1</span>一键优选 CF IP</div>
+              <div class="tiny" style="margin-top:10px;">首次使用和重置线路时优先触发</div>
+            </div>
+            <div class="card" style="margin-bottom:0;">
+              <div class="step-title"><span class="step-chip">2</span>生成订阅链接</div>
+              <div class="tiny" style="margin-top:10px;">生成后再复制导入客户端</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="title">订阅使用流程</div>
+            <div class="feature-grid">
+              <div class="feature-box">1. 优选 CF IP</div>
+              <div class="feature-box">2. 生成订阅链接</div>
+              <div class="feature-box">3. 复制到客户端</div>
+              <div class="feature-box">4. 查看教程</div>
+            </div>
+            <div class="tip-box">
+              若用户未先完成 CF IP 优选，点击“生成订阅链接”时不置灰，但需要弹出提示：请先进行 CF IP 优选。生成按钮在发起生成后进入置灰/加载状态，待订阅链接生成完成后才恢复可点击。
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-top">
+              <div class="title">系统公告</div>
+              <div class="tiny">最新 2 条</div>
+            </div>
+            <div class="list">
+              <div class="list-item">
+                <span>客户端更新说明与导入教程</span>
+                <span>›</span>
+              </div>
+              <div class="list-item">
+                <span>节点维护通知与恢复时间</span>
+                <span>›</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bottom-nav">
+            <div class="nav-item active">首页</div>
+            <div class="nav-item">订阅</div>
+            <div class="nav-item">帮助</div>
+            <div class="nav-item">我的</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>未登录套餐展示页</h2>
+        <p>核心关键词：首屏购买感、推荐套餐、移动端筛选标签、卡片内直接购买。</p>
+        <div class="phone">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span>5G 100%</span>
+          </div>
+          <div class="card dark">
+            <div class="tiny">高速稳定 · 多端可用</div>
+            <div class="big">选择适合你的套餐</div>
+            <div class="tiny" style="margin-top:8px;">价格、流量、适用人群和按钮都尽量留在首屏</div>
+            <div class="chips" style="margin-top:12px;">
+              <div class="chip">不限设备</div>
+              <div class="chip">支持 Clash</div>
+              <div class="chip">新手教程</div>
+            </div>
+          </div>
+
+          <div class="seg-tabs">
+            <div class="seg-tab active">推荐</div>
+            <div class="seg-tab">入门</div>
+            <div class="seg-tab">高流量</div>
+            <div class="seg-tab">长期</div>
+          </div>
+
+          <div class="plan-card">
+            <div class="plan-head">
+              <div>
+                <div class="title">轻量套餐</div>
+                <div class="tiny">适合日常轻度使用</div>
+              </div>
+              <div class="tag">推荐</div>
+            </div>
+            <div class="price-row">
+              <div class="price">¥19</div>
+              <div class="tiny">一次购买</div>
+            </div>
+            <div class="mini-grid">
+              <div class="mini">
+                <div class="tiny">流量</div>
+                <div class="big">100 GB</div>
+              </div>
+              <div class="mini">
+                <div class="tiny">有效期</div>
+                <div class="big">长期</div>
+              </div>
+            </div>
+            <div class="tiny" style="margin-top:12px;">适合 1-2 台设备、首次体验用户</div>
+            <div class="buy-btn">立即购买</div>
+          </div>
+
+          <div class="plan-card" style="border-color:#e5e7eb;">
+            <div class="plan-head">
+              <div>
+                <div class="title">高阶套餐</div>
+                <div class="tiny">适合重度和长期用户</div>
+              </div>
+              <div class="tag" style="background:#f8fafc;color:#64748b;">热门</div>
+            </div>
+            <div class="price-row">
+              <div class="price">¥39</div>
+              <div class="tiny">一次购买</div>
+            </div>
+            <div class="mini-grid">
+              <div class="mini">
+                <div class="tiny">流量</div>
+                <div class="big">300 GB</div>
+              </div>
+              <div class="mini">
+                <div class="tiny">有效期</div>
+                <div class="big">长期</div>
+              </div>
+            </div>
+            <div class="buy-btn">立即购买</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>“我的”页</h2>
+        <p>核心关键词：服务聚合、设置感更强、把工单和教程收纳进去，避免底部导航过多。</p>
+        <div class="phone">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span>5G 100%</span>
+          </div>
+          <div class="card dark">
+            <div class="card-top">
+              <div>
+                <div class="tiny">账户中心</div>
+                <div class="big">user@example.com</div>
+              </div>
+              <div class="avatar" style="background:rgba(255,255,255,.18);"></div>
+            </div>
+            <div class="mini-grid">
+              <div class="mini">
+                <div class="tiny">当前套餐</div>
+                <div class="big">轻量套餐</div>
+              </div>
+              <div class="mini">
+                <div class="tiny">账户状态</div>
+                <div class="big">正常</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="title">我的服务</div>
+            <div class="feature-grid">
+              <div class="feature-box">续费套餐</div>
+              <div class="feature-box">工单支持</div>
+              <div class="feature-box">客户端下载</div>
+              <div class="feature-box">使用教程</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="title">常用管理</div>
+            <div class="list">
+              <div class="list-item"><span>订阅链接管理</span><span>›</span></div>
+              <div class="list-item"><span>订单记录</span><span>›</span></div>
+              <div class="list-item"><span>帮助中心</span><span>›</span></div>
+              <div class="list-item"><span class="danger">退出登录</span><span class="danger">›</span></div>
+            </div>
+          </div>
+
+          <div class="bottom-nav">
+            <div class="nav-item">首页</div>
+            <div class="nav-item">订阅</div>
+            <div class="nav-item">帮助</div>
+            <div class="nav-item active">我的</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>订阅页</h2>
+        <p>这里建议单独承接“复制通用订阅 / 复制 Clash 订阅 / 节点列表 / 使用说明”，把现在 Profile 页中过长的订阅内容拆出去。</p>
+        <div class="phone">
+          <div class="statusbar">
+            <span>9:41</span>
+            <span>5G 100%</span>
+          </div>
+          <div class="screen-head">
+            <div>
+              <div class="tiny">链接与节点</div>
+              <h3>订阅管理</h3>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="step-title"><span class="step-chip">1</span>一键优选 CF IP</div>
+            <div class="buy-btn" style="margin-top:12px;">开始优选</div>
+          </div>
+
+          <div class="card">
+            <div class="step-title"><span class="step-chip">2</span>生成订阅链接</div>
+            <div class="buy-btn ghost" style="margin-top:12px;">生成中 / 暂时置灰</div>
+            <div class="tip-box">
+              若未完成步骤 1，点击此按钮时弹出提示“请先进行 CF IP 优选”。生成请求发起后按钮置灰，等订阅链接生成完成后恢复可点击。
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="title">通用订阅</div>
+            <div class="mini" style="margin-top:12px; min-height:auto;">https://domain.com/api/user/sub/xxxxx</div>
+            <div class="buy-btn" style="margin-top:12px;">复制通用订阅</div>
+          </div>
+
+          <div class="card">
+            <div class="title">Clash 订阅</div>
+            <div class="mini" style="margin-top:12px; min-height:auto;">https://domain.com/api/user/sub/xxxxx?clash=1</div>
+            <div class="buy-btn" style="margin-top:12px;">复制 Clash 订阅</div>
+          </div>
+
+          <div class="bottom-nav">
+            <div class="nav-item">首页</div>
+            <div class="nav-item active">订阅</div>
+            <div class="nav-item">帮助</div>
+            <div class="nav-item">我的</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="summary">
+      <h2 style="margin:0 0 8px;">当前推荐的页面结构</h2>
+      <ul>
+        <li>登录后用底部导航替代移动端侧边栏，保留 `首页 / 订阅 / 帮助 / 我的` 四个一级入口。</li>
+        <li>`首页` 做成会员面板型工作台，重点展示套餐状态、流量进度、`CF IP 优选`、`生成订阅链接` 和系统公告。</li>
+        <li>`首页` 删除“服务与帮助”卡片，避免首页内容发散。</li>
+        <li>`订阅` 页聚焦核心动作，只保留 `优选 CF IP` 和 `生成订阅链接` 两个主按钮作为主要操作区。</li>
+        <li>`帮助` 保持内容型页面，移动端强化分类和文章卡片。</li>
+        <li>`我的` 聚合工单、订单、客户端下载、退出登录等服务入口。</li>
+        <li>系统公告不再放在外部独立主入口，而是并入登录后首页，提高曝光。</li>
+        <li>未登录 `首页/套餐页` 改成更强购买导向的移动端卡片布局，卡片内直接购买。</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>
