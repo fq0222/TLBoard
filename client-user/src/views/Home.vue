@@ -82,38 +82,6 @@
         </div>
       </section>
 
-      <section class="announcements-section">
-        <div class="announcements-list">
-          <article
-            v-for="announcement in announcements"
-            :key="announcement.id"
-            class="announcement-item"
-          >
-            <div class="announcement-header">
-              <div class="announcement-title-row">
-                <el-tag v-if="announcement.pinned" type="danger" size="small">置顶</el-tag>
-                <h3 class="announcement-title">{{ announcement.title }}</h3>
-              </div>
-              <span class="announcement-time">{{ formatTime(announcement.created_at) }}</span>
-            </div>
-            <div class="announcement-content" v-html="renderMarkdown(announcement.content)"></div>
-          </article>
-
-          <div v-if="announcements.length === 0" class="empty-tip">
-            暂无公告
-          </div>
-        </div>
-
-        <div v-if="announcementTotal > announcementLimit" class="pagination-container">
-          <el-pagination
-            v-model:current-page="announcementPage"
-            :page-size="announcementLimit"
-            :total="announcementTotal"
-            layout="prev, pager, next"
-            @current-change="handleAnnouncementPageChange"
-          />
-        </div>
-      </section>
     </main>
 
     <footer class="footer">
@@ -128,19 +96,13 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ArrowRight, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { marked } from 'marked'
 import api from '@/api'
 
 const router = useRouter()
 const userStore = useUserStore()
 
 const plans = ref([])
-const announcements = ref([])
 const loading = ref(false)
-
-const announcementPage = ref(1)
-const announcementTotal = ref(0)
-const announcementLimit = 3
 
 const isLoggedIn = computed(() => userStore.isLoggedIn)
 
@@ -174,28 +136,6 @@ async function fetchPlans() {
   } finally {
     loading.value = false
   }
-}
-
-async function fetchAnnouncements() {
-  try {
-    const response = await api.user.getAnnouncements({ page: announcementPage.value, limit: announcementLimit })
-    if (response.code === 0) {
-      announcements.value = response.data.list || []
-      announcementTotal.value = Number(response.data.total) || 0
-    }
-  } catch (error) {
-    console.error('获取公告列表失败:', error)
-  }
-}
-
-function handleAnnouncementPageChange(page) {
-  announcementPage.value = page
-  fetchAnnouncements()
-}
-
-function renderMarkdown(content) {
-  if (!content) return ''
-  return marked(content)
 }
 
 function formatDuration(durationDays) {
@@ -236,19 +176,8 @@ function selectPlan(plan) {
   }
 }
 
-function formatTime(timestamp) {
-  if (!timestamp) return ''
-  const date = new Date(timestamp * 1000)
-  return date.toLocaleDateString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  })
-}
-
 onMounted(() => {
   fetchPlans()
-  fetchAnnouncements()
 })
 </script>
 
@@ -535,134 +464,6 @@ onMounted(() => {
   margin-left: 6px;
 }
 
-.announcements-section {
-  margin-top: 42px;
-}
-
-.announcements-list {
-  border-radius: 24px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 18px 42px rgba(20, 33, 61, 0.06);
-  overflow: hidden;
-}
-
-.announcement-item {
-  padding: 20px 22px;
-  border-bottom: 1px solid rgba(20, 33, 61, 0.06);
-}
-
-.announcement-item:last-child {
-  border-bottom: none;
-}
-
-.announcement-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 12px;
-}
-
-.announcement-title-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.announcement-title {
-  margin: 0;
-  font-size: 18px;
-}
-
-.announcement-time {
-  flex-shrink: 0;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-.announcement-content {
-  color: var(--text-muted);
-  line-height: 1.8;
-}
-
-.announcement-content :deep(h1),
-.announcement-content :deep(h2),
-.announcement-content :deep(h3),
-.announcement-content :deep(h4),
-.announcement-content :deep(h5),
-.announcement-content :deep(h6) {
-  margin: 16px 0 8px;
-  color: var(--text-main);
-}
-
-.announcement-content :deep(p),
-.announcement-content :deep(ul),
-.announcement-content :deep(ol),
-.announcement-content :deep(pre),
-.announcement-content :deep(blockquote),
-.announcement-content :deep(table) {
-  margin-bottom: 12px;
-}
-
-.announcement-content :deep(ul),
-.announcement-content :deep(ol) {
-  padding-left: 20px;
-}
-
-.announcement-content :deep(code) {
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: rgba(20, 33, 61, 0.06);
-}
-
-.announcement-content :deep(pre) {
-  padding: 16px;
-  border-radius: 14px;
-  overflow-x: auto;
-  background: #f7f8fa;
-}
-
-.announcement-content :deep(blockquote) {
-  padding-left: 14px;
-  border-left: 3px solid var(--accent);
-  color: var(--text-muted);
-}
-
-.announcement-content :deep(a) {
-  color: var(--accent-strong);
-}
-
-.announcement-content :deep(table) {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.announcement-content :deep(th),
-.announcement-content :deep(td) {
-  border: 1px solid rgba(20, 33, 61, 0.08);
-  padding: 8px 12px;
-  text-align: left;
-}
-
-.announcement-content :deep(th) {
-  background: #f7f8fa;
-}
-
-.empty-tip {
-  padding: 44px 20px;
-  text-align: center;
-  color: var(--text-muted);
-}
-
-.pagination-container {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 14px;
-  padding: 0 4px;
-}
-
 .footer {
   margin-top: auto;
   padding: 22px 20px 30px;
@@ -731,17 +532,5 @@ onMounted(() => {
     padding: 12px 14px;
   }
 
-  .announcement-item {
-    padding: 18px 16px;
-  }
-
-  .announcement-header {
-    align-items: start;
-    flex-direction: column;
-  }
-
-  .pagination-container {
-    justify-content: center;
-  }
 }
 </style>
