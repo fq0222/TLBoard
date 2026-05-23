@@ -1,132 +1,163 @@
 <template>
   <div class="cf-optimize-container">
-    <div class="page-header">
-      <h1 class="page-title">CF IP 优选</h1>
-      <p class="page-subtitle">在本地测试 Cloudflare IP 延迟，选择最优节点</p>
-    </div>
-    
-    <div class="content-card">
+    <section class="content-card">
       <h2 class="card-title">当前使用的 IP</h2>
       <div class="current-ips">
         <div v-for="(ip, index) in currentIps" :key="index" class="ip-item">
           <span class="ip-address">{{ ip.ip }}</span>
           <el-tag size="small">{{ ip.source === 'default' ? '默认' : '自定义' }}</el-tag>
         </div>
-        <div v-if="currentIps.length === 0" class="empty-tip">暂无自定义 IP，使用默认 IP</div>
+        <div v-if="currentIps.length === 0" class="empty-tip">暂无自定义 IP，当前使用默认 IP。</div>
       </div>
-    </div>
-    
-    <div class="content-card">
-      <h2 class="card-title">IP 池列表</h2>
-      <p class="tip">每次随机展示20个IP（包含至少3个IPv6），点击"开始测试"在浏览器本地测试延迟</p>
-      
+    </section>
+
+    <section class="content-card">
+      <div class="section-head">
+        <h2 class="card-title">IP 池列表</h2>
+        <p class="tip">每次随机展示 20 个 IP，点击开始测试后会在浏览器本地完成延迟测试。</p>
+      </div>
+
       <div class="toolbar">
-        <el-button type="primary" size="large" :loading="testing" @click="startTest">
+        <el-button type="primary" size="large" class="toolbar-button primary-action" :loading="testing" @click="startTest">
           <el-icon><Connection /></el-icon>
           开始测试
         </el-button>
-        
-        <el-button size="large" :disabled="!tested" @click="selectTop5">
+
+        <el-button size="large" class="toolbar-button recommend-action" :disabled="!tested" @click="selectTop5">
           <el-icon><Trophy /></el-icon>
-          选前5（含IPv6）
+          选前 5（含 IPv6）
         </el-button>
-        
-        <el-button size="large" @click="refreshRandom">
+
+        <el-button size="large" class="toolbar-button refresh-action" @click="refreshRandom">
           <el-icon><Refresh /></el-icon>
           随机换一批
         </el-button>
-        
-        <el-button size="large" @click="selectAll">
-          {{ isAllSelected ? '取消全选' : '全选' }}
-        </el-button>
-        
-        <el-button 
-          type="success" 
+
+        <el-button
+          type="success"
           size="large"
-          :disabled="selectedIps.length === 0 || selectedIps.length > 5 || applying"
+          class="toolbar-button apply-action"
+          :disabled="selectedIds.length === 0 || selectedIds.length > 5 || applying"
           :loading="applying"
           @click="applyIps"
         >
           <el-icon><Check /></el-icon>
-          应用选中IP ({{ selectedIps.length }}/5)
+          应用选中 IP（{{ selectedIds.length }}/5）
         </el-button>
       </div>
-      
-      <el-table 
-        :data="sortedIpList" 
-        style="width: 100%"
-        @selection-change="handleSelectionChange"
-        ref="tableRef"
-        :row-class-name="getRowClassName"
-      >
-        <el-table-column type="selection" width="55" />
-        <el-table-column type="index" label="排名" width="70" />
-        <el-table-column prop="ip" label="IP地址">
-          <template #default="scope">
-            <span :class="isIpv6(scope.row.ip) ? 'ipv6-tag' : ''">{{ scope.row.ip }}</span>
-            <el-tag v-if="isIpv6(scope.row.ip)" size="small" type="warning" style="margin-left: 8px;">IPv6</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="延迟" width="200">
-          <template #default="scope">
-            <div class="latency-cell">
-              <span :class="getLatencyClass(scope.row.latency)">
-                {{ formatLatency(scope.row.latency) }}
-              </span>
-              <div v-if="scope.row.testedTimes > 1" class="latency-detail">
-                平均: {{ scope.row.avgLatency }}ms | 丢包: {{ scope.row.packetLoss }}%
+
+      <div class="desktop-table">
+        <el-table :data="sortedIpList" style="width: 100%" :row-class-name="getRowClassName">
+          <el-table-column label="" width="62">
+            <template #default="{ row }">
+              <el-checkbox
+                :model-value="isSelected(row.id)"
+                @change="toggleSelection(row)"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column type="index" label="排名" width="72" />
+          <el-table-column prop="ip" label="IP 地址" min-width="240">
+            <template #default="{ row }">
+              <div class="ip-table-cell">
+                <span :class="['ip-address', { 'ipv6-text': isIpv6(row.ip) }]">{{ row.ip }}</span>
+                <el-tag v-if="isIpv6(row.ip)" size="small" type="warning">IPv6</el-tag>
               </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="延迟" min-width="220">
+            <template #default="{ row }">
+              <div class="latency-cell">
+                <span :class="getLatencyClass(row.latency)">{{ formatLatency(row.latency) }}</span>
+                <div v-if="row.testedTimes > 1" class="latency-detail">
+                  平均: {{ row.avgLatency }}ms | 丢包: {{ row.packetLoss }}%
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag v-if="row.testStatus === 'testing'" type="warning" size="small">测试中</el-tag>
+              <el-tag v-else-if="row.testStatus === 'done'" :type="row.latency > 0 ? 'success' : 'danger'" size="small">
+                {{ row.latency > 0 ? '可用' : '超时' }}
+              </el-tag>
+              <el-tag v-else type="info" size="small">未测试</el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <div class="mobile-ip-list">
+        <article
+          v-for="(ip, index) in sortedIpList"
+          :key="ip.id"
+          class="mobile-ip-card"
+          :class="{ selected: isSelected(ip.id) }"
+        >
+          <div class="mobile-ip-head">
+            <el-checkbox
+              :model-value="isSelected(ip.id)"
+              @change="toggleSelection(ip)"
+            />
+            <span class="mobile-rank">#{{ index + 1 }}</span>
+            <el-tag v-if="isIpv6(ip.ip)" size="small" type="warning">IPv6</el-tag>
+          </div>
+
+          <div class="mobile-ip-address" :class="{ 'ipv6-text': isIpv6(ip.ip) }">{{ ip.ip }}</div>
+
+          <div class="mobile-ip-meta">
+            <div class="mobile-meta-item">
+              <span class="mobile-meta-label">延迟</span>
+              <span :class="getLatencyClass(ip.latency)">{{ formatLatency(ip.latency) }}</span>
             </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="scope">
-            <el-tag v-if="scope.row.testStatus === 'testing'" type="warning" size="small">测试中</el-tag>
-            <el-tag v-else-if="scope.row.testStatus === 'done'" :type="scope.row.latency > 0 ? 'success' : 'danger'" size="small">
-              {{ scope.row.latency > 0 ? '可用' : '超时' }}
-            </el-tag>
-            <el-tag v-else type="info" size="small">待测试</el-tag>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+
+            <div class="mobile-meta-item">
+              <span class="mobile-meta-label">状态</span>
+              <el-tag v-if="ip.testStatus === 'testing'" type="warning" size="small">测试中</el-tag>
+              <el-tag v-else-if="ip.testStatus === 'done'" :type="ip.latency > 0 ? 'success' : 'danger'" size="small">
+                {{ ip.latency > 0 ? '可用' : '超时' }}
+              </el-tag>
+              <el-tag v-else type="info" size="small">未测试</el-tag>
+            </div>
+          </div>
+
+          <div v-if="ip.testedTimes > 1" class="mobile-latency-detail">
+            平均: {{ ip.avgLatency }}ms | 丢包: {{ ip.packetLoss }}%
+          </div>
+        </article>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { Connection, Check, Refresh, Trophy } from '@element-plus/icons-vue'
+import { computed, onMounted, ref } from 'vue'
+import { Check, Connection, Refresh, Trophy } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 
 const TEST_COUNT = 3
 const TEST_TIMEOUT = 5000
 const TEST_INTERVAL = 200
+const MAX_SELECTED = 5
 
 const ipList = ref([])
 const currentIps = ref([])
-const selectedIps = ref([])
+const selectedIds = ref([])
 const testing = ref(false)
 const applying = ref(false)
-const tableRef = ref(null)
 const tested = ref(false)
 
-const isAllSelected = computed(() => ipList.value.length > 0 && selectedIps.value.length === ipList.value.length)
-
-// 排序后的列表：按延迟从低到高，超时放最后
 const sortedIpList = computed(() => {
   return [...ipList.value].sort((a, b) => {
-    // 未测试的放最后
     if (a.testStatus !== 'done' && b.testStatus !== 'done') return 0
     if (a.testStatus !== 'done') return 1
     if (b.testStatus !== 'done') return -1
-    
-    // 超时的放最后
+
     if (a.latency <= 0 && b.latency <= 0) return 0
     if (a.latency <= 0) return 1
     if (b.latency <= 0) return -1
-    
-    // 按延迟排序
+
     return a.latency - b.latency
   })
 })
@@ -135,21 +166,30 @@ function isIpv6(ip) {
   return ip.includes(':')
 }
 
+function isSelected(id) {
+  return selectedIds.value.includes(id)
+}
+
+function buildIpState(ip) {
+  return {
+    ...ip,
+    latency: -1,
+    avgLatency: 0,
+    packetLoss: 100,
+    testedTimes: 0,
+    successTimes: 0,
+    testStatus: 'pending',
+    testResults: []
+  }
+}
+
 async function fetchIpPool() {
   try {
     const response = await api.user.getCfIps()
     if (response.code === 0) {
-      ipList.value = response.data.ips.map(ip => ({
-        ...ip,
-        latency: -1,
-        avgLatency: 0,
-        packetLoss: 100,
-        testedTimes: 0,
-        successTimes: 0,
-        testStatus: 'pending',
-        testResults: []
-      }))
-      currentIps.value = response.data.current_ips
+      ipList.value = (response.data.ips || []).map(buildIpState)
+      currentIps.value = response.data.current_ips || []
+      selectedIds.value = []
       tested.value = false
     }
   } catch (error) {
@@ -164,8 +204,7 @@ async function refreshRandom() {
 
 async function startTest() {
   testing.value = true
-  
-  // 重置所有IP的测试状态
+
   ipList.value.forEach(ip => {
     ip.latency = -1
     ip.avgLatency = 0
@@ -175,62 +214,57 @@ async function startTest() {
     ip.testStatus = 'testing'
     ip.testResults = []
   })
-  
-  // 清空选择
-  if (tableRef.value) {
-    tableRef.value.clearSelection()
-  }
-  
+
+  selectedIds.value = []
+
   await Promise.all(ipList.value.map(ip => testSingleIp(ip)))
-  
+
   testing.value = false
   tested.value = true
   ElMessage.success('测试完成，已按延迟排序')
 }
 
 async function testSingleIp(ipData) {
-  for (let i = 0; i < TEST_COUNT; i++) {
+  for (let i = 0; i < TEST_COUNT; i += 1) {
     try {
       const latency = await pingIp(ipData.ip)
-      ipData.testedTimes++
-      
+      ipData.testedTimes += 1
+
       if (latency > 0) {
-        ipData.successTimes++
+        ipData.successTimes += 1
         ipData.testResults.push(latency)
         ipData.latency = latency
       }
-      
+
       if (ipData.testResults.length > 0) {
         const sum = ipData.testResults.reduce((a, b) => a + b, 0)
         ipData.avgLatency = Math.round(sum / ipData.testResults.length)
         ipData.packetLoss = Math.round((1 - ipData.successTimes / ipData.testedTimes) * 100)
       }
-      
+
       if (i < TEST_COUNT - 1) {
         await new Promise(resolve => setTimeout(resolve, TEST_INTERVAL))
       }
-    } catch (error) {
-      ipData.testedTimes++
+    } catch {
+      ipData.testedTimes += 1
       ipData.packetLoss = Math.round((1 - ipData.successTimes / ipData.testedTimes) * 100)
     }
   }
-  
+
   ipData.testStatus = 'done'
 }
 
 function pingIp(ip) {
   return new Promise((resolve) => {
     const startTime = window.performance.now()
-    // IPv6 地址需要加方括号
     const host = ip.includes(':') ? `[${ip}]` : ip
     const url = `https://${host}:443/cdn-cgi/trace`
-    
     const controller = new AbortController()
     const timeoutId = setTimeout(() => {
       controller.abort()
       resolve(-1)
     }, TEST_TIMEOUT)
-    
+
     fetch(url, {
       mode: 'no-cors',
       signal: controller.signal,
@@ -248,100 +282,77 @@ function pingIp(ip) {
   })
 }
 
-// 选择前5个（必须包含至少1个IPv6）
+function toggleSelection(row) {
+  const exists = isSelected(row.id)
+  if (exists) {
+    selectedIds.value = selectedIds.value.filter(id => id !== row.id)
+    return
+  }
+
+  if (selectedIds.value.length >= MAX_SELECTED) {
+    ElMessage.warning(`最多只能选择 ${MAX_SELECTED} 个 IP`)
+    return
+  }
+
+  selectedIds.value = [...selectedIds.value, row.id]
+}
+
 function selectTop5() {
   if (!tested.value) {
     ElMessage.warning('请先测试延迟')
     return
   }
-  
-  // 获取排序后的可用IP
+
   const availableIps = sortedIpList.value.filter(ip => ip.latency > 0)
-  
   if (availableIps.length === 0) {
-    ElMessage.warning('没有可用的IP')
+    ElMessage.warning('没有可用的 IP')
     return
   }
-  
-  // 分离IPv4和IPv6
+
   const ipv4List = availableIps.filter(ip => !isIpv6(ip.ip))
   const ipv6List = availableIps.filter(ip => isIpv6(ip.ip))
-  
   const selected = []
-  
-  // 优先选择1个IPv6（如果有的话）
+
   if (ipv6List.length > 0) {
     selected.push(ipv6List[0])
   }
-  
-  // 剩余从IPv4中选择，凑够5个
+
   for (const ip of ipv4List) {
-    if (selected.length >= 5) break
-    if (!selected.find(s => s.id === ip.id)) {
+    if (selected.length >= MAX_SELECTED) break
+    if (!selected.find(item => item.id === ip.id)) {
       selected.push(ip)
     }
   }
-  
-  // 如果还不够5个，从剩余IPv6中补充
+
   for (const ip of ipv6List) {
-    if (selected.length >= 5) break
-    if (!selected.find(s => s.id === ip.id)) {
+    if (selected.length >= MAX_SELECTED) break
+    if (!selected.find(item => item.id === ip.id)) {
       selected.push(ip)
     }
   }
-  
-  // 设置选中状态
-  if (tableRef.value) {
-    tableRef.value.clearSelection()
-    selected.forEach(row => {
-      tableRef.value.toggleRowSelection(row, true)
-    })
-  }
-  selectedIps.value = selected
-  
-  ElMessage.success(`已选择前 ${selected.length} 个IP`)
-}
 
-function selectAll() {
-  if (isAllSelected.value) {
-    selectedIps.value = []
-    if (tableRef.value) {
-      tableRef.value.clearSelection()
-    }
-  } else {
-    if (tableRef.value) {
-      tableRef.value.clearSelection()
-      ipList.value.forEach(row => {
-        tableRef.value.toggleRowSelection(row, true)
-      })
-    }
-    selectedIps.value = [...ipList.value]
-  }
-}
-
-function handleSelectionChange(selection) {
-  selectedIps.value = selection
+  selectedIds.value = selected.map(ip => ip.id)
+  ElMessage.success(`已选择前 ${selected.length} 个 IP`)
 }
 
 async function applyIps() {
-  if (selectedIps.value.length === 0) {
+  if (selectedIds.value.length === 0) {
     ElMessage.warning('请至少选择 1 个 IP')
     return
   }
-  
-  if (selectedIps.value.length > 5) {
-    ElMessage.warning('最多只能选择 5 个 IP')
+
+  if (selectedIds.value.length > MAX_SELECTED) {
+    ElMessage.warning(`最多只能选择 ${MAX_SELECTED} 个 IP`)
     return
   }
-  
+
   try {
     applying.value = true
-    const ipIds = selectedIps.value.map(ip => ip.id)
-    const response = await api.user.applyCfIps(ipIds)
-    
+    const response = await api.user.applyCfIps(selectedIds.value)
+
     if (response.code === 0) {
       ElMessage.success(response.data.message)
-      fetchIpPool()
+      await fetchIpPool()
     }
   } catch (error) {
     console.error('应用 IP 失败:', error)
@@ -378,25 +389,274 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.cf-optimize-container { max-width: 1000px; }
-.page-header { margin-bottom: 30px; }
-.page-title { font-size: 28px; color: #333; margin-bottom: 10px; }
-.page-subtitle { color: #666; font-size: 16px; }
-.content-card { background: #fff; border-radius: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); padding: 30px; margin-bottom: 20px; }
-.card-title { font-size: 20px; color: #333; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
-.tip { color: #999; font-size: 14px; margin-bottom: 15px; }
-.toolbar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-.latency-cell { display: flex; flex-direction: column; gap: 4px; }
-.latency-detail { font-size: 12px; color: #999; }
-.latency-pending { color: #999; }
-.latency-timeout { color: #f56c6c; font-weight: bold; }
-.latency-good { color: #67c23a; font-weight: bold; }
-.latency-medium { color: #e6a23c; font-weight: bold; }
-.latency-bad { color: #f56c6c; font-weight: bold; }
-.ipv6-tag { color: #e6a23c; }
-.current-ips { display: flex; flex-wrap: wrap; gap: 10px; }
-.ip-item { display: flex; align-items: center; gap: 10px; padding: 10px 15px; background: #f5f7fa; border-radius: 8px; }
-.ip-address { font-family: monospace; color: #333; }
-.empty-tip { color: #999; font-size: 14px; }
-:deep(.row-good) { background-color: #f0f9eb !important; }
+.cf-optimize-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1000px;
+}
+
+.content-card {
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  padding: 24px;
+}
+
+.section-head {
+  margin-bottom: 18px;
+}
+
+.card-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 20px;
+}
+
+.tip {
+  margin: 10px 0 0;
+  color: #64748b;
+  line-height: 1.7;
+}
+
+.current-ips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.ip-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.ip-address {
+  font-family: Consolas, Monaco, monospace;
+  color: #0f172a;
+  word-break: break-all;
+}
+
+.empty-tip {
+  color: #94a3b8;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.toolbar-button {
+  margin: 0;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 52px;
+  border: none;
+  border-radius: 18px;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.12);
+}
+
+.toolbar-button:deep(span),
+.toolbar-button:deep(.el-icon) {
+  color: #fff;
+}
+
+.toolbar-button.is-disabled {
+  box-shadow: none;
+}
+
+.primary-action {
+  background: linear-gradient(135deg, #60a5fa 0%, #2563eb 100%);
+}
+
+.primary-action:not(.is-disabled):hover,
+.primary-action:not(.is-disabled):focus {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+}
+
+.recommend-action {
+  background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
+}
+
+.recommend-action:not(.is-disabled):hover,
+.recommend-action:not(.is-disabled):focus {
+  background: linear-gradient(135deg, #f59e0b 0%, #b45309 100%);
+}
+
+.refresh-action {
+  background: linear-gradient(135deg, #38bdf8 0%, #0ea5e9 100%);
+}
+
+.refresh-action:not(.is-disabled):hover,
+.refresh-action:not(.is-disabled):focus {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+}
+
+.apply-action {
+  background: linear-gradient(135deg, #4ade80 0%, #0f766e 100%);
+}
+
+.apply-action:not(.is-disabled):hover,
+.apply-action:not(.is-disabled):focus {
+  background: linear-gradient(135deg, #22c55e 0%, #0f766e 100%);
+}
+
+.toolbar-button.is-disabled.primary-action,
+.toolbar-button.is-disabled.recommend-action,
+.toolbar-button.is-disabled.refresh-action,
+.toolbar-button.is-disabled.apply-action {
+  background: linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%);
+}
+
+.desktop-table {
+  display: block;
+}
+
+.mobile-ip-list {
+  display: none;
+}
+
+.ip-table-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ipv6-text {
+  color: #d97706;
+}
+
+.latency-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.latency-detail,
+.mobile-latency-detail {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.latency-pending {
+  color: #94a3b8;
+}
+
+.latency-timeout {
+  color: #ef4444;
+  font-weight: 700;
+}
+
+.latency-good {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.latency-medium {
+  color: #d97706;
+  font-weight: 700;
+}
+
+.latency-bad {
+  color: #ef4444;
+  font-weight: 700;
+}
+
+.mobile-ip-card {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mobile-ip-card + .mobile-ip-card {
+  margin-top: 12px;
+}
+
+.mobile-ip-card.selected {
+  border-color: rgba(34, 197, 94, 0.5);
+  box-shadow: 0 10px 24px rgba(34, 197, 94, 0.1);
+}
+
+.mobile-ip-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mobile-rank {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.mobile-ip-address {
+  margin-top: 12px;
+  color: #0f172a;
+  font-family: Consolas, Monaco, monospace;
+  line-height: 1.7;
+  word-break: break-all;
+}
+
+.mobile-ip-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.mobile-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.mobile-meta-label {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.mobile-latency-detail {
+  margin-top: 12px;
+}
+
+:deep(.row-good) {
+  background-color: #f0fdf4 !important;
+}
+
+@media (max-width: 768px) {
+  .content-card {
+    border-radius: 18px;
+    padding: 18px;
+  }
+
+  .toolbar {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+  }
+
+  .toolbar-button {
+    height: 50px;
+    border-radius: 16px;
+    width: 100%;
+  }
+
+  .desktop-table {
+    display: none;
+  }
+
+  .mobile-ip-list {
+    display: block;
+  }
+}
 </style>

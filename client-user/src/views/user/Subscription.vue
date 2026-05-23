@@ -1,137 +1,477 @@
 <template>
-  <div class="subscription-container" v-loading="loading" element-loading-text="正在同步节点信息，请稍候...">
-    <div class="page-header">
-      <h1 class="page-title">订阅信息</h1>
-      <p class="page-subtitle">查看您的订阅详情和节点信息</p>
-    </div>
-    
-    <div class="content-card">
-      <h2 class="card-title">订阅链接</h2>
-      <div class="subscription-links">
-        <div class="link-group">
-          <span class="link-label">通用订阅：</span>
-          <el-input v-model="subscription.subscription_url" readonly size="large">
-            <template #append>
-              <el-button @click="copyLink(subscription.subscription_url)">复制</el-button>
-            </template>
-          </el-input>
-          <p class="link-tip">适用于 v2rayN、V2rayNG、Shadowrocket、Quantumult X 等</p>
-        </div>
-        <div class="link-group">
-          <span class="link-label">Clash订阅：</span>
-          <el-input v-model="subscription.clash_url" readonly size="large">
-            <template #append>
-              <el-button @click="copyLink(subscription.clash_url)">复制</el-button>
-            </template>
-          </el-input>
-          <p class="link-tip">适用于 Clash、Clash Verge、ClashX、Clash for Windows 等</p>
-        </div>
+  <div class="subscription-container" v-loading="pageLoading">
+    <section class="panel-card action-panel">
+      <div class="step-actions">
+        <button
+          type="button"
+          class="step-action-card optimize-action"
+          :class="{ disabled: actionBusy }"
+          :disabled="actionBusy"
+          @click="startOptimize"
+        >
+          <div class="step-action-index">1</div>
+          <div class="step-action-copy">
+            <div class="step-action-name">一键优选 CF IP</div>
+            <div class="step-action-desc">自动测试并保存当前账号的更优 Cloudflare 节点组合。</div>
+          </div>
+          <el-icon class="step-action-icon"><MagicStick /></el-icon>
+        </button>
+
+        <button
+          type="button"
+          class="step-action-card generate-action"
+          :class="{ disabled: actionBusy }"
+          :disabled="actionBusy"
+          @click="generateSubscription"
+        >
+          <div class="step-action-index">2</div>
+          <div class="step-action-copy">
+            <div class="step-action-name">
+              {{ generatingSubscription ? '生成中...' : '生成订阅链接' }}
+            </div>
+            <div class="step-action-desc">同步节点信息后生成通用订阅和 Clash 订阅链接。</div>
+          </div>
+          <el-icon class="step-action-icon"><Link /></el-icon>
+        </button>
       </div>
-    </div>
-    
-    <div class="content-card">
-      <h2 class="card-title">账户信息</h2>
-      <div class="account-info">
-        <div class="info-item">
-          <span class="info-label">到期时间：</span>
-          <span class="info-value">{{ subscription.expire_text }}</span>
+    </section>
+
+    <section class="content-grid">
+      <article class="panel-card result-card">
+        <div class="section-head">
+          <h2 class="card-title">结果区</h2>
+          <el-tag size="small" :type="cfOptimized ? 'success' : 'warning'">
+            {{ cfOptimized ? '已完成 CF IP 优选' : '未完成 CF IP 优选' }}
+          </el-tag>
         </div>
-        <div class="info-item">
-          <span class="info-label">已用流量：</span>
-          <span class="info-value">{{ subscription.traffic_used_text }}</span>
+
+        <div class="subscription-links">
+          <div class="link-group">
+            <span class="link-label">通用订阅链接</span>
+            <el-input :model-value="subscription.subscription_url || ''" readonly size="large">
+              <template #append>
+                <el-button @click="copyLink(subscription.subscription_url)">复制</el-button>
+              </template>
+            </el-input>
+            <p class="link-tip">适用于 v2rayN、v2rayNG、Shadowrocket、Quantumult X 等客户端。</p>
+          </div>
+
+          <div class="link-group">
+            <span class="link-label">Clash 订阅链接</span>
+            <el-input :model-value="subscription.clash_url || ''" readonly size="large">
+              <template #append>
+                <el-button @click="copyLink(subscription.clash_url)">复制</el-button>
+              </template>
+            </el-input>
+            <p class="link-tip">适用于 Clash、Clash Verge、ClashX、Clash for Windows 等客户端。</p>
+          </div>
         </div>
-        <div class="info-item">
-          <span class="info-label">流量总量：</span>
-          <span class="info-value">{{ subscription.traffic_limit_text }}</span>
+      </article>
+
+      <article class="panel-card nodes-card">
+        <div class="section-head">
+          <h2 class="card-title">节点列表</h2>
         </div>
-        <div class="info-item">
-          <span class="info-label">使用比例：</span>
-          <el-progress 
-            :percentage="subscription.traffic_percent || 0" 
-            :stroke-width="16"
+
+        <div v-if="hasNodes" class="nodes-content">
+          <div class="nodes-table-wrap">
+            <el-table :data="subscription.nodes" style="width: 100%">
+              <el-table-column prop="node_name" label="节点" min-width="150" />
+              <el-table-column prop="address" label="地址" min-width="140" />
+              <el-table-column prop="port" label="端口" width="88" />
+              <el-table-column label="协议" min-width="220">
+                <template #default="{ row }">
+                  <template v-for="tag in parseProtocol(row.protocol)" :key="tag">
+                    <el-tag :type="getTagType(tag)" size="small" class="protocol-tag">{{ tag }}</el-tag>
+                  </template>
+                </template>
+              </el-table-column>
+              <el-table-column prop="remark" label="备注" min-width="140" />
+            </el-table>
+          </div>
+
+          <div class="nodes-mobile-list">
+            <article
+              v-for="node in subscription.nodes"
+              :key="`${node.node_name}-${node.address}-${node.port}`"
+              class="node-mobile-card"
+            >
+              <div class="node-mobile-head">
+                <h3 class="node-mobile-title">{{ node.node_name || '未命名节点' }}</h3>
+                <div class="node-mobile-tags">
+                  <template v-for="tag in parseProtocol(node.protocol)" :key="tag">
+                    <el-tag :type="getTagType(tag)" size="small" class="protocol-tag">{{ tag }}</el-tag>
+                  </template>
+                </div>
+              </div>
+
+              <div class="node-mobile-meta">
+                <div class="node-mobile-row">
+                  <span class="node-mobile-label">地址</span>
+                  <span class="node-mobile-value">{{ node.address || '-' }}</span>
+                </div>
+                <div class="node-mobile-row">
+                  <span class="node-mobile-label">端口</span>
+                  <span class="node-mobile-value">{{ node.port || '-' }}</span>
+                </div>
+                <div class="node-mobile-row">
+                  <span class="node-mobile-label">备注</span>
+                  <span class="node-mobile-value">{{ node.remark || '-' }}</span>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <el-empty v-else description="暂无节点信息" />
+      </article>
+    </section>
+
+    <el-dialog
+      v-model="optimizing"
+      title="CF IP 优选中"
+      :width="optimizeDialogWidth"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+      class="optimize-dialog"
+    >
+      <div class="optimize-dialog-content">
+        <el-alert
+          title="正在进行 CF IP 优选，请稍候..."
+          description="系统会自动测试多个 Cloudflare 节点的延迟并保存最优结果。"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
+        <div class="progress-panel">
+          <el-progress
+            :percentage="optimizeProgress"
+            :stroke-width="18"
             :text-inside="true"
-            style="width: 200px;"
+            :status="optimizeProgress === 100 ? 'success' : ''"
           />
+          <p class="progress-text">{{ optimizeStatusText }}</p>
         </div>
       </div>
-    </div>
-    
-    <div class="content-card">
-      <h2 class="card-title">节点列表</h2>
-      <el-table :data="subscription.nodes" style="width: 100%">
-        <el-table-column prop="node_name" label="节点" min-width="150" />
-        <el-table-column prop="address" label="地址" min-width="120" />
-        <el-table-column prop="port" label="端口" width="80" />
-        <el-table-column label="协议" min-width="200">
-          <template #default="{ row }">
-            <template v-for="tag in parseProtocol(row.protocol)" :key="tag">
-              <el-tag :type="getTagType(tag)" size="small" class="protocol-tag">{{ tag }}</el-tag>
-            </template>
-          </template>
-        </el-table-column>
-        <el-table-column prop="remark" label="备注" />
-      </el-table>
-    </div>
+    </el-dialog>
+
+    <el-dialog
+      v-model="generatingSubscription"
+      title="生成订阅中"
+      :width="optimizeDialogWidth"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+      class="generate-dialog"
+    >
+      <div class="generate-dialog-content">
+        <div class="generate-loading-orb">
+          <el-icon class="generate-loading-icon"><Loading /></el-icon>
+        </div>
+        <h3 class="generate-dialog-title">正在生成订阅链接</h3>
+        <p class="generate-dialog-text">系统正在同步节点信息并生成通用订阅和 Clash 订阅链接，请稍候。</p>
+        <div class="generate-loading-dots" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-/**
- * 订阅信息组件
- * 展示订阅链接、账户信息和节点列表
- */
-
-import { ref, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Link, Loading, MagicStick } from '@element-plus/icons-vue'
+import { useUserStore } from '@/stores/user'
 import api from '@/api'
 
-// 响应式数据
-const subscription = ref({})
-const loading = ref(false)
+const userStore = useUserStore()
 
-/**
- * 获取订阅信息
- */
-async function fetchSubscription() {
+const subscription = ref({})
+const pageLoading = ref(false)
+const generatingSubscription = ref(false)
+const cfOptimized = ref(false)
+const optimizing = ref(false)
+const optimizeProgress = ref(0)
+const optimizeStatusText = ref('')
+const windowWidth = ref(window.innerWidth)
+
+const TEST_COUNT = 3
+const TEST_TIMEOUT = 5000
+const TEST_INTERVAL = 200
+
+const hasNodes = computed(() => Array.isArray(subscription.value.nodes) && subscription.value.nodes.length > 0)
+const actionBusy = computed(() => optimizing.value || generatingSubscription.value)
+const optimizeDialogWidth = computed(() => (windowWidth.value <= 768 ? '94%' : '420px'))
+
+async function fetchPageData() {
   try {
-    loading.value = true
-    const response = await api.user.getSubscription()
-    if (response.code === 0) {
-      subscription.value = response.data
+    pageLoading.value = true
+    const [subscriptionResponse, profileResult] = await Promise.all([
+      api.user.getSubscription(),
+      userStore.fetchUserProfile()
+    ])
+
+    if (subscriptionResponse.code === 0) {
+      subscription.value = subscriptionResponse.data || {}
+    }
+
+    if (profileResult.success) {
+      cfOptimized.value = !!profileResult.data.cf_optimized
     }
   } catch (error) {
-    console.error('获取订阅信息失败:', error)
+    console.error('获取订阅页面数据失败:', error)
   } finally {
-    loading.value = false
+    pageLoading.value = false
   }
 }
 
-/**
- * 复制链接
- * @param {string} link - 链接地址
- */
-function copyLink(link) {
-  if (link) {
-    navigator.clipboard.writeText(link)
+function handleResize() {
+  windowWidth.value = window.innerWidth
+}
+
+async function copyLink(link) {
+  if (!link) {
+    ElMessage.warning('请先生成订阅链接')
+    return
+  }
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(link)
+    } else {
+      fallbackCopyText(link)
+    }
     ElMessage.success('链接已复制到剪贴板')
+  } catch (error) {
+    try {
+      fallbackCopyText(link)
+      ElMessage.success('链接已复制到剪贴板')
+    } catch (fallbackError) {
+      console.error('复制链接失败:', error, fallbackError)
+      ElMessage.error('复制失败，请手动复制')
+    }
   }
 }
 
-/**
- * 解析协议字符串为标签数组
- * @param {string} protocol - 如 "vless+tcp+reality"
- * @returns {string[]} 标签数组，过滤掉 none
- */
+function fallbackCopyText(text) {
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'readonly')
+  textarea.style.position = 'fixed'
+  textarea.style.top = '-9999px'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  textarea.setSelectionRange(0, textarea.value.length)
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+
+  if (!copied) {
+    throw new Error('execCommand copy failed')
+  }
+}
+
+async function generateSubscription() {
+  if (generatingSubscription.value || optimizing.value) {
+    return
+  }
+
+  if (!cfOptimized.value) {
+    ElMessage.warning('请先进行 CF IP 优选')
+    return
+  }
+
+  try {
+    generatingSubscription.value = true
+    const response = await api.user.generateSubscription()
+
+    if (response.code === 0) {
+      subscription.value = {
+        ...subscription.value,
+        subscription_url: response.data.subscription_url,
+        clash_url: response.data.clash_url
+      }
+      ElMessage.success('订阅链接已生成')
+      await fetchPageData()
+    } else {
+      ElMessage.error(response.message || '生成订阅链接失败')
+    }
+  } catch (error) {
+    console.error('生成订阅链接失败:', error)
+    ElMessage.error('生成订阅链接失败')
+  } finally {
+    generatingSubscription.value = false
+  }
+}
+
+async function startOptimize() {
+  if (optimizing.value || generatingSubscription.value) {
+    return
+  }
+
+  try {
+    optimizing.value = true
+    optimizeProgress.value = 0
+    optimizeStatusText.value = '正在获取 IP 列表...'
+
+    const response = await api.user.getCfIps()
+    if (response.code !== 0) {
+      throw new Error('获取 IP 列表失败')
+    }
+
+    const ipPool = response.data.ips
+    if (!ipPool || ipPool.length === 0) {
+      throw new Error('IP 池为空，请联系管理员')
+    }
+
+    const totalIps = ipPool.length
+    let completedIps = 0
+
+    const ipTestData = ipPool.map(item => ({
+      id: item.id,
+      ip: item.ip,
+      latency: -1,
+      successTimes: 0,
+      testedTimes: 0,
+      testResults: []
+    }))
+
+    await Promise.all(ipTestData.map(async (ipData) => {
+      await testSingleIp(ipData)
+      completedIps += 1
+      optimizeProgress.value = 10 + Math.round((completedIps / totalIps) * 70)
+      optimizeStatusText.value = `正在测试第 ${completedIps}/${totalIps} 个 IP...`
+    }))
+
+    ipTestData.forEach(ipData => {
+      if (ipData.testResults.length > 0) {
+        const sum = ipData.testResults.reduce((acc, item) => acc + item, 0)
+        ipData.avgLatency = Math.round(sum / ipData.testResults.length)
+        ipData.packetLoss = Math.round((1 - ipData.successTimes / ipData.testedTimes) * 100)
+      } else {
+        ipData.avgLatency = -1
+        ipData.packetLoss = 100
+      }
+    })
+
+    optimizeProgress.value = 85
+    optimizeStatusText.value = '正在筛选最优 IP...'
+
+    const availableIps = ipTestData
+      .filter(item => item.latency > 0)
+      .sort((a, b) => a.latency - b.latency)
+
+    if (availableIps.length === 0) {
+      throw new Error('所有 IP 测试超时，请检查网络后重试')
+    }
+
+    const ipv4List = availableIps.filter(item => !item.ip.includes(':'))
+    const ipv6List = availableIps.filter(item => item.ip.includes(':'))
+    const selectedIps = []
+
+    if (ipv6List.length > 0) {
+      selectedIps.push(ipv6List[0])
+    }
+
+    for (const ip of ipv4List) {
+      if (selectedIps.length >= 5) break
+      if (!selectedIps.find(selected => selected.id === ip.id)) {
+        selectedIps.push(ip)
+      }
+    }
+
+    for (const ip of ipv6List) {
+      if (selectedIps.length >= 5) break
+      if (!selectedIps.find(selected => selected.id === ip.id)) {
+        selectedIps.push(ip)
+      }
+    }
+
+    optimizeProgress.value = 95
+    optimizeStatusText.value = '正在保存优选结果...'
+
+    const ipIds = selectedIps.map(item => item.id)
+    const applyResponse = await api.user.applyCfIps(ipIds)
+
+    if (applyResponse.code === 0) {
+      optimizeProgress.value = 100
+      optimizeStatusText.value = '优选完成'
+      cfOptimized.value = true
+      await fetchPageData()
+      ElMessage.success(`已成功优选 ${selectedIps.length} 个 IP`)
+    } else {
+      throw new Error(applyResponse.message || '保存优选结果失败')
+    }
+  } catch (error) {
+    console.error('一键优选失败:', error)
+    ElMessage.error(error.message || '优选失败，请重试')
+    optimizeProgress.value = 0
+    optimizeStatusText.value = ''
+  } finally {
+    setTimeout(() => {
+      optimizing.value = false
+    }, 1500)
+  }
+}
+
+async function testSingleIp(ipData) {
+  for (let i = 0; i < TEST_COUNT; i += 1) {
+    try {
+      const latency = await pingIp(ipData.ip)
+      ipData.testedTimes += 1
+
+      if (latency > 0) {
+        ipData.successTimes += 1
+        ipData.testResults.push(latency)
+        ipData.latency = latency
+      }
+
+      if (i < TEST_COUNT - 1) {
+        await new Promise(resolve => setTimeout(resolve, TEST_INTERVAL))
+      }
+    } catch {
+      ipData.testedTimes += 1
+    }
+  }
+}
+
+function pingIp(ip) {
+  return new Promise((resolve) => {
+    const startTime = window.performance.now()
+    const host = ip.includes(':') ? `[${ip}]` : ip
+    const url = `https://${host}:443/cdn-cgi/trace`
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => {
+      controller.abort()
+      resolve(-1)
+    }, TEST_TIMEOUT)
+
+    fetch(url, {
+      mode: 'no-cors',
+      signal: controller.signal,
+      cache: 'no-store'
+    }).then(() => {
+      clearTimeout(timeoutId)
+      const endTime = window.performance.now()
+      resolve(Math.round(endTime - startTime))
+    }).catch(() => {
+      clearTimeout(timeoutId)
+      const endTime = window.performance.now()
+      const elapsed = endTime - startTime
+      resolve(elapsed < 50 ? -1 : Math.round(elapsed))
+    })
+  })
+}
+
 function parseProtocol(protocol) {
   if (!protocol) return []
   return protocol.split('+').filter(tag => tag.toLowerCase() !== 'none')
 }
 
-/**
- * 获取标签类型（颜色）
- * @param {string} tag - 标签文本
- * @returns {string} Element Plus tag type
- */
 function getTagType(tag) {
   const lower = tag.toLowerCase()
   if (lower === 'vless') return 'primary'
@@ -144,93 +484,484 @@ function getTagType(tag) {
   return ''
 }
 
-// 组件挂载时获取数据
 onMounted(() => {
-  fetchSubscription()
+  window.addEventListener('resize', handleResize)
+  fetchPageData()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
 })
 </script>
 
 <style scoped>
 .subscription-container {
-  max-width: 800px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
 }
 
-.page-header {
-  margin-bottom: 30px;
-}
-
-.page-title {
-  font-size: 28px;
-  color: #333;
-  margin-bottom: 10px;
-}
-
-.page-subtitle {
-  color: #666;
-  font-size: 16px;
-}
-
-.content-card {
+.panel-card {
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  padding: 30px;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  padding: 24px;
+  min-width: 0;
+}
+
+.action-panel {
+  padding: 22px;
+}
+
+.step-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.step-action-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 22px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease;
+  appearance: none;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.step-action-card::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: 21px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.18));
+  pointer-events: none;
+}
+
+.step-action-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.72), transparent 34%);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.step-action-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.step-action-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 38px rgba(15, 23, 42, 0.14);
+}
+
+.step-action-card.disabled,
+.step-action-card:disabled {
+  opacity: 0.68;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.optimize-action {
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), transparent 30%),
+    linear-gradient(135deg, rgba(232, 243, 255, 0.92) 0%, rgba(214, 231, 255, 0.78) 100%);
+  border-color: rgba(147, 197, 253, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 12px 28px rgba(59, 130, 246, 0.14);
+}
+
+.generate-action {
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), transparent 30%),
+    linear-gradient(135deg, rgba(234, 255, 244, 0.92) 0%, rgba(214, 248, 226, 0.78) 100%);
+  border-color: rgba(134, 239, 172, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 12px 28px rgba(34, 197, 94, 0.14);
+}
+
+.step-action-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.optimize-action .step-action-index {
+  background: #2563eb;
+}
+
+.generate-action .step-action-index {
+  background: #16a34a;
+}
+
+.step-action-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.step-action-name {
+  color: #0f172a;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.01em;
+}
+
+.step-action-desc {
+  margin-top: 6px;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.step-action-icon {
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.optimize-action .step-action-icon {
+  color: #2563eb;
+}
+
+.generate-action .step-action-icon {
+  color: #16a34a;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 20px;
 }
 
 .card-title {
+  margin: 0;
+  color: #0f172a;
   font-size: 20px;
-  color: #333;
-  margin-bottom: 20px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #eee;
 }
 
 .subscription-links {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
+  min-width: 0;
 }
 
 .link-group {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .link-label {
+  display: block;
   margin-bottom: 8px;
-  color: #333;
-  font-weight: 500;
+  color: #0f172a;
+  font-weight: 600;
 }
 
 .link-tip {
-  margin-top: 8px;
-  color: #999;
+  margin: 8px 0 0;
+  color: #64748b;
   font-size: 13px;
-}
-
-.account-info {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
-}
-
-.info-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.info-label {
-  color: #666;
-  font-weight: 500;
-}
-
-.info-value {
-  color: #333;
+  line-height: 1.6;
 }
 
 .protocol-tag {
   margin-right: 4px;
+  margin-bottom: 4px;
+}
+
+.nodes-table-wrap {
+  width: 100%;
+  min-width: 0;
+}
+
+.nodes-mobile-list {
+  display: none;
+}
+
+.node-mobile-card {
+  padding: 16px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.node-mobile-card + .node-mobile-card {
+  margin-top: 12px;
+}
+
+.node-mobile-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.node-mobile-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 17px;
+  line-height: 1.4;
+}
+
+.node-mobile-tags {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.node-mobile-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.node-mobile-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.node-mobile-label {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.node-mobile-value {
+  color: #0f172a;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.progress-panel {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.progress-text {
+  margin: 10px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.optimize-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 0;
+}
+
+.optimize-dialog-content :deep(.el-alert) {
+  min-width: 0;
+}
+
+.generate-dialog-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+  padding: 20px 8px 12px;
+}
+
+.generate-loading-orb {
+  width: 72px;
+  height: 72px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.16), rgba(15, 118, 110, 0.22));
+  box-shadow: 0 16px 30px rgba(15, 118, 110, 0.14);
+}
+
+.generate-loading-icon {
+  font-size: 34px;
+  color: #0f766e;
+  animation: spin 1.2s linear infinite;
+}
+
+.generate-dialog-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 22px;
+}
+
+.generate-dialog-text {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.8;
+}
+
+.generate-loading-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.generate-loading-dots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #22c55e, #0f766e);
+  animation: dotPulse 1.2s ease-in-out infinite;
+}
+
+.generate-loading-dots span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.generate-loading-dots span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+.optimize-dialog :deep(.el-dialog) {
+  border-radius: 20px;
+  box-sizing: border-box;
+}
+
+.generate-dialog :deep(.el-dialog) {
+  border-radius: 20px;
+  box-sizing: border-box;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dotPulse {
+  0%,
+  80%,
+  100% {
+    transform: scale(0.7);
+    opacity: 0.45;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 1024px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .panel-card,
+  .action-panel {
+    padding: 18px;
+    border-radius: 18px;
+  }
+
+  .step-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .step-action-card {
+    padding: 18px;
+    border-radius: 20px;
+  }
+
+  .step-action-card::before {
+    border-radius: 19px;
+  }
+
+  .step-action-name {
+    font-size: 17px;
+  }
+
+  .step-action-desc {
+    font-size: 13px;
+  }
+
+  .section-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .nodes-table-wrap {
+    display: none;
+  }
+
+  .nodes-mobile-list {
+    display: block;
+  }
+
+  .link-group :deep(.el-input-group) {
+    width: 100%;
+  }
+
+  .optimize-dialog :deep(.el-dialog) {
+    margin-top: 4vh !important;
+  }
+
+  .optimize-dialog :deep(.el-dialog__body) {
+    padding: 16px !important;
+    max-height: 72vh;
+    overflow-y: auto;
+  }
+
+  .optimize-dialog-content {
+    padding: 0;
+  }
+
+  .generate-dialog :deep(.el-dialog) {
+    margin-top: 4vh !important;
+  }
+
+  .generate-dialog :deep(.el-dialog__body) {
+    padding: 16px !important;
+    max-height: 72vh;
+    overflow-y: auto;
+  }
+
+  .generate-dialog-content {
+    padding: 4px 0 0;
+  }
 }
 </style>

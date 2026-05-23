@@ -6,7 +6,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 
-// 路由配置
 const routes = [
   {
     path: '/',
@@ -28,9 +27,15 @@ const routes = [
     children: [
       {
         path: '',
-        name: 'UserProfile',
+        name: 'UserHome',
         component: () => import('@/views/user/Profile.vue'),
-        meta: { title: '个人中心' }
+        meta: { title: '首页' }
+      },
+      {
+        path: 'my',
+        name: 'UserProfile',
+        component: () => import('@/views/user/My.vue'),
+        meta: { title: '我的' }
       },
       {
         path: 'subscription',
@@ -42,7 +47,7 @@ const routes = [
         path: 'cf-optimize',
         name: 'CfOptimize',
         component: () => import('@/views/user/CfOptimize.vue'),
-        meta: { title: 'CF IP优选' }
+        meta: { title: 'CF IP 优选' }
       },
       {
         path: 'tickets',
@@ -90,45 +95,37 @@ const routes = [
   }
 ]
 
-// 创建路由实例
 const router = createRouter({
   history: createWebHistory(),
   routes,
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) {
       return savedPosition
-    } else {
-      return { top: 0 }
     }
+
+    return { top: 0 }
   }
 })
 
-// 全局前置守卫
 router.beforeEach((to, from, next) => {
-  // 设置页面标题
   document.title = to.meta.title ? `${to.meta.title} - 天澜大陆` : '天澜大陆'
-  
-  // 获取用户状态
+
   const userStore = useUserStore()
-  
-  // 检查是否需要登录
+
   if (to.meta.requiresAuth && !userStore.isLoggedIn) {
     next({ name: 'Login', query: { redirect: to.fullPath } })
     return
   }
-  
-  // 检查是否是游客页面（已登录用户不应访问）
+
   if (to.meta.guest && userStore.isLoggedIn) {
-    next({ name: 'UserProfile' })
+    next({ path: '/user' })
     return
   }
-  
+
   next()
 })
 
-// 全局后置守卫
 router.afterEach((to, from) => {
-  // 可以在这里添加页面加载完成后的逻辑
   console.log(`页面跳转: ${from.path} -> ${to.path}`)
 })
 

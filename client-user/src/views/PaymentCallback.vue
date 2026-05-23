@@ -75,10 +75,19 @@ const countdownTimer = ref(null)
 const pollInterval = 5000
 const isPageVisible = ref(true)
 const hiddenTimestamp = ref(null)
+const paymentStartAt = ref(0)
 
 const paymentUrl = computed(() => String(route.query.payment_url || ''))
 const orderId = computed(() => String(route.query.order_id || ''))
 const payType = computed(() => Number(route.query.pay_type || 2))
+
+const paymentSessionKey = computed(() => {
+  if (!orderId.value) {
+    return ''
+  }
+
+  return `payment_callback_session_${orderId.value}`
+})
 
 // 支付方式名称
 const payTypeName = computed(() => {
@@ -91,6 +100,55 @@ const formatCountdown = computed(() => {
   const seconds = countdown.value % 60
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
 })
+
+function setExpiredState(message = '支付超时，请返回重新下单') {
+  clearTimer()
+  clearCountdownTimer()
+  loading.value = false
+  errorMessage.value = message
+  countdown.value = 0
+}
+
+function persistPaymentSession() {
+  if (!paymentSessionKey.value || !paymentStartAt.value) {
+    return
+  }
+
+  sessionStorage.setItem(paymentSessionKey.value, JSON.stringify({
+    startAt: paymentStartAt.value
+  }))
+}
+
+function restorePaymentSession() {
+  const now = Date.now()
+
+  if (!paymentSessionKey.value) {
+    paymentStartAt.value = now
+    countdown.value = 300
+    return
+  }
+
+  try {
+    const cached = sessionStorage.getItem(paymentSessionKey.value)
+    const startAt = cached ? Number(JSON.parse(cached).startAt) : 0
+    paymentStartAt.value = startAt > 0 ? startAt : now
+  } catch (error) {
+    console.error('恢复支付会话失败:', error)
+    paymentStartAt.value = now
+  }
+
+  const elapsedSeconds = Math.floor((now - paymentStartAt.value) / 1000)
+  countdown.value = Math.max(0, 300 - elapsedSeconds)
+  persistPaymentSession()
+}
+
+function clearPaymentSession() {
+  if (!paymentSessionKey.value) {
+    return
+  }
+
+  sessionStorage.removeItem(paymentSessionKey.value)
+}
 
 /**
  * 根据支付链接生成二维码
@@ -128,6 +186,11 @@ async function checkPaymentStatus() {
     return
   }
 
+  if (countdown.value <= 0 && !paymentSuccess.value) {
+    setExpiredState()
+    return
+  }
+
   try {
     const response = await api.user.getPublicOrderStatus(orderId.value)
     if (response.code !== 0) {
@@ -138,6 +201,7 @@ async function checkPaymentStatus() {
     if (status === 'paid') {
       paymentSuccess.value = true
       loading.value = false
+      clearPaymentSession()
       await tryAutoLogin()
 
       timer.value = setTimeout(() => {
@@ -147,8 +211,8 @@ async function checkPaymentStatus() {
     }
 
     if (status === 'expired') {
-      errorMessage.value = '订单已过期，请返回重新下单'
-      loading.value = false
+      clearPaymentSession()
+      setExpiredState('支付超时，请返回重新下单')
       return
     }
 
@@ -172,8 +236,7 @@ function handleVisibilityChange() {
     }
     // 检查倒计时是否已结束
     if (countdown.value <= 0) {
-      clearCountdownTimer()
-      clearTimer()
+      setExpiredState()
     } else {
       checkPaymentStatus()
     }
@@ -228,6 +291,11 @@ async function tryAutoLogin() {
  * 保持即时反馈，不受定时轮询间隔限制
  */
 function retryCheck() {
+  if (countdown.value <= 0) {
+    setExpiredState()
+    return
+  }
+
   errorMessage.value = ''
   checkPaymentStatus()
 }
@@ -266,9 +334,14 @@ function startCountdown() {
 }
 
 onMounted(() => {
+  restorePaymentSession()
   generateQrCode()
-  checkPaymentStatus()
-  startCountdown()
+  if (countdown.value <= 0) {
+    setExpiredState()
+  } else {
+    checkPaymentStatus()
+    startCountdown()
+  }
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 

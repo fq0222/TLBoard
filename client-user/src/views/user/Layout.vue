@@ -1,65 +1,48 @@
 <template>
   <div class="user-layout">
-    <!-- 移动端顶部栏 -->
-    <header class="mobile-header">
-      <button class="menu-btn" @click="toggleSidebar">
-        <el-icon :size="24"><Expand /></el-icon>
-      </button>
-      <h1 class="mobile-title">用户中心</h1>
-    </header>
-
-    <!-- 遮罩层 -->
-    <div 
-      v-if="sidebarOpen" 
-      class="sidebar-overlay" 
-      @click="closeSidebar"
-    />
-
-    <!-- 侧边栏 -->
-    <aside class="sidebar" :class="{ 'sidebar-open': sidebarOpen }">
+    <aside class="sidebar">
       <div class="sidebar-header">
         <h2 class="sidebar-title">用户中心</h2>
-        <button class="close-btn" @click="closeSidebar">
-          <el-icon><Close /></el-icon>
-        </button>
       </div>
-      
+
       <nav class="sidebar-nav">
-        <router-link to="/user" class="nav-item" exact-active-class="active" @click="closeSidebar">
-          <el-icon><User /></el-icon>
-          <span>个人中心</span>
+        <router-link to="/user" class="nav-item" exact-active-class="active">
+          <el-icon><House /></el-icon>
+          <span>首页</span>
         </router-link>
-        <router-link 
-          v-if="subscriptionReady" 
-          to="/user/subscription" 
-          class="nav-item" 
-          active-class="active" 
-          @click="closeSidebar"
+        <router-link to="/user/my" class="nav-item" active-class="active">
+          <el-icon><User /></el-icon>
+          <span>我的</span>
+        </router-link>
+        <router-link
+          v-if="subscriptionReady"
+          to="/user/subscription"
+          class="nav-item"
+          active-class="active"
         >
           <el-icon><Link /></el-icon>
-          <span>订阅信息</span>
+          <span>订阅</span>
         </router-link>
-        <router-link 
-          v-if="subscriptionReady" 
-          to="/user/cf-optimize" 
-          class="nav-item" 
-          active-class="active" 
-          @click="closeSidebar"
+        <router-link
+          v-if="subscriptionReady"
+          to="/user/cf-optimize"
+          class="nav-item"
+          active-class="active"
         >
           <el-icon><Connection /></el-icon>
-          <span>CF IP优选</span>
+          <span>IP 优选</span>
         </router-link>
-        <router-link to="/user/tickets" class="nav-item" active-class="active" @click="closeSidebar">
+        <router-link to="/user/tickets" class="nav-item" active-class="active">
           <el-icon><ChatDotRound /></el-icon>
-          <span>工单支持</span>
+          <span>工单</span>
           <span v-if="unreadTicketCount > 0" class="badge"></span>
         </router-link>
-        <router-link to="/user/help" class="nav-item" active-class="active" @click="closeSidebar">
+        <router-link to="/user/help" class="nav-item" active-class="active">
           <el-icon><QuestionFilled /></el-icon>
-          <span>帮助中心</span>
+          <span>帮助</span>
         </router-link>
       </nav>
-      
+
       <div class="sidebar-footer">
         <el-button type="danger" plain @click="handleLogout">
           <el-icon><SwitchButton /></el-icon>
@@ -67,24 +50,41 @@
         </el-button>
       </div>
     </aside>
-    
-    <!-- 主要内容 -->
+
     <main class="main-content">
       <router-view />
     </main>
+
+    <nav class="bottom-nav">
+      <router-link
+        v-for="item in mobileNavItems"
+        :key="item.to"
+        :to="item.to"
+        class="bottom-nav-item"
+        :class="{ active: isMobileNavActive(item) }"
+      >
+        <el-icon :size="20">
+          <component :is="item.icon" />
+        </el-icon>
+        <span>{{ item.label }}</span>
+      </router-link>
+    </nav>
   </div>
 </template>
 
 <script setup>
-/**
- * 用户布局组件
- * 提供侧边栏导航和内容区域
- */
-
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { User, Link, Connection, SwitchButton, ChatDotRound, Expand, Close, QuestionFilled } from '@element-plus/icons-vue'
+import {
+  ChatDotRound,
+  Connection,
+  House,
+  Link,
+  QuestionFilled,
+  SwitchButton,
+  User
+} from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import api from '@/api'
 
@@ -92,33 +92,31 @@ const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const unreadTicketCount = ref(0)
-const sidebarOpen = ref(false)
 
-// 使用 computed 从 store 中获取 subscription_ready，确保与 Profile 组件同步
 const subscriptionReady = computed(() => userStore.userInfo?.subscription_ready || false)
 
-// 监听路由变化，切换导航时刷新未读数量
-watch(() => route.path, () => {
-  fetchUnreadCount()
-})
+const mobileNavItems = [
+  { key: 'home', label: '首页', to: '/user', icon: House },
+  { key: 'subscription', label: '订阅', to: '/user/subscription', icon: Link },
+  { key: 'help', label: '帮助', to: '/user/help', icon: QuestionFilled },
+  { key: 'my', label: '我的', to: '/user/my', icon: User }
+]
 
-/**
- * 切换侧边栏显示状态
- */
-function toggleSidebar() {
-  sidebarOpen.value = !sidebarOpen.value
+watch(
+  () => route.path,
+  () => {
+    fetchUnreadCount()
+  }
+)
+
+function isMobileNavActive(item) {
+  if (item.to === '/user') {
+    return route.path === '/user'
+  }
+
+  return route.path === item.to || route.path.startsWith(`${item.to}/`)
 }
 
-/**
- * 关闭侧边栏
- */
-function closeSidebar() {
-  sidebarOpen.value = false
-}
-
-/**
- * 获取未读工单数量
- */
 async function fetchUnreadCount() {
   try {
     const response = await api.user.getTicketUnreadCount()
@@ -130,21 +128,14 @@ async function fetchUnreadCount() {
   }
 }
 
-/**
- * 处理退出登录
- */
 async function handleLogout() {
   try {
-    await ElMessageBox.confirm(
-      '确定要退出登录吗？',
-      '提示',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    
+    await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+
     userStore.logout()
     router.push('/')
   } catch {
@@ -164,8 +155,7 @@ onMounted(() => {
   background: #f5f7fa;
 }
 
-/* 移动端顶部栏 - 桌面端隐藏 */
-.mobile-header {
+.bottom-nav {
   display: none;
 }
 
@@ -185,21 +175,13 @@ onMounted(() => {
 .sidebar-header {
   padding: 20px;
   border-bottom: 1px solid #eee;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
 }
 
 .sidebar-title {
+  margin: 0;
   font-size: 20px;
   color: #409eff;
   text-align: center;
-  flex: 1;
-}
-
-/* 关闭按钮 - 桌面端隐藏 */
-.close-btn {
-  display: none;
 }
 
 .sidebar-nav {
@@ -247,106 +229,65 @@ onMounted(() => {
   padding: 20px;
 }
 
-/* ========== 平板端适配 (768px - 1024px) ========== */
 @media (max-width: 1024px) {
   .sidebar {
     width: 200px;
   }
-  
+
   .main-content {
     margin-left: 200px;
   }
 }
 
-/* ========== 移动端适配 (< 768px) ========== */
 @media (max-width: 768px) {
-  /* 显示移动端顶部栏 */
-  .mobile-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  .sidebar {
+    display: none;
+  }
+
+  .main-content {
+    margin-left: 0;
+    width: 100%;
+    min-width: 0;
+    padding: 16px 16px calc(84px + env(safe-area-inset-bottom)) 16px;
+    overflow-x: hidden;
+  }
+
+  .bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 56px;
-    background: #fff;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    padding: 0 16px;
-    z-index: 200;
-  }
-
-  .menu-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    border: none;
-    background: none;
-    cursor: pointer;
-    border-radius: 8px;
-    color: #333;
-  }
-
-  .menu-btn:hover {
-    background: #f5f7fa;
-  }
-
-  .mobile-title {
-    font-size: 18px;
-    color: #409eff;
-    font-weight: 600;
-  }
-
-  /* 遮罩层 */
-  .sidebar-overlay {
-    position: fixed;
-    top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 299;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    background: rgba(255, 255, 255, 0.96);
+    border-top: 1px solid #e4e7ed;
+    backdrop-filter: blur(12px);
+    z-index: 220;
   }
 
-  /* 侧边栏 - 移动端默认隐藏 */
-  .sidebar {
-    transform: translateX(-100%);
-    transition: transform 0.3s ease;
-    width: 280px;
-    z-index: 300;
-  }
-
-  /* 侧边栏打开状态 */
-  .sidebar.sidebar-open {
-    transform: translateX(0);
-  }
-
-  /* 显示关闭按钮 */
-  .close-btn {
+  .bottom-nav-item {
+    position: relative;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
-    border: none;
-    background: none;
-    cursor: pointer;
-    border-radius: 6px;
-    color: #666;
+    gap: 4px;
+    min-height: 52px;
+    border-radius: 12px;
+    color: #606266;
+    text-decoration: none;
+    transition: color 0.2s ease, background 0.2s ease;
   }
 
-  .close-btn:hover {
-    background: #f5f7fa;
+  .bottom-nav-item span {
+    font-size: 12px;
+    line-height: 1;
   }
 
-  /* 主内容区域 */
-  .main-content {
-    margin-left: 0;
-    padding: 72px 16px 20px;
-    width: 100%;
-    overflow-x: hidden;
+  .bottom-nav-item.active {
+    color: #409eff;
+    background: #ecf5ff;
   }
 }
 </style>

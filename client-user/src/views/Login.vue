@@ -1,126 +1,188 @@
 <template>
   <div class="login-container">
-    <div class="login-card">
-      <div class="login-header">
-        <h1 class="login-title">{{ isRegisterMode ? '注册并支付' : '用户登录' }}</h1>
-        <p class="login-subtitle">
-          {{ isRegisterMode ? '完成注册后即可发起套餐支付' : '登录您的账户管理订阅' }}
-        </p>
-      </div>
-
-      <div
-        v-if="isRegisterMode && selectedPlanId"
-        class="plan-info-card"
+    <div
+      class="login-shell"
+      :class="{ 'register-layout': isRegisterMode }"
+    >
+      <section
+        class="login-card"
+        :class="{ 'register-card': isRegisterMode }"
       >
-        <h3 class="plan-info-title">购买套餐</h3>
-        <div class="plan-info-details">
-          <div class="plan-info-item">
-            <span class="plan-info-label">套餐名称：</span>
-            <span class="plan-info-value">{{ planInfo.name }}</span>
+        <div class="login-card-head">
+          <h2>{{ isRegisterMode ? '填写账号信息' : '欢迎回来' }}</h2>
+          <p v-if="!isRegisterMode">输入账号密码后进入个人中心。</p>
+        </div>
+
+        <el-form
+          ref="formRef"
+          :model="form"
+          :rules="formRules"
+          class="login-form"
+          @submit.prevent="handleSubmit"
+        >
+          <el-form-item prop="email">
+            <el-input
+              v-model="form.email"
+              placeholder="请输入邮箱"
+              prefix-icon="Message"
+              size="large"
+            />
+          </el-form-item>
+
+          <el-form-item prop="password">
+            <el-input
+              v-model="form.password"
+              type="password"
+              placeholder="请输入密码"
+              prefix-icon="Lock"
+              size="large"
+              show-password
+              @keyup.enter="handleSubmit"
+            />
+          </el-form-item>
+
+          <p v-if="isRegisterMode" class="password-tip">
+            密码需至少 8 位，并同时包含字母和数字
+          </p>
+
+          <el-form-item v-if="isRegisterMode" prop="confirmPassword">
+            <el-input
+              v-model="form.confirmPassword"
+              type="password"
+              placeholder="请再次输入密码"
+              prefix-icon="Lock"
+              size="large"
+              show-password
+              @keyup.enter="handleSubmit"
+            />
+          </el-form-item>
+
+          <div v-if="isRegisterMode" class="pay-section">
+            <div class="pay-section-head">
+              <div>
+                <h3>支付方式</h3>
+              </div>
+            </div>
+
+            <el-form-item prop="pay_type" class="pay-form-item">
+              <el-radio-group v-model="form.pay_type" class="pay-type-group">
+                <label
+                  class="pay-option"
+                  :class="{ 'is-selected': form.pay_type === 2 }"
+                >
+                  <el-radio :label="2" class="pay-radio">
+                    <span class="pay-option-main">
+                      <span class="pay-icon alipay">支</span>
+                      <span class="pay-copy">
+                        <strong>支付宝</strong>
+                      </span>
+                    </span>
+                  </el-radio>
+                </label>
+
+                <label
+                  class="pay-option"
+                  :class="{ 'is-selected': form.pay_type === 1 }"
+                >
+                  <el-radio :label="1" class="pay-radio">
+                    <span class="pay-option-main">
+                      <span class="pay-icon wechat">微</span>
+                      <span class="pay-copy">
+                        <strong>微信支付</strong>
+                      </span>
+                    </span>
+                  </el-radio>
+                </label>
+              </el-radio-group>
+            </el-form-item>
           </div>
-          <div class="plan-info-item">
-            <span class="plan-info-label">价格：</span>
-            <span class="plan-info-value price">¥{{ planInfo.price }}</span>
+
+          <el-form-item>
+            <el-button
+              type="primary"
+              size="large"
+              class="login-btn"
+              :loading="loading"
+              :disabled="isRegisterMode && planInfo.is_soldout"
+              @click="handleSubmit"
+            >
+              {{ isRegisterMode && planInfo.is_soldout ? '套餐已售罄' : (isRegisterMode ? '提交并前往支付' : '登录') }}
+            </el-button>
+          </el-form-item>
+        </el-form>
+
+        <div class="login-footer">
+          <p v-if="isRegisterMode">
+            已有账户？
+            <el-button text type="primary" @click="switchToLogin">直接登录</el-button>
+          </p>
+          <p v-else>
+            还没有账户？
+            <router-link to="/" class="link">返回首页选择套餐</router-link>
+          </p>
+        </div>
+      </section>
+
+      <section
+        class="login-aside"
+        :class="{ 'register-aside': isRegisterMode }"
+      >
+        <span v-if="isRegisterMode" class="aside-badge">确认订单</span>
+        <h1 v-if="!isRegisterMode" class="login-title">登录您的账号</h1>
+        <p v-if="!isRegisterMode" class="login-subtitle">请使用已激活账号登录，未完成购买和激活的账号暂时无法登录。</p>
+
+        <div
+          v-if="isRegisterMode && selectedPlanId"
+          class="plan-info-card"
+        >
+          <div class="order-head">
+            <h2 class="order-title">{{ planInfo.name }}</h2>
+            <div class="order-price">
+              <span class="price-symbol">¥</span>
+              <strong>{{ planInfo.price }}</strong>
+            </div>
           </div>
-          <div class="plan-info-item">
-            <span class="plan-info-label">流量：</span>
-            <span class="plan-info-value">{{ planInfo.traffic }}</span>
+
+          <div class="order-metrics">
+            <div class="order-metric">
+              <span>流量</span>
+              <strong>{{ planInfo.traffic }}</strong>
+            </div>
+            <div class="order-metric">
+              <span>时长</span>
+              <strong>{{ planInfo.duration }}</strong>
+            </div>
           </div>
-          <div class="plan-info-item">
-            <span class="plan-info-label">有效期：</span>
-            <span class="plan-info-value">{{ planInfo.duration }}</span>
+
+          <div v-if="planInfo.is_soldout" class="sold-out-warning">
+            该套餐已售罄，暂时无法继续创建订单
           </div>
         </div>
-        <div v-if="planInfo.is_soldout" class="sold-out-warning">该套餐已售罄</div>
-      </div>
 
-      <el-form
-        ref="formRef"
-        :model="form"
-        :rules="formRules"
-        class="login-form"
-        @submit.prevent="handleSubmit"
-      >
-        <el-form-item prop="email">
-          <el-input
-            v-model="form.email"
-            placeholder="请输入邮箱"
-            prefix-icon="Message"
-            size="large"
-          />
-        </el-form-item>
-
-        <el-form-item prop="password">
-          <el-input
-            v-model="form.password"
-            type="password"
-            placeholder="请输入密码"
-            prefix-icon="Lock"
-            size="large"
-            show-password
-            @keyup.enter="handleSubmit"
-          />
-        </el-form-item>
-
-        <p v-if="isRegisterMode" class="password-tip">
-          密码需至少 8 位，并同时包含字母和数字
-        </p>
-
-        <el-form-item v-if="isRegisterMode" prop="confirmPassword">
-          <el-input
-            v-model="form.confirmPassword"
-            type="password"
-            placeholder="请再次输入密码"
-            prefix-icon="Lock"
-            size="large"
-            show-password
-            @keyup.enter="handleSubmit"
-          />
-        </el-form-item>
-
-        <el-form-item v-if="isRegisterMode" prop="pay_type">
-          <el-radio-group v-model="form.pay_type" class="pay-type-group">
-            <el-radio-button :label="2">支付宝</el-radio-button>
-            <el-radio-button :label="1">微信</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-
-        <el-form-item>
-          <el-button
-            type="primary"
-            size="large"
-            class="login-btn"
-            :loading="loading"
-            :disabled="isRegisterMode && planInfo.is_soldout"
-            @click="handleSubmit"
-          >
-            {{ isRegisterMode && planInfo.is_soldout ? '套餐已售罄' : (isRegisterMode ? '提交并前往支付' : '登录') }}
-          </el-button>
-        </el-form-item>
-      </el-form>
-
-      <div class="login-footer">
-        <p v-if="isRegisterMode">
-          已有账户？
-          <el-button text type="primary" @click="switchToLogin">直接登录</el-button>
-        </p>
-        <p v-else>
-          还没有账户？
-          <router-link to="/" class="link">选择套餐注册</router-link>
-        </p>
-      </div>
+        <div v-if="!isRegisterMode" class="aside-tips">
+          <div class="aside-tip">
+            <span class="tip-index">1</span>
+            <div>
+              <strong>激活后才能登录</strong>
+              <p>购买套餐并完成支付后，系统才会自动激活账号，随后可使用填写的邮箱和密码登录。</p>
+            </div>
+          </div>
+          <div class="aside-tip">
+            <span class="tip-index">2</span>
+            <div>
+              <strong>未付款前无法使用</strong>
+              <p>如果订单尚未支付完成，账号不会立即开通，请先完成付款并等待页面回调。</p>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup>
-/**
- * 登录页组件
- * 处理用户登录与注册支付流程
- */
-
 import { computed, reactive, ref } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus'
 
@@ -140,7 +202,7 @@ const planInfo = computed(() => ({
   name: route.query.plan_name || '未知套餐',
   price: route.query.plan_price || '0.00',
   traffic: route.query.plan_traffic || '0 B',
-  duration: Number(route.query.plan_duration) === 0 ? '无限期' : (route.query.plan_duration || '0') + ' 天',
+  duration: Number(route.query.plan_duration) === 0 ? '不限时' : `${route.query.plan_duration || '0'} 天`,
   is_soldout: route.query.plan_soldout === '1'
 }))
 
@@ -153,13 +215,8 @@ const form = reactive({
   pay_type: 1
 })
 
-// 注册场景的密码规则与后端保持一致：至少 8 位，且必须包含字母和数字
 const passwordPattern = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/
 
-/**
- * 校验密码复杂度
- * 登录模式只校验非空，注册模式额外校验复杂度规则
- */
 function validatePassword(rule, value, callback) {
   if (!value) {
     callback(new Error('请输入密码'))
@@ -174,10 +231,6 @@ function validatePassword(rule, value, callback) {
   callback()
 }
 
-/**
- * 校验确认密码
- * 仅在注册模式下启用
- */
 function validateConfirmPassword(rule, value, callback) {
   if (!isRegisterMode.value) {
     callback()
@@ -219,7 +272,6 @@ async function handleSubmit() {
     loading.value = true
 
     if (isRegisterMode.value) {
-      // 注册成功后立即跳转到支付等待页，并缓存登录信息用于支付完成后的自动登录
       const result = await userStore.registerAndPay({
         email: form.email,
         password: form.password,
@@ -249,7 +301,6 @@ async function handleSubmit() {
       return
     }
 
-    // 非注册模式按普通登录流程处理
     const result = await userStore.login({
       email: form.email,
       password: form.password
@@ -280,135 +331,479 @@ function switchToLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 20px;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.22), transparent 28%),
+    linear-gradient(135deg, #f4f3ed 0%, #eef4f2 48%, #f8f8fb 100%);
 }
 
-.login-card {
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+.login-shell {
   width: 100%;
-  max-width: 420px;
-  padding: 40px;
+  max-width: 1120px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 420px);
+  gap: 24px;
+  align-items: stretch;
 }
 
-.login-header {
-  text-align: center;
-  margin-bottom: 24px;
+.login-aside,
+.login-card {
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(20, 33, 61, 0.08);
+  box-shadow: 0 24px 60px rgba(20, 33, 61, 0.08);
+}
+
+.login-aside {
+  padding: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.aside-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0b5f58;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .login-title {
-  font-size: 28px;
-  color: #333;
-  margin-bottom: 10px;
+  margin: 0;
+  font-size: clamp(32px, 4vw, 44px);
+  line-height: 1.08;
+  color: #14213d;
 }
 
 .login-subtitle {
-  color: #666;
-  font-size: 16px;
-  margin: 0;
-}
-
-.plan-alert {
-  margin-bottom: 20px;
+  margin: -8px 0 0;
+  color: #5f6c8d;
+  font-size: 15px;
+  line-height: 1.8;
 }
 
 .plan-info-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 24px;
+  border-radius: 24px;
+  padding: 22px;
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.18), transparent 30%),
+    linear-gradient(145deg, #102542 0%, #173d39 100%);
   color: #fff;
 }
 
-.plan-info-title {
-  font-size: 18px;
-  margin: 0 0 16px 0;
-  text-align: center;
-  opacity: 0.9;
-}
-
-.plan-info-details {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+.order-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
 }
 
-.plan-info-item {
+.order-title {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.order-price {
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  align-items: baseline;
+  gap: 4px;
+  color: #f7c66b;
 }
 
-.plan-info-label {
+.order-price strong {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.order-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.order-metric {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.order-metric span {
+  display: block;
+  margin-bottom: 8px;
   font-size: 12px;
-  opacity: 0.8;
-  margin-bottom: 4px;
+  opacity: 0.74;
 }
 
-.plan-info-value {
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.plan-info-value.price {
-  font-size: 24px;
-  color: #ffd700;
+.order-metric strong {
+  font-size: 17px;
 }
 
 .sold-out-warning {
-  margin-top: 12px;
-  padding: 8px 12px;
-  background: rgba(255, 77, 79, 0.2);
-  border: 1px solid rgba(255, 77, 79, 0.4);
-  border-radius: 6px;
-  text-align: center;
-  font-size: 14px;
-  color: #ffa39e;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(245, 108, 108, 0.18);
+  border: 1px solid rgba(245, 108, 108, 0.3);
+  color: #ffd0d0;
+  font-size: 13px;
+}
+
+.aside-tips {
+  display: grid;
+  gap: 12px;
+}
+
+.aside-tip {
+  display: flex;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: #f7f8fa;
+  border: 1px solid rgba(20, 33, 61, 0.05);
+}
+
+.tip-index {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #0f766e;
+  color: #fff;
+  font-weight: 700;
+}
+
+.aside-tip strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #14213d;
+  font-size: 15px;
+}
+
+.aside-tip p {
+  margin: 0;
+  color: #5f6c8d;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.login-card {
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.login-card-head {
+  margin-bottom: 28px;
+}
+
+.login-card-head h2 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  color: #14213d;
+}
+
+.login-card-head p {
+  margin: 0;
+  color: #5f6c8d;
+  line-height: 1.7;
 }
 
 .login-form {
-  margin-bottom: 20px;
+  margin-bottom: 28px;
 }
 
 .password-tip {
-  margin: -8px 0 16px;
-  color: #909399;
+  margin: -6px 0 16px;
+  color: #76839f;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.7;
+}
+
+.pay-section {
+  margin: 8px 0 24px;
+  padding: 18px;
+  border-radius: 22px;
+  background: #f8fafc;
+  border: 1px solid rgba(20, 33, 61, 0.06);
+}
+
+.pay-section-head h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #14213d;
+}
+
+.pay-section-head p {
+  margin: 6px 0 0;
+  color: #5f6c8d;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.pay-form-item {
+  margin: 16px 0 0;
 }
 
 .pay-type-group {
   width: 100%;
-  display: flex;
+  display: grid;
+  gap: 12px;
 }
 
-.pay-type-group :deep(.el-radio-button) {
-  flex: 1;
+.pay-option {
+  display: block;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1.5px solid rgba(20, 33, 61, 0.08);
+  background: #fff;
+  transition: 0.25s ease;
+  cursor: pointer;
 }
 
-.pay-type-group :deep(.el-radio-button__inner) {
+.pay-option.is-selected {
+  border-color: rgba(15, 118, 110, 0.38);
+  background: rgba(15, 118, 110, 0.05);
+  box-shadow: 0 14px 28px rgba(15, 118, 110, 0.08);
+}
+
+.pay-radio {
   width: 100%;
+  margin-right: 0;
+}
+
+.pay-radio :deep(.el-radio__label) {
+  width: 100%;
+  padding-left: 10px;
+}
+
+.pay-option-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pay-icon {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pay-icon.alipay {
+  background: linear-gradient(135deg, #1677ff, #0958d9);
+}
+
+.pay-icon.wechat {
+  background: linear-gradient(135deg, #07c160, #06ad56);
+}
+
+.pay-copy {
+  display: flex;
+  flex-direction: column;
+}
+
+.pay-copy strong {
+  color: #14213d;
+  font-size: 15px;
 }
 
 .login-btn {
   width: 100%;
-  height: 50px;
-  font-size: 18px;
+  height: 52px;
+  border-radius: 16px;
+  border: none;
+  font-size: 16px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #0f766e 0%, #115e59 100%);
 }
 
 .login-footer {
   text-align: center;
-  color: #666;
+  color: #5f6c8d;
 }
 
 .link {
-  color: #409eff;
+  color: #0f766e;
   text-decoration: none;
 }
 
 .link:hover {
   text-decoration: underline;
+}
+
+@media (max-width: 1024px) {
+  .login-shell {
+    grid-template-columns: 1fr;
+    max-width: 700px;
+  }
+}
+
+@media (max-width: 768px) {
+  .login-container {
+    padding: 10px;
+    align-items: flex-start;
+  }
+
+  .login-shell {
+    gap: 10px;
+  }
+
+  .login-aside,
+  .login-card {
+    border-radius: 20px;
+  }
+
+  .login-aside {
+    padding: 16px 14px;
+    gap: 12px;
+  }
+
+  .register-layout .login-aside {
+    order: -1;
+  }
+
+  .login-subtitle {
+    font-size: 14px;
+  }
+
+  .plan-info-card {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .order-head {
+    gap: 8px;
+  }
+
+  .order-title {
+    font-size: 22px;
+  }
+
+  .order-price strong {
+    font-size: 28px;
+  }
+
+  .order-metrics {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .order-metric {
+    padding: 12px 14px;
+  }
+
+  .aside-tip {
+    padding: 14px 16px;
+    border-radius: 18px;
+  }
+
+  .login-card {
+    padding: 18px 14px;
+    justify-content: flex-start;
+  }
+
+  .register-card {
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  .login-card-head {
+    margin-bottom: 16px;
+  }
+
+  .login-card-head h2 {
+    font-size: 22px;
+    margin-bottom: 4px;
+  }
+
+  .login-form {
+    margin-bottom: 14px;
+  }
+
+  .password-tip {
+    margin: -8px 0 10px;
+    font-size: 12px;
+  }
+
+  .pay-section {
+    margin: 4px 0 16px;
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .pay-section-head h3 {
+    font-size: 16px;
+  }
+
+  .pay-form-item {
+    margin-top: 12px;
+  }
+
+  .pay-type-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .pay-option {
+    padding: 10px 12px;
+    border-radius: 16px;
+  }
+
+  .pay-radio :deep(.el-radio) {
+    align-items: center;
+  }
+
+  .pay-radio :deep(.el-radio__label) {
+    padding-left: 8px;
+  }
+
+  .pay-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    font-size: 14px;
+  }
+
+  .pay-copy strong {
+    font-size: 14px;
+  }
+
+  .pay-option-main {
+    gap: 8px;
+  }
+
+  .login-btn {
+    height: 48px;
+    border-radius: 14px;
+  }
+
+  .login-footer p {
+    margin: 0;
+    font-size: 13px;
+  }
+
+  .register-aside .aside-badge {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
 }
 </style>
