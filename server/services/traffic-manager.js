@@ -10,6 +10,29 @@ const logger = createLogger('TRAFFIC-MANAGER');
 
 const DEFAULT_TRAFFIC_USAGE_MULTIPLIER = 1.0;
 
+function formatTrafficForLog(bytes) {
+  if (bytes === null || bytes === undefined || bytes === '') {
+    return '0 B (0 B)';
+  }
+
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0 B (0 B)';
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let size = value;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  const formattedSize = unitIndex === 0 ? `${size}` : size.toFixed(2);
+  return `${formattedSize} ${units[unitIndex]} (${value} B)`;
+}
+
 async function getTrafficUsageMultiplier(db) {
   try {
     const row = await db.prepare("SELECT value FROM system_settings WHERE key = 'traffic_usage_multiplier'").get();
@@ -176,9 +199,9 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
 
         if (increment > 0) {
           logger.info(
-            `用户流量增量: email=${user.email}, 已用流量=${user.traffic_used || 0}, ` +
-            `上次流量=${lastSyncTraffic}, 当前流量=${currentTraffic}, 本次增量=${rawIncrement}, ` +
-            `倍率=${trafficUsageMultiplier}, 倍率后增量=${increment}`
+            `用户流量增量: email=${user.email}, 已用流量=${formatTrafficForLog(user.traffic_used || 0)}, ` +
+            `上次流量=${formatTrafficForLog(lastSyncTraffic)}, 当前流量=${formatTrafficForLog(currentTraffic)}, 本次增量=${formatTrafficForLog(rawIncrement)}, ` +
+            `倍率=${trafficUsageMultiplier}, 倍率后增量=${formatTrafficForLog(increment)}`
           );
         }
 
@@ -426,5 +449,6 @@ module.exports = {
   updateTrafficInDatabase,
   checkAndDisableOverLimitUsers,
   syncDisableStatusToXui,
-  getTrafficUsageMultiplier
+  getTrafficUsageMultiplier,
+  formatTrafficForLog
 };
