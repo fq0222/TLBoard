@@ -17,6 +17,21 @@ const { createLogger } = require('../utils/logger');
 const logger = createLogger('ORDER-SERVICE');
 
 /**
+ * 清理用户单个节点的原始订阅模板缓存
+ * @param {Object} db - 数据库实例
+ * @param {number} userId - 用户 ID
+ * @param {number} serverId - 服务器 ID
+ * @param {number} inboundId - inbound ID
+ * @returns {Promise<void>}
+ */
+async function clearSubscriptionSourceCache(db, userId, serverId, inboundId) {
+  await db.prepare(`
+    DELETE FROM user_subscription_sources
+    WHERE user_id = ? AND server_id = ? AND inbound_id = ?
+  `).run(userId, serverId, inboundId);
+}
+
+/**
  * 为用户在单个节点上生成独立的 UUID 和 sub_id
  * @returns {object} { uuid, subId }
  */
@@ -84,6 +99,7 @@ async function ensureNodeConfig(db, user, server, inbound, existingClient = null
   `).run(user.id, server.id, inbound.id, uuid, subId);
 
   logger.info(`保存用户节点配置: user=${user.email}, server=${server.id}, inbound=${inbound.id}, uuid=${uuid}, sub_id=${subId}`);
+  await clearSubscriptionSourceCache(db, user.id, server.id, inbound.id);
   return { uuid, subId };
 }
 

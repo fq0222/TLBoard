@@ -17,11 +17,11 @@ const logger = createLogger('XUI-SYNC');
 async function syncServerNodes(db, server) {
   try {
     logger.info(`开始同步服务器 ${server.name} 的节点信息`);
-    
+
     const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
-    
+
     const inboundsResult = await xuiService.getInbounds();
-    
+
     if (!inboundsResult.success) {
       logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${inboundsResult.message}`);
       return { success: false, message: inboundsResult.message };
@@ -29,26 +29,27 @@ async function syncServerNodes(db, server) {
 
     // 删除旧节点
     await db.prepare('DELETE FROM xui_nodes WHERE server_id = $1').run(server.id);
-    
+
     // 插入新节点
     for (const inbound of inboundsResult.data) {
       const settings = typeof inbound.settings === 'string' ? inbound.settings : JSON.stringify(inbound.settings || {});
       const streamSettings = typeof inbound.streamSettings === 'string' ? inbound.streamSettings : JSON.stringify(inbound.streamSettings || {});
       const clientStats = inbound.clientStats || [];
-      
+
       await db.prepare(`
         INSERT INTO xui_nodes (server_id, inbound_id, remark, port, protocol, settings, stream_settings, user_count, online_count)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       `).run(server.id, inbound.id, inbound.remark, inbound.port, inbound.protocol, settings, streamSettings, clientStats.length, 0);
-      
+
       logger.info(`节点 ${inbound.remark}: inbound_id ${inbound.id}`);
     }
-    
+
     logger.info(`同步服务器 ${server.name} 完成，${inboundsResult.data.length} 个节点`);
-    
-    return { 
-      success: true, 
-      nodeCount: inboundsResult.data.length 
+
+    return {
+      success: true,
+      serverId: server.id,
+      nodeCount: inboundsResult.data.length
     };
   } catch (error) {
     logger.error(`同步服务器 ${server.name} 错误: ${error.message}`);
@@ -75,7 +76,7 @@ async function syncAllServers(db) {
     }
 
     logger.info(`开始同步 ${servers.length} 台服务器`);
-    
+
     let syncedCount = 0;
     for (const server of servers) {
       const result = await syncServerNodes(db, server);
@@ -85,11 +86,11 @@ async function syncAllServers(db) {
     }
 
     logger.info(`同步完成，成功 ${syncedCount}/${servers.length} 台`);
-    
-    return { 
-      success: true, 
-      syncedCount, 
-      totalCount: servers.length 
+
+    return {
+      success: true,
+      syncedCount,
+      totalCount: servers.length
     };
   } catch (error) {
     logger.error(`同步所有服务器错误: ${error.message}`);

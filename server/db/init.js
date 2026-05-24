@@ -330,6 +330,26 @@ class DatabaseManager {
       `);
       logger.info('用户订阅缓存表初始化完成');
 
+      // 用户原始订阅模板缓存表（存储每个用户在每个节点上的原始订阅模板）
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS user_subscription_sources (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          server_id INTEGER NOT NULL,
+          inbound_id INTEGER NOT NULL,
+          sub_id VARCHAR(50) NOT NULL DEFAULT '',
+          remark VARCHAR(255) NOT NULL DEFAULT '',
+          protocol VARCHAR(50) NOT NULL DEFAULT '',
+          original_link TEXT NOT NULL DEFAULT '',
+          node_fingerprint VARCHAR(255) NOT NULL DEFAULT '',
+          server_fingerprint VARCHAR(255) NOT NULL DEFAULT '',
+          fetched_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+          UNIQUE(user_id, server_id, inbound_id)
+        )
+      `);
+      logger.info('用户原始订阅模板缓存表初始化完成');
+
       // 3X-UI 同步任务队列表
       await client.query(`
         CREATE TABLE IF NOT EXISTS xui_sync_tasks (
@@ -581,6 +601,8 @@ class DatabaseManager {
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_inbound_id ON user_node_configs(inbound_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_sub_id ON user_node_configs(sub_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_id ON user_subscriptions(user_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscription_sources_user_id ON user_subscription_sources(user_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscription_sources_server_id ON user_subscription_sources(server_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_xui_sync_tasks_status_retry ON xui_sync_tasks(status, next_retry_at)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_xui_sync_tasks_user_id ON xui_sync_tasks(user_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_email_logs_campaign_id ON email_logs(campaign_id)');
