@@ -1,7 +1,7 @@
 /**
  * 定时任务管理
- * 集中管理所有定时任务，方便维护
- * 
+ * 集中管理所有后台定时任务，方便维护、启动和统一清理。
+ *
  * 任务配置表：
  * +------------------------+----------------+----------------+------------------+
  * | 任务名称               | 启动时执行     | 首次延迟       | 执行间隔         |
@@ -10,6 +10,7 @@
  * | 删除过期订单           | 是             | 5 分钟         | 1 小时           |
  * | 清理僵尸用户           | 是             | 2 分钟         | 30 分钟          |
  * | 3X-UI 用户同步         | 是             | 1 分钟         | 4 小时           |
+ * | 3X-UI 同步重试队列     | 是             | 30 秒          | 1 分钟           |
  * | 流量同步               | 是             | 10 分钟        | 1 小时           |
  * | 工单自动关闭           | 是             | 3 分钟         | 1 小时           |
  * | 释放过期名额           | 否             | 无             | 每天 5:00        |
@@ -17,15 +18,16 @@
  * | 清理邮件日志           | 否             | 无             | 每天 3:00        |
  * | 3X-UI 数据库备份       | 否             | 无             | 每天 4:00        |
  * +------------------------+----------------+----------------+------------------+
- * 
+ *
  * 任务说明：
  * - 标记过期订单：将超过 30 分钟未支付的 pending 订单标记为 expired
  * - 删除过期订单：删除超过 1 小时的 expired 订单
  * - 清理僵尸用户：删除未支付且超过 30 分钟的用户（enabled=0, payment_count=0）
- * - 3X-UI 用户同步：确保所有已付费用户都在 3X-UI 节点中
+ * - 3X-UI 用户同步：确保所有已付费用户都在 3X-UI 节点中，并修复 sub_id、flow、流量上限等状态
+ * - 3X-UI 同步重试队列：处理注册、续费、启用/禁用等同步失败后的补偿任务
  * - 流量同步：从 3X-UI 服务器同步用户流量数据到本地数据库
- * - 工单自动关闭：关闭用户已读后超过24小时无新回复的 pending 工单
- * - 释放过期名额：释放流量用完超过3天且未续费的用户名额
+ * - 工单自动关闭：关闭用户已读后超过 24 小时无新回复的 pending 工单
+ * - 释放过期名额：释放流量用完超过 3 天且未续费的用户名额
  * - 邮件群发：处理待发送的邮件群发任务，每日限额 200 封
  * - 清理邮件日志：清理超过 30 天的邮件发送日志
  * - 3X-UI 数据库备份：备份所有 3X-UI 服务器的 x-ui.db 到 server/backupDB
@@ -34,6 +36,8 @@
 const cron = require('node-cron');
 const XuiService = require('../services/xui-service');
 const trafficManager = require('../services/traffic-manager');
+const orderService = require('../services/order-service');
+const xuiSyncTaskService = require('../services/xui-sync-task-service');
 const { processCampaigns, cleanLogs } = require('./email-campaign');
 const { registerXuiDbBackupJob } = require('./backupDB');
 const { createLogger } = require('../utils/logger');
@@ -44,9 +48,12 @@ const logger = createLogger('JOBS');
 const intervals = [];
 const cronTasks = [];
 
+// 3X-UI 同步重试队列使用进程内锁，避免上一轮超时未结束时并发启动下一轮
+let isXuiSyncTaskRunning = false;
+
 /**
  * 注册标记过期订单任务
- * 将超过30分钟未支付的 pending 订单标记为 expired
+ * 启动时立即执行一次，之后每 10 分钟执行一次。
  * @param {Object} db - 数据库实例
  */
 function registerMarkExpiredJob(db) {
@@ -63,6 +70,7 @@ function registerMarkExpiredJob(db) {
 
 /**
  * 执行标记过期订单
+ * 将超过 30 分钟未支付的 pending 订单标记为 expired。
  * @param {Object} db - 数据库实例
  */
 async function runMarkExpired(db) {
@@ -84,7 +92,7 @@ async function runMarkExpired(db) {
 
 /**
  * 注册删除过期订单任务
- * 删除超过1小时的 expired 订单
+ * 启动后延迟 5 分钟执行第一次，之后每 1 小时执行一次。
  * @param {Object} db - 数据库实例
  */
 function registerDeleteExpiredJob(db) {
@@ -103,6 +111,7 @@ function registerDeleteExpiredJob(db) {
 
 /**
  * 执行删除过期订单
+ * 删除超过 1 小时的 expired 订单。
  * @param {Object} db - 数据库实例
  */
 async function runDeleteExpired(db) {
@@ -124,7 +133,7 @@ async function runDeleteExpired(db) {
 
 /**
  * 注册清理僵尸用户任务
- * 删除未支付且超过30分钟的用户（enabled=0, payment_count=0）
+ * 启动后延迟 2 分钟执行第一次，之后每 30 分钟执行一次。
  * @param {Object} db - 数据库实例
  */
 function registerCleanZombieUsersJob(db) {
@@ -143,6 +152,7 @@ function registerCleanZombieUsersJob(db) {
 
 /**
  * 执行清理僵尸用户
+ * 删除未支付且超过 30 分钟的用户（enabled=0, payment_count=0）。
  * @param {Object} db - 数据库实例
  */
 async function runCleanZombieUsers(db) {
@@ -165,10 +175,11 @@ async function runCleanZombieUsers(db) {
 }
 
 /**
- * 同步用户到3X-UI服务器
+ * 同步一台 3X-UI 服务器上的用户状态
+ * 负责补添加缺失用户、修复 sub_id、补充 direct 节点 flow，并巡检补偿已存在用户的流量上限、到期时间和启用状态。
  * @param {Object} db - 数据库实例
- * @param {Object} server - 服务器信息
- * @param {Array} users - 需要同步的用户列表
+ * @param {Object} server - 3X-UI 服务器配置
+ * @param {Array} users - 需要巡检同步的用户列表
  */
 async function syncUsersToServer(db, server, users) {
   try {
@@ -345,9 +356,40 @@ async function syncUsersToServer(db, server, users) {
             logger.warn(`补充 flow 失败: user=${user.email}, inbound=${inbound.id}, error=${updateResult.message}`);
           }
         }
+
+        // 巡检补偿：已存在用户也要对齐流量上限、到期时间和启用状态
+        const expectedTotalGB = Number(user.traffic_limit || 0);
+        const actualTotalGB = Number(xuiClient.totalGB || 0);
+        const expectedExpiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
+        const actualExpiryTime = Number(xuiClient.expiryTime || 0);
+        const expectedEnabled = user.enabled === 1;
+        const actualEnabled = xuiClient.enable !== false;
+
+        if (
+          actualTotalGB !== expectedTotalGB ||
+          actualExpiryTime !== expectedExpiryTime ||
+          actualEnabled !== expectedEnabled
+        ) {
+          const updateOpts = {
+            subId: dbConfig.sub_id,
+            totalGB: expectedTotalGB / (1024 * 1024 * 1024),
+            expiryTime: expectedExpiryTime,
+            enabled: expectedEnabled
+          };
+          if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+            updateOpts.flow = xuiClient.flow || 'xtls-rprx-vision';
+          }
+
+          logger.info(`3X-UI 用户状态不一致，补同步: user=${user.email}, inbound=${inbound.id}, totalGB=${actualTotalGB}->${expectedTotalGB}, expiryTime=${actualExpiryTime}->${expectedExpiryTime}, enabled=${actualEnabled}->${expectedEnabled}`);
+          const updateResult = await xuiService.updateClient(inbound.id, nodeEmail, updateOpts);
+          if (updateResult.success) {
+            logger.info(`补同步用户状态成功: user=${user.email}, inbound=${inbound.id}`);
+          } else {
+            logger.warn(`补同步用户状态失败: user=${user.email}, inbound=${inbound.id}, error=${updateResult.message}`);
+          }
+        }
       }
     }
-
     if (syncCount > 0) {
       logger.info(`服务器 ${server.name} 同步完成，新增 ${syncCount} 个用户`);
     }
@@ -357,8 +399,8 @@ async function syncUsersToServer(db, server, users) {
 }
 
 /**
- * 注册3X-UI用户同步任务
- * 每4小时检查一次，确保所有已付费用户都在3X-UI节点中
+ * 注册 3X-UI 用户同步任务
+ * 启动后延迟 1 分钟执行第一次，之后每 4 小时执行一次。
  * @param {Object} db - 数据库实例
  */
 function registerXuiSyncJob(db) {
@@ -376,8 +418,25 @@ function registerXuiSyncJob(db) {
 }
 
 /**
+ * 注册 3X-UI 同步重试队列 worker
+ * 首次延迟 30 秒执行，之后每 1 分钟处理一次到期 pending 任务；具体重试间隔由 xui_sync_tasks.next_retry_at 控制。
+ * @param {Object} db - 数据库实例
+ */
+function registerXuiSyncTaskJob(db) {
+  setTimeout(async () => {
+    await runXuiSyncTasks(db);
+  }, 30 * 1000);
+
+  const interval = setInterval(async () => {
+    await runXuiSyncTasks(db);
+  }, 60 * 1000);
+  intervals.push(interval);
+  logger.info('3X-UI 同步重试队列 worker 已注册（每 1 分钟执行一次）');
+}
+
+/**
  * 注册流量同步任务
- * 每1小时从3X-UI服务器同步用户流量数据到本地数据库
+ * 启动后延迟 10 分钟执行第一次，之后每 1 小时执行一次。
  * @param {Object} db - 数据库实例
  */
 function registerTrafficSyncJob(db) {
@@ -395,7 +454,108 @@ function registerTrafficSyncJob(db) {
 }
 
 /**
- * 执行3X-UI用户同步
+ * 获取队列任务执行时的最新用户同步快照
+ *
+ * 队列 payload 是创建任务时的快照，续费后可能已经过期。
+ * 真实执行前必须重新读取 users 表，避免旧任务把新流量上限覆盖回旧值。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} task - 同步任务
+ * @param {Object} payload - 任务 payload
+ * @returns {Promise<Object|null>} 最新用户信息
+ */
+async function getLatestUserForSyncTask(db, task, payload) {
+  const userId = task.user_id || payload.user?.id;
+  if (!userId) return null;
+
+  const user = await db.prepare(`
+    SELECT id, email, subscription_token, enabled, traffic_limit, expire_at
+    FROM users
+    WHERE id = ?
+  `).get(userId);
+
+  if (!user) {
+    return null;
+  }
+
+  const payloadUser = payload.user || {};
+  if (
+    Number(payloadUser.traffic_limit || 0) !== Number(user.traffic_limit || 0) ||
+    Number(payloadUser.expire_at || 0) !== Number(user.expire_at || 0)
+  ) {
+    logger.info(`3X-UI 同步队列任务使用最新用户状态: task=${task.id}, user=${user.email}, traffic_limit=${payloadUser.traffic_limit || 0}->${user.traffic_limit || 0}, expire_at=${payloadUser.expire_at || 0}->${user.expire_at || 0}`);
+  }
+
+  return user;
+}
+
+/**
+ * 执行 3X-UI 同步重试队列
+ * 根据任务类型分发到用户同步或启用/禁用同步逻辑；handler 返回 success=false 时，队列服务会自动安排下一次重试。
+ * @param {Object} db - 数据库实例
+ */
+async function runXuiSyncTasks(db) {
+  if (isXuiSyncTaskRunning) {
+    logger.info('3X-UI 同步重试队列上一轮仍在执行，本轮跳过');
+    return;
+  }
+
+  isXuiSyncTaskRunning = true;
+  const startTime = Date.now();
+  let result = { processed: 0, success: 0, failed: 0, finalFailed: 0 };
+  let hasExecutableTasks = false;
+  let status = 'failed';
+
+  try {
+    result = await xuiSyncTaskService.processDueTasks(db, async task => {
+      const payload = task.payload_data || {};
+
+      if (
+        task.task_type === xuiSyncTaskService.TASK_TYPES.INITIAL_USER_SYNC ||
+        task.task_type === xuiSyncTaskService.TASK_TYPES.RENEW_SYNC ||
+        task.task_type === xuiSyncTaskService.TASK_TYPES.USER_SYNC
+      ) {
+        const currentUser = await getLatestUserForSyncTask(db, task, payload);
+        if (!currentUser) {
+          logger.warn(`3X-UI 同步队列任务对应用户不存在，跳过任务: task=${task.id}, user=${task.user_id || payload.user?.id || 'unknown'}`);
+          return { success: true, message: '用户不存在，任务已跳过' };
+        }
+        return orderService.syncUserToXuiServers(db, currentUser, payload.plan || {});
+      }
+
+      if (task.task_type === xuiSyncTaskService.TASK_TYPES.ENABLE_SYNC) {
+        const ok = await trafficManager.syncDisableStatusToXui(db, task.user_id, false);
+        return { success: ok, message: ok ? 'ok' : '同步启用状态失败' };
+      }
+
+      if (task.task_type === xuiSyncTaskService.TASK_TYPES.DISABLE_SYNC) {
+        const ok = await trafficManager.syncDisableStatusToXui(db, task.user_id, true);
+        return { success: ok, message: ok ? 'ok' : '同步禁用状态失败' };
+      }
+
+      return { success: false, message: `未知任务类型: ${task.task_type}` };
+    }, {
+      onStart: tasks => {
+        hasExecutableTasks = true;
+        logger.info(`开始执行 3X-UI 同步重试队列任务: count=${tasks.length}`);
+      }
+    });
+
+    status = 'success';
+  } catch (error) {
+    logger.error(`3X-UI 同步重试队列执行错误: ${error.message}`);
+  } finally {
+    const duration = Date.now() - startTime;
+    if (hasExecutableTasks || result.processed > 0) {
+      logger.info(`3X-UI 同步重试队列任务执行结束: status=${status}, processed=${result.processed}, success=${result.success}, failed=${result.failed}, finalFailed=${result.finalFailed}, duration=${duration}ms`);
+    }
+    isXuiSyncTaskRunning = false;
+  }
+}
+
+/**
+ * 执行 3X-UI 用户同步巡检
+ * 查询所有启用且未过期用户，并逐台在线服务器执行同步补偿。
  * @param {Object} db - 数据库实例
  */
 async function runXuiSync(db) {
@@ -444,8 +604,7 @@ async function runXuiSync(db) {
 
 /**
  * 注册工单自动关闭任务
- * 每小时检查一次，关闭满足条件的工单
- * 条件：状态为 pending，用户已读后超过24小时无新回复
+ * 启动后延迟 3 分钟执行第一次，之后每 1 小时执行一次。
  * @param {Object} db - 数据库实例
  */
 function registerTicketAutoCloseJob(db) {
@@ -464,6 +623,7 @@ function registerTicketAutoCloseJob(db) {
 
 /**
  * 执行工单自动关闭
+ * 关闭管理员已回复、用户已读且超过 24 小时无新回复的 pending 工单。
  * @param {Object} db - 数据库实例
  */
 async function runTicketAutoClose(db) {
@@ -487,7 +647,7 @@ async function runTicketAutoClose(db) {
 
 /**
  * 注册释放过期名额任务
- * 每天5点执行一次，释放流量用完超过3天且未续费的用户名额
+ * 每天 5:00 执行，释放流量用完超过 3 天且未续费的用户名额。
  * @param {Object} db - 数据库实例
  */
 function registerReleaseExpiredSalesJob(db) {
@@ -501,6 +661,7 @@ function registerReleaseExpiredSalesJob(db) {
 
 /**
  * 执行释放过期名额
+ * 按套餐统计符合条件的用户，并回退对应套餐的 sales_count。
  * @param {Object} db - 数据库实例
  */
 async function runReleaseExpiredSales(db) {
@@ -575,8 +736,7 @@ async function runReleaseExpiredSales(db) {
 
 /**
  * 注册邮件群发任务
- * 每天 9:00 执行，处理待发送的群发任务
- * @param {Object} db - 数据库实例
+ * 每天 9:00 处理待发送的邮件群发任务。
  */
 function registerEmailCampaignJob(db) {
   const task = cron.schedule('0 9 * * *', async () => {
@@ -589,8 +749,7 @@ function registerEmailCampaignJob(db) {
 
 /**
  * 注册清理邮件日志任务
- * 每天 3:00 执行，清理超过 30 天的日志
- * @param {Object} db - 数据库实例
+ * 每天 3:00 清理超过 30 天的邮件发送日志。
  */
 function registerCleanEmailLogsJob(db) {
   const task = cron.schedule('0 3 * * *', async () => {
@@ -611,6 +770,7 @@ function startAllJobs(db) {
   registerDeleteExpiredJob(db);
   registerCleanZombieUsersJob(db);
   registerXuiSyncJob(db);
+  registerXuiSyncTaskJob(db);
   registerTrafficSyncJob(db);
   registerTicketAutoCloseJob(db);
   registerReleaseExpiredSalesJob(db);
@@ -622,6 +782,7 @@ function startAllJobs(db) {
 
 /**
  * 停止所有定时任务
+ * 清理 setInterval 和 cron task 引用，供应用退出时调用。
  */
 function stopAllJobs() {
   logger.info('正在停止所有定时任务...');

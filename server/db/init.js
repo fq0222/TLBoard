@@ -197,6 +197,7 @@ class DatabaseManager {
           expire_at BIGINT,
           enabled INTEGER DEFAULT 0,
           payment_count INTEGER DEFAULT 0,
+          sync_status INTEGER DEFAULT 0,
           created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
           updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
         )
@@ -328,6 +329,23 @@ class DatabaseManager {
         )
       `);
       logger.info('用户订阅缓存表初始化完成');
+
+      // 3X-UI 同步任务队列表
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS xui_sync_tasks (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          task_type VARCHAR(50) NOT NULL,
+          status VARCHAR(20) DEFAULT 'pending',
+          payload TEXT DEFAULT '{}',
+          attempts INTEGER DEFAULT 0,
+          next_retry_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+          last_error TEXT,
+          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+        )
+      `);
+      logger.info('3X-UI 同步任务队列表初始化完成');
 
       // 公告表
       await client.query(`
@@ -563,6 +581,8 @@ class DatabaseManager {
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_inbound_id ON user_node_configs(inbound_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_sub_id ON user_node_configs(sub_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_id ON user_subscriptions(user_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_xui_sync_tasks_status_retry ON xui_sync_tasks(status, next_retry_at)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_xui_sync_tasks_user_id ON xui_sync_tasks(user_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_email_logs_campaign_id ON email_logs(campaign_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_email_logs_user_id ON email_logs(user_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_email_campaigns_status ON email_campaigns(status)');
