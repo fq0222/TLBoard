@@ -1,6 +1,6 @@
 /**
  * 流量管理模块
- * 负责流量统计、禁用检查和3X-UI同步
+ * 负责流量统计、禁用检查和 3X-UI 同步
  */
 
 const XuiService = require('./xui-service');
@@ -31,7 +31,6 @@ async function getTrafficUsageMultiplier(db) {
  */
 async function fetchAllServerTraffic(db) {
   try {
-    // 查询所有在线服务器
     const servers = await db.prepare(`
       SELECT id, name, api_url, api_token
       FROM xui_servers
@@ -47,12 +46,10 @@ async function fetchAllServerTraffic(db) {
 
     const serverTrafficData = {};
 
-    // 并行获取所有服务器的流量数据
     const promises = servers.map(async (server) => {
       try {
         const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
 
-        // 获取所有inbounds
         const inboundsResult = await xuiService.getInbounds();
         if (!inboundsResult.success) {
           logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${inboundsResult.message}`);
@@ -61,7 +58,6 @@ async function fetchAllServerTraffic(db) {
 
         const serverData = {};
 
-        // 遍历所有inbound，收集用户流量数据
         for (const inbound of inboundsResult.data) {
           const clientStats = inbound.clientStats || [];
 
@@ -69,7 +65,6 @@ async function fetchAllServerTraffic(db) {
             const email = client.email;
             if (!email) continue;
 
-            // 累加同一用户在不同inbound的流量
             if (!serverData[email]) {
               serverData[email] = {
                 up: 0,
@@ -115,7 +110,6 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
     return {};
   }
 
-  // 先查询用户（不需要事务）
   const users = await db.prepare(`
     SELECT id, email, traffic_used, traffic_limit
     FROM users
@@ -133,13 +127,11 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
   const trafficUsageMultiplier = await getTrafficUsageMultiplier(db);
   logger.info(`当前流量统计倍率: ${trafficUsageMultiplier}`);
 
-  // 获取专用连接用于事务
   const client = await db.pool.connect();
-  
+
   try {
     await client.query('BEGIN');
-    
-    // 批量获取所有同步记录（使用事务连接）
+
     const syncResult = await client.query(
       'SELECT user_id, server_id, last_sync_traffic FROM traffic_sync_log'
     );
@@ -156,8 +148,7 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
 
       for (const serverId of serverIds) {
         const serverData = serverTrafficData[serverId];
-        
-        // 查找该用户在该服务器上的所有节点流量（邮箱格式：用户邮箱-节点备注）
+
         let userTotalTraffic = 0;
         let found = false;
         for (const [email, data] of Object.entries(serverData)) {
@@ -166,7 +157,7 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
             found = true;
           }
         }
-        
+
         if (!found) continue;
 
         const lastSyncTraffic = syncLogMap.get(`${user.id}-${serverId}`) || 0;
@@ -178,9 +169,9 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
           rawIncrement = currentTraffic - lastSyncTraffic;
           increment = Math.round(rawIncrement * trafficUsageMultiplier);
         } else {
-          logger.warn(`服务器 ${serverId} 用户 ${user.email} 流量重置: 当前 ${currentTraffic} < 上次 ${lastSyncTraffic}`);
-          rawIncrement = currentTraffic;
-          increment = currentTraffic;
+          logger.warn(
+            `服务器 ${serverId} 用户 ${user.email} 流量回退: 当前 ${currentTraffic} < 上次 ${lastSyncTraffic}，本次不累加，仅重置同步基线`
+          );
         }
 
         if (increment > 0) {
@@ -202,13 +193,12 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
       userTrafficData[user.id] = {
         email: user.email,
         trafficUsed: newTrafficUsed,
-        trafficLimit: trafficLimit,
-        isOverLimit: isOverLimit,
+        trafficLimit,
+        isOverLimit,
         increment: totalIncrement
       };
     }
 
-    // 批量写入同步日志（使用事务连接）
     if (syncLogUpdates.length > 0) {
       const values = [];
       const params = [];
@@ -247,7 +237,7 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
 async function updateTrafficInDatabase(db, userTrafficData) {
   try {
     const userIds = Object.keys(userTrafficData);
-    
+
     if (userIds.length === 0) {
       logger.info('没有需要更新的用户流量数据');
       return;
@@ -259,12 +249,12 @@ async function updateTrafficInDatabase(db, userTrafficData) {
 
     for (const userId of userIds) {
       const data = userTrafficData[userId];
-      
+
       try {
         await db.prepare(`
           UPDATE users SET traffic_used = ?, updated_at = ? WHERE id = ?
         `).run(data.trafficUsed, Math.floor(Date.now() / 1000), userId);
-        
+
         updatedCount++;
       } catch (error) {
         logger.error(`更新用户 ${data.email} 流量数据错误: ${error.message}`);
@@ -285,7 +275,7 @@ async function updateTrafficInDatabase(db, userTrafficData) {
 async function checkAndDisableOverLimitUsers(db, userTrafficData) {
   try {
     const userIds = Object.keys(userTrafficData);
-    
+
     if (userIds.length === 0) {
       logger.info('没有需要检查的用户');
       return;
@@ -297,13 +287,11 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
 
     for (const userId of userIds) {
       const data = userTrafficData[userId];
-      
-      // 检查是否超限
+
       if (!data.isOverLimit) {
         continue;
       }
 
-      // 检查用户当前状态
       const user = await db.prepare('SELECT enabled FROM users WHERE id = ?').get(userId);
       if (!user || user.enabled === 0) {
         continue;
@@ -312,15 +300,13 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
       logger.info(`用户 ${data.email} 流量超限，开始禁用: ${data.trafficUsed}/${data.trafficLimit}`);
 
       try {
-        // 先同步到3X-UI
         const syncSuccess = await syncDisableStatusToXui(db, userId, true);
-        
+
         if (syncSuccess) {
-          // 更新本地数据库
           await db.prepare(`
             UPDATE users SET enabled = 0, traffic_used_at = ? WHERE id = ?
           `).run(Math.floor(Date.now() / 1000), userId);
-          
+
           disabledCount++;
           logger.info(`禁用用户 ${data.email} 成功`);
         } else {
@@ -338,56 +324,50 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
 }
 
 /**
- * 同步禁用状态到3X-UI
+ * 同步禁用状态到 3X-UI
  * @param {Object} db - 数据库实例
- * @param {number} userId - 用户ID
+ * @param {number} userId - 用户 ID
  * @param {boolean} disable - 是否禁用
  * @returns {Promise<boolean>} 是否成功
  */
 async function syncDisableStatusToXui(db, userId, disable) {
   try {
-    // 查询用户信息
     const user = await db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
     if (!user) {
       logger.warn(`用户不存在: ${userId}`);
       return false;
     }
-    
-    // 查询所有在线服务器
+
     const servers = await db.prepare(`
       SELECT id, name, api_url, api_token
       FROM xui_servers
       WHERE status = 1
     `).all();
-    
+
     if (servers.length === 0) {
       logger.warn('没有在线服务器');
       return false;
     }
-    
+
     logger.info(`开始同步禁用状态到 ${servers.length} 台服务器: 用户 ${user.email}, 禁用 ${disable}`);
-    
-    // 遍历服务器，同步禁用状态
+
     let successCount = 0;
     for (const server of servers) {
       try {
         const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
-        
-        // 获取所有inbound
+
         const inboundsResult = await xuiService.getInbounds();
         if (!inboundsResult.success) {
           logger.warn(`获取服务器 ${server.name} 的 inbounds 失败`);
           continue;
         }
-        
-        // 对每个inbound，查找匹配用户并更新
+
         for (const inbound of inboundsResult.data) {
-          // 使用新的邮箱格式（用户邮箱-节点备注）
           const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
           const updateResult = await xuiService.updateClient(inbound.id, nodeEmail, {
             enabled: !disable
           });
-          
+
           if (updateResult.success) {
             successCount++;
             logger.info(`同步服务器 ${server.name} 的 inbound ${inbound.id} 成功`);
@@ -399,7 +379,7 @@ async function syncDisableStatusToXui(db, userId, disable) {
         logger.error(`同步服务器 ${server.name} 禁用状态错误: ${error.message}`);
       }
     }
-    
+
     logger.info(`同步禁用状态完成: 用户 ${user.email}, 禁用 ${disable}, 成功 ${successCount} 个 inbound`);
     return successCount > 0;
   } catch (error) {
@@ -431,7 +411,6 @@ async function syncTrafficAndHandleDisable(db) {
     }
 
     await updateTrafficInDatabase(db, userTrafficData);
-
     await checkAndDisableOverLimitUsers(db, userTrafficData);
 
     logger.info('流量同步与禁用检查任务完成');
