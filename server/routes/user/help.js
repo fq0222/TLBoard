@@ -24,6 +24,7 @@ router.get('/images/:filename', [
     const filename = path.basename(req.params.filename);
     const filePath = path.resolve(UPLOAD_DIR, filename);
     const uploadRoot = path.resolve(UPLOAD_DIR);
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
     if (!filePath.startsWith(uploadRoot + path.sep)) {
       return res.status(404).json({ code: 404, message: '图片不存在', data: null });

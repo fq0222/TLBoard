@@ -102,7 +102,7 @@ router.post('/upload-image', authenticateAdmin, (req, res) => {
       return sendBusinessError(res, '请选择要上传的图片');
     }
 
-    const url = `${blogService.BLOG_IMAGE_PREFIX}${req.file.filename}`;
+    const url = blogService.buildBlogImageUrl(req.file.filename);
     logger.info(`上传博客图片成功: ${req.file.filename}`);
     res.json({
       code: 0,
@@ -110,7 +110,7 @@ router.post('/upload-image', authenticateAdmin, (req, res) => {
       data: {
         filename: req.file.filename,
         url,
-        markdown: `![图片说明](${url})`
+        markdown: blogService.buildBlogImageMarkdown(req.file.filename)
       }
     });
   });

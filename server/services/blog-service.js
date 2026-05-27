@@ -1,8 +1,20 @@
 const fs = require('fs');
 const path = require('path');
+const { getSiteBaseUrl } = require('../utils/site-url');
 
 const ALLOWED_STATUSES = ['draft', 'published'];
 const BLOG_IMAGE_PREFIX = '/api/user/help/images/';
+
+function buildBlogImageUrl(filename) {
+  const baseUrl = getSiteBaseUrl();
+  const imagePath = `${BLOG_IMAGE_PREFIX}${filename}`;
+
+  return baseUrl ? `${baseUrl}${imagePath}` : imagePath;
+}
+
+function buildBlogImageMarkdown(filename, alt = '\u56fe\u7247\u8bf4\u660e') {
+  return `![${alt}](${buildBlogImageUrl(filename)})`;
+}
 
 function normalizeArticleInput(data) {
   const title = String(data.title || '').trim();
@@ -151,7 +163,9 @@ async function updateArticle(db, id, data) {
 }
 
 async function listCategories(db, { publishedOnly = false } = {}) {
-  const whereSql = publishedOnly ? "WHERE status = 'published' AND category IS NOT NULL AND category != ''" : "WHERE category IS NOT NULL AND category != ''";
+  const whereSql = publishedOnly
+    ? "WHERE status = 'published' AND category IS NOT NULL AND category != ''"
+    : "WHERE category IS NOT NULL AND category != ''";
   const rows = await db.prepare(`
     SELECT DISTINCT category
     FROM blog_articles
@@ -247,6 +261,8 @@ async function deleteArticle(db, id, options = {}) {
 
 module.exports = {
   BLOG_IMAGE_PREFIX,
+  buildBlogImageUrl,
+  buildBlogImageMarkdown,
   ensureBlogArticlesTable,
   createArticle,
   updateArticle,
