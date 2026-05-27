@@ -1098,6 +1098,10 @@ proxy-groups:
 ${nodes.map(node => `      - ${node.node_name}`).join('\n')}
 
 rules:
+  - GEOIP,lan,DIRECT,no-resolve
+  - GEOSITE,cn,DIRECT
+  - DOMAIN-SUFFIX,cn,DIRECT
+  - GEOIP,CN,DIRECT
   - MATCH,Proxy`;
 }
 
@@ -1110,5 +1114,7 @@ rules:
 function generateV2RayConfig(nodes, user) {
   return nodes.map(node => node.link).filter(Boolean).join('\n');
 }
+
+router.generateClashConfig = generateClashConfig;
 
 module.exports = router;
