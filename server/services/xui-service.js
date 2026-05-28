@@ -649,6 +649,284 @@ class XuiService {
    * @param {boolean} options.enabled - 是否启用
    * @returns {Promise<Object>} 更新结果
    */
+  async getClientsByEmail(inboundId, email) {
+    try {
+      if (!this.client && typeof this.getInbound !== 'function') {
+        await this.init();
+      }
+
+      const response = typeof this.getInbound === 'function'
+        ? await this.getInbound(inboundId)
+        : await this.client.getInbound(inboundId);
+
+      if (!response.success) {
+        return {
+          success: false,
+          message: '获取入站信息失败',
+          clients: []
+        };
+      }
+
+      let clients = [];
+      clients = this.extractClientsFromSettings(response.obj.settings);
+
+      return {
+        success: true,
+        clients: clients
+          .filter(item => item.email === email)
+          .map(item => ({
+            uuid: item.id,
+            email: item.email,
+            enable: item.enable,
+            expiryTime: item.expiryTime,
+            totalGB: item.totalGB || 0,
+            subId: item.subId || '',
+            flow: item.flow || ''
+          }))
+      };
+    } catch (error) {
+      logger.error(`获取客户端列表错误: ${error.message}`);
+      return {
+        success: false,
+        message: error.message,
+        clients: []
+      };
+    }
+  }
+
+  async getClientByEmail(inboundId, email) {
+    try {
+      const result = await this.getClientsByEmail(inboundId, email);
+
+      if (!result.success) {
+        return {
+          success: false,
+          message: result.message
+        };
+      }
+
+      const client = result.clients[0];
+
+      if (!client) {
+        return {
+          success: false,
+          message: `未找到用户 ${email}`
+        };
+      }
+
+      return {
+        success: true,
+        uuid: client.uuid,
+        email: client.email,
+        enable: client.enable,
+        expiryTime: client.expiryTime,
+        totalGB: client.totalGB || 0,
+        subId: client.subId || '',
+        flow: client.flow || ''
+      };
+    } catch (error) {
+      logger.error(`获取客户端信息错误: ${error.message}`);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
+
+  buildUniqueClientLockKey(serverId, inboundId, email) {
+    const crypto = require('crypto');
+    const raw = `${serverId}:${inboundId}:${email}`;
+    const hex = crypto.createHash('sha1').update(raw).digest('hex').slice(0, 15);
+    return parseInt(hex, 16);
+  }
+
+  async withUniqueClientLock(db, { serverId, inboundId, email }, handler) {
+    if (this._forceLockBusy) {
+      return { success: false, message: 'failed to acquire unique client lock' };
+    }
+
+    const lockKey = this.buildUniqueClientLockKey(serverId, inboundId, email);
+    const lockResult = await db.prepare('SELECT pg_try_advisory_lock($1) AS locked').get(lockKey);
+
+    if (!lockResult || !lockResult.locked) {
+      return { success: false, message: 'failed to acquire unique client lock' };
+    }
+
+    try {
+      return await handler();
+    } finally {
+      await db.prepare('SELECT pg_advisory_unlock($1) AS unlocked').get(lockKey);
+    }
+  }
+
+  async getNodeConfig(db, userId, serverId, inboundId) {
+    return db.prepare(
+      'SELECT uuid, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
+    ).get(userId, serverId, inboundId);
+  }
+
+  async saveNodeConfig(db, userId, serverId, inboundId, uuid, subId) {
+    const existing = await this.getNodeConfig(db, userId, serverId, inboundId);
+    if (existing) {
+      await db.prepare(
+        'UPDATE user_node_configs SET uuid = ?, sub_id = ? WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
+      ).run(uuid, subId, userId, serverId, inboundId);
+      return;
+    }
+
+    await db.prepare(
+      'INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, sub_id) VALUES (?, ?, ?, ?, ?)'
+    ).run(userId, serverId, inboundId, uuid, subId);
+  }
+
+  chooseClientToKeep(existingClients, nodeConfig) {
+    if (nodeConfig && nodeConfig.uuid) {
+      const matched = existingClients.find(item => item.uuid === nodeConfig.uuid);
+      if (matched) return matched;
+    }
+    return existingClients[0] || null;
+  }
+
+  convertBytesToGB(bytes) {
+    return Number(bytes || 0) / (1024 * 1024 * 1024);
+  }
+
+  extractClientsFromSettings(settings) {
+    if (!settings) return [];
+
+    if (typeof settings === 'string') {
+      try {
+        const parsed = JSON.parse(settings || '{}');
+        return Array.isArray(parsed.clients) ? parsed.clients : [];
+      } catch (error) {
+        logger.warn(`解析 settings 失败: ${error.message}`);
+        return [];
+      }
+    }
+
+    if (typeof settings === 'object') {
+      return Array.isArray(settings.clients) ? settings.clients : [];
+    }
+
+    return [];
+  }
+
+  async upsertUniqueClient(db, context) {
+    const {
+      userId,
+      serverId,
+      inbound,
+      email,
+      desiredClient
+    } = context;
+
+    return this.withUniqueClientLock(db, {
+      serverId,
+      inboundId: inbound.id,
+      email
+    }, async () => {
+      const listResult = await this.getClientsByEmail(inbound.id, email);
+      if (!listResult.success) {
+        return { success: false, message: listResult.message || '获取客户端列表失败' };
+      }
+
+      const nodeConfig = await this.getNodeConfig(db, userId, serverId, inbound.id);
+      const existingClients = listResult.clients;
+
+      if (existingClients.length > 1) {
+        const keepClient = this.chooseClientToKeep(existingClients, nodeConfig);
+        const duplicates = existingClients.filter(item => item.uuid !== keepClient.uuid);
+
+        for (const duplicate of duplicates) {
+          const deleteResult = await this.deleteClient(inbound.id, duplicate.uuid);
+          if (!deleteResult.success) {
+            return { success: false, message: deleteResult.message || `删除重复客户端失败: ${duplicate.uuid}` };
+          }
+        }
+
+        const verifyResult = await this.getClientsByEmail(inbound.id, email);
+        if (!verifyResult.success) {
+          return { success: false, message: verifyResult.message || '重复删除后二次查询失败' };
+        }
+        if (verifyResult.clients.length !== 1) {
+          return { success: false, message: `duplicate email still exists for ${email}` };
+        }
+
+        const finalKeep = verifyResult.clients[0];
+        await this.saveNodeConfig(
+          db,
+          userId,
+          serverId,
+          inbound.id,
+          finalKeep.uuid,
+          desiredClient.subId || finalKeep.subId || ''
+        );
+
+        const updateResult = await this.updateClient(inbound.id, email, {
+          enabled: desiredClient.enable,
+          expiryTime: desiredClient.expiryTime,
+          totalGB: this.convertBytesToGB(desiredClient.totalGB),
+          subId: desiredClient.subId,
+          flow: desiredClient.flow
+        });
+
+        return updateResult.success
+          ? { success: true, action: 'dedup-update' }
+          : { success: false, message: updateResult.message || '更新保留客户端失败' };
+      }
+
+      if (existingClients.length === 1) {
+        await this.saveNodeConfig(
+          db,
+          userId,
+          serverId,
+          inbound.id,
+          existingClients[0].uuid,
+          desiredClient.subId || existingClients[0].subId || ''
+        );
+
+        const updateResult = await this.updateClient(inbound.id, email, {
+          enabled: desiredClient.enable,
+          expiryTime: desiredClient.expiryTime,
+          totalGB: this.convertBytesToGB(desiredClient.totalGB),
+          subId: desiredClient.subId,
+          flow: desiredClient.flow
+        });
+
+        return updateResult.success
+          ? { success: true, action: 'update' }
+          : { success: false, message: updateResult.message || '更新客户端失败' };
+      }
+
+      const addResult = await this.addClient(inbound.id, inbound.protocol, {
+        email,
+        id: desiredClient.id,
+        enable: desiredClient.enable,
+        expiryTime: desiredClient.expiryTime,
+        totalGB: desiredClient.totalGB,
+        limitIp: 0,
+        tgId: 0,
+        subId: desiredClient.subId,
+        flow: desiredClient.flow
+      });
+
+      if (!addResult.success) {
+        return { success: false, message: addResult.message || '新增客户端失败' };
+      }
+
+      await this.saveNodeConfig(
+        db,
+        userId,
+        serverId,
+        inbound.id,
+        desiredClient.id,
+        desiredClient.subId || ''
+      );
+
+      return { success: true, action: 'add' };
+    });
+  }
+
   async updateClient(inboundId, email, options = {}) {
     try {
       if (!this.client) {

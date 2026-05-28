@@ -403,6 +403,69 @@ async function syncUsersToServer(db, server, users) {
  * 启动后延迟 1 分钟执行第一次，之后每 4 小时执行一次。
  * @param {Object} db - 数据库实例
  */
+async function syncUsersToServer(db, server, users) {
+  try {
+    const crypto = require('crypto');
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
+    const inboundsResult = await xuiService.getInbounds();
+    if (!inboundsResult.success) {
+      logger.warn(`获取服务器 ${server.name} 的inbounds失败: ${inboundsResult.message}`);
+      return;
+    }
+
+    let syncCount = 0;
+
+    for (const inbound of inboundsResult.data) {
+      for (const user of users) {
+        try {
+          const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
+          const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
+          const totalBytes = Number(user.traffic_limit || 0);
+          const existingConfig = await db.prepare(
+            'SELECT uuid, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
+          ).get(user.id, server.id, inbound.id);
+
+          const desiredClient = {
+            id: existingConfig?.uuid || crypto.randomUUID(),
+            email: nodeEmail,
+            enable: user.enabled === 1,
+            expiryTime,
+            totalGB: totalBytes,
+            subId: existingConfig?.sub_id || crypto.randomBytes(8).toString('hex')
+          };
+
+          if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+            desiredClient.flow = 'xtls-rprx-vision';
+          }
+
+          const syncResult = await xuiService.upsertUniqueClient(db, {
+            userId: user.id,
+            serverId: server.id,
+            inbound,
+            email: nodeEmail,
+            desiredClient
+          });
+
+          if (syncResult.success) {
+            syncCount++;
+            logger.info(`同步用户 ${user.email} 到服务器 ${server.name} 的inbound ${inbound.id} 成功: action=${syncResult.action}`);
+          } else {
+            logger.warn(`同步用户 ${user.email} 到服务器 ${server.name} 的inbound ${inbound.id} 失败: ${syncResult.message}`);
+          }
+        } catch (error) {
+          logger.error(`同步用户 ${user.email} 到inbound ${inbound.id} 失败: ${error.message}`);
+        }
+      }
+    }
+
+    if (syncCount > 0) {
+      logger.info(`服务器 ${server.name} 同步完成，成功 ${syncCount} 个用户`);
+    }
+  } catch (error) {
+    logger.error(`同步服务器 ${server.name} 错误: ${error.message}`);
+  }
+}
+
 function registerXuiSyncJob(db) {
   // 启动时延迟1分钟执行第一次
   setTimeout(async () => {

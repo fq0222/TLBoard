@@ -256,6 +256,113 @@ async function syncUserToXuiServers(db, user, plan = {}) {
  * @param {Object} plan - 套餐信息
  * @returns {Promise<number>} 同步任务 ID
  */
+async function syncUserToXuiServers(db, user, plan = {}) {
+  let successCount = 0;
+  let failureCount = 0;
+  let lastError = '';
+
+  try {
+    const servers = await db.prepare(`
+      SELECT id, name, api_url, api_token
+      FROM xui_servers
+      WHERE status = 1
+    `).all();
+
+    if (servers.length === 0) {
+      logger.warn('没有在线的 3X-UI 服务器，跳过同步');
+      return { success: false, message: '没有在线的 3X-UI 服务器' };
+    }
+
+    logger.info(`开始同步用户 ${user.email} 到 ${servers.length} 个 3X-UI 服务器`);
+    await db.prepare('UPDATE users SET sync_status = 1 WHERE id = ?').run(user.id);
+
+    for (const server of servers) {
+      try {
+        const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
+        const inboundsResult = await xuiService.getInbounds();
+
+        if (!inboundsResult.success) {
+          failureCount++;
+          lastError = inboundsResult.message || '获取 inbounds 失败';
+          logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${lastError}`);
+          continue;
+        }
+
+        for (const inbound of inboundsResult.data) {
+          try {
+            const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
+            const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
+            const totalBytes = Number(user.traffic_limit || plan.traffic_limit || 0);
+            const existingClient = await xuiService.getClientByEmail(inbound.id, nodeEmail);
+            const config = await ensureNodeConfig(
+              db,
+              user,
+              server,
+              inbound,
+              existingClient.success ? existingClient : null
+            );
+            const desiredClient = {
+              id: config.uuid,
+              email: nodeEmail,
+              enable: true,
+              expiryTime,
+              totalGB: totalBytes,
+              subId: config.subId
+            };
+
+            if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+              desiredClient.flow = 'xtls-rprx-vision';
+            }
+
+            const syncResult = await xuiService.upsertUniqueClient(db, {
+              userId: user.id,
+              serverId: server.id,
+              inbound,
+              email: nodeEmail,
+              desiredClient
+            });
+
+            if (syncResult.success) {
+              successCount++;
+              logger.info(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功: action=${syncResult.action}`);
+            } else {
+              failureCount++;
+              lastError = syncResult.message || '同步 3X-UI 用户失败';
+              logger.warn(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${lastError}`);
+            }
+          } catch (error) {
+            failureCount++;
+            lastError = error.message;
+            logger.error(`同步用户到 inbound ${inbound.id} 错误: ${error.message}`);
+          }
+        }
+      } catch (error) {
+        failureCount++;
+        lastError = error.message;
+        logger.error(`同步用户到服务器 ${server.name} 错误: ${error.message}`);
+      }
+    }
+
+    logger.info(`用户 ${user.email} 同步结束，成功 ${successCount} 个，失败 ${failureCount} 个`);
+    if (failureCount > 0 || successCount === 0) {
+      return {
+        success: false,
+        message: lastError || '3X-UI 同步未完成',
+        successCount,
+        failureCount
+      };
+    }
+
+    return { success: true, successCount, failureCount };
+  } catch (error) {
+    logger.error(`同步用户到 3X-UI 错误: ${error.message}`);
+    return { success: false, message: error.message, successCount, failureCount: failureCount + 1 };
+  } finally {
+    await db.prepare('UPDATE users SET sync_status = 2 WHERE id = ?').run(user.id);
+    logger.info(`用户 ${user.email} 同步状态更新为 2（等待结束）`);
+  }
+}
+
 async function enqueueAndTryUserSync(db, taskType, userInfo, plan) {
   const payload = {
     user: userInfo,
