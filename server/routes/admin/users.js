@@ -12,6 +12,7 @@ const { syncAllServers } = require('../../services/xui-sync');
 const { getStrategyFromRemark, processNodeLink } = require('../../services/subscription-strategy');
 const { fetchOriginalSubscription, parseSubscriptionContent } = require('../../services/subscription-service');
 const XuiService = require('../../services/xui-service');
+const { DISABLE_REASONS } = require('../../services/renew-policy');
 
 const router = express.Router();
 const logger = createLogger('ADMIN-USERS');
@@ -336,6 +337,8 @@ router.put('/:id', authenticateAdmin, [
     if (req.body.enabled !== undefined) {
       updates.push('enabled = ?');
       values.push(req.body.enabled ? 1 : 0);
+      updates.push('disable_reason = ?');
+      values.push(req.body.enabled ? null : DISABLE_REASONS.ADMIN);
     }
     if (req.body.plan_id !== undefined) {
       updates.push('plan_id = ?');

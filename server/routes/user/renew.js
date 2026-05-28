@@ -7,6 +7,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticateUser } = require('../../middleware/auth-user');
 const vmqService = require('../../services/vmq-service');
+const { evaluateRenewEligibility, DISABLE_REASONS } = require('../../services/renew-policy');
 const { createLogger } = require('../../utils/logger');
 const crypto = require('crypto');
 
@@ -53,17 +54,7 @@ router.post('/', authenticateUser, [
       });
     }
 
-    // 2. 检查用户是否被禁用
-    if (!user.enabled) {
-      logger.warn(`续费失败: 账号已被禁用 - ${user.email}`);
-      return res.json({
-        code: 2003,
-        message: '账号已被禁用，请联系管理员',
-        data: null
-      });
-    }
-
-    // 3. 验证用户有有效套餐（已购买过）
+    // 2. 验证用户有有效套餐（已购买过）
     if (!user.plan_id) {
       logger.warn(`续费失败: 用户未购买过套餐 - ${user.email}`);
       return res.json({
@@ -73,7 +64,7 @@ router.post('/', authenticateUser, [
       });
     }
 
-    // 4. 验证套餐存在且启用
+    // 3. 验证套餐存在且启用
     const plan = await db.prepare('SELECT * FROM plans WHERE id = ? AND enabled = 1').get(plan_id);
     if (!plan) {
       logger.warn(`续费失败: 套餐不存在或未启用 - ${plan_id}`);
@@ -84,40 +75,25 @@ router.post('/', authenticateUser, [
       });
     }
 
-    // 5. 检查续费资格
-    const isRenewCurrentPlan = user.plan_id === plan_id;
-    
-    if (isRenewCurrentPlan) {
-      // 续费当前套餐：检查是否在流量用完后 3 天内
-      if (user.traffic_used_at) {
-        const now = Math.floor(Date.now() / 1000);
-        const daysSinceTrafficUsed = (now - user.traffic_used_at) / (24 * 60 * 60);
-        
-        if (daysSinceTrafficUsed > 3) {
-          logger.warn(`续费失败: 流量用完超过 3 天 - ${user.email}`);
-          return res.json({
-            code: 1003,
-            message: '流量用完已超过 3 天，请等待名额释放后重新购买',
-            data: null
-          });
-        }
-      }
-    } else {
-      // 切换套餐：检查新套餐是否售罄
-      if (plan.sales_limit !== -1 && plan.sales_count >= plan.sales_limit) {
-        logger.warn(`续费失败: 套餐已售罄 - ${plan_id}`);
-        return res.json({
-          code: 1002,
-          message: '该套餐已售罄',
-          data: null
-        });
-      }
+    // 4. 检查续费资格
+    const renewEligibility = evaluateRenewEligibility(user, plan);
+    if (!renewEligibility.allowed) {
+      logger.warn(`续费失败: ${renewEligibility.message} - ${user.email}, disable_reason=${user.disable_reason || 'null'}`);
+      return res.json({
+        code: renewEligibility.code,
+        message: renewEligibility.message,
+        data: null
+      });
     }
 
-    // 6. 生成商户订单号（REN前缀表示续费订单）
+    if (renewEligibility.skipSalesLimit && user.disable_reason === DISABLE_REASONS.TRAFFIC_LIMIT) {
+      logger.info(`用户 ${user.email} 在流量用完 3 天内续费当前套餐，跳过名额检查`);
+    }
+
+    // 5. 生成商户订单号（REN前缀表示续费订单）
     const outTradeNo = 'REN' + Date.now() + crypto.randomBytes(3).toString('hex');
 
-    // 7. 开始事务 - 创建订单并处理名额变化
+    // 6. 开始事务 - 仅创建订单，禁用状态在支付成功后再清理
     let orderId;
     const transaction = db.transaction(async () => {
       // 创建订单
@@ -128,16 +104,13 @@ router.post('/', authenticateUser, [
 
       orderId = orderResult.lastInsertRowid;
 
-      // 重置流量用完时间
-      await db.prepare('UPDATE users SET traffic_used_at = NULL WHERE id = ?').run(userId);
-
       logger.info(`续费订单创建成功: ${outTradeNo}, 用户: ${user.email}, 套餐: ${plan.name}`);
     });
 
     // 执行事务
     await transaction();
 
-    // 8. 调用VMQ创建支付订单
+    // 7. 调用VMQ创建支付订单
     // VMQ 接口要求金额使用元并保留两位小数
     const amount = (Number(plan.price) / 100).toFixed(2);
     const vmqResult = await vmqService.createOrder({
@@ -160,7 +133,7 @@ router.post('/', authenticateUser, [
       });
     }
 
-    // 9. 检查是否需要手输金额（isAuto=1）
+    // 8. 检查是否需要手输金额（isAuto=1）
     if (Number(vmqResult.data.isAuto) === 1) {
       logger.warn(`VMQ通道需要手输金额，拒绝下单: ${outTradeNo}`);
       // 关闭本地订单

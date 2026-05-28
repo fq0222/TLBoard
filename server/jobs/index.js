@@ -181,7 +181,9 @@ async function runCleanZombieUsers(db) {
  * @param {Object} server - 3X-UI 服务器配置
  * @param {Array} users - 需要巡检同步的用户列表
  */
-async function syncUsersToServer(db, server, users) {
+async function legacySyncUsersToServer(db, server, users) {
+  // 历史实现，保留仅用于对照旧巡检逻辑。
+  // 当前真实使用的是下方新的 syncUsersToServer()，避免旧入口继续覆盖新规则。
   try {
     const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
 
@@ -506,7 +508,7 @@ function registerTrafficSyncJob(db) {
   // 启动时延迟10分钟执行第一次，避免启动时负载过高
   setTimeout(async () => {
     await trafficManager.syncTrafficAndHandleDisable(db);
-  }, 10 * 60 * 1000);
+  }, 2 * 60 * 1000);
 
   const interval = setInterval(async () => {
     await trafficManager.syncTrafficAndHandleDisable(db);
@@ -741,6 +743,7 @@ async function runReleaseExpiredSales(db) {
       JOIN plans p ON u.plan_id = p.id
       WHERE u.plan_id IS NOT NULL
         AND u.enabled = 0
+        AND u.disable_reason = 'traffic_limit'
         AND u.traffic_used_at IS NOT NULL
         AND u.traffic_used_at < ? - 259200
         AND u.payment_count > 0

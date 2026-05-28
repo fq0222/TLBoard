@@ -12,6 +12,7 @@ const crypto = require('crypto');
 const XuiService = require('./xui-service');
 const trafficManager = require('./traffic-manager');
 const xuiSyncTaskService = require('./xui-sync-task-service');
+const { DISABLE_REASONS } = require('./renew-policy');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('ORDER-SERVICE');
@@ -106,6 +107,9 @@ async function ensureNodeConfig(db, user, server, inbound, existingClient = null
 /**
  * 同步用户到所有在线的 3X-UI 服务器
  *
+ * 历史实现，保留仅用于对照旧逻辑。
+ * 当前真实使用的是下方新的 syncUserToXuiServers()，避免旧分支继续扩散。
+ *
  * 此函数会真实返回同步结果，供重试队列判断是否需要再次补偿。
  * 但无论成功失败，finally 中都会把 users.sync_status 写为 2，
  * 表示“用户端等待流程结束”，避免注册/支付页面长时间阻塞。
@@ -115,7 +119,7 @@ async function ensureNodeConfig(db, user, server, inbound, existingClient = null
  * @param {Object} plan - 套餐信息
  * @returns {Promise<{success: boolean, message?: string, successCount?: number, failureCount?: number}>}
  */
-async function syncUserToXuiServers(db, user, plan = {}) {
+async function legacySyncUserToXuiServers(db, user, plan = {}) {
   let successCount = 0;
   let failureCount = 0;
   let lastError = '';
@@ -401,7 +405,8 @@ async function enqueueAndTryUserSync(db, taskType, userInfo, plan) {
 async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   const order = await db.prepare(`
     SELECT o.*, u.expire_at as current_expire_at, u.traffic_limit as current_traffic_limit,
-           u.email, u.subscription_token, u.plan_id as current_plan_id
+           u.email, u.subscription_token, u.plan_id as current_plan_id, u.enabled as current_enabled,
+           u.disable_reason as current_disable_reason
     FROM orders o
     LEFT JOIN users u ON o.user_id = u.id
     WHERE o.out_trade_no = ?
@@ -454,6 +459,8 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
         enabled = 1,
         plan_id = ?,
         traffic_limit = ?,
+        traffic_used_at = NULL,
+        disable_reason = NULL,
         expire_at = ?,
         payment_count = payment_count + 1,
         updated_at = ?
@@ -479,14 +486,25 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   await transaction();
 
   // 流量用完被禁用的用户续费后，先恢复本地状态，再异步同步 3X-UI
-  const user = await db.prepare('SELECT enabled FROM users WHERE id = ?').get(order.user_id);
-  if (user && user.enabled === 0) {
+  if (isRenewOrder
+    && Number(order.current_enabled) === 0
+    && order.current_disable_reason === DISABLE_REASONS.TRAFFIC_LIMIT) {
     logger.info(`用户 ${order.email} 已禁用，开始解除禁用`);
-    await db.prepare('UPDATE users SET enabled = 1, traffic_used_at = NULL WHERE id = ?').run(order.user_id);
 
-    trafficManager.syncDisableStatusToXui(db, order.user_id, false).catch(error => {
-      logger.error(`后台同步解除禁用到 3X-UI 失败: ${error.message}`);
-    });
+    trafficManager.enqueueUserStatusSync(db, order.user_id, false)
+      .then(result => {
+        if (result.success) {
+          logger.info(`用户 ${order.email} 解禁状态已立即同步到 3X-UI`);
+          return;
+        }
+
+        if (result.retryable) {
+          logger.warn(`用户 ${order.email} 解禁状态未立即同步，已进入重试队列`);
+        }
+      })
+      .catch(error => {
+        logger.error(`后台同步解除禁用到 3X-UI 失败: ${error.message}`);
+      });
 
     logger.info(`用户 ${order.email} 解除禁用成功`);
   }

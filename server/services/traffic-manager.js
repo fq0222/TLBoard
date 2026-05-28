@@ -4,6 +4,9 @@
  */
 
 const XuiService = require('./xui-service');
+const xuiSyncTaskService = require('./xui-sync-task-service');
+const { withUserStatusLock } = require('./user-status-lock');
+const { DISABLE_REASONS } = require('./renew-policy');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('TRAFFIC-MANAGER');
@@ -291,9 +294,24 @@ async function updateTrafficInDatabase(db, userTrafficData) {
 }
 
 /**
+ * 获取禁用前需要再次确认的用户最新状态
+ * @param {Object} db - 数据库实例
+ * @param {number|string} userId - 用户 ID
+ * @returns {Promise<Object|undefined>} 最新用户状态快照
+ */
+async function getLatestUserDisableState(db, userId) {
+  return db.prepare(`
+    SELECT id, email, enabled, traffic_used, traffic_limit, traffic_used_at
+    FROM users
+    WHERE id = ?
+  `).get(userId);
+}
+
+/**
  * 检查并禁用超量用户
  * @param {Object} db - 数据库实例
  * @param {Object} userTrafficData - 用户流量数据
+ * @returns {Promise<{disabledCount: number, retryCount: number}>} 禁用数量与待重试数量
  */
 async function checkAndDisableOverLimitUsers(db, userTrafficData) {
   try {
@@ -307,6 +325,7 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
     logger.info(`开始检查 ${userIds.length} 个用户的流量限制`);
 
     let disabledCount = 0;
+    let retryCount = 0;
 
     for (const userId of userIds) {
       const data = userTrafficData[userId];
@@ -315,34 +334,63 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
         continue;
       }
 
-      const user = await db.prepare('SELECT enabled FROM users WHERE id = ?').get(userId);
-      if (!user || user.enabled === 0) {
+      const lockedResult = await withUserStatusLock(db, Number(userId), async () => {
+        const latestUser = await getLatestUserDisableState(db, userId);
+        if (!latestUser || latestUser.enabled === 0) {
+          logger.info(`用户 ${data.email} 当前已是禁用状态，跳过重复禁用`);
+          return { success: true, action: 'skip-disabled' };
+        }
+
+        const latestUsed = Number(latestUser.traffic_used) || 0;
+        const latestLimit = Number(latestUser.traffic_limit) || 0;
+        const stillOverLimit = latestLimit > 0 && latestUsed >= latestLimit;
+
+        if (!stillOverLimit) {
+          logger.info(
+            `用户 ${data.email} 二次校验后未超限，跳过禁用: latestUsed=${latestUsed}, latestLimit=${latestLimit}`
+          );
+          return { success: true, action: 'skip-rechecked' };
+        }
+
+        logger.info(`用户 ${data.email} 流量超限，开始禁用: ${latestUsed}/${latestLimit}`);
+
+        const syncSuccess = await syncDisableStatusToXui(db, userId, true, { skipLock: true });
+        if (!syncSuccess) {
+          return {
+            success: false,
+            retryable: true,
+            message: `同步禁用状态到3X-UI失败: user=${userId}`
+          };
+        }
+
+        await db.prepare(`
+          UPDATE users SET enabled = 0, traffic_used_at = ?, disable_reason = ? WHERE id = ?
+        `).run(Math.floor(Date.now() / 1000), DISABLE_REASONS.TRAFFIC_LIMIT, userId);
+
+        return { success: true, action: 'disabled' };
+      });
+
+      if (lockedResult.retryable) {
+        retryCount++;
+        logger.warn(`用户 ${data.email} 状态锁忙或禁用同步失败，等待重试: ${lockedResult.message}`);
         continue;
       }
 
-      logger.info(`用户 ${data.email} 流量超限，开始禁用: ${data.trafficUsed}/${data.trafficLimit}`);
+      if (lockedResult.success && lockedResult.action === 'disabled') {
+        disabledCount++;
+        logger.info(`禁用用户 ${data.email} 成功`);
+      }
 
-      try {
-        const syncSuccess = await syncDisableStatusToXui(db, userId, true);
-
-        if (syncSuccess) {
-          await db.prepare(`
-            UPDATE users SET enabled = 0, traffic_used_at = ? WHERE id = ?
-          `).run(Math.floor(Date.now() / 1000), userId);
-
-          disabledCount++;
-          logger.info(`禁用用户 ${data.email} 成功`);
-        } else {
-          logger.warn(`同步禁用状态到3X-UI失败，跳过用户 ${data.email}`);
-        }
-      } catch (error) {
-        logger.error(`禁用用户 ${data.email} 错误: ${error.message}`);
+      if (!lockedResult.success && lockedResult.message) {
+        logger.error(`禁用用户 ${data.email} 错误: ${lockedResult.message}`);
       }
     }
 
-    logger.info(`检查用户流量限制完成，禁用 ${disabledCount} 个用户`);
+    logger.info(`检查用户流量限制完成，禁用 ${disabledCount} 个用户，待重试 ${retryCount} 个用户`);
+    return { disabledCount, retryCount };
   } catch (error) {
     logger.error(`检查用户流量限制错误: ${error.message}`);
+    return { disabledCount: 0, retryCount: 0 };
   }
 }
 
@@ -351,9 +399,24 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
  * @param {Object} db - 数据库实例
  * @param {number} userId - 用户 ID
  * @param {boolean} disable - 是否禁用
+ * @param {Object} [options={}] - 同步选项
+ * @param {boolean} [options.skipLock=false] - 是否跳过外层 userId 锁，供已持锁路径复用
  * @returns {Promise<boolean>} 是否成功
  */
-async function syncDisableStatusToXui(db, userId, disable) {
+async function syncDisableStatusToXui(db, userId, disable, options = {}) {
+  if (!options.skipLock) {
+    const lockedResult = await withUserStatusLock(db, Number(userId), async () => {
+      const success = await syncDisableStatusToXui(db, userId, disable, { ...options, skipLock: true });
+      return { success };
+    });
+
+    if (!lockedResult.success) {
+      return false;
+    }
+
+    return !!lockedResult.success;
+  }
+
   try {
     const user = await db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
     if (!user) {
@@ -412,6 +475,46 @@ async function syncDisableStatusToXui(db, userId, disable) {
 }
 
 /**
+ * 统一处理用户启用状态同步
+ *
+ * 先尝试立即同步到 3X-UI；如果锁忙或同步失败，则降级写入 xui_sync_tasks，
+ * 交给现有重试队列继续补偿，避免直接丢失禁用/解禁动作。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} userId - 用户 ID
+ * @param {boolean} disable - 是否禁用
+ * @returns {Promise<{success: boolean, retryable?: boolean, action: string}>}
+ */
+async function enqueueUserStatusSync(db, userId, disable) {
+  const syncSuccess = await syncDisableStatusToXui(db, userId, disable);
+  if (syncSuccess) {
+    logger.info(`用户状态已立即同步到 3X-UI: user=${userId}, disable=${disable}`);
+    return {
+      success: true,
+      action: disable ? 'disable' : 'enable'
+    };
+  }
+
+  const taskType = disable
+    ? xuiSyncTaskService.TASK_TYPES.DISABLE_SYNC
+    : xuiSyncTaskService.TASK_TYPES.ENABLE_SYNC;
+
+  await xuiSyncTaskService.enqueueTask(db, {
+    userId,
+    taskType,
+    payload: { disable }
+  });
+
+  logger.warn(`用户状态同步已降级进入重试队列: user=${userId}, disable=${disable}, taskType=${taskType}`);
+
+  return {
+    success: false,
+    retryable: true,
+    action: 'queued'
+  };
+}
+
+/**
  * 主函数：同步流量并处理禁用
  * @param {Object} db - 数据库实例
  */
@@ -449,6 +552,8 @@ module.exports = {
   updateTrafficInDatabase,
   checkAndDisableOverLimitUsers,
   syncDisableStatusToXui,
+  enqueueUserStatusSync,
+  getLatestUserDisableState,
   getTrafficUsageMultiplier,
   formatTrafficForLog
 };
