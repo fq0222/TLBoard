@@ -791,6 +791,35 @@ class XuiService {
     return Number(bytes || 0) / (1024 * 1024 * 1024);
   }
 
+  normalizeClientSnapshot(client = {}) {
+    return {
+      enable: client.enable !== false,
+      expiryTime: Number(client.expiryTime || 0),
+      totalBytes: Number(client.totalGB || 0),
+      subId: client.subId || '',
+      flow: client.flow || ''
+    };
+  }
+
+  shouldUpdateClient(existingClient, desiredClient) {
+    const current = this.normalizeClientSnapshot(existingClient);
+    const desired = {
+      enable: desiredClient.enable !== false,
+      expiryTime: Number(desiredClient.expiryTime || 0),
+      totalBytes: Number(desiredClient.totalGB || 0),
+      subId: desiredClient.subId || '',
+      flow: desiredClient.flow || ''
+    };
+
+    return (
+      current.enable !== desired.enable ||
+      current.expiryTime !== desired.expiryTime ||
+      current.totalBytes !== desired.totalBytes ||
+      current.subId !== desired.subId ||
+      current.flow !== desired.flow
+    );
+  }
+
   extractClientsFromSettings(settings) {
     if (!settings) return [];
 
@@ -862,6 +891,10 @@ class XuiService {
           desiredClient.subId || finalKeep.subId || ''
         );
 
+        if (!this.shouldUpdateClient(finalKeep, desiredClient)) {
+          return { success: true, action: 'dedup-skip-update' };
+        }
+
         const updateResult = await this.updateClient(inbound.id, email, {
           enabled: desiredClient.enable,
           expiryTime: desiredClient.expiryTime,
@@ -884,6 +917,10 @@ class XuiService {
           existingClients[0].uuid,
           desiredClient.subId || existingClients[0].subId || ''
         );
+
+        if (!this.shouldUpdateClient(existingClients[0], desiredClient)) {
+          return { success: true, action: 'skip-update' };
+        }
 
         const updateResult = await this.updateClient(inbound.id, email, {
           enabled: desiredClient.enable,
