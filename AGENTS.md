@@ -46,8 +46,9 @@ npx vite build --minify esbuild  # 绕过 terser 的构建方式
 
 ### 代码提交
 1. 可以 `git commit` 提交本地更改
-2. `git push` 前**必须**展示变更并获得用户同意
-3. **commit 信息必须使用中文书写**
+2. 刚写完但用户没有明确要求提交的文件，不要 `git add`，避免用户后续难以定位未确认的改动
+3. `git push` 前**必须**展示变更并获得用户同意
+4. **commit 信息必须使用中文书写**
 
 ### 验证要求
 - 后端修改：运行 `server/test/` 下的脚本验证
