@@ -1105,3 +1105,206 @@ node server/db/migrations/001-node-subscription-strategy.js
 - 新增管理端流量统计倍率设置
 - 资源下载分发改为按用户唯一分发，避免同一用户重复分发记录
 - 新增 3X-UI 数据库每日自动备份任务
+---
+
+## 15. 当前实现补充（2026-05-29）
+
+以下内容已在代码中落地，但旧版需求文档尚未完整覆盖，现补充说明。
+
+### 15.1 新增 `hy2` 节点策略
+
+系统当前支持三种订阅策略：
+
+| 策略类型 | 备注识别规则 | 当前用途 |
+|------|------|------|
+| `cf` | `remark` 包含 `cf` | Cloudflare 优选改写 |
+| `direct` | `remark` 不包含 `cf` / `hy2` | 直连透传 |
+| `hy2` | `remark` 包含 `hy2` | Hysteria2 节点专用处理 |
+
+补充说明：
+- `hy2` 在订阅聚合阶段归类为独立策略，不再与 `direct` 混写在同一语义下。
+- `hy2` 的原始协议链接为 `hysteria2://...`，但 3X-UI inbound 协议名实际为 `hysteria`，系统内部已做协议别名兼容。
+
+### 15.2 `user_node_configs` 数据结构补充
+
+当前 `user_node_configs` 已从“仅存储 UUID”扩展为“按协议存储凭据”：
+
+| 字段 | 说明 |
+|------|------|
+| `uuid` | 供 `vless` / `trojan` 等 UUID 型协议使用 |
+| `auth` | 供 `hy2` 节点使用的认证凭据 |
+| `sub_id` | 每个用户在每个节点上的独立订阅 ID |
+
+当前实现约束：
+- `UNIQUE(user_id, server_id, inbound_id)` 仍保持不变。
+- `uuid` 与 `auth` 不是二选一字段，而是按协议分别生效。
+- `sub_id` 仍以数据库为准，再同步到 3X-UI。
+
+### 15.3 3X-UI 同步规则补充
+
+#### 15.3.1 `direct` 节点
+
+- 同步时继续写入 `id(uuid)`。
+- 自动附带 `flow: xtls-rprx-vision`。
+
+#### 15.3.2 `hy2` 节点
+
+`hy2` 在 3X-UI 中实际按 `protocol=hysteria` 处理，客户端对象使用以下字段：
+
+- `auth`
+- `email`
+- `subId`
+- `enable`
+- `expiryTime`
+- `totalGB`
+- `limitIp`
+- `tgId`
+
+补充说明：
+- `hy2` 不写 `id`。
+- `hy2` 不写 `flow`。
+- 代码内部命名已统一使用 `auth`，不再使用旧的 `password` 语义。
+
+### 15.4 原始订阅模板缓存机制补充
+
+订阅生成链路当前不再简单依赖实时抓取，而是引入了“原始订阅模板缓存 + 增量修复”机制：
+
+- 新增缓存表：`user_subscription_sources`
+- 每条缓存按 `user_id + server_id + inbound_id` 唯一定位
+- 缓存内容包括：
+  - `sub_id`
+  - `remark`
+  - `protocol`
+  - `original_link`
+  - `node_fingerprint`
+  - `server_fingerprint`
+  - `fetched_at`
+
+生成订阅时的当前流程：
+1. 优先复用本地 `user_subscription_sources`
+2. 如果缓存缺失、过期或节点/服务器指纹不一致，则只对失效节点做增量修复
+3. 修复时按每个节点自己的 `sub_id` 向 3X-UI 拉取原始订阅
+4. 修复完成后再聚合输出最终订阅
+
+### 15.5 `hy2` 订阅输出规则补充
+
+#### 15.5.1 通用订阅（`/api/user/sub/:token` 默认输出）
+
+`hy2` 节点当前输出为 `hysteria2://` 链接，并在保留原始认证、地址、`fp`、`alpn`、`sni` 等参数的基础上，统一补齐：
+
+- `security=tls`
+- `mport=40000-50000`
+- `insecure=0`
+- `allowInsecure=0`
+
+说明：
+- 该规则用于兼容 V2RayN 等客户端的当前导入行为。
+- 这一步只作用于 `hy2` 节点，不影响 `cf` / `direct` 的既有逻辑。
+
+#### 15.5.2 Clash 订阅（`?clash=1`）
+
+`hy2` 的 Clash YAML 当前输出字段补充为：
+
+- `type: hysteria2`
+- `ports: 40000-50000`
+- `tls: true`
+- `skip-cert-verify: false`
+
+同时保留：
+- `password`
+- `sni`
+- `alpn`
+- `client-fingerprint`
+
+### 15.6 协议匹配兼容补充
+
+当前代码已兼容以下协议映射：
+
+| inbound 协议 | 原始订阅链接协议 | 说明 |
+|------|------|------|
+| `hysteria` | `hysteria2://` | 用于 `hy2` 节点模板匹配 |
+
+这意味着：
+- 当 3X-UI 节点快照中记录的是 `protocol=hysteria` 时
+- 系统仍能从原始订阅内容中正确匹配 `hysteria2://` 节点链接
+
+### 15.7 数据库迁移补充
+
+当前与订阅/节点策略相关的迁移脚本包括：
+
+- `001-node-subscription-strategy.js`
+- `008-user-node-config-password.js`
+
+其中 `008-user-node-config-password.js` 的当前职责已经调整为：
+- 新增 `user_node_configs.auth`
+- 兼容历史 `password` 列
+- 将历史 `password` 数据迁移到 `auth`
+
+说明：
+- 脚本文件名仍沿用原编号命名，便于兼容已有环境。
+- 代码运行时已统一使用 `auth` 字段。
+
+### 15.8 定时任务实际执行时间补充
+
+当前代码中的部分定时任务时间表与旧文档描述存在差异，现以实现为准：
+
+| 任务 | 当前实际首次延迟 | 当前实际周期 |
+|------|------|------|
+| 3X-UI 用户巡检同步 | 1 分钟 | 4 小时 |
+| 3X-UI 同步重试队列 worker | 30 秒 | 1 分钟 |
+| 流量同步与自动禁用 | 10 分钟 | 1 小时 |
+| 工单自动关闭 | 3 分钟 | 1 小时 |
+| 释放过期名额 | 不在启动时立即执行 | 每天 5:00 |
+| 邮件群发任务 | 不在启动时立即执行 | 每天 9:00 |
+| 清理邮件日志 | 不在启动时立即执行 | 每天 3:00 |
+| 3X-UI 数据库备份 | 不在启动时立即执行 | 每天 4:00 |
+
+补充说明：
+- `3X-UI 同步重试队列 worker` 是当前实现中的独立任务，用于补偿注册、续费、启用、禁用等同步失败后的重试。
+- 释放过期名额并不是每小时执行，而是每天 5:00 执行一次。
+
+### 15.9 3X-UI 同步重试队列补充
+
+当前系统已落地 `xui_sync_tasks` 队列表，用于持久化以下类型的补偿任务：
+
+- `initial_user_sync`
+- `renew_sync`
+- `user_sync`
+- `enable_sync`
+- `disable_sync`
+
+重试特性：
+- 状态：`pending` / `processing` / `success` / `failed`
+- 退避时间：`60 秒`、`5 分钟`、`15 分钟`、`1 小时`、`4 小时`
+- 默认最多重试 `10` 次
+- 同一用户的新同步任务入队前，会将旧的 `pending` 用户同步任务标记为已被取代
+
+### 15.10 资源管理能力补充
+
+管理端资源管理当前除原有上传、分发、批量设置过期外，还支持：
+
+- 刷新资源全局下载 token
+- 单独设置资源过期时间
+
+对应能力：
+- `POST /api/admin/resources/:id/refresh-token`
+- `PUT /api/admin/resources/:id/expire`
+
+### 15.11 帮助中心补充
+
+用户端当前已存在帮助中心接口与文章图片读取能力：
+
+- 帮助文章列表
+- 帮助分类列表
+- 帮助文章详情
+- 帮助中心图片直链访问
+
+实现入口：
+- `/api/user/help/articles`
+- `/api/user/help/categories`
+- `/api/user/help/articles/:id`
+- `/api/user/help/images/:filename`
+
+说明：
+- 帮助中心内容来源于后台博客文章的已发布内容。
+- 帮助文章接口当前要求用户已登录后访问。

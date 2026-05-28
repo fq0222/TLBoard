@@ -2,70 +2,86 @@
 
 English | [简体中文](./README.md)
 
-A complete subscription management system for proxy panels, supporting multiple 3X-UI servers, online payments, Cloudflare IP optimization, email management, and more.
+A subscription management system for multi-3X-UI deployments, covering plan purchase, subscription generation, Cloudflare optimization, resource delivery, email workflows, and cross-server synchronization.
 
-## Features
+## Overview
+
+- Backend: `server/`, built with Node.js + Express + PostgreSQL
+- User panel: `client-user/`, built with Vue 3 + Vite + Element Plus
+- Admin panel: `client-admin/`, built with Vue 3 + Vite + Element Plus
+- Package layout: three independent packages, no root `package.json`
+
+## Current Capabilities
 
 ### User Panel
 
-- **Registration & Payment**: Integrated registration and payment flow, supporting Alipay/WeChat
-- **Subscription Management**: Universal subscription (V2Ray/Clash) and Clash subscription
-- **IP Optimization**: One-click Cloudflare node latency testing, automatic optimal IP selection
-- **Plan Renewal**: Traffic accumulation mechanism, supporting plan switching
-- **Ticket System**: Users can submit issues, admins respond promptly
-- **Email Trigger**: Users can request tutorials, invoices, and other emails
-- **Mobile Responsive**: Responsive layout supporting mobile browser access
-- **Getting Started Guide**: Step-by-step guide for first-time users
+- Browse plans, purchase, renew, and switch plans
+- Generate universal subscriptions and Clash subscriptions
+- Manage Cloudflare preferred IPs
+- Claim downloadable resources and reset delivery links
+- Read announcements, browse help center articles, request tutorial emails
+- Responsive layout for mobile devices
 
 ### Admin Panel
 
-- **Plan Management**: Flexible configuration of plan pricing, traffic, and duration with sales limit support
-- **Order Management**: View all orders with status filtering
-- **User Management**: Adjust user plans, traffic, and expiration dates, manage user CF optimal IPs, generate subscription links for users
-- **Announcement Management**: Markdown syntax support, pinning feature
-- **Server Management**: Multiple 3X-UI server management with one-click sync
-- **Ticket Management**: Handle user tickets with auto-close support
-- **Email Management**: Brevo-based email sending with templates, campaigns, and logs
-- **System Settings**: Configure the traffic usage multiplier
-- **Database Backup**: Automatically back up all 3X-UI server databases every day
+- Manage multiple 3X-UI servers and trigger one-click sync
+- Manage plans, orders, users, and announcements
+- Distribute resources, expire links, and refresh tokens
+- Manage email templates, campaigns, and delivery logs
+- View dashboard metrics and configure traffic multiplier
+- Back up 3X-UI databases every day
 
-### Email Management
+## Node and Subscription Strategies
 
-- **Brevo Integration**: Send emails via Brevo API
-- **Email Templates**: HTML templates with automatic variable substitution
-- **Campaign Tasks**: Send to all users, disabled users, or custom lists
-- **Quota Management**: Configurable daily sending and campaign quotas
-- **Sending Logs**: Complete record of each email's sending status
-- **Scheduled Tasks**: Daily campaign processing and log cleanup
-- **External Recipients**: Support sending to emails outside the system
+The system currently supports three inbound handling strategies detected from inbound `remark`:
 
-### Subscription Strategy
+- `cf`: remark contains `cf`; subscriptions replace address, port, and host, and generate one node per preferred CF IP
+- `direct`: default strategy; keeps the original node values and auto-applies `flow: xtls-rprx-vision` when syncing to 3X-UI
+- `hy2`: remark contains `hy2`; maps to `protocol=hysteria` in 3X-UI and outputs `hysteria2://` subscriptions
 
-- **Node-level Independent Config**: Each user has independent UUID and sub_id for each node
-- **CF Strategy**: Replace address with CF optimal IP, generate independent node for each IP
-- **Direct Strategy**: Use original node info directly, auto-set flow: xtls-rprx-vision
-- **Strategy Detection**: Auto-detect via node remark (contains "cf" uses CF strategy)
+### hy2 Details
 
-### Technical Features
+- 3X-UI client auth uses `auth`, not `id`
+- Client sync payload includes `auth`, `email`, `subId`, `enable`, `expiryTime`, `totalGB`, `limitIp`, and `tgId`
+- Universal subscriptions add `security=tls`, `mport=40000-50000`, `insecure=0`, and `allowInsecure=0`
+- Clash subscriptions add `ports: 40000-50000`, `tls: true`, and `skip-cert-verify: false`
 
-- **Multi-Server Support**: Manage multiple 3X-UI servers simultaneously
-- **Auto Sync**: Scheduled synchronization of user and traffic data, check sub_id and flow consistency
-- **Traffic Multiplier**: Configure how new traffic increments are counted locally
-- **Database Backup**: Download and overwrite the latest `x-ui.db` via 3X-UI API Token
-- **Security**: Login/registration rate limiting, payment signature verification
-- **High Performance**: Connection pool optimization, automatic retry mechanism
+### Raw Subscription Template Cache
 
-## Tech Stack
+- Raw subscription templates are cached per user, per server, and per inbound in `user_subscription_sources`
+- Subscription generation reuses cached templates first and repairs only invalid pairs when needed
+- `hysteria` inbounds automatically match `hysteria2://` raw links
 
-| Layer | Technology |
-|-------|------------|
-| Backend | Node.js + Express |
-| Frontend | Vue 3 + Vite + Element Plus |
-| Database | PostgreSQL |
-| Payment | VMQ |
-| Email | Brevo |
-| 3X-UI Integration | API Token based 3X-UI API client |
-| Deployment | PM2 + OpenResty + Cloudflare Tunnel |
+## Synchronization and Background Jobs
+
+### 3X-UI User Sync
+
+- Purchase, renewal, enable, and disable actions all trigger 3X-UI synchronization
+- Failed sync tasks are written into the `xui_sync_tasks` compensation queue
+- The retry worker starts after 30 seconds and then runs every minute
+- Retry backoff steps are 1 minute, 5 minutes, 15 minutes, 1 hour, and 4 hours
+
+### Scheduled Jobs
+
+- Traffic sync and auto-disable: first run after 10 minutes, then hourly
+- Mark expired orders: every 10 minutes
+- Delete expired orders: first run after 5 minutes, then hourly
+- Clean zombie users: first run after 2 minutes, then every 30 minutes
+- Full 3X-UI user sync: first run after 1 minute, then every 4 hours
+- Ticket auto-close check: first run after 3 minutes, then hourly
+- Release expired sales slots: daily at 05:00
+- Email campaigns: daily at 09:00
+- Email log cleanup: daily at 03:00
+- 3X-UI database backup: daily at 04:00
+
+## Technical Highlights
+
+- Unified management for multiple 3X-UI servers
+- PostgreSQL connection pooling with automatic retry on transient failures
+- Rate limiting for user login and registration
+- Aggregated traffic accounting, multiplier support, and auto-disable on overuse
+- Consistency maintenance based on `sub_id`, `auth`, and `flow`
+- Support for downloading and overwriting the latest `x-ui.db` via 3X-UI API Token
 
 ## Quick Start
 
@@ -84,227 +100,159 @@ cd TLBoard
 
 # Install backend dependencies
 cd server
-npm install --production
+npm install
 
-# Install frontend dependencies and build
+# Install user panel dependencies
 cd ../client-user
 npm install
-npm run build
 
+# Install admin panel dependencies
 cd ../client-admin
 npm install
-npm run build
 
 # Initialize database
 cd ../server
-node init-db.js
+npm run init-db
 
-# Start service
+# Start backend only
 npm run dev
+
+# Start backend + user panel + admin panel together
+npm run dev:all
 ```
 
-### Default Account
+### Default Admin Account
 
 | Purpose | Account | Password |
 |---------|---------|----------|
-| Admin Panel | admin | admin123 |
+| Admin Panel | `admin` | `admin123` |
 
-> ⚠️ Please change the default password immediately after first login
-
-## Project Structure
-
-```
-subscription-manager/
-├── server/                 # Backend service
-│   ├── routes/            # Routes
-│   │   ├── user/          # User API
-│   │   └── admin/         # Admin API
-│   ├── services/          # Business logic
-│   │   ├── subscription-strategy.js  # Subscription strategy
-│   │   ├── order-service.js          # Order processing
-│   │   ├── xui-service.js            # 3X-UI integration
-│   │   ├── xui-sync.js               # Node sync
-│   │   ├── traffic-manager.js        # Traffic management
-│   │   └── email-service.js          # Email service
-│   ├── middleware/         # Middleware
-│   ├── jobs/              # Scheduled tasks
-│   │   ├── index.js       # Task registration
-│   │   ├── email-campaign.js  # Email campaign task
-│   │   └── backupDB.js    # 3X-UI database backup task
-│   ├── backupDB/          # 3X-UI database backups (git ignored)
-│   ├── db/                # Database init and migrations
-│   └── app.js             # Entry file
-├── client-user/           # User frontend
-│   └── src/
-│       ├── views/         # Page components
-│       ├── api/           # API interfaces
-│       └── stores/        # State management
-├── client-admin/          # Admin frontend
-│   └── src/
-│       ├── views/         # Page components
-│       │   └── Email.vue  # Email management (send, templates, campaigns)
-│       ├── api/           # API interfaces
-│       └── stores/        # State management
-└── docs/                  # Documentation
-```
+Change the default password immediately after the first login.
 
 ## Configuration
 
-### Server Configuration
+### Core Config Files
 
-Edit `server/config.js`:
+- Development config: `server/config.js`
+- Production config: `server/ecosystem.config.js`
+- Site URL helpers: `server/utils/site-url.js`
+
+### Site URL Settings
+
+Features such as subscription URLs and email links depend on a full site URL:
 
 ```javascript
-module.exports = {
-  // Database configuration
-  database: {
-    host: 'localhost',
-    port: 5432,
-    user: 'postgres',
-    password: 'your_password',
-    database: 'subscription_manager'
-  },
-  
-  // JWT secrets (must be changed)
-  user: {
-    jwtSecret: 'your_user_jwt_secret'
-  },
-  admin: {
-    jwtSecret: 'your_admin_jwt_secret'
-  },
-
-  // Site configuration (required for production)
-  site: {
-    protocol: 'https',  // Use https for production
-    host: 'yourdomain.com'
-  }
-};
+site: {
+  protocol: process.env.SITE_PROTOCOL || 'http',
+  host: process.env.SITE_HOST || '',
+}
 ```
 
-### Production Configuration
-
-Use environment variables or PM2 configuration:
+Recommended production environment variables:
 
 ```bash
-# Environment variables
 SITE_PROTOCOL=https
 SITE_HOST=yourdomain.com
 ```
 
-### 3X-UI Server Configuration
+### 3X-UI Server Settings
 
-> ⚠️ **Authentication Requirement**: The system now uses 3X-UI API Token authentication. Generate and keep the API Token securely in your 3X-UI panel.
+When adding a 3X-UI server in the admin panel, configure:
 
-Add 3X-UI servers in the admin panel:
+- Name: display name of the server
+- API URL: 3X-UI panel URL
+- API Token: API token generated by 3X-UI
+- Host / Port: used by `cf` strategy output
+- Subscription URL: original 3X-UI subscription URL
 
-- **Name**: Server identifier (e.g., "US-01", "HK-01")
-- **API URL**: 3X-UI panel address
-- **API Token**: 3X-UI panel API Token
-- **Host**: CF port forwarding hostname
-- **Port**: Client connection port (for CF nodes)
-- **Subscription URL**: 3X-UI subscription link (e.g., `https://example.com/sub/aaa333/`)
+## Key Directories
 
-### 3X-UI Database Backup
-
-The backend automatically backs up every 3X-UI server with an API Token at 4:00 AM every day:
-
-- Backup directory: `server/backupDB`
-- File name: `<server-name>-x-ui.db`
-- Existing files with the same name are overwritten to keep the latest backup
-- `server/backupDB/` is git ignored to avoid committing real database backups
-
-## Deployment Guide
-
-For detailed deployment instructions, see [Deployment Guide](./docs/deploy-subscription-manager.md)
-
-### Production Start
-
-```bash
-# Start with PM2
-cd server
-pm2 start ecosystem.config.js
-
-# Save and enable auto-start
-pm2 save
-pm2 startup
+```text
+server/
+  routes/
+  services/
+  jobs/
+  db/
+client-user/
+  src/
+client-admin/
+  src/
+docs/
 ```
 
-## API Documentation
+Important service files:
 
-For complete API documentation, see [API.md](./docs/api.md)
+- `server/services/order-service.js`: purchase, renewal, and 3X-UI sync flow
+- `server/services/xui-service.js`: 3X-UI API integration
+- `server/services/subscription-strategy.js`: strategy detection and link rewriting
+- `server/services/subscription-service.js`: raw subscription template cache and repair
+- `server/services/xui-sync-task-service.js`: 3X-UI compensation queue
+- `server/services/traffic-manager.js`: traffic aggregation and auto-disable logic
+
+## Documentation
+
+- [Requirements](./docs/requirements.md)
+- [API Reference](./docs/api.md)
+- [Deployment Guide](./docs/deploy-subscription-manager.md)
 
 ## Changelog
 
+### V1.7.0 (2026-05-29)
+
+- Added the `hy2` strategy with `hysteria2://` support for both universal and Clash subscriptions
+- Finished 3X-UI interoperability for hy2 and standardized client authentication on `auth`
+- Added raw subscription template caching and incremental repair, including `hysteria` to `hysteria2` matching
+- Added the `xui_sync_tasks` compensation queue for failed purchase, renewal, enable, and disable syncs
+- Brought README and project docs in line with the current help center, resource delivery, and traffic multiplier behavior
+
 ### V1.6.0 (2026-05-22)
 
-- ✨ 3X-UI authentication: Adapted to the newer API Token authentication flow
-- ✨ Traffic multiplier: Admin panel can configure the traffic usage multiplier
-- ✨ 3X-UI database backup: Back up every server's `x-ui.db` at 4:00 AM daily
-- ✅ Resource distribution: Keep one distribution record per user to avoid duplicate links
-- ✅ Download link retrieval: User panel can create, reset, or reuse download links automatically
+- Adapted 3X-UI authentication to the newer API Token flow
+- Added configurable traffic usage multiplier in the admin panel
+- Back up every server's `x-ui.db` daily at 04:00
+- Reuse one resource delivery record per user
+- Allow the user panel to create, reset, or reuse download links automatically
 
 ### V1.5.0 (2026-05-15)
 
-- ✨ Admin user management: Support managing user CF optimal IPs (up to 5)
-- ✨ Admin user management: Support generating subscription links for users (consistent with user-generated URLs)
-- ✅ Fix release expired quota logic: Only release users who have paid and traffic exhausted over 3 days without renewal
-- ✅ Release expired quota scheduled task changed to run daily at 5:00 AM
+- Added admin-side management for user Cloudflare preferred IPs
+- Added admin-side subscription link generation for users
+- Fixed expired sales slot release so it only affects paid users whose traffic has been exhausted for over 3 days without renewal
+- Moved the expired slot release task to 05:00 daily
 
 ### V1.4.0 (2026-05-13)
 
-- ✨ Mobile responsive: User panel responsive layout for mobile browsers
-- ✨ Getting started guide: Step-by-step guide for first-time users
-- ✨ Tutorial emails: Support Android and Windows client tutorial emails
-- ✨ Site configuration: Support HTTPS protocol for production environment
-- ✨ External recipients: Email sending supports addresses outside the system
-- ✨ Server management: Sync button with loading state, timeout extended to 60s
-- ✅ Subscription link persistence: Display after page refresh
-- ✅ Real IP retrieval: Enable Express trust proxy
+- Added mobile support for the user panel
+- Added getting-started guidance and tutorial emails
+- Added site protocol configuration for HTTPS deployments
+- Added loading state to server sync and extended related timeouts to 60 seconds
 
 ### V1.3.0 (2026-05-12)
 
-- ✨ Email management: Brevo-based email sending
-- ✨ Email templates: HTML templates with automatic variable substitution
-- ✨ Campaign tasks: Send to all users, disabled users, or custom lists
-- ✨ Quota management: Configurable daily sending and campaign quotas
-- ✨ Sending logs: Complete record of each email's sending status with pagination
-- ✨ Scheduled tasks: Daily campaign processing and log cleanup
-- ✨ Dashboard: Display today's email count and quotas
-- ✨ Page merge: Email-related pages merged into unified email management page
+- Integrated Brevo-based email delivery
+- Added email templates, campaigns, logs, and quota controls
 
 ### V1.2.0 (2026-05-11)
 
-- ✨ Subscription strategy: Support CF and Direct strategies
-- ✨ Node-level independent config: Each user has independent UUID/sub_id per node
-- ✨ CF node multi-IP: Generate independent node for each optimal IP
-- ✨ Direct node flow: Auto-set xtls-rprx-vision
-- ✅ 3X-UI server subscription URL field
-- ✅ Scheduled task sync sub_id and flow consistency
-- ✅ Database migration script
+- Introduced `cf` and `direct` subscription strategies
+- Added independent UUID and `sub_id` per user per node
+- Auto-applied `xtls-rprx-vision` to direct nodes
 
 ### V1.1.0 (2026-05-09)
 
-- ✨ Traffic statistics: Aggregate user traffic across all 3X-UI servers (incremental update)
-- ✨ Auto disable: Automatically disable users when traffic exceeds plan limit
-- ✨ Auto re-enable: Automatically re-enable users after plan renewal
-- ✨ Traffic sync frequency changed from 3 hours to 1 hour
+- Added cross-server traffic aggregation and automatic disable
+- Re-enable users automatically after renewal
 
 ### V1.0.0 (2026-05-09)
 
-- 🎉 First official release
-- ✨ Multiple 3X-UI server support
-- ✨ Online payment (VMQ)
-- ✨ Cloudflare IP optimization
-- ✨ Subscription management (V2Ray/Clash)
-- ✨ Plan renewal
-- ✨ Ticket system
-- ✨ Announcement management
+- First official release
+- Included multi-3X-UI support, online payment, announcements, and core subscription management
 
 ## License
 
 MIT License
 
-## Support & Feedback
+## Support and Feedback
 
-- Submit [Issue](https://github.com/fq0222/TLBoard/issues)
-- View [Wiki](https://github.com/fq0222/TLBoard/wiki)
+- Submit an [Issue](https://github.com/fq0222/TLBoard/issues)
+- Visit the [Wiki](https://github.com/fq0222/TLBoard/wiki)

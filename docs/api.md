@@ -1870,3 +1870,311 @@ X-Requested-With: XMLHttpRequest
 | GET | `/panel/api/server/getDb` | 下载 3X-UI 数据库文件 `x-ui.db` |
 
 `/panel/api/server/getDb` 用于每天 4:00 的 3X-UI 数据库自动备份，备份文件保存到 `server/backupDB/<服务器名称>-x-ui.db`。
+---
+
+## 8. 当前实现补充（2026-05-29）
+
+以下内容用于补充当前代码已经支持、但旧版 API 文档未完整描述的订阅与节点同步能力。
+
+### 8.1 订阅策略补充
+
+当前订阅链路支持三种策略：
+
+| 策略类型 | 识别规则 | 说明 |
+|------|------|------|
+| `cf` | 节点备注包含 `cf` | 替换地址、端口、`host` |
+| `direct` | 节点备注不包含 `cf` / `hy2` | 直连透传 |
+| `hy2` | 节点备注包含 `hy2` | Hysteria2 专用处理 |
+
+补充说明：
+- `hy2` 在 3X-UI inbound 中的协议名通常为 `hysteria`。
+- 原始订阅中的实际链接协议为 `hysteria2://`。
+- 当前实现已兼容 `hysteria -> hysteria2` 的模板匹配。
+
+### 8.2 `POST /api/user/subscription/generate` 补充说明
+
+当前实现中，此接口不只是“生成 URL”，而是完整执行以下步骤：
+
+1. 确保在线服务器已有最新 `xui_nodes` 快照
+2. 确保用户在每个在线节点上都有本地节点配置
+3. 优先复用 `user_subscription_sources` 原始订阅模板缓存
+4. 仅对失效或缺失的节点做增量修复
+5. 聚合为通用订阅 / Clash 订阅并写入 `user_subscriptions`
+
+返回结构仍为：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "subscription_url": "https://example.com/api/user/sub/abc123",
+    "clash_url": "https://example.com/api/user/sub/abc123?clash=1",
+    "v2ray_url": "https://example.com/api/user/sub/abc123?v2ray=1"
+  }
+}
+```
+
+### 8.3 `GET /api/user/sub/:token` 通用订阅补充
+
+当前默认返回的 Base64 通用订阅中，`hy2` 节点输出为 `hysteria2://` 链接，并会在保留原始参数的基础上补齐：
+
+- `security=tls`
+- `mport=40000-50000`
+- `insecure=0`
+- `allowInsecure=0`
+
+示例形态：
+
+```text
+hysteria2://<auth>@host:port?security=tls&fp=chrome&alpn=h3&sni=example.com&mport=40000-50000&insecure=0&allowInsecure=0#node-name
+```
+
+### 8.4 `GET /api/user/sub/:token?clash=1` 补充
+
+当前 `hy2` 节点在 Clash YAML 中输出为 `type: hysteria2`，并固定补齐以下字段：
+
+- `ports: 40000-50000`
+- `tls: true`
+- `skip-cert-verify: false`
+
+同时保留原始链路中的：
+
+- `password`
+- `sni`
+- `alpn`
+- `client-fingerprint`
+
+### 8.5 节点协议格式补充
+
+当前文档中的节点格式说明需要补充 `hysteria2`：
+
+- VLESS：`vless://uuid@address:port?...#remark`
+- VMess：`vmess://base64(json)`
+- Trojan：`trojan://password@address:port?...#remark`
+- Hysteria2：`hysteria2://auth@address:port?...#remark`
+
+说明：
+- 对 `hysteria2` 而言，链接中的认证字段语义为 `auth`。
+- 在通用订阅解析逻辑中，该值当前复用 `uuid` 槽位进行统一处理，但业务语义应理解为 `auth`。
+
+### 8.6 3X-UI 客户端同步字段补充
+
+当前系统向 3X-UI 写入客户端信息时，按协议使用不同字段：
+
+#### `direct` / 常规 UUID 协议
+
+- `id`
+- `email`
+- `subId`
+- `enable`
+- `expiryTime`
+- `totalGB`
+- `flow`（`direct` 节点会自动写入 `xtls-rprx-vision`）
+
+#### `hy2` / `protocol=hysteria`
+
+- `auth`
+- `email`
+- `subId`
+- `enable`
+- `expiryTime`
+- `totalGB`
+- `limitIp`
+- `tgId`
+
+补充说明：
+- `hy2` 不写 `id`
+- `hy2` 不写 `flow`
+
+### 8.7 数据表补充
+
+与订阅链路相关的当前表结构补充如下：
+
+#### `user_node_configs`
+
+新增/当前有效字段：
+- `uuid`
+- `auth`
+- `sub_id`
+
+说明：
+- `uuid` 用于 UUID 型协议
+- `auth` 用于 `hy2`
+
+#### `user_subscription_sources`
+
+用于缓存每个用户在每个节点上的原始订阅模板，关键字段包括：
+
+- `user_id`
+- `server_id`
+- `inbound_id`
+- `sub_id`
+- `remark`
+- `protocol`
+- `original_link`
+- `node_fingerprint`
+- `server_fingerprint`
+- `fetched_at`
+
+### 8.8 数据库迁移补充
+
+当前与本次能力直接相关的迁移为：
+
+- `001-node-subscription-strategy.js`
+- `008-user-node-config-password.js`
+
+`008-user-node-config-password.js` 当前实际作用：
+- 补充 `user_node_configs.auth`
+- 兼容历史 `password` 列
+- 将旧值迁移到 `auth`
+
+### 8.9 定时任务与同步补偿补充
+
+当前实现中，3X-UI 同步相关并不只有一个“4 小时巡检任务”，还包含独立的失败补偿队列：
+
+#### 3X-UI 用户巡检同步
+
+- 首次延迟：1 分钟
+- 执行周期：4 小时
+
+#### 3X-UI 同步重试队列 worker
+
+- 首次延迟：30 秒
+- 执行周期：1 分钟
+
+队列任务类型：
+- `initial_user_sync`
+- `renew_sync`
+- `user_sync`
+- `enable_sync`
+- `disable_sync`
+
+重试退避时间：
+- 60 秒
+- 5 分钟
+- 15 分钟
+- 1 小时
+- 4 小时
+
+说明：
+- 新的用户同步任务入队时，会自动取代同一用户旧的 `pending` 同步任务。
+- 该机制用于避免续费后的旧快照把新流量覆盖回去。
+
+### 8.10 帮助中心接口补充
+
+用户端当前还有一组帮助中心接口，旧版 API 文档未完整列出：
+
+#### GET `/api/user/help/articles`
+
+获取帮助文章列表，支持查询参数：
+
+- `page`
+- `limit`
+- `category`
+- `keyword`
+
+#### GET `/api/user/help/categories`
+
+获取帮助中心文章分类列表。
+
+#### GET `/api/user/help/articles/:id`
+
+获取单篇帮助文章详情。
+
+#### GET `/api/user/help/images/:filename`
+
+读取帮助中心文章中引用的图片资源。
+
+补充说明：
+- 帮助文章接口当前要求登录后访问。
+- 图片接口不要求登录，但会校验文件名安全性。
+
+### 8.11 管理端资源接口补充
+
+旧版 API 文档缺少两个当前已实现的资源管理接口：
+
+#### POST `/api/admin/resources/:id/refresh-token`
+
+刷新资源的全局下载 token。
+
+成功响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 1,
+    "download_token": "new-token"
+  }
+}
+```
+
+#### PUT `/api/admin/resources/:id/expire`
+
+设置资源本身的过期时间。
+
+请求体示例：
+
+```json
+{
+  "expire_at": 1770000000
+}
+```
+
+说明：
+- `expire_at` 传 `null` 时表示取消资源级过期时间。
+
+### 8.12 资源分发接口行为补充
+
+当前资源分发接口的行为是“按用户唯一分发记录”：
+
+#### POST `/api/admin/resources/:id/distribute`
+
+对同一 `user_id`：
+- 已有分发记录时更新同一条记录
+- 不再重复插入多条分发记录
+
+#### GET `/api/admin/resources/:id/distributions`
+
+当前返回的是“每个用户最新的一条分发记录”，不是历史全量流水。
+
+### 8.13 仪表盘与系统设置补充
+
+以下接口已在代码中实现，并建议视为正式接口：
+
+#### GET `/api/admin/dashboard/stats`
+
+返回：
+- `userCount`
+- `planCount`
+- `orderCount`
+- `serverCount`
+- `emailTodayCount`
+- `emailDailyLimit`
+- `campaignDailyLimit`
+
+#### GET `/api/admin/system-settings/traffic`
+
+获取流量统计倍率配置：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "traffic_usage_multiplier": 1
+  }
+}
+```
+
+#### PUT `/api/admin/system-settings/traffic`
+
+更新流量统计倍率配置，请求体：
+
+```json
+{
+  "traffic_usage_multiplier": 1.2
+}
+```
