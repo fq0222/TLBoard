@@ -485,7 +485,7 @@ function composeSubscriptionNodes(nodeConfigs, sourceMap, serversById, cfIps) {
       }
     } else {
       const nodeName = `${server.name}-${config.remark}`;
-      const processedLink = replaceNodeRemark(processNodeLink(source.original_link, 'direct'), nodeName);
+      const processedLink = replaceNodeRemark(processNodeLink(source.original_link, strategy), nodeName);
 
       allNodes.push({
         server_name: server.name,
@@ -1083,6 +1083,34 @@ function generateClashConfig(nodes, user) {
         }
       }
       
+      return config;
+    } else if (protocol === 'hysteria2') {
+      const sni = params.sni || serverAddress;
+      const alpnValues = (params.alpn || '')
+        .split(',')
+        .map(item => item.trim())
+        .filter(Boolean);
+
+      let config = `  - name: ${node_name}
+    type: hysteria2
+    server: ${serverAddress}
+    port: ${port}
+    password: ${uuid}
+    ports: 40000-50000
+    tls: true
+    skip-cert-verify: false
+    sni: ${sni}
+    udp: true`;
+
+      if (alpnValues.length > 0) {
+        config += `\n    alpn:`;
+        for (const alpn of alpnValues) {
+          config += `\n      - ${alpn}`;
+        }
+      }
+      if (params.fp) {
+        config += `\n    client-fingerprint: ${params.fp}`;
+      }
       return config;
     }
     return '';

@@ -17,6 +17,9 @@ function getStrategyFromRemark(remark) {
   if (lowerRemark.includes('cf')) {
     return 'cf';
   }
+  if (lowerRemark.includes('hy2')) {
+    return 'hy2';
+  }
   return 'direct';
 }
 
@@ -28,7 +31,7 @@ function getStrategyFromRemark(remark) {
 function parseNodeLink(link) {
   if (!link) return null;
   
-  const protocolMatch = link.match(/^(vless|vmess|trojan):\/\//);
+  const protocolMatch = link.match(/^(vless|vmess|trojan|hysteria2):\/\//);
   if (!protocolMatch) return null;
   
   const protocol = protocolMatch[1];
@@ -173,6 +176,28 @@ function applyDirectStrategy(originalLink) {
 }
 
 /**
+ * 应用 hy2 通用订阅策略。
+ * 职责：
+ * 1. 保留原始 hysteria2 链接中的认证、地址和大部分参数
+ * 2. 统一补齐 V2RayN 等客户端需要的 TLS/证书校验/端口跳跃参数
+ * @param {string} originalLink - 原始 hysteria2 节点链接
+ * @returns {string} 处理后的 hysteria2 节点链接
+ */
+function applyHy2Strategy(originalLink) {
+  const nodeInfo = parseNodeLink(originalLink);
+  if (!nodeInfo || nodeInfo.protocol !== 'hysteria2') {
+    return originalLink;
+  }
+
+  nodeInfo.params.security = 'tls';
+  nodeInfo.params.mport = '40000-50000';
+  nodeInfo.params.insecure = '0';
+  nodeInfo.params.allowInsecure = '0';
+
+  return buildNodeLink(nodeInfo);
+}
+
+/**
  * 处理节点链接
  * @param {string} originalLink - 原始节点链接
  * @param {string} strategy - 策略类型（cf 或 direct）
@@ -183,6 +208,9 @@ function processNodeLink(originalLink, strategy, cfConfig = null) {
   if (strategy === 'cf' && cfConfig) {
     return applyCfStrategy(originalLink, cfConfig);
   }
+  if (strategy === 'hy2') {
+    return applyHy2Strategy(originalLink);
+  }
   return applyDirectStrategy(originalLink);
 }
 
@@ -192,5 +220,6 @@ module.exports = {
   buildNodeLink,
   applyCfStrategy,
   applyDirectStrategy,
+  applyHy2Strategy,
   processNodeLink
 };

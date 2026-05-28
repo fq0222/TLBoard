@@ -33,13 +33,25 @@ async function clearSubscriptionSourceCache(db, userId, serverId, inboundId) {
 }
 
 /**
- * 为用户在单个节点上生成独立的 UUID 和 sub_id
- * @returns {object} { uuid, subId }
+ * 为用户在单个节点上生成独立的节点凭据和 sub_id
+ * @param {string} strategy - 节点策略，用于区分 uuid/auth 型协议
+ * @returns {object} { uuid, auth, subId }
  */
-function generateNodeCredentials() {
+function generateNodeCredentials(strategy = 'direct') {
+  const subId = crypto.randomBytes(8).toString('hex');
+
+  if (strategy === 'hy2') {
+    return {
+      uuid: '',
+      auth: crypto.randomBytes(12).toString('base64url'),
+      subId
+    };
+  }
+
   return {
     uuid: crypto.randomUUID(),
-    subId: crypto.randomBytes(8).toString('hex')
+    auth: '',
+    subId
   };
 }
 
@@ -75,33 +87,35 @@ function buildPayloadPlan(plan) {
  * @param {Object} server - 3X-UI 服务器信息
  * @param {Object} inbound - 3X-UI inbound 信息
  * @param {Object|null} existingClient - 3X-UI 已存在的客户端信息
- * @returns {Promise<{uuid: string, subId: string}>}
+ * @returns {Promise<{uuid: string, auth: string, subId: string}>}
  */
-async function ensureNodeConfig(db, user, server, inbound, existingClient = null) {
+async function ensureNodeConfig(db, user, server, inbound, existingClient = null, strategy = 'direct') {
   const existingConfig = await db.prepare(
-    'SELECT id, uuid, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
+    'SELECT id, uuid, auth, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
   ).get(user.id, server.id, inbound.id);
 
   if (existingConfig) {
     return {
       uuid: existingConfig.uuid,
+      auth: existingConfig.auth || '',
       subId: existingConfig.sub_id
     };
   }
 
-  const credentials = generateNodeCredentials();
+  const credentials = generateNodeCredentials(strategy);
   const uuid = existingClient?.uuid || credentials.uuid;
+  const auth = existingClient?.auth || credentials.auth;
   const subId = existingClient?.subId || credentials.subId;
 
   await db.prepare(`
-    INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, sub_id)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, auth, sub_id)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT (user_id, server_id, inbound_id) DO NOTHING
-  `).run(user.id, server.id, inbound.id, uuid, subId);
+  `).run(user.id, server.id, inbound.id, uuid, auth, subId);
 
   logger.info(`保存用户节点配置: user=${user.email}, server=${server.id}, inbound=${inbound.id}, uuid=${uuid}, sub_id=${subId}`);
   await clearSubscriptionSourceCache(db, user.id, server.id, inbound.id);
-  return { uuid, subId };
+  return { uuid, auth, subId };
 }
 
 /**
@@ -297,24 +311,31 @@ async function syncUserToXuiServers(db, user, plan = {}) {
             const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
             const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
             const totalBytes = Number(user.traffic_limit || plan.traffic_limit || 0);
+            const strategy = inbound.remark && inbound.remark.toLowerCase().includes('hy2')
+              ? 'hy2'
+              : (inbound.remark && inbound.remark.toLowerCase().includes('direct') ? 'direct' : 'cf');
             const existingClient = await xuiService.getClientByEmail(inbound.id, nodeEmail);
             const config = await ensureNodeConfig(
               db,
               user,
               server,
               inbound,
-              existingClient.success ? existingClient : null
+              existingClient.success ? existingClient : null,
+              strategy
             );
             const desiredClient = {
               id: config.uuid,
+              auth: config.auth,
               email: nodeEmail,
               enable: true,
               expiryTime,
               totalGB: totalBytes,
-              subId: config.subId
+              subId: config.subId,
+              strategy,
+              protocol: inbound.protocol
             };
 
-            if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+            if (strategy === 'direct') {
               desiredClient.flow = 'xtls-rprx-vision';
             }
 

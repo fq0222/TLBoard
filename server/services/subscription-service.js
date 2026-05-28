@@ -11,6 +11,28 @@ const logger = createLogger('SUBSCRIPTION-SERVICE');
 const SUBSCRIPTION_FETCH_TIMEOUT = 15000;
 
 /**
+ * 规范化协议名，兼容 3X-UI inbound 协议与订阅链接协议名称不一致的场景。
+ * @param {string} protocol - 原始协议名
+ * @returns {string[]} 可接受的协议名列表，首个元素为规范名
+ */
+function getProtocolAliases(protocol) {
+  const normalizedProtocol = String(protocol || '')
+    .trim()
+    .toLowerCase()
+    .replace(/:\/+$/, '');
+
+  if (!normalizedProtocol) {
+    return [];
+  }
+
+  if (normalizedProtocol === 'hysteria' || normalizedProtocol === 'hy2') {
+    return ['hysteria2', 'hysteria', 'hy2'];
+  }
+
+  return [normalizedProtocol];
+}
+
+/**
  * 从 3X-UI 获取原始订阅内容
  * @param {string} subUrl - 订阅地址
  * @param {string} subId - 订阅 token
@@ -80,10 +102,7 @@ function pickSingleNodeLink(links, expectedProtocol) {
     return validLinks[0];
   }
 
-  const normalizedProtocol = String(expectedProtocol)
-    .trim()
-    .toLowerCase()
-    .replace(/:\/+$/, '');
+  const protocolAliases = new Set(getProtocolAliases(expectedProtocol));
 
   return validLinks.find(link => {
     const protocolMatch = link.match(/^([a-z0-9+.-]+):\/\//i);
@@ -91,12 +110,13 @@ function pickSingleNodeLink(links, expectedProtocol) {
       return false;
     }
 
-    return protocolMatch[1].toLowerCase() === normalizedProtocol;
+    return protocolAliases.has(protocolMatch[1].toLowerCase());
   }) || null;
 }
 
 module.exports = {
   fetchOriginalSubscription,
   parseSubscriptionContent,
-  pickSingleNodeLink
+  pickSingleNodeLink,
+  getProtocolAliases
 };

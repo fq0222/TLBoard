@@ -423,20 +423,30 @@ async function syncUsersToServer(db, server, users) {
           const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
           const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
           const totalBytes = Number(user.traffic_limit || 0);
+          const strategy = inbound.remark && inbound.remark.toLowerCase().includes('hy2')
+            ? 'hy2'
+            : (inbound.remark && inbound.remark.toLowerCase().includes('direct') ? 'direct' : 'cf');
           const existingConfig = await db.prepare(
-            'SELECT uuid, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
+            'SELECT uuid, auth, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
           ).get(user.id, server.id, inbound.id);
 
+          const generatedAuth = strategy === 'hy2'
+            ? crypto.randomBytes(12).toString('base64url')
+            : '';
+
           const desiredClient = {
-            id: existingConfig?.uuid || crypto.randomUUID(),
+            id: existingConfig?.uuid || (strategy === 'hy2' ? '' : crypto.randomUUID()),
+            auth: existingConfig?.auth || generatedAuth,
             email: nodeEmail,
             enable: user.enabled === 1,
             expiryTime,
             totalGB: totalBytes,
-            subId: existingConfig?.sub_id || crypto.randomBytes(8).toString('hex')
+            subId: existingConfig?.sub_id || crypto.randomBytes(8).toString('hex'),
+            strategy,
+            protocol: inbound.protocol
           };
 
-          if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+          if (strategy === 'direct') {
             desiredClient.flow = 'xtls-rprx-vision';
           }
 
@@ -508,7 +518,7 @@ function registerTrafficSyncJob(db) {
   // 启动时延迟10分钟执行第一次，避免启动时负载过高
   setTimeout(async () => {
     await trafficManager.syncTrafficAndHandleDisable(db);
-  }, 2 * 60 * 1000);
+  }, 10 * 60 * 1000);
 
   const interval = setInterval(async () => {
     await trafficManager.syncTrafficAndHandleDisable(db);

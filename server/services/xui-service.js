@@ -429,6 +429,43 @@ class XuiService {
     return parseFloat((numBytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
+  buildClientSettingsPayload(options = {}) {
+    const {
+      protocol = '',
+      strategy = 'direct',
+      credential = '',
+      email = '',
+      enable = true,
+      expiryTime = 0,
+      totalGB = 0,
+      limitIp = 0,
+      tgId = 0,
+      subId = '',
+      flow = ''
+    } = options;
+
+    const payload = {
+      email,
+      enable,
+      expiryTime,
+      totalGB,
+      limitIp,
+      tgId,
+      subId
+    };
+
+    if (strategy === 'hy2' || protocol === 'hysteria' || protocol === 'hysteria2') {
+      payload.auth = credential;
+      return payload;
+    }
+
+    payload.id = credential;
+    if (flow) {
+      payload.flow = flow;
+    }
+    return payload;
+  }
+
   /**
    * 添加客户端
    * @param {number} inboundId - inbound ID
@@ -681,7 +718,8 @@ class XuiService {
             expiryTime: item.expiryTime,
             totalGB: item.totalGB || 0,
             subId: item.subId || '',
-            flow: item.flow || ''
+            flow: item.flow || '',
+            auth: item.auth || item.password || ''
           }))
       };
     } catch (error) {
@@ -722,7 +760,8 @@ class XuiService {
         expiryTime: client.expiryTime,
         totalGB: client.totalGB || 0,
         subId: client.subId || '',
-        flow: client.flow || ''
+        flow: client.flow || '',
+        auth: client.auth || client.password || ''
       };
     } catch (error) {
       logger.error(`获取客户端信息错误: ${error.message}`);
@@ -761,27 +800,31 @@ class XuiService {
 
   async getNodeConfig(db, userId, serverId, inboundId) {
     return db.prepare(
-      'SELECT uuid, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
+      'SELECT uuid, auth, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
     ).get(userId, serverId, inboundId);
   }
 
-  async saveNodeConfig(db, userId, serverId, inboundId, uuid, subId) {
+  async saveNodeConfig(db, userId, serverId, inboundId, uuid, auth, subId) {
     const existing = await this.getNodeConfig(db, userId, serverId, inboundId);
     if (existing) {
       await db.prepare(
-        'UPDATE user_node_configs SET uuid = ?, sub_id = ? WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
-      ).run(uuid, subId, userId, serverId, inboundId);
+        'UPDATE user_node_configs SET uuid = ?, auth = ?, sub_id = ? WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
+      ).run(uuid, auth, subId, userId, serverId, inboundId);
       return;
     }
 
     await db.prepare(
-      'INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, sub_id) VALUES (?, ?, ?, ?, ?)'
-    ).run(userId, serverId, inboundId, uuid, subId);
+      'INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, auth, sub_id) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(userId, serverId, inboundId, uuid, auth, subId);
   }
 
   chooseClientToKeep(existingClients, nodeConfig) {
     if (nodeConfig && nodeConfig.uuid) {
       const matched = existingClients.find(item => item.uuid === nodeConfig.uuid);
+      if (matched) return matched;
+    }
+    if (nodeConfig && nodeConfig.auth) {
+      const matched = existingClients.find(item => item.auth === nodeConfig.auth);
       if (matched) return matched;
     }
     return existingClients[0] || null;
@@ -797,7 +840,8 @@ class XuiService {
       expiryTime: Number(client.expiryTime || 0),
       totalBytes: Number(client.totalGB || 0),
       subId: client.subId || '',
-      flow: client.flow || ''
+      flow: client.flow || '',
+      auth: client.auth || ''
     };
   }
 
@@ -808,7 +852,8 @@ class XuiService {
       expiryTime: Number(desiredClient.expiryTime || 0),
       totalBytes: Number(desiredClient.totalGB || 0),
       subId: desiredClient.subId || '',
-      flow: desiredClient.flow || ''
+      flow: desiredClient.flow || '',
+      auth: desiredClient.auth || ''
     };
 
     return (
@@ -816,7 +861,8 @@ class XuiService {
       current.expiryTime !== desired.expiryTime ||
       current.totalBytes !== desired.totalBytes ||
       current.subId !== desired.subId ||
-      current.flow !== desired.flow
+      current.flow !== desired.flow ||
+      current.auth !== desired.auth
     );
   }
 
@@ -887,7 +933,8 @@ class XuiService {
           userId,
           serverId,
           inbound.id,
-          finalKeep.uuid,
+          finalKeep.uuid || '',
+          finalKeep.auth || '',
           desiredClient.subId || finalKeep.subId || ''
         );
 
@@ -895,7 +942,10 @@ class XuiService {
           return { success: true, action: 'dedup-skip-update' };
         }
 
-        const updateResult = await this.updateClient(inbound.id, email, {
+        const updateResult = await this.updateClientByContext(inbound.id, email, {
+          protocol: desiredClient.protocol,
+          strategy: desiredClient.strategy,
+          auth: desiredClient.auth,
           enabled: desiredClient.enable,
           expiryTime: desiredClient.expiryTime,
           totalGB: this.convertBytesToGB(desiredClient.totalGB),
@@ -914,7 +964,8 @@ class XuiService {
           userId,
           serverId,
           inbound.id,
-          existingClients[0].uuid,
+          existingClients[0].uuid || '',
+          existingClients[0].auth || '',
           desiredClient.subId || existingClients[0].subId || ''
         );
 
@@ -922,7 +973,10 @@ class XuiService {
           return { success: true, action: 'skip-update' };
         }
 
-        const updateResult = await this.updateClient(inbound.id, email, {
+        const updateResult = await this.updateClientByContext(inbound.id, email, {
+          protocol: desiredClient.protocol,
+          strategy: desiredClient.strategy,
+          auth: desiredClient.auth,
           enabled: desiredClient.enable,
           expiryTime: desiredClient.expiryTime,
           totalGB: this.convertBytesToGB(desiredClient.totalGB),
@@ -935,15 +989,17 @@ class XuiService {
           : { success: false, message: updateResult.message || '更新客户端失败' };
       }
 
-      const addResult = await this.addClient(inbound.id, inbound.protocol, {
+      const addResult = await this.addClientByContext(inbound.id, inbound.protocol, {
         email,
         id: desiredClient.id,
+        auth: desiredClient.auth,
         enable: desiredClient.enable,
         expiryTime: desiredClient.expiryTime,
         totalGB: desiredClient.totalGB,
         limitIp: 0,
         tgId: 0,
         subId: desiredClient.subId,
+        strategy: desiredClient.strategy,
         flow: desiredClient.flow
       });
 
@@ -956,7 +1012,8 @@ class XuiService {
         userId,
         serverId,
         inbound.id,
-        desiredClient.id,
+        desiredClient.id || '',
+        desiredClient.auth || '',
         desiredClient.subId || ''
       );
 
@@ -1034,6 +1091,113 @@ class XuiService {
    * @param {string} email - 客户端标识
    * @returns {Promise<Object>} 重置结果
    */
+  async addClientByContext(inboundId, protocol, options = {}) {
+    try {
+      if (!this.client) {
+        await this.init();
+      }
+
+      const clientObj = this.buildClientSettingsPayload({
+        protocol,
+        strategy: options.strategy || 'direct',
+        credential: options.auth || options.id || this.generateUuid(),
+        email: options.email || '',
+        enable: options.enable !== false,
+        expiryTime: options.expiryTime || 0,
+        totalGB: options.totalGB || 0,
+        limitIp: options.limitIp || 0,
+        tgId: options.tgId || 0,
+        subId: options.subId || '',
+        flow: options.flow || ''
+      });
+
+      logger.info(`构建客户端配置: protocol=${protocol}, strategy=${options.strategy || 'direct'}, email=${options.email}, hasAuth=${Boolean(options.auth)}, hasId=${Boolean(options.id)}`);
+
+      const clientConfig = {
+        id: inboundId,
+        settings: JSON.stringify({
+          clients: [clientObj]
+        })
+      };
+
+      const result = await this.client.addClient(clientConfig);
+
+      if (result.success) {
+        return { success: true, message: result.msg };
+      }
+
+      logger.warn(`添加客户端失败: ${result.msg}`);
+      return { success: false, message: result.msg };
+    } catch (error) {
+      logger.error(`添加客户端错误: ${error.message}`);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
+
+  async updateClientByContext(inboundId, email, options = {}) {
+    try {
+      if (!this.client) {
+        await this.init();
+      }
+
+      const clientInfo = await this.getClientByEmail(inboundId, email);
+      if (!clientInfo.success) {
+        return {
+          success: false,
+          message: `未找到用户 ${email}`
+        };
+      }
+
+      const strategy = options.strategy || 'direct';
+      const protocol = options.protocol || '';
+      const credential = options.auth !== undefined
+        ? options.auth
+        : ((strategy === 'hy2' || protocol === 'hysteria' || protocol === 'hysteria2') ? clientInfo.auth : clientInfo.uuid);
+
+      const updateClientObj = this.buildClientSettingsPayload({
+        protocol,
+        strategy,
+        credential,
+        email,
+        enable: options.enabled !== undefined ? options.enabled : clientInfo.enable,
+        expiryTime: options.expiryTime !== undefined ? options.expiryTime : clientInfo.expiryTime,
+        totalGB: options.totalGB !== undefined ? options.totalGB * 1073741824 : clientInfo.totalGB,
+        limitIp: 0,
+        tgId: 0,
+        subId: options.subId !== undefined ? options.subId : (clientInfo.subId || ''),
+        flow: options.flow !== undefined ? options.flow : (clientInfo.flow || '')
+      });
+
+      logger.info(`构建客户端配置: protocol=${protocol}, strategy=${strategy}, email=${email}, hasAuth=${Boolean(options.auth || clientInfo.auth)}, hasId=${Boolean(clientInfo.uuid)}`);
+
+      const updateConfig = {
+        id: inboundId,
+        settings: JSON.stringify({
+          clients: [updateClientObj]
+        })
+      };
+
+      const clientIdentifier = clientInfo.uuid || clientInfo.auth;
+      const result = await this.client.updateClient(clientIdentifier, updateConfig);
+
+      if (result.success) {
+        return { success: true, message: result.msg };
+      }
+
+      logger.warn(`更新客户端失败: ${result.msg}`);
+      return { success: false, message: result.msg };
+    } catch (error) {
+      logger.error(`更新客户端错误: ${error.message}`);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
+
   async resetClientTraffic(inboundId, email) {
     try {
       if (!this.client) {

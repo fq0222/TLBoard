@@ -312,6 +312,7 @@ class DatabaseManager {
           server_id INTEGER NOT NULL,
           inbound_id INTEGER NOT NULL,
           uuid VARCHAR(100) NOT NULL,
+          auth VARCHAR(100) NOT NULL DEFAULT '',
           sub_id VARCHAR(50) NOT NULL,
           created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
           UNIQUE(user_id, server_id, inbound_id)
