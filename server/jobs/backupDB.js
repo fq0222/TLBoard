@@ -4,7 +4,6 @@
  * 并覆盖保存到 server/backupDB 目录，防止远端服务器数据丢失。
  */
 
-const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
 const XuiApiClient = require('../services/xui-api-client');
@@ -67,12 +66,11 @@ async function backupServer(server, options = {}) {
   const data = await client.getDb();
   const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
   const filePath = path.join(backupDir, `${sanitizeFileName(server.name)}-x-ui.db`);
-
-  fs.writeFileSync(filePath, buffer);
-
   const validSqlite = isSqliteDatabase(buffer);
   if (!validSqlite) {
     logger.warn(`服务器 ${server.name} 备份文件 SQLite 头校验未通过: ${filePath}`);
+  } else {
+    fs.writeFileSync(filePath, buffer);
   }
 
   logger.info(`服务器 ${server.name} 数据库备份完成: ${filePath}, ${buffer.length} bytes`);
@@ -130,24 +128,7 @@ async function backupXuiDatabases(db, options = {}) {
   return summary;
 }
 
-/**
- * 注册 3X-UI 数据库备份任务
- * 每天凌晨 4 点执行一次，不在启动时立即执行。
- * @param {Object} db - 数据库实例
- * @param {Array} cronTasks - 定时任务引用列表
- */
-function registerXuiDbBackupJob(db, cronTasks) {
-  const task = cron.schedule('0 4 * * *', async () => {
-    logger.info('开始执行 3X-UI 数据库备份任务');
-    await backupXuiDatabases(db);
-  });
-
-  cronTasks.push(task);
-  logger.info('3X-UI 数据库备份任务已注册（每天 4:00 执行）');
-}
-
 module.exports = {
   backupXuiDatabases,
-  registerXuiDbBackupJob,
   sanitizeFileName
 };

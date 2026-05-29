@@ -1,11 +1,17 @@
 /**
  * 数据库初始化模块
- * 使用 PostgreSQL 数据库
+ * 使用 PostgreSQL 数据库。
  */
 
 const { Pool } = require('pg');
 const config = require('../config');
 const { createLogger } = require('../utils/logger');
+const { createQueryWithRetry } = require('./query-runner');
+const { createDbProxy: buildDbProxy } = require('./proxy');
+const { convertPlaceholders: toPgPlaceholders } = require('./sql-utils');
+const { initTables: initSchemaTables } = require('./schema/tables');
+const { createIndexes: createSchemaIndexes } = require('./schema/indexes');
+const { initDefaultData: initSchemaDefaultData } = require('./schema/default-data');
 
 const logger = createLogger('DB');
 
@@ -15,11 +21,11 @@ class DatabaseManager {
   }
 
   /**
-   * 初始化数据库连接池
+   * 初始化数据库连接池并编排表结构初始化。
+   * @returns {Promise<object>} 兼容原 SQLite 风格的代理对象
    */
   async init() {
     try {
-      // 创建连接池
       this.pool = new Pool({
         host: config.database.host,
         port: config.database.port,
@@ -29,539 +35,50 @@ class DatabaseManager {
         max: config.database.max,
         idleTimeoutMillis: config.database.idleTimeoutMillis,
         connectionTimeoutMillis: config.database.connectionTimeoutMillis,
-        // 连接健康检查
         allowExitOnIdle: false,
-        // 应用名称，便于在数据库中识别
         application_name: 'subscription_manager'
       });
 
-      // 监听连接池错误事件
       this.pool.on('error', (err) => {
         logger.error(`连接池错误: ${err.message}`);
       });
 
-      // 测试连接
       const client = await this.pool.connect();
       logger.info(`PostgreSQL 连接成功: ${config.database.host}:${config.database.port}/${config.database.database}`);
       client.release();
 
-      // 创建表结构
       await this.initTables();
 
-      return this.createDbProxy();
+      return buildDbProxy({
+        pool: this.pool,
+        queryWithRetry: createQueryWithRetry(this.pool, logger),
+        convertPlaceholders: toPgPlaceholders,
+        logger
+      });
     } catch (error) {
+      if (this.pool) {
+        try {
+          await this.pool.end();
+        } catch (closeError) {
+          logger.error(`初始化失败后关闭连接池失败: ${closeError.message}`);
+        } finally {
+          this.pool = null;
+        }
+      }
       logger.error(`数据库初始化失败: ${error.message}`);
       throw error;
     }
   }
 
   /**
-   * 执行带重试的数据库查询
-   * @param {string} sql - SQL 语句
-   * @param {Array} params - 参数
-   * @param {number} maxRetries - 最大重试次数
-   * @returns {Promise<Object>} 查询结果
-   */
-  async queryWithRetry(sql, params = [], maxRetries = 2) {
-    let lastError;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        const result = await this.pool.query(sql, params);
-        return result;
-      } catch (error) {
-        lastError = error;
-        // 如果是连接错误，重试
-        if (attempt < maxRetries && (error.code === 'ECONNRESET' || error.code === '57P01' || error.message.includes('connection'))) {
-          logger.warn(`数据库查询失败，正在重试 (${attempt}/${maxRetries}): ${error.message}`);
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-        } else {
-          throw error;
-        }
-      }
-    }
-    throw lastError;
-  }
-
-  /**
-   * 创建数据库代理对象
-   * 提供与原 SQLite 代理兼容的接口
-   */
-  createDbProxy() {
-    const self = this;
-    return {
-      /**
-       * 获取连接池（用于需要直接使用连接的场景，如事务）
-       */
-      pool: self.pool,
-      
-      /**
-       * 准备 SQL 语句
-       * @param {string} sql - SQL 语句，使用 $1, $2, ... 作为参数占位符
-       */
-      prepare(sql) {
-        // 将 SQL 中的 ? 占位符转换为 $1, $2, ...
-        const convertedSql = self.convertPlaceholders(sql);
-        
-        return {
-          async run(...params) {
-            try {
-              const result = await self.queryWithRetry(convertedSql + ' RETURNING id', params);
-              const lastId = result.rows.length > 0 ? result.rows[0].id : 0;
-              return { lastInsertRowid: lastId, changes: result.rowCount };
-            } catch (error) {
-              logger.error(`SQL执行错误(run): ${convertedSql} - ${error.message}`);
-              throw error;
-            }
-          },
-          async get(...params) {
-            try {
-              const result = await self.queryWithRetry(convertedSql, params);
-              return result.rows[0] || undefined;
-            } catch (error) {
-              logger.error(`SQL执行错误(get): ${convertedSql} - ${error.message}`);
-              throw error;
-            }
-          },
-          async all(...params) {
-            try {
-              const result = await self.queryWithRetry(convertedSql, params);
-              return result.rows;
-            } catch (error) {
-              logger.error(`SQL执行错误(all): ${convertedSql} - ${error.message}`);
-              throw error;
-            }
-          }
-        };
-      },
-      async exec(sql) {
-        try {
-          await self.pool.query(sql);
-        } catch (error) {
-          logger.error(`SQL执行错误(exec): ${error.message}`);
-          throw error;
-        }
-      },
-      transaction(fn) {
-        return async function(...args) {
-          const client = await self.pool.connect();
-          try {
-            await client.query('BEGIN');
-            const result = await fn.apply(this, args);
-            await client.query('COMMIT');
-            return result;
-          } catch (error) {
-            await client.query('ROLLBACK');
-            throw error;
-          } finally {
-            client.release();
-          }
-        };
-      },
-      save() {
-        // PostgreSQL 自动持久化，无需手动保存
-        logger.info('PostgreSQL 自动持久化，无需手动保存');
-      }
-    };
-  }
-
-  /**
-   * 将 SQL 中的 ? 占位符转换为 $1, $2, ...
-   * @param {string} sql - 原始 SQL
-   * @returns {string} 转换后的 SQL
-   */
-  convertPlaceholders(sql) {
-    let index = 0;
-    return sql.replace(/\?/g, () => `$${++index}`);
-  }
-
-  /**
-   * 初始化表结构
+   * 初始化表结构与索引。
    */
   async initTables() {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-
-      // 用户表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS users (
-          id SERIAL PRIMARY KEY,
-          email VARCHAR(255) UNIQUE NOT NULL,
-          password_hash VARCHAR(255) NOT NULL,
-          plan_id INTEGER,
-          subscription_token VARCHAR(255) UNIQUE,
-          sub_id VARCHAR(255) UNIQUE,
-          traffic_used BIGINT DEFAULT 0,
-          traffic_limit BIGINT DEFAULT 0,
-          traffic_used_at BIGINT,
-          disable_reason VARCHAR(50),
-          expire_at BIGINT,
-          enabled INTEGER DEFAULT 0,
-          payment_count INTEGER DEFAULT 0,
-          sync_status INTEGER DEFAULT 0,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('用户表初始化完成');
-
-      // 流量同步日志表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS traffic_sync_log (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER NOT NULL,
-          server_id INTEGER NOT NULL,
-          last_sync_traffic BIGINT DEFAULT 0,
-          last_sync_at BIGINT,
-          UNIQUE(user_id, server_id)
-        )
-      `);
-      logger.info('流量同步日志表初始化完成');
-
-      // 管理员表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS admins (
-          id SERIAL PRIMARY KEY,
-          username VARCHAR(255) UNIQUE NOT NULL,
-          password_hash VARCHAR(255) NOT NULL,
-          is_super INTEGER DEFAULT 0,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('管理员表初始化完成');
-
-      // 套餐表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS plans (
-          id SERIAL PRIMARY KEY,
-          name VARCHAR(255) NOT NULL,
-          description TEXT,
-          price INTEGER NOT NULL,
-          duration_days INTEGER NOT NULL,
-          traffic_limit BIGINT NOT NULL,
-          sort_order INTEGER DEFAULT 0,
-          enabled INTEGER DEFAULT 1,
-          sales_limit INTEGER DEFAULT -1,
-          sales_count INTEGER DEFAULT 0,
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('套餐表初始化完成');
-
-      // 订单表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS orders (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER,
-          email VARCHAR(255) NOT NULL,
-          plan_id INTEGER NOT NULL,
-          amount INTEGER NOT NULL,
-          trade_no VARCHAR(255) UNIQUE,
-          out_trade_no VARCHAR(255) UNIQUE NOT NULL,
-          status VARCHAR(50) DEFAULT 'pending',
-          payment_url TEXT,
-          paid_at BIGINT,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('订单表初始化完成');
-
-      // 3X-UI服务器表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS xui_servers (
-          id SERIAL PRIMARY KEY,
-          name VARCHAR(255) NOT NULL,
-          api_url VARCHAR(500) NOT NULL,
-          api_username VARCHAR(255) NOT NULL,
-          api_password VARCHAR(255) NOT NULL,
-          api_token TEXT DEFAULT '',
-          host VARCHAR(500) DEFAULT '',
-          client_port INTEGER DEFAULT 0,
-          sub_url VARCHAR(500) DEFAULT '',
-          status INTEGER DEFAULT 0,
-          last_check_at BIGINT,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('3X-UI服务器表初始化完成');
-
-      // 3X-UI节点快照表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS xui_nodes (
-          id SERIAL PRIMARY KEY,
-          server_id INTEGER NOT NULL,
-          inbound_id INTEGER NOT NULL,
-          remark VARCHAR(255),
-          port INTEGER,
-          protocol VARCHAR(50),
-          settings TEXT DEFAULT '{}',
-          stream_settings TEXT DEFAULT '{}',
-          user_count INTEGER DEFAULT 0,
-          online_count INTEGER DEFAULT 0,
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('3X-UI节点快照表初始化完成');
-
-      // 用户节点配置表（存储每个用户在每个节点上的独立配置）
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS user_node_configs (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          server_id INTEGER NOT NULL,
-          inbound_id INTEGER NOT NULL,
-          uuid VARCHAR(100) NOT NULL,
-          auth VARCHAR(100) NOT NULL DEFAULT '',
-          sub_id VARCHAR(50) NOT NULL,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          UNIQUE(user_id, server_id, inbound_id)
-        )
-      `);
-      logger.info('用户节点配置表初始化完成');
-
-      // 用户订阅缓存表（存储聚合后的订阅信息）
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS user_subscriptions (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          sub_id VARCHAR(50) NOT NULL UNIQUE,
-          nodes_data TEXT NOT NULL,
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('用户订阅缓存表初始化完成');
-
-      // 用户原始订阅模板缓存表（存储每个用户在每个节点上的原始订阅模板）
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS user_subscription_sources (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          server_id INTEGER NOT NULL,
-          inbound_id INTEGER NOT NULL,
-          sub_id VARCHAR(50) NOT NULL DEFAULT '',
-          remark VARCHAR(255) NOT NULL DEFAULT '',
-          protocol VARCHAR(50) NOT NULL DEFAULT '',
-          original_link TEXT NOT NULL DEFAULT '',
-          node_fingerprint VARCHAR(255) NOT NULL DEFAULT '',
-          server_fingerprint VARCHAR(255) NOT NULL DEFAULT '',
-          fetched_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          UNIQUE(user_id, server_id, inbound_id)
-        )
-      `);
-      logger.info('用户原始订阅模板缓存表初始化完成');
-
-      // 3X-UI 同步任务队列表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS xui_sync_tasks (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-          task_type VARCHAR(50) NOT NULL,
-          status VARCHAR(20) DEFAULT 'pending',
-          payload TEXT DEFAULT '{}',
-          attempts INTEGER DEFAULT 0,
-          next_retry_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          last_error TEXT,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('3X-UI 同步任务队列表初始化完成');
-
-      // 公告表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS announcements (
-          id SERIAL PRIMARY KEY,
-          title VARCHAR(500) NOT NULL,
-          content TEXT,
-          pinned INTEGER DEFAULT 0,
-          enabled INTEGER DEFAULT 1,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('公告表初始化完成');
-
-      // 博客文章表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS blog_articles (
-          id SERIAL PRIMARY KEY,
-          title VARCHAR(200) NOT NULL,
-          summary VARCHAR(500) NOT NULL,
-          category VARCHAR(100),
-          content TEXT NOT NULL,
-          status VARCHAR(20) DEFAULT 'draft',
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('博客文章表初始化完成');
-
-      // 工单表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS tickets (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER NOT NULL,
-          title VARCHAR(50) NOT NULL,
-          description TEXT NOT NULL,
-          status VARCHAR(20) DEFAULT 'open',
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          closed_at BIGINT,
-          last_reply_at BIGINT,
-          last_read_at BIGINT,
-          reply_count INTEGER DEFAULT 0
-        )
-      `);
-      logger.info('工单表初始化完成');
-
-      // 工单回复表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS ticket_replies (
-          id SERIAL PRIMARY KEY,
-          ticket_id INTEGER NOT NULL,
-          user_id INTEGER,
-          admin_id INTEGER,
-          content TEXT NOT NULL,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('工单回复表初始化完成');
-
-      // 工单已读表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS ticket_reads (
-          id SERIAL PRIMARY KEY,
-          ticket_id INTEGER NOT NULL,
-          user_id INTEGER NOT NULL,
-          last_read_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          UNIQUE(ticket_id, user_id)
-        )
-      `);
-      logger.info('工单已读表初始化完成');
-
-      // Cloudflare优选IP池
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS cf_ip_pool (
-          id SERIAL PRIMARY KEY,
-          ip VARCHAR(50) NOT NULL,
-          enabled INTEGER DEFAULT 1,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('Cloudflare优选IP池表初始化完成');
-
-      // 用户CF优选记录
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS user_cf_ips (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER NOT NULL,
-          ip_pool_id INTEGER NOT NULL,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('用户CF优选记录表初始化完成');
-
-      // 系统配置表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS system_settings (
-          key VARCHAR(50) PRIMARY KEY,
-          value TEXT,
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('系统配置表初始化完成');
-
-      // 邮件模板表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS email_templates (
-          id SERIAL PRIMARY KEY,
-          name VARCHAR(100) NOT NULL UNIQUE,
-          subject VARCHAR(200) NOT NULL,
-          content TEXT NOT NULL,
-          variables TEXT,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('邮件模板表初始化完成');
-
-      // 群发任务表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS email_campaigns (
-          id SERIAL PRIMARY KEY,
-          name VARCHAR(100),
-          template_id INT,
-          subject VARCHAR(200),
-          content TEXT,
-          target_type VARCHAR(20),
-          target_users TEXT,
-          total_count INT DEFAULT 0,
-          sent_count INT DEFAULT 0,
-          failed_count INT DEFAULT 0,
-          status VARCHAR(20) DEFAULT 'pending',
-          daily_limit INT DEFAULT 200,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('群发任务表初始化完成');
-
-      // 邮件日志表
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS email_logs (
-          id SERIAL PRIMARY KEY,
-          campaign_id INT,
-          user_id INT,
-          email VARCHAR(255),
-          subject VARCHAR(200),
-          status VARCHAR(20),
-          error_message TEXT,
-          sent_at BIGINT,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('邮件日志表初始化完成');
-
-      // 资源表（用户端下载资源、管理端资源管理）
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS resources (
-          id SERIAL PRIMARY KEY,
-          name VARCHAR(255) NOT NULL,
-          filename VARCHAR(255) NOT NULL,
-          original_name VARCHAR(255) NOT NULL,
-          size BIGINT NOT NULL,
-          mimetype VARCHAR(100),
-          path VARCHAR(500) NOT NULL,
-          download_token VARCHAR(32) UNIQUE NOT NULL,
-          expire_at BIGINT,
-          download_count INTEGER DEFAULT 0,
-          enabled INTEGER DEFAULT 1,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-          updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('资源表初始化完成');
-
-      // 资源分发表：以 user_id 为唯一维度，一个用户只保留一条分发记录
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS resource_distributions (
-          id SERIAL PRIMARY KEY,
-          resource_id INTEGER NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
-          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-          download_token VARCHAR(32) UNIQUE NOT NULL,
-          expire_at BIGINT,
-          download_count INTEGER DEFAULT 0,
-          enabled INTEGER DEFAULT 1,
-          created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-        )
-      `);
-      logger.info('资源分发表初始化完成');
-
-      // 创建索引
-      await this.createIndexes(client);
-
+      await initSchemaTables(client, logger);
+      await createSchemaIndexes(client, logger);
       await client.query('COMMIT');
       logger.info('数据库表初始化完成');
     } catch (error) {
@@ -574,99 +91,13 @@ class DatabaseManager {
   }
 
   /**
-   * 创建数据库索引
-   */
-  async createIndexes(client) {
-    try {
-      await client.query('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_users_plan_id ON users(plan_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_users_subscription_token ON users(subscription_token)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_orders_out_trade_no ON orders(out_trade_no)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_xui_nodes_server_id ON xui_nodes(server_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_user_cf_ips_user_id ON user_cf_ips(user_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets(created_at)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_blog_articles_status ON blog_articles(status)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_blog_articles_category ON blog_articles(category)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_blog_articles_updated_at ON blog_articles(updated_at)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_replies_ticket_id ON ticket_replies(ticket_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_replies_created_at ON ticket_replies(created_at)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_reads_ticket_id ON ticket_reads(ticket_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_ticket_reads_user_id ON ticket_reads(user_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_traffic_sync_log_user_server ON traffic_sync_log(user_id, server_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_traffic_sync_log_last_sync_at ON traffic_sync_log(last_sync_at)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_user_id ON user_node_configs(user_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_server_id ON user_node_configs(server_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_inbound_id ON user_node_configs(inbound_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_user_node_configs_sub_id ON user_node_configs(sub_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_id ON user_subscriptions(user_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscription_sources_user_id ON user_subscription_sources(user_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_user_subscription_sources_server_id ON user_subscription_sources(server_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_xui_sync_tasks_status_retry ON xui_sync_tasks(status, next_retry_at)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_xui_sync_tasks_user_id ON xui_sync_tasks(user_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_email_logs_campaign_id ON email_logs(campaign_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_email_logs_user_id ON email_logs(user_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_email_campaigns_status ON email_campaigns(status)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_resources_download_token ON resources(download_token)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_resources_enabled ON resources(enabled)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_resources_expire_at ON resources(expire_at)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_resource_distributions_resource_id ON resource_distributions(resource_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_resource_distributions_download_token ON resource_distributions(download_token)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_resource_distributions_expire_at ON resource_distributions(expire_at)');
-      await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_distributions_user_id_unique ON resource_distributions(user_id)');
-      logger.info('数据库索引创建完成');
-    } catch (error) {
-      logger.error(`索引创建失败: ${error.message}`);
-    }
-  }
-
-  /**
-   * 初始化默认数据
+   * 初始化默认数据。
    */
   async initDefaultData() {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-
-      // 检查是否已有管理员数据
-      const adminCount = await client.query('SELECT COUNT(*) as count FROM admins');
-      if (parseInt(adminCount.rows[0].count) === 0) {
-        const bcrypt = require('bcrypt');
-        const defaultPassword = bcrypt.hashSync('admin123', config.security.bcryptRounds);
-        await client.query(
-          'INSERT INTO admins (username, password_hash, is_super) VALUES ($1, $2, $3)',
-          ['admin', defaultPassword, 1]
-        );
-        logger.info('默认超级管理员创建成功 (admin/admin123)');
-      }
-
-      // 检查是否已有套餐数据
-      const planCount = await client.query('SELECT COUNT(*) as count FROM plans');
-      if (parseInt(planCount.rows[0].count) === 0) {
-        await client.query(
-          'INSERT INTO plans (name, description, price, duration_days, traffic_limit, sort_order) VALUES ($1, $2, $3, $4, $5, $6)',
-          ['基础套餐', '适合轻度使用，每月100GB流量', 1990, 30, 107374182400, 1]
-        );
-        await client.query(
-          'INSERT INTO plans (name, description, price, duration_days, traffic_limit, sort_order) VALUES ($1, $2, $3, $4, $5, $6)',
-          ['高级套餐', '适合重度使用，每月500GB流量', 4990, 30, 536870912000, 2]
-        );
-        logger.info('默认套餐创建成功');
-      }
-
-      // 检查是否已有公告数据
-      const announcementCount = await client.query('SELECT COUNT(*) as count FROM announcements');
-      if (parseInt(announcementCount.rows[0].count) === 0) {
-        await client.query(
-          'INSERT INTO announcements (title, content, pinned, enabled) VALUES ($1, $2, $3, $4)',
-          ['系统上线通知', '## 系统上线通知\n\n欢迎使用机场面板系统！', 1, 1]
-        );
-        logger.info('默认公告创建成功');
-      }
-
+      await initSchemaDefaultData(client, { config, logger });
       await client.query('COMMIT');
       logger.info('默认数据初始化完成');
     } catch (error) {
@@ -679,18 +110,19 @@ class DatabaseManager {
   }
 
   /**
-   * 获取数据库连接池
+   * 获取数据库连接池。
    */
   getPool() {
     return this.pool;
   }
 
   /**
-   * 关闭数据库连接池
+   * 关闭数据库连接池。
    */
   async close() {
     if (this.pool) {
       await this.pool.end();
+      this.pool = null;
       logger.info('数据库连接池已关闭');
     }
   }
