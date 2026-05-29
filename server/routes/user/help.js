@@ -1,7 +1,19 @@
+/**
+ * 用户端帮助中心路由
+ * 处理帮助文章、分类和图片读取。
+ */
+
 const express = require('express');
 const path = require('path');
 const { param, query, validationResult } = require('express-validator');
 const { authenticateUser } = require('../../middleware/auth-user');
+const {
+  legacySuccess,
+  legacyFail,
+  legacyValidationError,
+  legacyNotFound
+} = require('../../shared/response/api-response');
+const { parsePagination } = require('../../shared/utils/pagination');
 const { createLogger } = require('../../utils/logger');
 const blogService = require('../../services/blog-service');
 
@@ -9,16 +21,16 @@ const router = express.Router();
 const logger = createLogger('USER-HELP');
 const UPLOAD_DIR = path.join(__dirname, '../../uploads/blog-images');
 
-function sendValidationError(res) {
-  return res.status(400).json({ code: 1001, message: '参数校验失败', data: null });
-}
-
+/**
+ * GET /api/user/help/images/:filename
+ * 读取帮助中心图片。
+ */
 router.get('/images/:filename', [
   param('filename').custom((value) => blogService.isSafeBlogImageFilename(value))
 ], (req, res) => {
   try {
     if (!validationResult(req).isEmpty()) {
-      return res.status(404).json({ code: 404, message: '图片不存在', data: null });
+      return legacyNotFound(res, { message: '图片不存在' });
     }
 
     const filename = path.basename(req.params.filename);
@@ -27,20 +39,24 @@ router.get('/images/:filename', [
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
     if (!filePath.startsWith(uploadRoot + path.sep)) {
-      return res.status(404).json({ code: 404, message: '图片不存在', data: null });
+      return legacyNotFound(res, { message: '图片不存在' });
     }
 
-    res.sendFile(filePath, (error) => {
+    return res.sendFile(filePath, (error) => {
       if (error && !res.headersSent) {
-        res.status(404).json({ code: 404, message: '图片不存在', data: null });
+        legacyNotFound(res, { message: '图片不存在' });
       }
     });
   } catch (error) {
     logger.error(`读取帮助中心图片错误: ${error.message}`);
-    res.status(500).json({ code: 500, message: '服务器内部错误', data: null });
+    return legacyFail(res);
   }
 });
 
+/**
+ * GET /api/user/help/articles
+ * 获取帮助文章列表。
+ */
 router.get('/articles', authenticateUser, [
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 100 }),
@@ -48,38 +64,59 @@ router.get('/articles', authenticateUser, [
   query('keyword').optional().isString()
 ], async (req, res) => {
   try {
-    if (!validationResult(req).isEmpty()) return sendValidationError(res);
-    const data = await blogService.listPublishedArticles(req.app.locals.db, req.query);
-    res.json({ code: 0, message: 'ok', data });
+    if (!validationResult(req).isEmpty()) {
+      return legacyValidationError(res);
+    }
+
+    const { page, limit } = parsePagination(req.query);
+    const data = await blogService.listPublishedArticles(req.app.locals.db, {
+      ...req.query,
+      page,
+      limit
+    });
+
+    return legacySuccess(res, data);
   } catch (error) {
     logger.error(`获取帮助文章列表错误: ${error.message}`);
-    res.status(500).json({ code: 500, message: '服务器内部错误', data: null });
+    return legacyFail(res);
   }
 });
 
+/**
+ * GET /api/user/help/categories
+ * 获取帮助文章分类。
+ */
 router.get('/categories', authenticateUser, async (req, res) => {
   try {
     const data = await blogService.listPublishedCategories(req.app.locals.db);
-    res.json({ code: 0, message: 'ok', data });
+    return legacySuccess(res, data);
   } catch (error) {
     logger.error(`获取帮助文章分类错误: ${error.message}`);
-    res.status(500).json({ code: 500, message: '服务器内部错误', data: null });
+    return legacyFail(res);
   }
 });
 
+/**
+ * GET /api/user/help/articles/:id
+ * 获取帮助文章详情。
+ */
 router.get('/articles/:id', authenticateUser, [
   param('id').isInt({ min: 1 })
 ], async (req, res) => {
   try {
-    if (!validationResult(req).isEmpty()) return sendValidationError(res);
+    if (!validationResult(req).isEmpty()) {
+      return legacyValidationError(res);
+    }
+
     const article = await blogService.getPublishedArticle(req.app.locals.db, parseInt(req.params.id, 10));
     if (!article) {
-      return res.status(404).json({ code: 404, message: '文章不存在', data: null });
+      return legacyNotFound(res, { message: '文章不存在' });
     }
-    res.json({ code: 0, message: 'ok', data: article });
+
+    return legacySuccess(res, article);
   } catch (error) {
     logger.error(`获取帮助文章详情错误: ${error.message}`);
-    res.status(500).json({ code: 500, message: '服务器内部错误', data: null });
+    return legacyFail(res);
   }
 });
 
