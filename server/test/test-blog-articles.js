@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const config = require('../config');
 const databaseManager = require('../db/init');
 const blogService = require('../services/blog-service');
 
@@ -9,6 +10,12 @@ const uploadDir = path.join(__dirname, '../uploads/blog-images');
 function assertOk(condition, message) {
   assert.strictEqual(Boolean(condition), true, message);
   console.log(`✓ ${message}`);
+}
+
+function getExpectedSiteBaseUrl() {
+  const protocol = config.site?.protocol || 'http';
+  const host = config.site?.host || 'localhost:30000';
+  return `${protocol}://${host}`;
 }
 
 async function cleanupTestArticles(db) {
@@ -70,7 +77,7 @@ async function main() {
     const uploadedImageFilename = '44444444-4444-4444-8444-444444444444.png';
     const imageMarkdown = blogService.buildBlogImageMarkdown(uploadedImageFilename);
     assertOk(
-      imageMarkdown === `![图片说明](http://localhost:30000/api/user/help/images/${uploadedImageFilename})`,
+      imageMarkdown === `![图片说明](${getExpectedSiteBaseUrl()}/api/user/help/images/${uploadedImageFilename})`,
       '博客图片 Markdown 会生成用户端可访问的绝对 URL'
     );
 

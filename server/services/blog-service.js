@@ -1,9 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const { getSiteBaseUrl } = require('../utils/site-url');
+const blogRepository = require('../repositories/blog-repository');
 
 const ALLOWED_STATUSES = ['draft', 'published'];
 const BLOG_IMAGE_PREFIX = '/api/user/help/images/';
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
 function buildBlogImageUrl(filename) {
   const baseUrl = getSiteBaseUrl();
@@ -14,6 +16,30 @@ function buildBlogImageUrl(filename) {
 
 function buildBlogImageMarkdown(filename, alt = '\u56fe\u7247\u8bf4\u660e') {
   return `![${alt}](${buildBlogImageUrl(filename)})`;
+}
+
+/**
+ * 判断博客图片 MIME 类型是否允许上传。
+ *
+ * @param {string} mimetype - 文件 MIME 类型
+ * @returns {boolean} 是否允许上传
+ */
+function isAllowedBlogImageMimeType(mimetype) {
+  return ALLOWED_MIME_TYPES.includes(mimetype);
+}
+
+/**
+ * 构造图片上传成功后的旧接口返回结构。
+ *
+ * @param {string} filename - 图片文件名
+ * @returns {{filename:string,url:string,markdown:string}} 上传结果
+ */
+function buildUploadedImagePayload(filename) {
+  return {
+    filename,
+    url: buildBlogImageUrl(filename),
+    markdown: buildBlogImageMarkdown(filename)
+  };
 }
 
 function normalizeArticleInput(data) {
@@ -41,70 +67,16 @@ function normalizeArticleInput(data) {
 }
 
 async function ensureBlogArticlesTable(db) {
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS blog_articles (
-      id SERIAL PRIMARY KEY,
-      title VARCHAR(200) NOT NULL,
-      summary VARCHAR(500) NOT NULL,
-      category VARCHAR(100),
-      content TEXT NOT NULL,
-      status VARCHAR(20) DEFAULT 'draft',
-      created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
-      updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
-    )
-  `);
-  await db.exec('CREATE INDEX IF NOT EXISTS idx_blog_articles_status ON blog_articles(status)');
-  await db.exec('CREATE INDEX IF NOT EXISTS idx_blog_articles_category ON blog_articles(category)');
-  await db.exec('CREATE INDEX IF NOT EXISTS idx_blog_articles_updated_at ON blog_articles(updated_at)');
-}
-
-function buildListQuery({ publishedOnly = false, page = 1, limit = 10, category, status, keyword } = {}) {
-  const where = [];
-  const params = [];
-
-  if (publishedOnly) {
-    where.push('status = ?');
-    params.push('published');
-  } else if (status && ALLOWED_STATUSES.includes(status)) {
-    where.push('status = ?');
-    params.push(status);
-  }
-
-  if (category) {
-    where.push('category = ?');
-    params.push(category);
-  }
-
-  if (keyword) {
-    where.push('(title ILIKE ? OR summary ILIKE ?)');
-    params.push(`%${keyword}%`, `%${keyword}%`);
-  }
-
-  const safePage = Math.max(parseInt(page, 10) || 1, 1);
-  const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);
-  const offset = (safePage - 1) * safeLimit;
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-
-  return { whereSql, params, page: safePage, limit: safeLimit, offset };
+  await blogRepository.ensureBlogArticlesTable(db);
 }
 
 async function listArticles(db, options = {}) {
-  const { whereSql, params, page, limit, offset } = buildListQuery(options);
-  const totalRow = await db.prepare(`SELECT COUNT(*) as count FROM blog_articles ${whereSql}`).get(...params);
-  const list = await db.prepare(`
-    SELECT id, title, summary, category, status, created_at, updated_at
-    FROM blog_articles
-    ${whereSql}
-    ORDER BY updated_at DESC, id DESC
-    LIMIT ? OFFSET ?
-  `).all(...params, limit, offset);
+  if (options.publishedOnly) {
+    const blogReadRepository = require('../repositories/blog-read-repository');
+    return blogReadRepository.listPublishedArticles(db, options);
+  }
 
-  return {
-    total: Number(totalRow?.count || 0),
-    page,
-    limit,
-    list
-  };
+  return blogRepository.listAdminArticles(db, options);
 }
 
 async function listAdminArticles(db, options = {}) {
@@ -118,15 +90,15 @@ async function listPublishedArticles(db, options = {}) {
 async function createArticle(db, data) {
   const article = normalizeArticleInput(data);
   const now = Math.floor(Date.now() / 1000);
-  const result = await db.prepare(`
-    INSERT INTO blog_articles (title, summary, category, content, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(article.title, article.summary, article.category, article.content, article.status, now, now);
+  const result = await blogRepository.insertArticle(db, {
+    ...article,
+    now
+  });
   return getAdminArticle(db, result.lastInsertRowid);
 }
 
 async function getAdminArticle(db, id) {
-  return (await db.prepare('SELECT * FROM blog_articles WHERE id = ?').get(id)) || null;
+  return (await blogRepository.findAdminArticleById(db, id)) || null;
 }
 
 async function getPublishedArticle(db, id) {
@@ -145,34 +117,21 @@ async function updateArticle(db, id, data) {
     status: data.status !== undefined ? data.status : existing.status
   });
 
-  await db.prepare(`
-    UPDATE blog_articles
-    SET title = ?, summary = ?, category = ?, content = ?, status = ?, updated_at = ?
-    WHERE id = ?
-  `).run(
-    merged.title,
-    merged.summary,
-    merged.category,
-    merged.content,
-    merged.status,
-    Math.floor(Date.now() / 1000),
-    id
-  );
+  await blogRepository.updateArticleFields(db, id, {
+    ...merged,
+    updatedAt: Math.floor(Date.now() / 1000)
+  });
 
   return getAdminArticle(db, id);
 }
 
 async function listCategories(db, { publishedOnly = false } = {}) {
-  const whereSql = publishedOnly
-    ? "WHERE status = 'published' AND category IS NOT NULL AND category != ''"
-    : "WHERE category IS NOT NULL AND category != ''";
-  const rows = await db.prepare(`
-    SELECT DISTINCT category
-    FROM blog_articles
-    ${whereSql}
-    ORDER BY category ASC
-  `).all();
-  return rows.map((row) => row.category);
+  if (publishedOnly) {
+    const blogReadRepository = require('../repositories/blog-read-repository');
+    return blogReadRepository.listPublishedCategories(db);
+  }
+
+  return blogRepository.listAdminCategories(db);
 }
 
 async function listAdminCategories(db) {
@@ -214,7 +173,7 @@ function extractLocalBlogImageFilenames(content = '') {
 }
 
 async function isImageReferencedByOtherArticles(db, filename, excludeArticleId) {
-  const rows = await db.prepare('SELECT id, content FROM blog_articles WHERE id != ?').all(excludeArticleId);
+  const rows = await blogRepository.listOtherArticleContents(db, excludeArticleId);
   return rows.some((row) => extractLocalBlogImageFilenames(row.content).includes(filename));
 }
 
@@ -250,7 +209,7 @@ async function deleteArticle(db, id, options = {}) {
   const existing = await getAdminArticle(db, id);
   if (!existing) return null;
 
-  await db.prepare('DELETE FROM blog_articles WHERE id = ?').run(id);
+  await blogRepository.deleteArticle(db, id);
 
   if (options.uploadDir) {
     await cleanupUnreferencedBlogImages(db, existing, options);
@@ -261,8 +220,10 @@ async function deleteArticle(db, id, options = {}) {
 
 module.exports = {
   BLOG_IMAGE_PREFIX,
+  isAllowedBlogImageMimeType,
   buildBlogImageUrl,
   buildBlogImageMarkdown,
+  buildUploadedImagePayload,
   ensureBlogArticlesTable,
   createArticle,
   updateArticle,

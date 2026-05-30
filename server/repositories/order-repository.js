@@ -27,6 +27,17 @@ async function findEnabledPlanById(db, planId) {
 }
 
 /**
+ * 按套餐 ID 查询套餐记录，不限制启用状态。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number|string} planId - 套餐 ID
+ * @returns {Promise<Object|undefined>} 套餐记录
+ */
+async function findPlanById(db, planId) {
+  return db.prepare('SELECT * FROM plans WHERE id = ?').get(planId);
+}
+
+/**
  * 创建待支付续费订单。
  *
  * @param {Object} db - 数据库代理对象
@@ -61,6 +72,26 @@ async function markOrderExpiredByOutTradeNo(db, outTradeNo) {
 }
 
 /**
+ * 清理单个用户节点的原始订阅缓存。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} payload - 缓存定位参数
+ * @returns {Promise<void>}
+ */
+async function clearUserSubscriptionSourceCache(db, payload) {
+  const {
+    userId,
+    serverId,
+    inboundId
+  } = payload;
+
+  await db.prepare(`
+    DELETE FROM user_subscription_sources
+    WHERE user_id = ? AND server_id = ? AND inbound_id = ?
+  `).run(userId, serverId, inboundId);
+}
+
+/**
  * 写入 VMQ 回传的支付信息。
  *
  * @param {Object} db - 数据库代理对象
@@ -80,6 +111,111 @@ async function updateOrderPaymentInfo(db, payload) {
     SET trade_no = ?, payment_url = ?, amount = ?
     WHERE out_trade_no = ?
   `).run(tradeNo, paymentUrl, amount, outTradeNo);
+}
+
+/**
+ * 更新用户同步状态。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {number} syncStatus - 同步状态
+ * @returns {Promise<void>}
+ */
+async function updateUserSyncStatus(db, userId, syncStatus) {
+  await db.prepare('UPDATE users SET sync_status = ? WHERE id = ?').run(syncStatus, userId);
+}
+
+/**
+ * 查询订单支付完成处理所需的订单与用户快照。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {string} outTradeNo - 商户订单号
+ * @returns {Promise<Object|undefined>} 订单与用户快照
+ */
+async function findPaidOrderContextByOutTradeNo(db, outTradeNo) {
+  return db.prepare(`
+    SELECT o.*, u.expire_at as current_expire_at, u.traffic_limit as current_traffic_limit,
+           u.email, u.subscription_token, u.plan_id as current_plan_id, u.enabled as current_enabled,
+           u.disable_reason as current_disable_reason
+    FROM orders o
+    LEFT JOIN users u ON o.user_id = u.id
+    WHERE o.out_trade_no = ?
+  `).get(outTradeNo);
+}
+
+/**
+ * 将订单标记为已支付。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} payload - 订单支付结果
+ * @returns {Promise<void>}
+ */
+async function markOrderPaid(db, payload) {
+  const {
+    outTradeNo,
+    tradeNo,
+    paidAt
+  } = payload;
+
+  await db.prepare(`
+    UPDATE orders SET
+      status = 'paid',
+      trade_no = ?,
+      paid_at = ?
+    WHERE out_trade_no = ?
+  `).run(tradeNo, paidAt, outTradeNo);
+}
+
+/**
+ * 写入支付完成后的用户权益。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} payload - 用户权益数据
+ * @returns {Promise<void>}
+ */
+async function updateUserAfterPaidOrder(db, payload) {
+  const {
+    userId,
+    planId,
+    trafficLimit,
+    expireAt,
+    updatedAt
+  } = payload;
+
+  await db.prepare(`
+    UPDATE users SET
+      enabled = 1,
+      plan_id = ?,
+      traffic_limit = ?,
+      traffic_used_at = NULL,
+      disable_reason = NULL,
+      expire_at = ?,
+      payment_count = payment_count + 1,
+      updated_at = ?
+    WHERE id = ?
+  `).run(planId, trafficLimit, expireAt, updatedAt, userId);
+}
+
+/**
+ * 增加套餐售卖计数。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} planId - 套餐 ID
+ * @returns {Promise<void>}
+ */
+async function incrementPlanSalesCount(db, planId) {
+  await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(planId);
+}
+
+/**
+ * 回收套餐售卖计数，最低不小于 0。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} planId - 套餐 ID
+ * @returns {Promise<void>}
+ */
+async function decrementPlanSalesCount(db, planId) {
+  await db.prepare('UPDATE plans SET sales_count = GREATEST(0, sales_count - 1) WHERE id = ?').run(planId);
 }
 
 /**
@@ -298,9 +434,17 @@ function buildAdminOrderFilters(filters = {}) {
 module.exports = {
   findUserById,
   findEnabledPlanById,
+  findPlanById,
   createPendingRenewOrder,
   markOrderExpiredByOutTradeNo,
+  clearUserSubscriptionSourceCache,
   updateOrderPaymentInfo,
+  updateUserSyncStatus,
+  findPaidOrderContextByOutTradeNo,
+  markOrderPaid,
+  updateUserAfterPaidOrder,
+  incrementPlanSalesCount,
+  decrementPlanSalesCount,
   countUserOrders,
   listUserOrders,
   findUserOrderById,

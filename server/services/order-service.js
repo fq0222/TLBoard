@@ -15,6 +15,8 @@ const xuiSyncTaskService = require('./xui-sync-task-service');
 const { DISABLE_REASONS } = require('./renew-policy');
 const { createLogger } = require('../utils/logger');
 const { isValidXuiAuth, generateXuiAuth } = require('../utils/xui-auth');
+const orderRepository = require('../repositories/order-repository');
+const xuiSyncRepository = require('../repositories/xui-sync-repository');
 
 const logger = createLogger('ORDER-SERVICE');
 
@@ -27,10 +29,11 @@ const logger = createLogger('ORDER-SERVICE');
  * @returns {Promise<void>}
  */
 async function clearSubscriptionSourceCache(db, userId, serverId, inboundId) {
-  await db.prepare(`
-    DELETE FROM user_subscription_sources
-    WHERE user_id = ? AND server_id = ? AND inbound_id = ?
-  `).run(userId, serverId, inboundId);
+  await orderRepository.clearUserSubscriptionSourceCache(db, {
+    userId,
+    serverId,
+    inboundId
+  });
 }
 
 /**
@@ -91,17 +94,25 @@ function buildPayloadPlan(plan) {
  * @returns {Promise<{uuid: string, auth: string, subId: string}>}
  */
 async function ensureNodeConfig(db, user, server, inbound, existingClient = null, strategy = 'direct') {
-  const existingConfig = await db.prepare(
-    'SELECT id, uuid, auth, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
-  ).get(user.id, server.id, inbound.id);
+  const existingConfig = await xuiSyncRepository.findUserNodeConfig(
+    db,
+    user.id,
+    server.id,
+    inbound.id
+  );
 
   if (existingConfig) {
     let auth = existingConfig.auth || '';
     if (strategy === 'hy2' && !isValidXuiAuth(auth)) {
       auth = generateXuiAuth();
-      await db.prepare(
-        'UPDATE user_node_configs SET auth = ? WHERE id = ?'
-      ).run(auth, existingConfig.id);
+      await xuiSyncRepository.saveUserNodeConfig(db, {
+        userId: user.id,
+        serverId: server.id,
+        inboundId: inbound.id,
+        uuid: existingConfig.uuid,
+        auth,
+        subId: existingConfig.sub_id
+      });
       logger.info(`修正非法 hy2 auth: user=${user.email}, server=${server.id}, inbound=${inbound.id}`);
     }
 
@@ -117,11 +128,14 @@ async function ensureNodeConfig(db, user, server, inbound, existingClient = null
   const auth = existingClient?.auth || credentials.auth;
   const subId = existingClient?.subId || credentials.subId;
 
-  await db.prepare(`
-    INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, auth, sub_id)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT (user_id, server_id, inbound_id) DO NOTHING
-  `).run(user.id, server.id, inbound.id, uuid, auth, subId);
+  await xuiSyncRepository.saveUserNodeConfig(db, {
+    userId: user.id,
+    serverId: server.id,
+    inboundId: inbound.id,
+    uuid,
+    auth,
+    subId
+  });
 
   logger.info(`保存用户节点配置: user=${user.email}, server=${server.id}, inbound=${inbound.id}, uuid=${uuid}, sub_id=${subId}`);
   await clearSubscriptionSourceCache(db, user.id, server.id, inbound.id);
@@ -149,11 +163,7 @@ async function legacySyncUserToXuiServers(db, user, plan = {}) {
   let lastError = '';
 
   try {
-    const servers = await db.prepare(`
-      SELECT id, name, api_url, api_token
-      FROM xui_servers
-      WHERE status = 1
-    `).all();
+    const servers = await xuiSyncRepository.listOnlineXuiServers(db);
 
     if (servers.length === 0) {
       logger.warn('没有在线的 3X-UI 服务器，跳过同步');
@@ -162,7 +172,7 @@ async function legacySyncUserToXuiServers(db, user, plan = {}) {
 
     logger.info(`开始同步用户 ${user.email} 到 ${servers.length} 个 3X-UI 服务器`);
     // 1=同步中：仅用于用户端短轮询等待，不作为最终成功标识
-    await db.prepare('UPDATE users SET sync_status = 1 WHERE id = ?').run(user.id);
+    await orderRepository.updateUserSyncStatus(db, user.id, 1);
 
     for (const server of servers) {
       try {
@@ -268,7 +278,7 @@ async function legacySyncUserToXuiServers(db, user, plan = {}) {
     return { success: false, message: error.message, successCount, failureCount: failureCount + 1 };
   } finally {
     // 2=等待结束：失败也结束等待，真实失败由 xui_sync_tasks 继续补偿
-    await db.prepare('UPDATE users SET sync_status = 2 WHERE id = ?').run(user.id);
+    await orderRepository.updateUserSyncStatus(db, user.id, 2);
     logger.info(`用户 ${user.email} 同步状态更新为 2（等待结束）`);
   }
 }
@@ -290,11 +300,7 @@ async function syncUserToXuiServers(db, user, plan = {}) {
   let lastError = '';
 
   try {
-    const servers = await db.prepare(`
-      SELECT id, name, api_url, api_token
-      FROM xui_servers
-      WHERE status = 1
-    `).all();
+    const servers = await xuiSyncRepository.listOnlineXuiServers(db);
 
     if (servers.length === 0) {
       logger.warn('没有在线的 3X-UI 服务器，跳过同步');
@@ -302,7 +308,7 @@ async function syncUserToXuiServers(db, user, plan = {}) {
     }
 
     logger.info(`开始同步用户 ${user.email} 到 ${servers.length} 个 3X-UI 服务器`);
-    await db.prepare('UPDATE users SET sync_status = 1 WHERE id = ?').run(user.id);
+    await orderRepository.updateUserSyncStatus(db, user.id, 1);
 
     for (const server of servers) {
       try {
@@ -393,7 +399,7 @@ async function syncUserToXuiServers(db, user, plan = {}) {
     logger.error(`同步用户到 3X-UI 错误: ${error.message}`);
     return { success: false, message: error.message, successCount, failureCount: failureCount + 1 };
   } finally {
-    await db.prepare('UPDATE users SET sync_status = 2 WHERE id = ?').run(user.id);
+    await orderRepository.updateUserSyncStatus(db, user.id, 2);
     logger.info(`用户 ${user.email} 同步状态更新为 2（等待结束）`);
   }
 }
@@ -434,14 +440,7 @@ async function enqueueAndTryUserSync(db, taskType, userInfo, plan) {
  * @returns {Promise<Object>} 处理结果
  */
 async function completePaidOrder(db, outTradeNo, tradeNo = null) {
-  const order = await db.prepare(`
-    SELECT o.*, u.expire_at as current_expire_at, u.traffic_limit as current_traffic_limit,
-           u.email, u.subscription_token, u.plan_id as current_plan_id, u.enabled as current_enabled,
-           u.disable_reason as current_disable_reason
-    FROM orders o
-    LEFT JOIN users u ON o.user_id = u.id
-    WHERE o.out_trade_no = ?
-  `).get(outTradeNo);
+  const order = await orderRepository.findPaidOrderContextByOutTradeNo(db, outTradeNo);
 
   if (!order) {
     logger.warn(`Order not found: ${outTradeNo}`);
@@ -452,7 +451,7 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
     return { handled: true, alreadyPaid: true, order };
   }
 
-  const plan = await db.prepare('SELECT * FROM plans WHERE id = ?').get(order.plan_id);
+  const plan = await orderRepository.findPlanById(db, order.plan_id);
   if (!plan) {
     logger.error(`Plan not found for order ${outTradeNo}: ${order.plan_id}`);
     return { handled: false, reason: 'plan_not_found', order };
@@ -477,39 +476,32 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   }
 
   const transaction = db.transaction(async () => {
-    await db.prepare(`
-      UPDATE orders SET
-        status = 'paid',
-        trade_no = ?,
-        paid_at = ?
-      WHERE out_trade_no = ?
-    `).run(finalTradeNo, now, outTradeNo);
+    await orderRepository.markOrderPaid(db, {
+      outTradeNo,
+      tradeNo: finalTradeNo,
+      paidAt: now
+    });
 
-    await db.prepare(`
-      UPDATE users SET
-        enabled = 1,
-        plan_id = ?,
-        traffic_limit = ?,
-        traffic_used_at = NULL,
-        disable_reason = NULL,
-        expire_at = ?,
-        payment_count = payment_count + 1,
-        updated_at = ?
-      WHERE id = ?
-    `).run(plan.id, newTrafficLimit, expireAt, now, order.user_id);
+    await orderRepository.updateUserAfterPaidOrder(db, {
+      userId: order.user_id,
+      planId: plan.id,
+      trafficLimit: newTrafficLimit,
+      expireAt,
+      updatedAt: now
+    });
 
     if (isRenewOrder) {
       const currentPlanId = order.current_plan_id;
       if (currentPlanId && currentPlanId !== plan.id) {
-        await db.prepare('UPDATE plans SET sales_count = GREATEST(0, sales_count - 1) WHERE id = ?').run(currentPlanId);
-        await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(plan.id);
+        await orderRepository.decrementPlanSalesCount(db, currentPlanId);
+        await orderRepository.incrementPlanSalesCount(db, plan.id);
         logger.info(`续费切换套餐: 旧套餐 ${currentPlanId} -1, 新套餐 ${plan.id} +1`);
       } else if (!currentPlanId) {
-        await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(plan.id);
+        await orderRepository.incrementPlanSalesCount(db, plan.id);
         logger.info(`续费新套餐 ${plan.id} +1`);
       }
     } else {
-      await db.prepare('UPDATE plans SET sales_count = sales_count + 1 WHERE id = ?').run(plan.id);
+      await orderRepository.incrementPlanSalesCount(db, plan.id);
       logger.info(`新购订单: ${plan.id} +1`);
     }
   });

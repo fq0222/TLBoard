@@ -4,6 +4,7 @@
  */
 
 const crypto = require('crypto');
+const downloadRepository = require('../repositories/download-repository');
 const {
   findUserDistributions,
   removeDuplicateDistributions,
@@ -31,9 +32,9 @@ function generateToken() {
  */
 async function getResourceConfig(db) {
   try {
-    const config = await db.prepare("SELECT value FROM system_settings WHERE key = 'resource_config'").get();
-    if (config) {
-      return JSON.parse(config.value);
+    const configRow = await downloadRepository.getResourceConfigRow(db);
+    if (configRow) {
+      return JSON.parse(configRow.value);
     }
   } catch (error) {
     logger.warn(`获取资源配置失败，使用默认配置: ${error.message}`);
@@ -59,9 +60,7 @@ function buildDownloadUrl(siteBaseUrl, token) {
  * @returns {Promise<Object|undefined>} 资源记录
  */
 async function findLatestDownloadResource(db) {
-  return await db.prepare(
-    'SELECT * FROM resources WHERE enabled = 1 AND name LIKE ? ORDER BY created_at DESC LIMIT 1'
-  ).get(`%${DOWNLOAD_RESOURCE_KEYWORD}%`);
+  return downloadRepository.findLatestEnabledResourceByKeyword(db, DOWNLOAD_RESOURCE_KEYWORD);
 }
 
 /**

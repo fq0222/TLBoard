@@ -271,6 +271,43 @@ async function listOnlineXuiServers(db) {
   `).all();
 }
 
+/**
+ * 删除某台服务器现有的节点快照。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} serverId - 服务器 ID
+ * @returns {Promise<void>}
+ */
+async function deleteServerNodes(db, serverId) {
+  await db.prepare('DELETE FROM xui_nodes WHERE server_id = ?').run(serverId);
+}
+
+/**
+ * 写入单个 inbound 的节点快照。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} payload - 节点快照
+ * @returns {Promise<void>}
+ */
+async function insertServerNodeSnapshot(db, payload) {
+  const {
+    serverId,
+    inboundId,
+    remark,
+    port,
+    protocol,
+    settings,
+    streamSettings,
+    userCount,
+    onlineCount
+  } = payload;
+
+  await db.prepare(`
+    INSERT INTO xui_nodes (server_id, inbound_id, remark, port, protocol, settings, stream_settings, user_count, online_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(serverId, inboundId, remark, port, protocol, settings, streamSettings, userCount, onlineCount);
+}
+
 module.exports = {
   findUserNodeConfig,
   saveUserNodeConfig,
@@ -285,5 +322,7 @@ module.exports = {
   markXuiSyncTaskFailed,
   findUserForSyncTask,
   listUsersForXuiSync,
-  listOnlineXuiServers
+  listOnlineXuiServers,
+  deleteServerNodes,
+  insertServerNodeSnapshot
 };
