@@ -146,6 +146,7 @@ server/test/*
 !server/test/
 !server/test/test-blog-articles.js
 !server/test/migrate-xui-traffic.js
+!server/test/test-user-subscription-service.js
 server/config.js
 server/uploads/
 server/backupDB/
