@@ -21,10 +21,21 @@ function createLegacyBusinessError(message, options = {}) {
   return error;
 }
 
+/**
+ * 获取当前秒级时间戳，保持与现有用户时间字段一致。
+ *
+ * @returns {number} 秒级 Unix 时间戳
+ */
 function getNowTimestamp() {
   return Math.floor(Date.now() / 1000);
 }
 
+/**
+ * 格式化流量值，兼容 null、空字符串和字符串数字。
+ *
+ * @param {*} bytes - 原始流量值
+ * @returns {string} 格式化后的流量文本
+ */
 function formatTraffic(bytes) {
   if (bytes === null || bytes === undefined || bytes === '') return '0 B';
   const numBytes = Number(bytes);
@@ -35,6 +46,12 @@ function formatTraffic(bytes) {
   return parseFloat((numBytes / Math.pow(k, index)).toFixed(2)) + ' ' + sizes[index];
 }
 
+/**
+ * 格式化到期时间，兼容不限期用户。
+ *
+ * @param {*} timestamp - 秒级时间戳
+ * @returns {string} 格式化后的时间文本
+ */
 function formatTime(timestamp) {
   if (!timestamp || timestamp === 0 || timestamp === '0') {
     return '无限期';
@@ -46,6 +63,12 @@ function formatTime(timestamp) {
   });
 }
 
+/**
+ * 将订单状态转换为旧前端使用的中文文案。
+ *
+ * @param {string} status - 订单状态
+ * @returns {string} 状态文案
+ */
 function getOrderStatusText(status) {
   const statusMap = {
     pending: '待支付',
@@ -56,6 +79,12 @@ function getOrderStatusText(status) {
   return statusMap[status] || status;
 }
 
+/**
+ * 根据用户启用状态和到期时间推导管理端列表状态。
+ *
+ * @param {Object} user - 用户记录
+ * @returns {{status:string,status_text:string}} 状态信息
+ */
 function buildUserStatus(user) {
   const now = getNowTimestamp();
   const expireAt = Number(user.expire_at) || 0;
@@ -76,6 +105,12 @@ function buildUserStatus(user) {
   };
 }
 
+/**
+ * 构造管理端用户列表查询条件。
+ *
+ * @param {Object} query - 路由查询参数
+ * @returns {{whereClause:string,params:Array}} SQL 条件与参数
+ */
 function buildUserListWhere(query) {
   const keyword = query.keyword || '';
   const status = query.status;
@@ -110,6 +145,13 @@ function buildUserListWhere(query) {
   };
 }
 
+/**
+ * 查询管理端用户分页列表。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} query - 路由查询参数
+ * @returns {Promise<Object>} 分页结果
+ */
 async function listUsers(db, query) {
   const { page, limit, offset } = parsePagination(query);
   const { whereClause, params } = buildUserListWhere(query);
@@ -138,6 +180,13 @@ async function listUsers(db, query) {
   };
 }
 
+/**
+ * 查询用户详情以及最近订单、CF IP 信息。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<Object>} 用户详情
+ */
 async function getUserDetail(db, userId) {
   const user = await userRepository.findUserDetailById(db, userId);
   if (!user) {
@@ -181,6 +230,13 @@ async function getUserDetail(db, userId) {
   };
 }
 
+/**
+ * 将用户启用状态、流量和到期时间同步到各个在线 3X-UI 节点。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} user - 用户记录
+ * @returns {Promise<void>}
+ */
 async function syncUserToXuiServers(db, user) {
   const servers = await userRepository.listOnlineXuiServersForSync(db);
   if (servers.length === 0) {
@@ -225,6 +281,14 @@ async function syncUserToXuiServers(db, user) {
   }
 }
 
+/**
+ * 更新用户基础资料并触发 3X-UI 同步。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {Object} payload - 更新参数
+ * @returns {Promise<Object>} 更新后的用户概要信息
+ */
 async function updateUser(db, userId, payload) {
   const user = await userRepository.findUserDetailById(db, userId);
   if (!user) {
@@ -283,6 +347,14 @@ async function updateUser(db, userId, payload) {
   };
 }
 
+/**
+ * 更新用户绑定的 CF 优选 IP。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {Array<number|string>} ipPoolIds - IP 池 ID 列表
+ * @returns {Promise<Object>} 更新结果
+ */
 async function updateUserCfIps(db, userId, ipPoolIds) {
   const currentUser = await userRepository.findUserDetailById(db, userId);
   if (!currentUser) {
@@ -309,6 +381,13 @@ async function updateUserCfIps(db, userId, ipPoolIds) {
   };
 }
 
+/**
+ * 重新同步节点并生成指定用户的订阅缓存。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<{sub_id:string,node_count:number}>} 生成结果
+ */
 async function generateSubscription(db, userId) {
   const user = await userRepository.findUserDetailById(db, userId);
   if (!user) {

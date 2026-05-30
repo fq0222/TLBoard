@@ -20,10 +20,21 @@ function createLegacyBusinessError(message, options = {}) {
   return error;
 }
 
+/**
+ * 获取当前秒级时间戳。
+ *
+ * @returns {number} 秒级 Unix 时间戳
+ */
 function getNowTimestamp() {
   return Math.floor(Date.now() / 1000);
 }
 
+/**
+ * 格式化流量值，兼容空值与字符串数字。
+ *
+ * @param {*} bytes - 原始流量值
+ * @returns {string} 格式化后的流量文本
+ */
 function formatTraffic(bytes) {
   if (bytes === null || bytes === undefined || bytes === '') return '0 B';
   const numBytes = Number(bytes);
@@ -35,6 +46,12 @@ function formatTraffic(bytes) {
   return parseFloat((numBytes / Math.pow(k, index)).toFixed(2)) + ' ' + sizes[index];
 }
 
+/**
+ * 格式化用户到期时间，兼容不限期账号。
+ *
+ * @param {*} timestamp - 秒级时间戳
+ * @returns {string} 格式化后的时间文本
+ */
 function formatTime(timestamp) {
   if (!timestamp || timestamp === 0 || timestamp === '0') {
     return '无限期';
@@ -46,6 +63,13 @@ function formatTime(timestamp) {
   });
 }
 
+/**
+ * 创建注册待支付订单并返回 VMQ 支付信息。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} payload - 注册与支付参数
+ * @returns {Promise<Object>} 下单结果
+ */
 async function registerAndPay(db, payload) {
   const {
     email,
@@ -179,6 +203,13 @@ async function registerAndPay(db, payload) {
   };
 }
 
+/**
+ * 校验用户邮箱和密码并签发登录令牌。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {{email:string,password:string}} payload - 登录参数
+ * @returns {Promise<Object>} 登录结果
+ */
 async function login(db, payload) {
   const { email, password } = payload;
   const user = await userRepository.findLoginUserByEmail(db, email);
@@ -225,6 +256,13 @@ async function login(db, payload) {
   };
 }
 
+/**
+ * 聚合当前用户资料与订阅状态。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<Object>} 资料结果
+ */
 async function getProfile(db, userId) {
   const user = await userRepository.findUserProfileById(db, userId);
   if (!user) {

@@ -61,6 +61,13 @@ function handleValidationFailure(req, res) {
   return true;
 }
 
+/**
+ * 获取 Brevo 配置。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function getConfig(req, res) {
   try {
     const data = await adminEmailService.getConfig(req.app.locals.db);
@@ -71,6 +78,13 @@ async function getConfig(req, res) {
   }
 }
 
+/**
+ * 保存 Brevo 配置。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function saveConfig(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -85,6 +99,13 @@ async function saveConfig(req, res) {
   }
 }
 
+/**
+ * 发送测试邮件验证配置可用性。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function sendTestEmail(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -108,6 +129,13 @@ async function sendTestEmail(req, res) {
   }
 }
 
+/**
+ * 获取模板列表。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function listTemplates(req, res) {
   try {
     const data = await adminEmailService.listTemplates(req.app.locals.db);
@@ -117,6 +145,13 @@ async function listTemplates(req, res) {
   }
 }
 
+/**
+ * 创建邮件模板。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function createTemplate(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -131,6 +166,13 @@ async function createTemplate(req, res) {
   }
 }
 
+/**
+ * 更新邮件模板。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function updateTemplate(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -146,6 +188,13 @@ async function updateTemplate(req, res) {
   }
 }
 
+/**
+ * 删除邮件模板。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function deleteTemplate(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -161,6 +210,13 @@ async function deleteTemplate(req, res) {
   }
 }
 
+/**
+ * 预览模板渲染结果。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function previewTemplate(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -180,6 +236,13 @@ async function previewTemplate(req, res) {
   }
 }
 
+/**
+ * 发送单封后台邮件。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function sendSingleEmail(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -203,6 +266,13 @@ async function sendSingleEmail(req, res) {
   }
 }
 
+/**
+ * 创建群发任务。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function createCampaign(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -217,6 +287,13 @@ async function createCampaign(req, res) {
   }
 }
 
+/**
+ * 获取群发任务列表。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function listCampaigns(req, res) {
   try {
     const data = await adminEmailService.listCampaigns(req.app.locals.db);
@@ -226,6 +303,13 @@ async function listCampaigns(req, res) {
   }
 }
 
+/**
+ * 获取群发任务详情。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function getCampaignDetail(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -242,6 +326,13 @@ async function getCampaignDetail(req, res) {
   }
 }
 
+/**
+ * 暂停群发任务。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function pauseCampaign(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -257,6 +348,13 @@ async function pauseCampaign(req, res) {
   }
 }
 
+/**
+ * 恢复群发任务。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function resumeCampaign(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -272,6 +370,13 @@ async function resumeCampaign(req, res) {
   }
 }
 
+/**
+ * 删除群发任务及关联日志。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function deleteCampaign(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -287,6 +392,13 @@ async function deleteCampaign(req, res) {
   }
 }
 
+/**
+ * 获取指定群发任务的日志分页。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function listCampaignLogs(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -304,6 +416,13 @@ async function listCampaignLogs(req, res) {
   }
 }
 
+/**
+ * 获取全部邮件日志分页。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function listLogs(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -317,6 +436,13 @@ async function listLogs(req, res) {
   }
 }
 
+/**
+ * 清理过期邮件日志。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function clearExpiredLogs(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -331,6 +457,13 @@ async function clearExpiredLogs(req, res) {
   }
 }
 
+/**
+ * 批量删除邮件日志。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function batchDeleteLogs(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -345,6 +478,13 @@ async function batchDeleteLogs(req, res) {
   }
 }
 
+/**
+ * 删除单条邮件日志。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function deleteLog(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -360,6 +500,13 @@ async function deleteLog(req, res) {
   }
 }
 
+/**
+ * 按关键词搜索用户列表供邮件收件人选择。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function searchUsers(req, res) {
   if (handleValidationFailure(req, res)) {
     return;

@@ -61,6 +61,13 @@ function handleValidationFailure(req, res) {
   return true;
 }
 
+/**
+ * 发送教程邮件。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function sendTutorialEmail(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -89,6 +96,13 @@ async function sendTutorialEmail(req, res) {
   }
 }
 
+/**
+ * 发送预设动作邮件。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
 async function sendPresetEmail(req, res) {
   if (handleValidationFailure(req, res)) {
     return;

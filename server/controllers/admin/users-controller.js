@@ -26,6 +26,14 @@ function handleValidationFailure(req, res) {
   return true;
 }
 
+/**
+ * 输出兼容旧接口的业务异常或系统异常响应。
+ *
+ * @param {Object} res - Express 响应对象
+ * @param {string} action - 当前操作描述
+ * @param {Error} error - 捕获到的异常对象
+ * @returns {Object} Express 响应结果
+ */
 function handleControllerError(res, action, error) {
   if (error && error.isLegacyBusinessError) {
     logger.warn(`${action}失败: ${error.message}`);
@@ -44,6 +52,13 @@ function handleControllerError(res, action, error) {
   });
 }
 
+/**
+ * 获取管理端用户分页列表。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
 async function listUsers(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -62,6 +77,13 @@ async function listUsers(req, res) {
   }
 }
 
+/**
+ * 获取指定用户详情及最近订单、CF IP 信息。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
 async function getUserDetail(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -103,6 +125,13 @@ async function getUserDetail(req, res) {
   }
 }
 
+/**
+ * 更新用户基础信息并同步到 3X-UI。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
 async function updateUser(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -126,6 +155,13 @@ async function updateUser(req, res) {
   }
 }
 
+/**
+ * 更新用户绑定的 CF 优选 IP。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
 async function updateUserCfIps(req, res) {
   if (handleValidationFailure(req, res)) {
     return;
@@ -149,6 +185,13 @@ async function updateUserCfIps(req, res) {
   }
 }
 
+/**
+ * 为指定用户重新生成订阅缓存。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
 async function generateSubscription(req, res) {
   if (handleValidationFailure(req, res)) {
     return;

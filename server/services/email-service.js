@@ -17,6 +17,12 @@ class EmailService {
     this.client = null
   }
 
+  /**
+   * 读取 Brevo 相关系统配置。
+   *
+   * @param {Object} db - 数据库代理对象
+   * @returns {Promise<Object>} 配置键值对
+   */
   async getConfig(db) {
     const rows = await emailRepository.getBrevoConfigRows(db)
     const config = {}
@@ -26,6 +32,13 @@ class EmailService {
     return config
   }
 
+  /**
+   * 批量保存 Brevo 配置项。
+   *
+   * @param {Object} db - 数据库代理对象
+   * @param {Object} config - 配置键值对
+   * @returns {Promise<void>}
+   */
   async saveConfig(db, config) {
     const now = Math.floor(Date.now() / 1000)
     for (const [key, value] of Object.entries(config)) {
@@ -33,6 +46,12 @@ class EmailService {
     }
   }
 
+  /**
+   * 初始化 Brevo 客户端并返回默认发件人信息。
+   *
+   * @param {Object} db - 数据库代理对象
+   * @returns {Promise<{senderEmail:string,senderName:string}>} 发件人配置
+   */
   async initClient(db) {
     try {
       const config = await this.getConfig(db)
@@ -55,6 +74,13 @@ class EmailService {
     }
   }
 
+  /**
+   * 发送单封 HTML 邮件。
+   *
+   * @param {Object} db - 数据库代理对象
+   * @param {Object} payload - 发件参数
+   * @returns {Promise<Object>} 发送结果
+   */
   async sendEmail(db, { to, subject, content, senderEmail, senderName }) {
     if (!this.client) {
       await this.initClient(db)
@@ -80,6 +106,13 @@ class EmailService {
     }
   }
 
+  /**
+   * 发送配置测试邮件。
+   *
+   * @param {Object} db - 数据库代理对象
+   * @param {{to:string}} payload - 收件参数
+   * @returns {Promise<Object>} 发送结果
+   */
   async sendTestEmail(db, { to }) {
     logger.info(`发送测试邮件: ${to}`)
     await this.initClient(db)
@@ -88,6 +121,13 @@ class EmailService {
     return await this.sendEmail(db, { to, subject, content })
   }
 
+  /**
+   * 使用变量字典替换模板中的 `{{key}}` 占位符。
+   *
+   * @param {string} content - 原始模板内容
+   * @param {Object} variables - 变量字典
+   * @returns {string} 替换后的内容
+   */
   replaceVariables(content, variables) {
     let result = content
     for (const [key, value] of Object.entries(variables)) {
@@ -96,6 +136,13 @@ class EmailService {
     return result
   }
 
+  /**
+   * 查询用户邮件模板所需变量。
+   *
+   * @param {Object} db - 数据库代理对象
+   * @param {number} userId - 用户 ID
+   * @returns {Promise<Object|null>} 模板变量
+   */
   async getUserVariables(db, userId) {
     const user = await emailRepository.findEmailUserProfileById(db, userId)
     if (!user) return null

@@ -1153,9 +1153,10 @@ class XuiService {
 
       const strategy = options.strategy || 'direct';
       const protocol = options.protocol || '';
-      const credential = options.auth !== undefined
-        ? options.auth
-        : ((strategy === 'hy2' || protocol === 'hysteria' || protocol === 'hysteria2') ? clientInfo.auth : clientInfo.uuid);
+      const usesAuthCredential = strategy === 'hy2' || protocol === 'hysteria' || protocol === 'hysteria2';
+      const credential = usesAuthCredential
+        ? (options.auth || clientInfo.auth || '')
+        : (clientInfo.uuid || '');
 
       const updateClientObj = this.buildClientSettingsPayload({
         protocol,
@@ -1179,6 +1180,15 @@ class XuiService {
           clients: [updateClientObj]
         })
       };
+
+      if (!credential) {
+        return {
+          success: false,
+          message: usesAuthCredential
+            ? `未找到用户 ${email} 的认证凭证`
+            : `未找到用户 ${email} 的客户端 ID`
+        };
+      }
 
       const clientIdentifier = clientInfo.uuid || clientInfo.auth;
       const result = await this.client.updateClient(clientIdentifier, updateConfig);

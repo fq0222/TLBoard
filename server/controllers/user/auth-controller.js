@@ -22,6 +22,14 @@ function respondValidationError(res, errors) {
   });
 }
 
+/**
+ * 输出兼容旧接口的业务异常或系统异常响应。
+ *
+ * @param {Object} res - Express 响应对象
+ * @param {string} action - 当前操作描述
+ * @param {Error} error - 捕获到的异常对象
+ * @returns {Object} Express 响应结果
+ */
 function respondLegacyError(res, action, error) {
   if (error && error.isLegacyBusinessError) {
     logger.warn(`${action}失败: ${error.message}`);
@@ -40,6 +48,13 @@ function respondLegacyError(res, action, error) {
   });
 }
 
+/**
+ * 处理注册并下单接口。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
 async function registerAndPay(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -60,6 +75,13 @@ async function registerAndPay(req, res) {
   }
 }
 
+/**
+ * 处理用户登录接口。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
 async function login(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -80,6 +102,13 @@ async function login(req, res) {
   }
 }
 
+/**
+ * 获取当前登录用户资料。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
 async function getProfile(req, res) {
   try {
     const profile = await authService.getProfile(req.app.locals.db, req.user.id);
