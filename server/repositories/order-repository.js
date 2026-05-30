@@ -185,6 +185,21 @@ async function findPublicOrderByOutTradeNo(db, outTradeNo) {
 }
 
 /**
+ * 查询支付回调处理所需的订单字段。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {string} outTradeNo - 商户订单号
+ * @returns {Promise<Object|undefined>} 订单记录
+ */
+async function findNotifyOrderByOutTradeNo(db, outTradeNo) {
+  return db.prepare(`
+    SELECT amount, trade_no, status
+    FROM orders
+    WHERE out_trade_no = ?
+  `).get(outTradeNo);
+}
+
+/**
  * 仅在待支付状态下将订单标记为过期。
  *
  * @param {Object} db - 数据库代理对象
@@ -291,6 +306,7 @@ module.exports = {
   findUserOrderById,
   findUserOrderByOutTradeNo,
   findPublicOrderByOutTradeNo,
+  findNotifyOrderByOutTradeNo,
   markPendingOrderExpiredById,
   countAdminOrders,
   listAdminOrders
