@@ -2,7 +2,7 @@
  * 用户端工单服务
  * 负责编排用户侧 tickets 的权限、分页、已读同步和状态校验。
  */
-const ticketService = require('../ticket-service');
+const ticketService = require('../shared/ticket-service');
 
 /**
  * 构造旧接口兼容的业务错误。

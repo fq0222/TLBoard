@@ -3,12 +3,12 @@
  * 负责流量统计、禁用检查和 3X-UI 同步
  */
 
-const XuiService = require('./xui-service');
-const xuiSyncTaskService = require('./xui-sync-task-service');
+const XuiService = require('../../integrations/xui/xui-service');
+const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const { withUserStatusLock } = require('./user-status-lock');
 const { DISABLE_REASONS } = require('./renew-policy');
-const { createLogger } = require('../utils/logger');
-const trafficRepository = require('../repositories/traffic-repository');
+const { createLogger } = require('../../utils/logger');
+const trafficRepository = require('../../repositories/traffic-repository');
 
 const logger = createLogger('TRAFFIC-MANAGER');
 

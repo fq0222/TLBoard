@@ -2,7 +2,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const config = require('../../config');
-const vmqService = require('../vmq-service');
+const vmqService = require('../../integrations/vmq/vmq-service');
 const userRepository = require('../../repositories/user-repository');
 
 /**

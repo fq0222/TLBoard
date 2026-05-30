@@ -5,7 +5,7 @@ const { parsePagination } = require('../../shared/utils/pagination');
 const { getUnixTimestamp } = require('../../shared/utils/time');
 const { createLogger } = require('../../utils/logger');
 const resourcesRepository = require('../../repositories/resources-repository');
-const { upsertUserDistribution } = require('../resource-distribution-service');
+const { upsertUserDistribution } = require('../shared/resource-distribution-service');
 
 const logger = createLogger('ADMIN-RESOURCES');
 

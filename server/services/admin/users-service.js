@@ -1,8 +1,8 @@
-const XuiService = require('../xui-service');
-const { syncAllServers } = require('../xui-sync');
-const { fetchOriginalSubscription, parseSubscriptionContent } = require('../subscription-service');
-const { getStrategyFromRemark, processNodeLink } = require('../subscription-strategy');
-const { DISABLE_REASONS } = require('../renew-policy');
+const XuiService = require('../../integrations/xui/xui-service');
+const { syncAllServers } = require('../../integrations/xui/xui-sync');
+const { fetchOriginalSubscription, parseSubscriptionContent } = require('../shared/subscription-service');
+const { getStrategyFromRemark, processNodeLink } = require('../shared/subscription-strategy');
+const { DISABLE_REASONS } = require('../shared/renew-policy');
 const { parsePagination } = require('../../shared/utils/pagination');
 const userRepository = require('../../repositories/user-repository');
 

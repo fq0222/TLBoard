@@ -1,12 +1,12 @@
-/**
+﻿/**
  * 3X-UI 节点同步工具。
  * 负责从 3X-UI 拉取 inbound 快照并写入本地 xui_nodes，
  * 自身只保留同步编排逻辑，具体 SQL 访问下沉到 xui-sync-repository。
  */
 
 const XuiService = require('./xui-service');
-const { createLogger } = require('../utils/logger');
-const xuiSyncRepository = require('../repositories/xui-sync-repository');
+const { createLogger } = require('../../utils/logger');
+const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 
 const logger = createLogger('XUI-SYNC');
 

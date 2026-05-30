@@ -1,12 +1,12 @@
 /**
- * 3X-UI 同步任务队列服务
+ * 3X-UI 同步任务队列服务。
  *
- * 用于持久化注册、续费、启用/禁用等 3X-UI 同步动作。
- * 任务失败后不会丢失，而是按退避时间写回 pending 状态，等待 worker 再次处理。
+ * 用于持久化注册、续费、启用、禁用等 3X-UI 同步动作。
+ * 任务失败后不会丢失，而是按退避时间写回 `pending` 状态，等待 worker 再次处理。
  */
 
-const { createLogger } = require('../utils/logger');
-const xuiSyncRepository = require('../repositories/xui-sync-repository');
+const { createLogger } = require('../../utils/logger');
+const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 
 const logger = createLogger('XUI-SYNC-TASK');
 
@@ -34,7 +34,8 @@ const USER_SYNC_TASK_TYPES = [
 ];
 
 /**
- * 判断是否为用户资料同步类任务
+ * 判断是否为用户资料同步类任务。
+ *
  * @param {string} taskType - 任务类型
  * @returns {boolean}
  */
@@ -43,7 +44,8 @@ function isUserSyncTaskType(taskType) {
 }
 
 /**
- * 根据失败次数获取下一次重试延迟
+ * 根据失败次数获取下一次重试延迟。
+ *
  * @param {number} attempts - 已失败次数
  * @returns {number} 延迟秒数
  */
@@ -53,7 +55,8 @@ function getRetryDelaySeconds(attempts) {
 }
 
 /**
- * 解析任务 payload，避免坏数据影响 worker 主循环
+ * 解析任务 payload，避免坏数据影响 worker 主循环。
+ *
  * @param {string|Object|null} payload - 数据库中保存的 payload
  * @returns {Object} payload 对象
  */
@@ -68,7 +71,7 @@ function parsePayload(payload) {
 }
 
 /**
- * 将同一用户旧的 pending 用户同步任务标记为已取代
+ * 将同一用户旧的 pending 用户同步任务标记为已取代。
  *
  * 用户续费会生成新的同步任务，旧任务的 payload 可能包含旧流量上限。
  * 在新任务入队前关闭旧 pending 任务，避免后续按旧快照重复同步。
@@ -92,7 +95,8 @@ async function supersedePendingUserSyncTasks(db, userId, reason = '已被新的�
 }
 
 /**
- * 创建同步任务
+ * 创建同步任务。
+ *
  * @param {Object} db - 数据库实例
  * @param {Object} options - 任务参数
  * @param {number} options.userId - 用户 ID
@@ -123,7 +127,8 @@ async function enqueueTask(db, { userId, taskType, payload = {}, runAt = null })
 }
 
 /**
- * 获取到期可执行的 pending 任务
+ * 获取到期可执行的 pending 任务。
+ *
  * @param {Object} db - 数据库实例
  * @param {number} limit - 最大任务数
  * @returns {Promise<Array>} 待处理任务
@@ -132,14 +137,15 @@ async function getDueTasks(db, limit = 20) {
   const now = Math.floor(Date.now() / 1000);
   const tasks = await xuiSyncRepository.listDueXuiSyncTasks(db, now, limit);
 
-  return tasks.map(task => ({
+  return tasks.map((task) => ({
     ...task,
     payload_data: parsePayload(task.payload)
   }));
 }
 
 /**
- * 标记任务处理中
+ * 标记任务处理中。
+ *
  * @param {Object} db - 数据库实例
  * @param {number} taskId - 任务 ID
  */
@@ -149,7 +155,8 @@ async function markProcessing(db, taskId) {
 }
 
 /**
- * 标记任务成功
+ * 标记任务成功。
+ *
  * @param {Object} db - 数据库实例
  * @param {number} taskId - 任务 ID
  */
@@ -159,7 +166,8 @@ async function markSuccess(db, taskId) {
 }
 
 /**
- * 标记任务等待重试
+ * 标记任务等待重试。
+ *
  * @param {Object} db - 数据库实例
  * @param {number} taskId - 任务 ID
  * @param {number} attempts - 新的失败次数
@@ -178,7 +186,8 @@ async function markRetry(db, taskId, attempts, errorMessage) {
 }
 
 /**
- * 标记任务最终失败
+ * 标记任务最终失败。
+ *
  * @param {Object} db - 数据库实例
  * @param {number} taskId - 任务 ID
  * @param {number} attempts - 最终失败次数
@@ -195,9 +204,9 @@ async function markFailed(db, taskId, attempts, errorMessage) {
 }
 
 /**
- * 处理单个同步任务
+ * 处理单个同步任务。
  *
- * handler 返回 { success: false } 或抛错都会触发重试逻辑。
+ * handler 返回 `{ success: false }` 或抛错都会触发重试逻辑。
  *
  * @param {Object} db - 数据库实例
  * @param {Object} task - 同步任务
@@ -232,7 +241,8 @@ async function processTask(db, task, handler, options = {}) {
 }
 
 /**
- * 批量处理到期任务
+ * 批量处理到期任务。
+ *
  * @param {Object} db - 数据库实例
  * @param {Function} handler - 具体任务处理器
  * @param {Object} options - 处理选项

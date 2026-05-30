@@ -5,7 +5,7 @@
 
 const https = require('https');
 const http = require('http');
-const { createLogger } = require('../utils/logger');
+const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('SUBSCRIPTION-SERVICE');
 const SUBSCRIPTION_FETCH_TIMEOUT = 15000;

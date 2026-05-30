@@ -2,7 +2,7 @@
  * 管理端工单服务
  * 负责编排管理端 tickets 的列表、详情、回复、关闭和删除业务。
  */
-const ticketService = require('../ticket-service');
+const ticketService = require('../shared/ticket-service');
 
 /**
  * 构造旧接口兼容的业务错误。

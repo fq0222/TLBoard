@@ -1,9 +1,9 @@
-/**
+﻿/**
  * 流量管理模块测试脚本
  */
 
 const databaseManager = require('../db/init');
-const trafficManager = require('../services/traffic-manager');
+const trafficManager = require('../services/shared/traffic-manager');
 
 async function test() {
   try {
@@ -32,3 +32,4 @@ async function test() {
 }
 
 test();
+

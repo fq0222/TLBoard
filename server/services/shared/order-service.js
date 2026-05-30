@@ -9,14 +9,14 @@
  */
 
 const crypto = require('crypto');
-const XuiService = require('./xui-service');
+const XuiService = require('../../integrations/xui/xui-service');
 const trafficManager = require('./traffic-manager');
-const xuiSyncTaskService = require('./xui-sync-task-service');
+const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const { DISABLE_REASONS } = require('./renew-policy');
-const { createLogger } = require('../utils/logger');
-const { isValidXuiAuth, generateXuiAuth } = require('../utils/xui-auth');
-const orderRepository = require('../repositories/order-repository');
-const xuiSyncRepository = require('../repositories/xui-sync-repository');
+const { createLogger } = require('../../utils/logger');
+const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
+const orderRepository = require('../../repositories/order-repository');
+const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 
 const logger = createLogger('ORDER-SERVICE');
 

@@ -1,5 +1,5 @@
-const assert = require('assert');
-const { upsertUserDistribution } = require('../services/resource-distribution-service');
+﻿const assert = require('assert');
+const { upsertUserDistribution } = require('../services/shared/resource-distribution-service');
 
 function createDb(distributions = []) {
   const db = {
@@ -107,3 +107,4 @@ main().catch(error => {
   console.error(error);
   process.exit(1);
 });
+

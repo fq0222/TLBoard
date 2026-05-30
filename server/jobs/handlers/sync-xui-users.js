@@ -1,9 +1,9 @@
-/**
+﻿/**
  * 3X-UI 用户同步任务
  * 负责注册并执行用户节点状态巡检与补偿同步逻辑。
  */
 
-const XuiService = require('../../services/xui-service');
+const XuiService = require('../../integrations/xui/xui-service');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const { createLogger } = require('../../utils/logger');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');

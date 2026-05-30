@@ -1,11 +1,11 @@
-/**
+﻿/**
  * 3X-UI 用户流量迁移脚本
  * 用于将源服务器的用户流量迁移到目标服务器
  * 
  * 使用方法：node server/test/migrate-xui-traffic.js --source <源服务器ID> --target <目标服务器ID>
  */
 
-const XuiService = require('../services/xui-service');
+const XuiService = require('../integrations/xui/xui-service');
 const config = require('../config');
 const readline = require('readline');
 const fs = require('fs');
@@ -404,3 +404,4 @@ main().catch(error => {
   console.error('脚本执行失败:', error.message);
   process.exit(1);
 });
+

@@ -5,7 +5,7 @@
 
 const { parsePagination } = require('../../shared/utils/pagination');
 const emailRepository = require('../../repositories/email-repository');
-const sharedEmailService = require('../email-service');
+const sharedEmailService = require('../../integrations/email/email-service');
 
 /**
  * 构造兼容旧接口的业务异常。

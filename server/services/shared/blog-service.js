@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const { getSiteBaseUrl } = require('../utils/site-url');
-const blogRepository = require('../repositories/blog-repository');
+const { getSiteBaseUrl } = require('../../utils/site-url');
+const blogRepository = require('../../repositories/blog-repository');
 
 const ALLOWED_STATUSES = ['draft', 'published'];
 const BLOG_IMAGE_PREFIX = '/api/user/help/images/';
@@ -72,7 +72,7 @@ async function ensureBlogArticlesTable(db) {
 
 async function listArticles(db, options = {}) {
   if (options.publishedOnly) {
-    const blogReadRepository = require('../repositories/blog-read-repository');
+    const blogReadRepository = require('../../repositories/blog-read-repository');
     return blogReadRepository.listPublishedArticles(db, options);
   }
 
@@ -127,7 +127,7 @@ async function updateArticle(db, id, data) {
 
 async function listCategories(db, { publishedOnly = false } = {}) {
   if (publishedOnly) {
-    const blogReadRepository = require('../repositories/blog-read-repository');
+    const blogReadRepository = require('../../repositories/blog-read-repository');
     return blogReadRepository.listPublishedCategories(db);
   }
 

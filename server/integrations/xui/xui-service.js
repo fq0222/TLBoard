@@ -1,13 +1,13 @@
-/**
+﻿/**
  * 3X-UI API 服务封装
  * 使用本地 API Token 客户端与 3X-UI 面板通信
  */
 
 const XuiApiClient = require('./xui-api-client');
-const config = require('../config');
-const { createLogger } = require('../utils/logger');
-const xuiSyncRepository = require('../repositories/xui-sync-repository');
-const { isValidXuiAuth } = require('../utils/xui-auth');
+const config = require('../../config');
+const { createLogger } = require('../../utils/logger');
+const xuiSyncRepository = require('../../repositories/xui-sync-repository');
+const { isValidXuiAuth } = require('../../utils/xui-auth');
 
 const logger = createLogger('XUI-SERVICE');
 

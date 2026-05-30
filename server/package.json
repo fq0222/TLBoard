@@ -7,12 +7,8 @@
     "start": "node app.js",
     "dev": "nodemon app.js",
     "init-db": "node init-db.js",
-    "start:user": "node app-user.js",
-    "start:admin": "node app-admin.js",
-    "start:all": "concurrently \"npm run start:user\" \"npm run start:admin\"",
-    "dev:user": "nodemon app-user.js",
-    "dev:admin": "nodemon app-admin.js",
-    "dev:all": "concurrently \"npm run dev:user\" \"npm run dev:admin\"",
+    "start:all": "node app.js",
+    "dev:all": "nodemon app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -40,7 +36,6 @@
     "pg": "^8.12.0"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
     "nodemon": "^3.0.2"
   }
 }

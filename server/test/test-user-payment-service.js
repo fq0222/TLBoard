@@ -1,7 +1,7 @@
-const assert = require('assert');
+﻿const assert = require('assert');
 const paymentService = require('../services/user/payment-service');
-const vmqService = require('../services/vmq-service');
-const orderService = require('../services/order-service');
+const vmqService = require('../integrations/vmq/vmq-service');
+const orderService = require('../services/shared/order-service');
 
 function createFakeDb(order) {
   return {
@@ -144,3 +144,4 @@ run().catch((error) => {
   console.error(error);
   process.exit(1);
 });
+

@@ -1,5 +1,5 @@
-const assert = require('assert');
-const syncTaskService = require('../services/xui-sync-task-service');
+﻿const assert = require('assert');
+const syncTaskService = require('../integrations/xui/xui-sync-task-service');
 
 function createFakeDb(initialTasks = []) {
   const tasks = initialTasks.map(task => ({ ...task }));

@@ -1,9 +1,9 @@
-const fs = require('fs');
+﻿const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 const config = require('../config');
 const databaseManager = require('../db/init');
-const blogService = require('../services/blog-service');
+const blogService = require('../services/shared/blog-service');
 
 const uploadDir = path.join(__dirname, '../uploads/blog-images');
 

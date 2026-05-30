@@ -1,5 +1,5 @@
-const vmqService = require('../vmq-service');
-const { completePaidOrder } = require('../order-service');
+const vmqService = require('../../integrations/vmq/vmq-service');
+const { completePaidOrder } = require('../shared/order-service');
 const { parsePagination } = require('../../shared/utils/pagination');
 const orderRepository = require('../../repositories/order-repository');
 

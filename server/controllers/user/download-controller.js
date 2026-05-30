@@ -2,7 +2,7 @@ const { validationResult } = require('express-validator');
 const { legacyFail } = require('../../shared/response/api-response');
 const { createLogger } = require('../../utils/logger');
 const { getSiteBaseUrl } = require('../../utils/site-url');
-const { getOrCreateDownloadLink } = require('../../services/download-link-service');
+const { getOrCreateDownloadLink } = require('../../services/shared/download-link-service');
 const downloadService = require('../../services/user/download-service');
 
 const logger = createLogger('USER-DOWNLOAD');

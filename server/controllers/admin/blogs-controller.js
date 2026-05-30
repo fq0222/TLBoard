@@ -6,13 +6,14 @@ const {
   legacyValidationError
 } = require('../../shared/response/api-response');
 const { createLogger } = require('../../utils/logger');
-const blogService = require('../../services/blog-service');
+const blogService = require('../../services/shared/blog-service');
 
 const logger = createLogger('ADMIN-BLOGS');
 
 /**
  * 管理端博客控制器。
- * 负责参数校验、上传接入与旧响应结构兼容，具体博客业务逻辑下沉到 blog-service。
+ * 负责参数校验、上传接入与旧响应结构兼容，
+ * 具体博客业务逻辑下沉到 blog-service。
  */
 
 function handleValidationFailure(req, res) {
@@ -91,7 +92,7 @@ function createImageUploadHandler({ storage }) {
     upload(req, res, (error) => {
       if (error) {
         const message = error.code === 'LIMIT_FILE_SIZE'
-          ? '图片大小不能超过5MB'
+          ? '图片大小不能超过 5MB'
           : error.message;
         return handleBusinessError(res, message);
       }

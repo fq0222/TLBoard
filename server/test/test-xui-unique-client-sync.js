@@ -1,5 +1,5 @@
-const assert = require('assert');
-const XuiService = require('../services/xui-service');
+﻿const assert = require('assert');
+const XuiService = require('../integrations/xui/xui-service');
 const { generateXuiAuth, isValidXuiAuth } = require('../utils/xui-auth');
 
 function createFakeDb(initialNodeConfigs = []) {
@@ -463,3 +463,4 @@ run().catch(error => {
   console.error(error);
   process.exit(1);
 });
+

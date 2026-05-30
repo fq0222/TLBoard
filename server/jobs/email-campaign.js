@@ -1,4 +1,4 @@
-const emailService = require('../services/email-service')
+﻿const emailService = require('../integrations/email/email-service')
 const { createLogger } = require('../utils/logger')
 
 const logger = createLogger('EMAIL-CAMPAIGN')
@@ -168,3 +168,4 @@ async function cleanLogs(db, beforeDays = 30) {
 }
 
 module.exports = { processCampaigns, cleanLogs }
+

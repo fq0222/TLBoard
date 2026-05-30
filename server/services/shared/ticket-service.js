@@ -3,7 +3,7 @@
  * 保留历史导出接口，内部改为复用 repository，避免旧 service 继续承载大而全职责。
  */
 
-const ticketRepository = require('../repositories/ticket-repository');
+const ticketRepository = require('../../repositories/ticket-repository');
 
 /**
  * 查询工单基础记录，供上下文 service 复用权限和状态校验。

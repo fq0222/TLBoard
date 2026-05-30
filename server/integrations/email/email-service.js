@@ -1,7 +1,7 @@
-const { BrevoClient } = require('@getbrevo/brevo')
-const config = require('../config')
-const { createLogger } = require('../utils/logger')
-const emailRepository = require('../repositories/email-repository')
+﻿const { BrevoClient } = require('@getbrevo/brevo')
+const config = require('../../config')
+const { createLogger } = require('../../utils/logger')
+const emailRepository = require('../../repositories/email-repository')
 
 const logger = createLogger('EMAIL-SERVICE')
 

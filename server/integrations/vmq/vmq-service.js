@@ -1,15 +1,16 @@
 /**
- * VMQ 支付服务封装
- * 处理 VMQ 订单创建、状态查询、关单和回调验签
+ * VMQ 支付服务封装。
+ * 处理 VMQ 订单创建、状态查询、关单和回调验签。
  */
 
 const axios = require('axios');
 const crypto = require('crypto');
-const config = require('../config');
+const config = require('../../config');
 
 /**
- * 计算 MD5 签名
- * @param {string} value - 待签名字符串
+ * 计算 MD5 签名。
+ *
+ * @param {string} value - 待签名字串
  * @returns {string} MD5 签名结果
  */
 function md5(value) {
@@ -17,7 +18,8 @@ function md5(value) {
 }
 
 /**
- * 获取 VMQ 支付配置
+ * 获取 VMQ 支付配置。
+ *
  * @returns {Object} VMQ 配置对象
  */
 function getPaymentConfig() {
@@ -30,7 +32,8 @@ function getPaymentConfig() {
 }
 
 /**
- * 调用 VMQ 接口
+ * 调用 VMQ 接口。
+ *
  * @param {string} path - 接口路径
  * @param {Object} params - 请求参数
  * @returns {Promise<Object>} 接口响应数据
@@ -56,7 +59,8 @@ async function request(path, params) {
 }
 
 /**
- * 生成创建订单签名
+ * 生成创建订单签名。
+ *
  * @param {Object} options - 签名参数
  * @param {string} options.payId - 商户订单号
  * @param {string} [options.param] - 透传参数
@@ -70,7 +74,8 @@ function createOrderSign({ payId, param = '', type, price }) {
 }
 
 /**
- * 生成关闭订单签名
+ * 生成关闭订单签名。
+ *
  * @param {string} orderId - VMQ 订单号
  * @returns {string} 签名结果
  */
@@ -80,7 +85,8 @@ function closeOrderSign(orderId) {
 }
 
 /**
- * 生成服务状态查询签名
+ * 生成服务状态查询签名。
+ *
  * @param {number} timestamp - 当前时间戳
  * @returns {string} 签名结果
  */
@@ -90,7 +96,8 @@ function stateSign(timestamp) {
 }
 
 /**
- * 校验 VMQ 支付回调签名
+ * 校验 VMQ 支付回调签名。
+ *
  * @param {Object} params - 回调参数
  * @returns {boolean} 签名是否有效
  */
@@ -108,7 +115,8 @@ function verifyNotifySign(params) {
 }
 
 /**
- * 创建 VMQ 订单
+ * 创建 VMQ 订单。
+ *
  * @param {Object} options - 下单参数
  * @param {string} options.payId - 商户订单号
  * @param {string} [options.param] - 透传参数
@@ -133,7 +141,8 @@ async function createOrder({ payId, param = '', type, price, isHtml = 0 }) {
 }
 
 /**
- * 查询 VMQ 订单详情
+ * 查询 VMQ 订单详情。
+ *
  * @param {string} orderId - VMQ 订单号
  * @returns {Promise<Object>} 订单详情
  */
@@ -142,7 +151,8 @@ async function getOrder(orderId) {
 }
 
 /**
- * 查询 VMQ 订单支付状态
+ * 查询 VMQ 订单支付状态。
+ *
  * @param {string} orderId - VMQ 订单号
  * @returns {Promise<Object>} 支付状态结果
  */
@@ -151,7 +161,8 @@ async function checkOrder(orderId) {
 }
 
 /**
- * 关闭 VMQ 订单
+ * 关闭 VMQ 订单。
+ *
  * @param {string} orderId - VMQ 订单号
  * @returns {Promise<Object>} 关单结果
  */
@@ -163,7 +174,8 @@ async function closeOrder(orderId) {
 }
 
 /**
- * 查询 VMQ 服务状态
+ * 查询 VMQ 服务状态。
+ *
  * @returns {Promise<Object>} 服务状态结果
  */
 async function getState() {

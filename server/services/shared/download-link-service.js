@@ -4,13 +4,13 @@
  */
 
 const crypto = require('crypto');
-const downloadRepository = require('../repositories/download-repository');
+const downloadRepository = require('../../repositories/download-repository');
 const {
   findUserDistributions,
   removeDuplicateDistributions,
   upsertUserDistribution
 } = require('./resource-distribution-service');
-const { createLogger } = require('../utils/logger');
+const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('DOWNLOAD-LINK-SERVICE');
 

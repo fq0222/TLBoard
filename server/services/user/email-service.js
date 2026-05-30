@@ -4,7 +4,7 @@
  */
 
 const emailRepository = require('../../repositories/email-repository');
-const sharedEmailService = require('../email-service');
+const sharedEmailService = require('../../integrations/email/email-service');
 
 const ALLOWED_TEMPLATES = {
   'send-tutorial': 1,

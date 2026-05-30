@@ -3,8 +3,8 @@
  * 统一处理 resource_distributions 表的创建、更新和去重逻辑。
  */
 
-const resourcesRepository = require('../repositories/resources-repository');
-const { createLogger } = require('../utils/logger');
+const resourcesRepository = require('../../repositories/resources-repository');
+const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('RESOURCE-DISTRIBUTION');
 

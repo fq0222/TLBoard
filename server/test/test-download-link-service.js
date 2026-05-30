@@ -1,5 +1,5 @@
-const assert = require('assert');
-const { getOrCreateDownloadLink } = require('../services/download-link-service');
+﻿const assert = require('assert');
+const { getOrCreateDownloadLink } = require('../services/shared/download-link-service');
 
 function createStatementMock(db, sql) {
   return {

@@ -1,11 +1,11 @@
-/**
+﻿/**
  * 3X-UI 同步重试队列任务
  * 负责注册并执行到期补偿任务的轮询处理逻辑。
  */
 
-const orderService = require('../../services/order-service');
-const trafficManager = require('../../services/traffic-manager');
-const xuiSyncTaskService = require('../../services/xui-sync-task-service');
+const orderService = require('../../services/shared/order-service');
+const trafficManager = require('../../services/shared/traffic-manager');
+const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const { createLogger } = require('../../utils/logger');
 

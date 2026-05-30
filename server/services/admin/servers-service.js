@@ -1,6 +1,6 @@
 const { formatTraffic } = require('../../shared/utils/format-traffic');
 const { createLogger } = require('../../utils/logger');
-const XuiService = require('../xui-service');
+const XuiService = require('../../integrations/xui/xui-service');
 const serversRepository = require('../../repositories/servers-repository');
 
 const logger = createLogger('ADMIN-SERVERS');

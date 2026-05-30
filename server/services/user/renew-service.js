@@ -1,7 +1,7 @@
 const crypto = require('crypto');
-const vmqService = require('../vmq-service');
+const vmqService = require('../../integrations/vmq/vmq-service');
 const orderRepository = require('../../repositories/order-repository');
-const { evaluateRenewEligibility, DISABLE_REASONS } = require('../renew-policy');
+const { evaluateRenewEligibility, DISABLE_REASONS } = require('../shared/renew-policy');
 
 /**
  * 用户端续费服务。

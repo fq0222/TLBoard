@@ -1,12 +1,12 @@
-const { syncAllServers, syncServerNodes } = require('../xui-sync');
-const { syncUserToXuiServers } = require('../order-service');
-const { getStrategyFromRemark, processNodeLink, parseNodeLink } = require('../subscription-strategy');
-const { fetchOriginalSubscription, parseSubscriptionContent, pickSingleNodeLink } = require('../subscription-service');
+const { syncAllServers, syncServerNodes } = require('../../integrations/xui/xui-sync');
+const { syncUserToXuiServers } = require('../shared/order-service');
+const { getStrategyFromRemark, processNodeLink, parseNodeLink } = require('../shared/subscription-strategy');
+const { fetchOriginalSubscription, parseSubscriptionContent, pickSingleNodeLink } = require('../shared/subscription-service');
 const {
   computeNodeFingerprint,
   computeServerFingerprint,
   isSourceCacheUsable
-} = require('../subscription-cache-service');
+} = require('../shared/subscription-cache-service');
 const subscriptionRepository = require('../../repositories/subscription-repository');
 
 const SOURCE_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60;

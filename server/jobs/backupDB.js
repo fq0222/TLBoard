@@ -1,19 +1,20 @@
 /**
- * 3X-UI 数据库备份定时任务
- * 每天从 xui_servers 表读取所有 3X-UI 服务器，使用 API Token 下载 x-ui.db，
- * 并覆盖保存到 server/backupDB 目录，防止远端服务器数据丢失。
+ * 3X-UI 数据库备份定时任务。
+ * 每天从 `xui_servers` 表读取所有 3X-UI 服务器，使用 API Token 下载 `x-ui.db`，
+ * 并覆盖保存到 `server/backupDB` 目录，防止远端服务器数据丢失。
  */
 
 const fs = require('fs');
 const path = require('path');
-const XuiApiClient = require('../services/xui-api-client');
+const XuiApiClient = require('../integrations/xui/xui-api-client');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('XUI-DB-BACKUP');
 const defaultBackupDir = path.join(__dirname, '..', 'backupDB');
 
 /**
- * 清理服务器名称中的非法文件名字符
+ * 清理服务器名称中的非法文件名字符。
+ *
  * @param {string} value - 原始服务器名称
  * @returns {string} 可用于文件名的服务器名称
  */
@@ -24,7 +25,8 @@ function sanitizeFileName(value) {
 }
 
 /**
- * 校验下载内容是否为 SQLite 数据库文件
+ * 校验下载内容是否为 SQLite 数据库文件。
+ *
  * @param {Buffer} buffer - 数据库文件内容
  * @returns {boolean} 是否包含 SQLite 文件头
  */
@@ -33,7 +35,8 @@ function isSqliteDatabase(buffer) {
 }
 
 /**
- * 读取所有 3X-UI 服务器配置
+ * 读取所有 3X-UI 服务器配置。
+ *
  * @param {Object} db - 数据库实例
  * @returns {Promise<Array>} 服务器列表
  */
@@ -46,7 +49,8 @@ async function loadServers(db) {
 }
 
 /**
- * 备份单台 3X-UI 服务器数据库
+ * 备份单台 3X-UI 服务器数据库。
+ *
  * @param {Object} server - 服务器配置
  * @param {Object} options - 测试或运行时选项
  * @returns {Promise<Object>} 备份结果
@@ -67,6 +71,7 @@ async function backupServer(server, options = {}) {
   const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
   const filePath = path.join(backupDir, `${sanitizeFileName(server.name)}-x-ui.db`);
   const validSqlite = isSqliteDatabase(buffer);
+
   if (!validSqlite) {
     logger.warn(`服务器 ${server.name} 备份文件 SQLite 头校验未通过: ${filePath}`);
   } else {
@@ -85,7 +90,8 @@ async function backupServer(server, options = {}) {
 }
 
 /**
- * 备份所有 3X-UI 服务器数据库
+ * 备份所有 3X-UI 服务器数据库。
+ *
  * @param {Object} db - 数据库实例
  * @param {Object} options - 测试或运行时选项
  * @returns {Promise<Object>} 汇总结果

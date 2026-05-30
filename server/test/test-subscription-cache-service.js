@@ -1,5 +1,5 @@
-const assert = require('assert');
-const cacheService = require('../services/subscription-cache-service');
+﻿const assert = require('assert');
+const cacheService = require('../services/shared/subscription-cache-service');
 
 function makeNode(overrides = {}) {
   return {
@@ -117,3 +117,4 @@ function run() {
 }
 
 run();
+
