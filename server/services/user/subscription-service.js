@@ -1,0 +1,908 @@
+const { syncAllServers, syncServerNodes } = require('../xui-sync');
+const { syncUserToXuiServers } = require('../order-service');
+const { getStrategyFromRemark, processNodeLink, parseNodeLink } = require('../subscription-strategy');
+const { fetchOriginalSubscription, parseSubscriptionContent, pickSingleNodeLink } = require('../subscription-service');
+const {
+  computeNodeFingerprint,
+  computeServerFingerprint,
+  isSourceCacheUsable
+} = require('../subscription-cache-service');
+const subscriptionRepository = require('../../repositories/subscription-repository');
+
+const SOURCE_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60;
+
+/**
+ * 用户端订阅服务。
+ * 负责订阅生成、订阅详情聚合、订阅内容格式输出与缓存修复，
+ * 保持现有 subscription 接口的旧响应语义与共享订阅核心不变。
+ */
+
+/**
+ * 创建兼容旧接口的业务异常对象。
+ *
+ * @param {number} code - 旧接口业务码
+ * @param {string} message - 错误提示
+ * @param {number} [statusCode=400] - HTTP 状态码
+ * @param {*} [data=null] - 旧接口 data 字段
+ * @returns {Error} 带旧接口元数据的异常对象
+ */
+function createLegacyBusinessError(code, message, statusCode = 400, data = null) {
+  const error = new Error(message);
+  error.isLegacyBusinessError = true;
+  error.code = code;
+  error.statusCode = statusCode;
+  error.data = data;
+  return error;
+}
+
+/**
+ * 构建 server_id + inbound_id 组成的缓存键。
+ *
+ * @param {number|string} serverId - 服务器 ID
+ * @param {number|string} inboundId - inbound ID
+ * @returns {string} 缓存键
+ */
+function buildSourceCacheKey(serverId, inboundId) {
+  return `${serverId}:${inboundId}`;
+}
+
+/**
+ * 提取 CF IP 记录中的 IP 值。
+ *
+ * @param {string|Object} cfIp - CF IP 记录
+ * @returns {string} IP 地址
+ */
+function getCfIpValue(cfIp) {
+  if (!cfIp) {
+    return '';
+  }
+  return typeof cfIp === 'string' ? cfIp : cfIp.ip;
+}
+
+/**
+ * 替换节点链接中的 remark，保持其余参数不变。
+ *
+ * @param {string} link - 节点链接
+ * @param {string} nodeName - 节点名称
+ * @returns {string} 替换后的节点链接
+ */
+function replaceNodeRemark(link, nodeName) {
+  const hashIdx = link.indexOf('#');
+  if (hashIdx > 0) {
+    return link.substring(0, hashIdx + 1) + encodeURIComponent(nodeName);
+  }
+  return `${link}#${encodeURIComponent(nodeName)}`;
+}
+
+/**
+ * 从 inbound 的 settings 与 stream_settings 中解析节点连接信息。
+ *
+ * @param {Object} node - 节点基础信息
+ * @param {string|Object} settings - inbound settings
+ * @param {string|Object} streamSettings - inbound stream_settings
+ * @param {string} [userEmail] - 用户邮箱，用于定位专属客户端 UUID
+ * @returns {{uuid:string,network:string,wsPath:string,security:string}} 节点配置
+ */
+function parseNodeConfig(node, settings, streamSettings, userEmail) {
+  let parsedSettings = {};
+  let parsedStream = {};
+
+  try {
+    parsedSettings = typeof settings === 'string'
+      ? JSON.parse(settings || '{}')
+      : (settings || {});
+  } catch (error) {
+    parsedSettings = {};
+  }
+
+  try {
+    parsedStream = typeof streamSettings === 'string'
+      ? JSON.parse(streamSettings || '{}')
+      : (streamSettings || {});
+  } catch (error) {
+    parsedStream = {};
+  }
+
+  const clients = parsedSettings.clients || [];
+  let uuid = '';
+  if (userEmail && clients.length > 0) {
+    const userClient = clients.find((client) => client.email === userEmail);
+    uuid = userClient ? userClient.id : clients[0].id;
+  } else {
+    uuid = clients.length > 0 ? clients[0].id : '';
+  }
+
+  const network = parsedStream.network || 'tcp';
+  let wsPath = '';
+  if (network === 'ws') {
+    const wsSettings = parsedStream.wsSettings || parsedStream['ws-settings'] || {};
+    wsPath = wsSettings.path || '/';
+  }
+
+  return {
+    uuid,
+    network,
+    wsPath,
+    security: parsedStream.security || 'none'
+  };
+}
+
+/**
+ * 格式化字节流量为可读字符串。
+ *
+ * @param {*} bytes - 原始字节数
+ * @returns {string} 格式化后的流量文本
+ */
+function formatTraffic(bytes) {
+  if (bytes === null || bytes === undefined || bytes === '') {
+    return '0 B';
+  }
+
+  const numBytes = Number(bytes);
+  if (Number.isNaN(numBytes) || numBytes === 0) {
+    return '0 B';
+  }
+
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(numBytes) / Math.log(k));
+  return `${parseFloat((numBytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+}
+
+/**
+ * 格式化 Unix 时间戳。
+ *
+ * @param {*} timestamp - 秒级时间戳
+ * @returns {string} 格式化后的时间文本
+ */
+function formatTime(timestamp) {
+  if (!timestamp || timestamp === 0 || timestamp === '0') {
+    return '无限期';
+  }
+  return new Date(Number(timestamp) * 1000).toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour12: false
+  });
+}
+
+/**
+ * 构建在线服务器 ID 到记录的映射。
+ *
+ * @param {Array} servers - 服务器列表
+ * @returns {Map<number,Object>} 映射结果
+ */
+function mapServersById(servers) {
+  return new Map(servers.map((server) => [server.id, server]));
+}
+
+/**
+ * 按在线服务器过滤 xui_nodes 快照。
+ *
+ * @param {Array} snapshots - 全量快照
+ * @param {Map<number,Object>} serversById - 在线服务器映射
+ * @returns {Array} 在线服务器对应快照
+ */
+function filterOnlineSnapshots(snapshots, serversById) {
+  return snapshots.filter((snapshot) => serversById.has(snapshot.server_id));
+}
+
+/**
+ * 按在线服务器过滤用户节点配置。
+ *
+ * @param {Array} nodeConfigs - 用户节点配置列表
+ * @param {Map<number,Object>} serversById - 在线服务器映射
+ * @returns {Array} 在线服务器对应节点配置
+ */
+function filterOnlineNodeConfigs(nodeConfigs, serversById) {
+  return nodeConfigs.filter((config) => serversById.has(config.server_id));
+}
+
+/**
+ * 确保在线服务器存在节点快照，缺失时按服务器补齐。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Array} servers - 在线服务器列表
+ * @param {Object} logger - 日志实例
+ * @returns {Promise<void>}
+ */
+async function ensureNodeSnapshotsAvailable(db, servers, logger) {
+  if (servers.length === 0) {
+    return;
+  }
+
+  const serversById = mapServersById(servers);
+  const snapshots = filterOnlineSnapshots(
+    await subscriptionRepository.listNodeSnapshots(db),
+    serversById
+  );
+  const snapshotServerIds = new Set(snapshots.map((snapshot) => snapshot.server_id));
+  const missingServers = servers.filter((server) => !snapshotServerIds.has(server.id));
+
+  if (missingServers.length === 0) {
+    return;
+  }
+
+  logger.info(`检测到 ${missingServers.length} 台在线服务器缺少 xui_nodes 快照，开始按服务器补齐`);
+  for (const server of missingServers) {
+    const syncResult = await syncServerNodes(db, server);
+    logger.info(`补齐服务器节点快照: server=${server.name}, success=${syncResult.success}, nodeCount=${syncResult.nodeCount || 0}`);
+  }
+}
+
+/**
+ * 确保用户在所有在线 inbound 上都有本地节点配置。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} user - 用户信息
+ * @param {Array} servers - 在线服务器列表
+ * @param {Object} logger - 日志实例
+ * @returns {Promise<Array>} 在线节点配置列表
+ */
+async function ensureUserNodeConfigsComplete(db, user, servers, logger) {
+  const serversById = mapServersById(servers);
+  const onlineSnapshots = filterOnlineSnapshots(
+    await subscriptionRepository.listNodeSnapshots(db),
+    serversById
+  );
+  let nodeConfigs = filterOnlineNodeConfigs(
+    await subscriptionRepository.listUserNodeConfigs(db, user.id),
+    serversById
+  );
+
+  if (onlineSnapshots.length === 0) {
+    return nodeConfigs;
+  }
+
+  const configKeys = new Set(
+    nodeConfigs.map((config) => buildSourceCacheKey(config.server_id, config.inbound_id))
+  );
+  const missingPairs = onlineSnapshots.filter(
+    (snapshot) => !configKeys.has(buildSourceCacheKey(snapshot.server_id, snapshot.inbound_id))
+  );
+
+  if (missingPairs.length === 0) {
+    return nodeConfigs;
+  }
+
+  logger.info(`用户 ${user.email} 缺少 ${missingPairs.length} 个节点配置，尝试同步用户到 3X-UI`);
+  const syncResult = await syncUserToXuiServers(db, user, { traffic_limit: user.traffic_limit });
+  if (!syncResult.success) {
+    logger.warn(`同步用户节点配置未完全成功: user=${user.email}, message=${syncResult.message || 'unknown'}`);
+  }
+
+  nodeConfigs = filterOnlineNodeConfigs(
+    await subscriptionRepository.listUserNodeConfigs(db, user.id),
+    serversById
+  );
+  return nodeConfigs;
+}
+
+/**
+ * 将来源缓存列表按 server_id + inbound_id 建立映射。
+ *
+ * @param {Array} sources - 缓存记录列表
+ * @returns {Map<string,Object>} 来源缓存映射
+ */
+function mapSourcesByKey(sources) {
+  return new Map(sources.map((source) => [buildSourceCacheKey(source.server_id, source.inbound_id), source]));
+}
+
+/**
+ * 评估当前来源缓存是否可直接复用。
+ *
+ * @param {Array} nodeConfigs - 用户节点配置
+ * @param {Map<string,Object>} sourceMap - 来源缓存映射
+ * @param {Map<number,Object>} serversById - 在线服务器映射
+ * @returns {{usable:boolean,invalidPairs:Array,invalidPairKeys:Set<string>,invalidServerIds:Set<number>}} 评估结果
+ */
+function collectSourceCacheStatus(nodeConfigs, sourceMap, serversById) {
+  const invalidServerIds = new Set();
+  const invalidPairKeys = new Set();
+  const invalidPairs = [];
+  const now = Math.floor(Date.now() / 1000);
+
+  for (const config of nodeConfigs) {
+    const key = buildSourceCacheKey(config.server_id, config.inbound_id);
+    const source = sourceMap.get(key);
+    const server = serversById.get(config.server_id);
+    const result = isSourceCacheUsable({
+      source,
+      node: config,
+      server,
+      subId: config.sub_id,
+      now,
+      maxAgeSeconds: SOURCE_CACHE_MAX_AGE_SECONDS
+    });
+
+    if (result.usable) {
+      continue;
+    }
+
+    invalidPairKeys.add(key);
+    invalidPairs.push({ key, config, reason: result.reason });
+    if (result.reason === 'node_fingerprint_mismatch' || result.reason === 'server_fingerprint_mismatch') {
+      invalidServerIds.add(config.server_id);
+    }
+  }
+
+  return {
+    usable: invalidPairs.length === 0,
+    invalidPairs,
+    invalidPairKeys,
+    invalidServerIds
+  };
+}
+
+/**
+ * 逐节点刷新原始订阅模板缓存。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} user - 用户信息
+ * @param {Array} nodeConfigs - 待刷新节点配置
+ * @param {Map<number,Object>} serversById - 在线服务器映射
+ * @param {Object} logger - 日志实例
+ * @returns {Promise<void>}
+ */
+async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, logger) {
+  const now = Math.floor(Date.now() / 1000);
+
+  for (const config of nodeConfigs) {
+    const server = serversById.get(config.server_id);
+    if (!server || !server.sub_url) {
+      logger.warn(`跳过原始订阅拉取：server=${config.server_id}, inbound=${config.inbound_id} 缺少订阅地址`);
+      continue;
+    }
+
+    try {
+      const originalContent = await fetchOriginalSubscription(server.sub_url, config.sub_id);
+      const links = parseSubscriptionContent(originalContent);
+      const originalLink = pickSingleNodeLink(links, config.protocol);
+
+      if (!originalLink) {
+        logger.warn(`未找到匹配的原始节点链接: user=${user.email}, server=${server.name}, inbound=${config.inbound_id}`);
+        continue;
+      }
+
+      await subscriptionRepository.upsertSubscriptionSource(db, {
+        user_id: user.id,
+        server_id: config.server_id,
+        inbound_id: config.inbound_id,
+        sub_id: config.sub_id,
+        remark: config.remark || '',
+        protocol: config.protocol || '',
+        original_link: originalLink,
+        node_fingerprint: computeNodeFingerprint(config),
+        server_fingerprint: computeServerFingerprint(server),
+        fetched_at: now,
+        updated_at: now
+      });
+
+      logger.info(`刷新原始订阅模板成功: user=${user.email}, server=${server.name}, inbound=${config.inbound_id}`);
+    } catch (error) {
+      logger.warn(`刷新原始订阅模板失败: user=${user.email}, server=${server.name}, inbound=${config.inbound_id}, error=${error.message}`);
+    }
+  }
+}
+
+/**
+ * 基于来源缓存和用户优选 IP 组合最终订阅节点。
+ *
+ * @param {Array} nodeConfigs - 用户节点配置
+ * @param {Map<string,Object>} sourceMap - 来源缓存映射
+ * @param {Map<number,Object>} serversById - 在线服务器映射
+ * @param {Array} cfIps - 用户优选 IP
+ * @param {Object} logger - 日志实例
+ * @returns {Array} 最终节点列表
+ */
+function composeSubscriptionNodes(nodeConfigs, sourceMap, serversById, cfIps, logger) {
+  const allNodes = [];
+
+  for (const config of nodeConfigs) {
+    const key = buildSourceCacheKey(config.server_id, config.inbound_id);
+    const source = sourceMap.get(key);
+    const server = serversById.get(config.server_id);
+
+    if (!source || !source.original_link || !server) {
+      logger.warn(`缺少可复用的原始订阅模板: server=${config.server_id}, inbound=${config.inbound_id}`);
+      continue;
+    }
+
+    const strategy = getStrategyFromRemark(config.remark);
+    if (strategy === 'cf') {
+      for (let i = 0; i < cfIps.length; i += 1) {
+        const cfIp = getCfIpValue(cfIps[i]);
+        const nodeNameBase = `${server.name}-${config.remark}`;
+        const nodeName = cfIps.length > 1 ? `${nodeNameBase}-${i + 1}` : nodeNameBase;
+        const processedLink = replaceNodeRemark(
+          processNodeLink(source.original_link, 'cf', {
+            cfIp,
+            clientPort: server.client_port,
+            host: server.host
+          }),
+          nodeName
+        );
+
+        allNodes.push({
+          server_name: server.name,
+          node_name: nodeName,
+          protocol: config.protocol,
+          strategy,
+          link: processedLink,
+          original_link: source.original_link
+        });
+      }
+      continue;
+    }
+
+    const nodeName = `${server.name}-${config.remark}`;
+    const processedLink = replaceNodeRemark(
+      processNodeLink(source.original_link, strategy),
+      nodeName
+    );
+
+    allNodes.push({
+      server_name: server.name,
+      node_name: nodeName,
+      protocol: config.protocol,
+      strategy,
+      link: processedLink,
+      original_link: source.original_link
+    });
+  }
+
+  return allNodes;
+}
+
+/**
+ * 校验订阅用户是否存在且账号启用。
+ *
+ * @param {Object|undefined} user - 用户信息
+ * @returns {Object} 已校验用户
+ */
+function assertActiveSubscriptionUser(user) {
+  if (!user) {
+    throw createLegacyBusinessError(2004, '用户不存在', 400, null);
+  }
+
+  if (!user.enabled) {
+    throw createLegacyBusinessError(2003, '账号已被禁用', 400, null);
+  }
+
+  return user;
+}
+
+/**
+ * 生成用户订阅链接并刷新缓存。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {Object} logger - 日志实例
+ * @returns {Promise<{subscription_url:string,clash_url:string,v2ray_url:string}>} 订阅链接集合
+ */
+async function generateSubscription(db, userId, logger) {
+  const existingSubscription = await subscriptionRepository.findLatestUserSubscription(db, userId);
+  const user = assertActiveSubscriptionUser(
+    await subscriptionRepository.findSubscriptionUserById(db, userId)
+  );
+  const cfIps = await subscriptionRepository.listEnabledUserCfIps(db, userId);
+
+  if (cfIps.length === 0) {
+    throw createLegacyBusinessError(3001, '请先完成 IP 优选', 400, null);
+  }
+
+  const servers = await subscriptionRepository.listOnlineServers(db);
+  if (servers.length === 0) {
+    throw createLegacyBusinessError(500, '当前没有可用的在线服务器', 500, null);
+  }
+
+  const serversById = mapServersById(servers);
+  const isFirstGeneration = !existingSubscription;
+
+  if (isFirstGeneration) {
+    logger.info(`用户 ${user.email} 首次生成订阅，先执行全量节点同步`);
+    const syncResult = await syncAllServers(db);
+    logger.info(`首次生成前节点同步完成: ${syncResult.syncedCount || 0}/${syncResult.totalCount || servers.length} 台服务器`);
+  } else {
+    await ensureNodeSnapshotsAvailable(db, servers, logger);
+  }
+
+  let nodeConfigs = await ensureUserNodeConfigsComplete(db, user, servers, logger);
+  if (nodeConfigs.length === 0) {
+    throw createLegacyBusinessError(500, '当前没有可用节点，请稍后重试', 500, null);
+  }
+
+  if (isFirstGeneration) {
+    logger.info(`用户 ${user.email} 首次生成订阅，开始拉取全部原始订阅模板`);
+    await refreshSubscriptionSources(db, user, nodeConfigs, serversById, logger);
+  } else {
+    const sourceMap = mapSourcesByKey(
+      await subscriptionRepository.listUserSubscriptionSources(db, userId)
+    );
+    const cacheStatus = collectSourceCacheStatus(nodeConfigs, sourceMap, serversById);
+
+    if (cacheStatus.usable) {
+      logger.info(`用户 ${user.email} 的原始订阅模板缓存可用，直接复用本地拼装`);
+    } else {
+      logger.info(`用户 ${user.email} 的原始订阅模板缓存不可用，开始增量修复: invalidPairs=${cacheStatus.invalidPairs.length}`);
+
+      if (cacheStatus.invalidServerIds.size > 0) {
+        for (const serverId of cacheStatus.invalidServerIds) {
+          const server = serversById.get(serverId);
+          if (!server) {
+            continue;
+          }
+
+          const syncResult = await syncServerNodes(db, server);
+          logger.info(`增量同步服务器完成: server=${server.name}, success=${syncResult.success}, nodeCount=${syncResult.nodeCount || 0}`);
+        }
+
+        nodeConfigs = await ensureUserNodeConfigsComplete(db, user, servers, logger);
+      }
+
+      const repairConfigs = nodeConfigs.filter((config) => {
+        const key = buildSourceCacheKey(config.server_id, config.inbound_id);
+        return cacheStatus.invalidServerIds.has(config.server_id) || cacheStatus.invalidPairKeys.has(key);
+      });
+      await refreshSubscriptionSources(db, user, repairConfigs, serversById, logger);
+    }
+  }
+
+  const latestSourceMap = mapSourcesByKey(
+    await subscriptionRepository.listUserSubscriptionSources(db, userId)
+  );
+  const allNodes = composeSubscriptionNodes(nodeConfigs, latestSourceMap, serversById, cfIps, logger);
+  if (allNodes.length === 0) {
+    throw createLegacyBusinessError(500, '未生成任何可用节点，请稍后重试', 500, null);
+  }
+
+  await subscriptionRepository.saveUserSubscriptionCache(db, userId, user.sub_id, allNodes);
+  logger.info(`用户 ${user.email} 生成订阅链接成功，共 ${allNodes.length} 个节点`);
+  return user.sub_id;
+}
+
+/**
+ * 获取用户当前订阅详情与节点展示信息。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<Object>} 订阅详情
+ */
+async function getSubscriptionInfo(db, userId) {
+  const user = assertActiveSubscriptionUser(
+    await subscriptionRepository.findSubscriptionUserById(db, userId)
+  );
+  const cfIps = await subscriptionRepository.listEnabledUserCfIps(db, userId);
+  const servers = await subscriptionRepository.listOnlineServersForDisplay(db);
+  const nodes = [];
+
+  for (const server of servers) {
+    const serverNodes = await subscriptionRepository.listServerNodes(db, server.id);
+    for (const node of serverNodes) {
+      const strategy = node.remark && node.remark.toLowerCase().includes('cf') ? 'cf' : 'direct';
+      const config = parseNodeConfig(node, node.settings, node.stream_settings, user.email);
+      const protocolDetail = `${node.protocol}+${config.network}+${config.security}`;
+      const nodeHost = server.host || '';
+
+      if (strategy === 'cf' && cfIps.length > 0) {
+        const nodePort = server.client_port || node.port;
+        cfIps.forEach((cfIp, index) => {
+          const ipRemark = cfIps.length > 1 ? `${node.remark}-${index + 1}` : node.remark;
+          nodes.push({
+            server_name: server.name,
+            node_name: `${server.name}-${ipRemark}`,
+            protocol: protocolDetail,
+            strategy,
+            uuid: config.uuid,
+            address: getCfIpValue(cfIp),
+            port: nodePort,
+            host: nodeHost,
+            remark: ipRemark
+          });
+        });
+        continue;
+      }
+
+      const defaultIp = String(server.api_url || '').match(/\/\/([^:]+)/);
+      nodes.push({
+        server_name: server.name,
+        node_name: `${server.name}-${node.remark}`,
+        protocol: protocolDetail,
+        strategy,
+        uuid: config.uuid,
+        address: defaultIp ? defaultIp[1] : '0.0.0.0',
+        port: node.port,
+        host: nodeHost,
+        remark: node.remark
+      });
+    }
+  }
+
+  const trafficLimit = Number(user.traffic_limit);
+  const trafficUsed = Number(user.traffic_used);
+  const safeTrafficLimit = Number.isFinite(trafficLimit) ? trafficLimit : 0;
+  const safeTrafficUsed = Number.isFinite(trafficUsed) ? trafficUsed : 0;
+  const trafficPercent = safeTrafficLimit > 0
+    ? Math.round((safeTrafficUsed / safeTrafficLimit) * 100 * 100) / 100
+    : 0;
+
+  return {
+    subId: user.sub_id,
+    cfOptimized: cfIps.length > 0,
+    expire_at: user.expire_at,
+    expire_text: formatTime(user.expire_at),
+    traffic_used: user.traffic_used,
+    traffic_limit: user.traffic_limit,
+    traffic_used_text: formatTraffic(user.traffic_used),
+    traffic_limit_text: formatTraffic(user.traffic_limit),
+    traffic_percent: trafficPercent,
+    nodes
+  };
+}
+
+/**
+ * 获取订阅内容，并根据请求格式生成输出。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {string} token - 订阅 token
+ * @param {Object} query - 请求查询参数
+ * @returns {Promise<{contentType:string,headers:Object,body:string,email:string}>} 输出结果
+ */
+async function getSubscriptionContent(db, token, query) {
+  const subscription = await subscriptionRepository.findSubscriptionContentByToken(db, token);
+
+  if (!subscription) {
+    throw createLegacyBusinessError(2004, '订阅链接无效或尚未生成', 400, null);
+  }
+
+  if (!subscription.enabled) {
+    throw createLegacyBusinessError(2003, '账号已被禁用', 400, null);
+  }
+
+  const nodes = JSON.parse(subscription.nodes_data || '[]');
+  if (query.clash === '1') {
+    return {
+      email: subscription.email,
+      contentType: 'text/yaml; charset=utf-8',
+      headers: {},
+      body: generateClashConfig(nodes, subscription)
+    };
+  }
+
+  const v2rayConfig = generateV2RayConfig(nodes, subscription);
+  if (query.v2ray === '1') {
+    return {
+      email: subscription.email,
+      contentType: 'text/plain; charset=utf-8',
+      headers: {},
+      body: Buffer.from(v2rayConfig).toString('base64')
+    };
+  }
+
+  return {
+    email: subscription.email,
+    contentType: 'text/plain; charset=utf-8',
+    headers: {
+      'Subscription-Userinfo': `upload=0; download=${subscription.traffic_used}; total=${subscription.traffic_limit}; expire=${subscription.expire_at}`
+    },
+    body: Buffer.from(v2rayConfig).toString('base64')
+  };
+}
+
+/**
+ * 生成 Clash 订阅配置。
+ *
+ * @param {Array} nodes - 节点列表
+ * @returns {string} Clash YAML
+ */
+function generateClashConfig(nodes) {
+  const proxies = nodes.map((node) => {
+    const { link, node_name } = node;
+    const parsed = parseNodeLink(link);
+    if (!parsed) {
+      return '';
+    }
+
+    const { protocol, uuid, address, port, params } = parsed;
+    const serverAddress = address.startsWith('[') && address.endsWith(']')
+      ? address.slice(1, -1)
+      : address;
+
+    if (protocol === 'vless') {
+      const security = params.security || 'none';
+      const network = params.type || 'tcp';
+      const flow = params.flow || '';
+      const sni = params.sni || '';
+      const fp = params.fp || '';
+      const pbk = params.pbk || '';
+      const sid = params.sid || '';
+      const host = params.host || '';
+      const wsPath = params.path || '';
+
+      let config = `  - name: ${node_name}
+    type: vless
+    server: ${serverAddress}
+    port: ${port}
+    uuid: ${uuid}
+    udp: true`;
+
+      if (flow) {
+        config += `\n    flow: ${flow}`;
+      }
+
+      if (security === 'reality') {
+        config += '\n    tls: true';
+        if (sni) {
+          config += `\n    servername: ${sni}`;
+        }
+        if (fp) {
+          config += `\n    client-fingerprint: ${fp}`;
+        }
+        if (pbk || sid) {
+          config += '\n    reality-opts:';
+          if (pbk) {
+            config += `\n      public-key: ${pbk}`;
+          }
+          if (sid) {
+            config += `\n      short-id: "${sid}"`;
+          }
+        }
+      } else if (security === 'tls') {
+        config += '\n    tls: true';
+        if (sni) {
+          config += `\n    servername: ${sni}`;
+        }
+        if (fp) {
+          config += `\n    client-fingerprint: ${fp}`;
+        }
+      } else {
+        config += '\n    tls: false';
+      }
+
+      config += `\n    network: ${network}`;
+      if (network === 'ws') {
+        config += '\n    ws-opts:';
+        config += `\n      path: ${wsPath || '/'}`;
+        if (host) {
+          config += '\n      headers:';
+          config += `\n        Host: ${host}`;
+        }
+      } else if (network === 'tcp') {
+        const headerType = params.headerType || 'none';
+        if (headerType !== 'none') {
+          config += '\n    tcp-opts:';
+          config += '\n      header:';
+          config += `\n        type: ${headerType}`;
+        }
+      }
+
+      return config;
+    }
+
+    if (protocol === 'vmess') {
+      const security = params.security || 'none';
+      const network = params.type || 'tcp';
+      const host = params.host || '';
+      const wsPath = params.path || '';
+
+      let config = `  - name: ${node_name}
+    type: vmess
+    server: ${serverAddress}
+    port: ${port}
+    uuid: ${uuid}
+    alterId: 0
+    cipher: auto
+    udp: true`;
+
+      config += `\n    tls: ${security === 'tls'}`;
+      config += `\n    network: ${network}`;
+      if (network === 'ws') {
+        config += '\n    ws-opts:';
+        config += `\n      path: ${wsPath || '/'}`;
+        if (host) {
+          config += '\n      headers:';
+          config += `\n        Host: ${host}`;
+        }
+      }
+
+      return config;
+    }
+
+    if (protocol === 'trojan') {
+      const network = params.type || 'tcp';
+      const host = params.host || '';
+      const wsPath = params.path || '';
+      const sni = params.sni || host || serverAddress;
+
+      let config = `  - name: ${node_name}
+    type: trojan
+    server: ${serverAddress}
+    port: ${port}
+    password: ${uuid}
+    udp: true`;
+
+      config += '\n    tls: true';
+      if (sni) {
+        config += `\n    sni: ${sni}`;
+      }
+      config += `\n    network: ${network}`;
+      if (network === 'ws') {
+        config += '\n    ws-opts:';
+        config += `\n      path: ${wsPath || '/'}`;
+        if (host) {
+          config += '\n      headers:';
+          config += `\n        Host: ${host}`;
+        }
+      }
+
+      return config;
+    }
+
+    if (protocol === 'hysteria2') {
+      const sni = params.sni || serverAddress;
+      const alpnValues = String(params.alpn || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+      let config = `  - name: ${node_name}
+    type: hysteria2
+    server: ${serverAddress}
+    port: ${port}
+    password: ${uuid}
+    ports: 40000-50000
+    tls: true
+    skip-cert-verify: false
+    sni: ${sni}
+    udp: true`;
+
+      if (alpnValues.length > 0) {
+        config += '\n    alpn:';
+        for (const alpn of alpnValues) {
+          config += `\n      - ${alpn}`;
+        }
+      }
+      if (params.fp) {
+        config += `\n    client-fingerprint: ${params.fp}`;
+      }
+
+      return config;
+    }
+
+    return '';
+  }).filter(Boolean).join('\n');
+
+  return `proxies:
+${proxies}
+
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies:
+${nodes.map((node) => `      - ${node.node_name}`).join('\n')}
+
+rules:
+  - GEOIP,lan,DIRECT,no-resolve
+  - GEOSITE,cn,DIRECT
+  - DOMAIN-SUFFIX,cn,DIRECT
+  - GEOIP,CN,DIRECT
+  - MATCH,Proxy`;
+}
+
+/**
+ * 生成 V2Ray 订阅内容。
+ *
+ * @param {Array} nodes - 节点列表
+ * @returns {string} 每行一个节点链接的文本
+ */
+function generateV2RayConfig(nodes) {
+  return nodes.map((node) => node.link).filter(Boolean).join('\n');
+}
+
+module.exports = {
+  generateSubscription,
+  getSubscriptionInfo,
+  getSubscriptionContent,
+  generateClashConfig,
+  generateV2RayConfig,
+  createLegacyBusinessError
+};
