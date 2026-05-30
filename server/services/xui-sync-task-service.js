@@ -6,6 +6,7 @@
  */
 
 const { createLogger } = require('../utils/logger');
+const xuiSyncRepository = require('../repositories/xui-sync-repository');
 
 const logger = createLogger('XUI-SYNC-TASK');
 
@@ -81,15 +82,7 @@ async function supersedePendingUserSyncTasks(db, userId, reason = '已被新的�
   if (!userId) return 0;
 
   const now = Math.floor(Date.now() / 1000);
-  const result = await db.prepare(`
-    UPDATE xui_sync_tasks
-    SET status = 'success',
-        last_error = ?,
-        updated_at = ?
-    WHERE user_id = ?
-      AND status = 'pending'
-      AND task_type IN (?, ?, ?)
-  `).run(reason, now, userId, ...USER_SYNC_TASK_TYPES);
+  const result = await xuiSyncRepository.supersedePendingUserSyncTasks(db, userId, reason, now);
 
   if (result.changes > 0) {
     logger.info(`旧 3X-UI 用户同步任务已取代: user=${userId}, count=${result.changes}, reason=${reason}`);
@@ -116,12 +109,14 @@ async function enqueueTask(db, { userId, taskType, payload = {}, runAt = null })
     await supersedePendingUserSyncTasks(db, userId, `被新的 ${taskType} 任务取代`);
   }
 
-  const result = await db.prepare(`
-    INSERT INTO xui_sync_tasks (
-      user_id, task_type, status, payload, attempts, next_retry_at, created_at, updated_at
-    )
-    VALUES (?, ?, 'pending', ?, 0, ?, ?, ?)
-  `).run(userId, taskType, JSON.stringify(payload), nextRetryAt, now, now);
+  const result = await xuiSyncRepository.insertXuiSyncTask(db, {
+    userId,
+    taskType,
+    payloadText: JSON.stringify(payload),
+    nextRetryAt,
+    createdAt: now,
+    updatedAt: now
+  });
 
   logger.info(`创建 3X-UI 同步任务: task=${result.lastInsertRowid}, user=${userId}, type=${taskType}`);
   return result.lastInsertRowid;
@@ -135,13 +130,7 @@ async function enqueueTask(db, { userId, taskType, payload = {}, runAt = null })
  */
 async function getDueTasks(db, limit = 20) {
   const now = Math.floor(Date.now() / 1000);
-  const tasks = await db.prepare(`
-    SELECT *
-    FROM xui_sync_tasks
-    WHERE status = 'pending' AND next_retry_at <= ?
-    ORDER BY next_retry_at ASC, id ASC
-    LIMIT ?
-  `).all(now, limit);
+  const tasks = await xuiSyncRepository.listDueXuiSyncTasks(db, now, limit);
 
   return tasks.map(task => ({
     ...task,
@@ -156,11 +145,7 @@ async function getDueTasks(db, limit = 20) {
  */
 async function markProcessing(db, taskId) {
   const now = Math.floor(Date.now() / 1000);
-  await db.prepare(`
-    UPDATE xui_sync_tasks
-    SET status = 'processing', updated_at = ?
-    WHERE id = ?
-  `).run(now, taskId);
+  await xuiSyncRepository.markXuiSyncTaskProcessing(db, taskId, now);
 }
 
 /**
@@ -170,11 +155,7 @@ async function markProcessing(db, taskId) {
  */
 async function markSuccess(db, taskId) {
   const now = Math.floor(Date.now() / 1000);
-  await db.prepare(`
-    UPDATE xui_sync_tasks
-    SET status = 'success', updated_at = ?
-    WHERE id = ?
-  `).run(now, taskId);
+  await xuiSyncRepository.markXuiSyncTaskSuccess(db, taskId, now);
 }
 
 /**
@@ -187,15 +168,13 @@ async function markSuccess(db, taskId) {
 async function markRetry(db, taskId, attempts, errorMessage) {
   const now = Math.floor(Date.now() / 1000);
   const nextRetryAt = now + getRetryDelaySeconds(attempts);
-  await db.prepare(`
-    UPDATE xui_sync_tasks
-    SET status = 'pending',
-        attempts = ?,
-        next_retry_at = ?,
-        last_error = ?,
-        updated_at = ?
-    WHERE id = ?
-  `).run(attempts, nextRetryAt, String(errorMessage || '').slice(0, 2000), now, taskId);
+  await xuiSyncRepository.markXuiSyncTaskRetry(db, {
+    taskId,
+    attempts,
+    nextRetryAt,
+    errorMessage,
+    updatedAt: now
+  });
 }
 
 /**
@@ -207,14 +186,12 @@ async function markRetry(db, taskId, attempts, errorMessage) {
  */
 async function markFailed(db, taskId, attempts, errorMessage) {
   const now = Math.floor(Date.now() / 1000);
-  await db.prepare(`
-    UPDATE xui_sync_tasks
-    SET status = 'failed',
-        attempts = ?,
-        last_error = ?,
-        updated_at = ?
-    WHERE id = ?
-  `).run(attempts, String(errorMessage || '').slice(0, 2000), now, taskId);
+  await xuiSyncRepository.markXuiSyncTaskFailed(db, {
+    taskId,
+    attempts,
+    errorMessage,
+    updatedAt: now
+  });
 }
 
 /**

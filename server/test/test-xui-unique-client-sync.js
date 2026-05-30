@@ -1,5 +1,6 @@
 const assert = require('assert');
 const XuiService = require('../services/xui-service');
+const { generateXuiAuth, isValidXuiAuth } = require('../utils/xui-auth');
 
 function createFakeDb(initialNodeConfigs = []) {
   const nodeConfigs = initialNodeConfigs.map(item => ({ ...item }));
@@ -75,7 +76,7 @@ function createFakeXuiService(initialClients = []) {
     updateClient: async function updateClient(clientId, config) {
       service._calls.push({ type: 'client.updateClient', clientId, config });
       const payload = JSON.parse(config.settings).clients[0];
-      const target = service._clients.find(item => item.uuid === clientId);
+      const target = service._clients.find(item => item.uuid === clientId || item.auth === clientId);
       if (!target) {
         return { success: false, msg: `not found: ${clientId}` };
       }
@@ -383,6 +384,53 @@ async function testUpdateClientByContextShouldKeepUuidWhenAuthIsEmpty() {
   assert.strictEqual(JSON.parse(capturedRequest.config.settings).clients[0].id, 'uuid-keep');
 }
 
+async function testHy2ClientShouldStillCheckSubId() {
+  const db = createFakeDb([
+    { user_id: 20, server_id: 1, inbound_id: 5, uuid: '', auth: 'Abc123XyZ9', sub_id: 'db-sub' }
+  ]);
+  const service = createFakeXuiService([
+    {
+      inboundId: 5,
+      uuid: '',
+      auth: 'Abc123XyZ9',
+      email: 'payment@163.com-hy2',
+      subId: '',
+      enable: true,
+      expiryTime: 99,
+      totalGB: 3221225472
+    }
+  ]);
+
+  const result = await service.upsertUniqueClient(db, {
+    userId: 20,
+    serverId: 1,
+    inbound: { id: 5, protocol: 'hysteria', remark: 'hy2-node' },
+    email: 'payment@163.com-hy2',
+    desiredClient: {
+      id: '',
+      auth: 'Abc123XyZ9',
+      email: 'payment@163.com-hy2',
+      enable: true,
+      expiryTime: 99,
+      totalGB: 3221225472,
+      subId: 'db-sub',
+      strategy: 'hy2',
+      protocol: 'hysteria'
+    }
+  });
+
+  assert.strictEqual(result.success, true);
+  assert.strictEqual(result.action, 'update');
+  assert.ok(service._calls.some(item => item.type === 'client.updateClient'));
+}
+
+async function testGeneratedXuiAuthShouldBeAlphanumericAndTenChars() {
+  const auth = generateXuiAuth();
+  assert.strictEqual(auth.length, 10);
+  assert.strictEqual(isValidXuiAuth(auth), true);
+  assert.strictEqual(isValidXuiAuth('PnF71NOt_KdMuRCX'), false);
+}
+
 async function testOrderAndJobPathsShouldUseUpsertUniqueClient() {
   const service = createFakeXuiService([]);
   let called = 0;
@@ -405,6 +453,8 @@ async function run() {
   await testUpsertUniqueClientSkipsUpdateWhenStateMatches();
   await testShouldNotUpdateWhenServerTotalGBStoresBytes();
   await testUpdateClientByContextShouldKeepUuidWhenAuthIsEmpty();
+  await testHy2ClientShouldStillCheckSubId();
+  await testGeneratedXuiAuthShouldBeAlphanumericAndTenChars();
   await testOrderAndJobPathsShouldUseUpsertUniqueClient();
   console.log('xui unique client sync tests passed');
 }

@@ -14,6 +14,7 @@ const trafficManager = require('./traffic-manager');
 const xuiSyncTaskService = require('./xui-sync-task-service');
 const { DISABLE_REASONS } = require('./renew-policy');
 const { createLogger } = require('../utils/logger');
+const { isValidXuiAuth, generateXuiAuth } = require('../utils/xui-auth');
 
 const logger = createLogger('ORDER-SERVICE');
 
@@ -43,7 +44,7 @@ function generateNodeCredentials(strategy = 'direct') {
   if (strategy === 'hy2') {
     return {
       uuid: '',
-      auth: crypto.randomBytes(12).toString('base64url'),
+      auth: generateXuiAuth(),
       subId
     };
   }
@@ -95,9 +96,18 @@ async function ensureNodeConfig(db, user, server, inbound, existingClient = null
   ).get(user.id, server.id, inbound.id);
 
   if (existingConfig) {
+    let auth = existingConfig.auth || '';
+    if (strategy === 'hy2' && !isValidXuiAuth(auth)) {
+      auth = generateXuiAuth();
+      await db.prepare(
+        'UPDATE user_node_configs SET auth = ? WHERE id = ?'
+      ).run(auth, existingConfig.id);
+      logger.info(`修正非法 hy2 auth: user=${user.email}, server=${server.id}, inbound=${inbound.id}`);
+    }
+
     return {
       uuid: existingConfig.uuid,
-      auth: existingConfig.auth || '',
+      auth,
       subId: existingConfig.sub_id
     };
   }

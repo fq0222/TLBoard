@@ -4,7 +4,9 @@
  */
 
 const XuiService = require('../../services/xui-service');
+const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const { createLogger } = require('../../utils/logger');
+const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
 
 const logger = createLogger('JOBS');
 
@@ -47,9 +49,12 @@ async function legacySyncUsersToServer(db, server, users) {
           const expiryTime = user.expire_at ? user.expire_at * 1000 : 0;
           const totalGB = user.traffic_limit || 0;
           const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
-          const existingConfig = await db.prepare(
-            'SELECT id, uuid, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
-          ).get(user.id, server.id, inbound.id);
+          const existingConfig = await xuiSyncRepository.findUserNodeConfig(
+            db,
+            user.id,
+            server.id,
+            inbound.id
+          );
 
           let configUuid;
           let configSubId;
@@ -61,9 +66,14 @@ async function legacySyncUsersToServer(db, server, users) {
             const crypto = require('crypto');
             configUuid = crypto.randomUUID();
             configSubId = crypto.randomBytes(8).toString('hex');
-            await db.prepare(
-              'INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, sub_id) VALUES (?, ?, ?, ?, ?)'
-            ).run(user.id, server.id, inbound.id, configUuid, configSubId);
+            await xuiSyncRepository.saveUserNodeConfig(db, {
+              userId: user.id,
+              serverId: server.id,
+              inboundId: inbound.id,
+              uuid: configUuid,
+              auth: '',
+              subId: configSubId
+            });
             logger.info(`保存用户节点配置: user=${user.email}, server=${server.id}, inbound=${inbound.id}, uuid=${configUuid}, sub_id=${configSubId}`);
           }
 
@@ -123,16 +133,24 @@ async function legacySyncUsersToServer(db, server, users) {
 
         logger.info(`找到用户: ${nodeEmail}, xuiClient.subId=${xuiClient.subId || '空'}, xuiClient.flow=${xuiClient.flow || '空'}`);
 
-        const dbConfig = await db.prepare(
-          'SELECT uuid, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
-        ).get(user.id, server.id, inbound.id);
+        const dbConfig = await xuiSyncRepository.findUserNodeConfig(
+          db,
+          user.id,
+          server.id,
+          inbound.id
+        );
 
         if (!dbConfig) {
           const crypto = require('crypto');
           const newSubId = crypto.randomBytes(8).toString('hex');
-          await db.prepare(
-            'INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, sub_id) VALUES (?, ?, ?, ?, ?)'
-          ).run(user.id, server.id, inbound.id, xuiClient.id, newSubId);
+          await xuiSyncRepository.saveUserNodeConfig(db, {
+            userId: user.id,
+            serverId: server.id,
+            inboundId: inbound.id,
+            uuid: xuiClient.id,
+            auth: '',
+            subId: newSubId
+          });
           logger.info(`为已存在用户创建配置: user=${user.email}, server=${server.id}, inbound=${inbound.id}, uuid=${xuiClient.id}, sub_id=${newSubId}`);
 
           const updateOpts = { subId: newSubId };
@@ -250,17 +268,27 @@ async function syncUsersToServer(db, server, users) {
           const strategy = inbound.remark && inbound.remark.toLowerCase().includes('hy2')
             ? 'hy2'
             : (inbound.remark && inbound.remark.toLowerCase().includes('direct') ? 'direct' : 'cf');
-          const existingConfig = await db.prepare(
-            'SELECT uuid, auth, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
-          ).get(user.id, server.id, inbound.id);
+          const existingConfig = await xuiSyncRepository.findUserNodeConfig(
+            db,
+            user.id,
+            server.id,
+            inbound.id
+          );
 
           const generatedAuth = strategy === 'hy2'
-            ? crypto.randomBytes(12).toString('base64url')
+            ? generateXuiAuth()
             : '';
+          const desiredAuth = strategy === 'hy2'
+            ? (isValidXuiAuth(existingConfig?.auth) ? existingConfig.auth : generatedAuth)
+            : '';
+
+          if (strategy === 'hy2' && existingConfig?.auth && !isValidXuiAuth(existingConfig.auth)) {
+            logger.info(`检测到非法 hy2 auth，准备重新生成: user=${user.email}, server=${server.id}, inbound=${inbound.id}`);
+          }
 
           const desiredClient = {
             id: existingConfig?.uuid || (strategy === 'hy2' ? '' : crypto.randomUUID()),
-            auth: existingConfig?.auth || generatedAuth,
+            auth: desiredAuth,
             email: nodeEmail,
             enable: user.enabled === 1,
             expiryTime,
@@ -333,11 +361,7 @@ async function runXuiSync(db) {
     logger.info('开始执行3X-UI用户同步任务...');
 
     const now = Math.floor(Date.now() / 1000);
-    const users = await db.prepare(`
-      SELECT id, email, subscription_token, enabled, traffic_limit, expire_at
-      FROM users
-      WHERE enabled = 1 AND (expire_at = 0 OR expire_at = '0' OR expire_at IS NULL OR expire_at > ?)
-    `).all(now);
+    const users = await xuiSyncRepository.listUsersForXuiSync(db, now);
 
     if (users.length === 0) {
       logger.info('没有需要同步的用户');
@@ -346,11 +370,7 @@ async function runXuiSync(db) {
 
     logger.info(`需要同步的用户数量: ${users.length}`);
 
-    const servers = await db.prepare(`
-      SELECT id, name, api_url, api_token
-      FROM xui_servers
-      WHERE status = 1
-    `).all();
+    const servers = await xuiSyncRepository.listOnlineXuiServers(db);
 
     if (servers.length === 0) {
       logger.info('没有在线的3X-UI服务器');

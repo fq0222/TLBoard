@@ -6,6 +6,7 @@
 const orderService = require('../../services/order-service');
 const trafficManager = require('../../services/traffic-manager');
 const xuiSyncTaskService = require('../../services/xui-sync-task-service');
+const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('JOBS');
@@ -46,11 +47,7 @@ async function getLatestUserForSyncTask(db, task, payload) {
   const userId = task.user_id || payload.user?.id;
   if (!userId) return null;
 
-  const user = await db.prepare(`
-    SELECT id, email, subscription_token, enabled, traffic_limit, expire_at
-    FROM users
-    WHERE id = ?
-  `).get(userId);
+  const user = await xuiSyncRepository.findUserForSyncTask(db, userId);
 
   if (!user) {
     return null;

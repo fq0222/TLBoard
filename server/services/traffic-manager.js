@@ -8,6 +8,7 @@ const xuiSyncTaskService = require('./xui-sync-task-service');
 const { withUserStatusLock } = require('./user-status-lock');
 const { DISABLE_REASONS } = require('./renew-policy');
 const { createLogger } = require('../utils/logger');
+const trafficRepository = require('../repositories/traffic-repository');
 
 const logger = createLogger('TRAFFIC-MANAGER');
 
@@ -36,9 +37,15 @@ function formatTrafficForLog(bytes) {
   return `${formattedSize} ${units[unitIndex]} (${value} B)`;
 }
 
+/**
+ * 获取流量统计倍率配置。
+ *
+ * @param {Object} db - 数据库实例
+ * @returns {Promise<number>} 流量倍率
+ */
 async function getTrafficUsageMultiplier(db) {
   try {
-    const row = await db.prepare("SELECT value FROM system_settings WHERE key = 'traffic_usage_multiplier'").get();
+    const row = await trafficRepository.findTrafficUsageMultiplierSetting(db);
     const multiplier = Number(row?.value);
     if (!Number.isFinite(multiplier) || multiplier < 0) {
       return DEFAULT_TRAFFIC_USAGE_MULTIPLIER;
@@ -57,11 +64,7 @@ async function getTrafficUsageMultiplier(db) {
  */
 async function fetchAllServerTraffic(db) {
   try {
-    const servers = await db.prepare(`
-      SELECT id, name, api_url, api_token
-      FROM xui_servers
-      WHERE status = 1
-    `).all();
+    const servers = await trafficRepository.listOnlineServers(db);
 
     if (servers.length === 0) {
       logger.warn('没有在线服务器');
@@ -136,11 +139,7 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
     return {};
   }
 
-  const users = await db.prepare(`
-    SELECT id, email, traffic_used, traffic_limit
-    FROM users
-    WHERE enabled = 1
-  `).all();
+  const users = await trafficRepository.listEnabledUsersForTrafficSync(db);
 
   if (users.length === 0) {
     logger.info('没有启用的用户');
@@ -153,105 +152,87 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
   const trafficUsageMultiplier = await getTrafficUsageMultiplier(db);
   logger.info(`当前流量统计倍率: ${trafficUsageMultiplier}`);
 
-  const client = await db.pool.connect();
-
   try {
-    await client.query('BEGIN');
+    const result = await trafficRepository.withTrafficSyncTransaction(db, async (client) => {
+      const syncLogRows = await trafficRepository.listTrafficSyncLogs(client);
+      const syncLogMap = new Map();
+      for (const row of syncLogRows) {
+        syncLogMap.set(`${row.user_id}-${row.server_id}`, Number(row.last_sync_traffic) || 0);
+      }
 
-    const syncResult = await client.query(
-      'SELECT user_id, server_id, last_sync_traffic FROM traffic_sync_log'
-    );
-    const syncLogMap = new Map();
-    for (const row of syncResult.rows) {
-      syncLogMap.set(`${row.user_id}-${row.server_id}`, Number(row.last_sync_traffic) || 0);
-    }
+      const userTrafficData = {};
+      const syncLogUpdates = [];
 
-    const userTrafficData = {};
-    const syncLogUpdates = [];
+      for (const user of users) {
+        let totalIncrement = 0;
 
-    for (const user of users) {
-      let totalIncrement = 0;
+        for (const serverId of serverIds) {
+          const serverData = serverTrafficData[serverId];
 
-      for (const serverId of serverIds) {
-        const serverData = serverTrafficData[serverId];
-
-        let userTotalTraffic = 0;
-        let found = false;
-        for (const [email, data] of Object.entries(serverData)) {
-          if (email.startsWith(user.email + '-')) {
-            userTotalTraffic += data.total || 0;
-            found = true;
+          let userTotalTraffic = 0;
+          let found = false;
+          for (const [email, data] of Object.entries(serverData)) {
+            if (email.startsWith(user.email + '-')) {
+              userTotalTraffic += data.total || 0;
+              found = true;
+            }
           }
+
+          if (!found) {
+            continue;
+          }
+
+          const lastSyncTraffic = syncLogMap.get(`${user.id}-${serverId}`) || 0;
+          const currentTraffic = userTotalTraffic;
+
+          let increment = 0;
+          let rawIncrement = 0;
+          if (currentTraffic >= lastSyncTraffic) {
+            rawIncrement = currentTraffic - lastSyncTraffic;
+            increment = Math.round(rawIncrement * trafficUsageMultiplier);
+          } else {
+            logger.warn(
+              `服务器 ${serverId} 用户 ${user.email} 流量回退: 当前 ${currentTraffic} < 上次 ${lastSyncTraffic}，本次不累加，仅重置同步基线`
+            );
+          }
+
+          if (increment > 0) {
+            logger.info(
+              `用户流量增量: email=${user.email}, 已用流量=${formatTrafficForLog(user.traffic_used || 0)}, ` +
+              `上次流量=${formatTrafficForLog(lastSyncTraffic)}, 当前流量=${formatTrafficForLog(currentTraffic)}, 本次增量=${formatTrafficForLog(rawIncrement)}, ` +
+              `倍率=${trafficUsageMultiplier}, 倍率后增量=${formatTrafficForLog(increment)}`
+            );
+          }
+
+          totalIncrement += increment;
+          syncLogUpdates.push({ userId: user.id, serverId, currentTraffic, now });
         }
 
-        if (!found) continue;
+        const newTrafficUsed = (Number(user.traffic_used) || 0) + totalIncrement;
+        const trafficLimit = Number(user.traffic_limit) || 0;
+        const isOverLimit = trafficLimit > 0 && newTrafficUsed >= trafficLimit;
 
-        const lastSyncTraffic = syncLogMap.get(`${user.id}-${serverId}`) || 0;
-        const currentTraffic = userTotalTraffic;
-
-        let increment = 0;
-        let rawIncrement = 0;
-        if (currentTraffic >= lastSyncTraffic) {
-          rawIncrement = currentTraffic - lastSyncTraffic;
-          increment = Math.round(rawIncrement * trafficUsageMultiplier);
-        } else {
-          logger.warn(
-            `服务器 ${serverId} 用户 ${user.email} 流量回退: 当前 ${currentTraffic} < 上次 ${lastSyncTraffic}，本次不累加，仅重置同步基线`
-          );
-        }
-
-        if (increment > 0) {
-          logger.info(
-            `用户流量增量: email=${user.email}, 已用流量=${formatTrafficForLog(user.traffic_used || 0)}, ` +
-            `上次流量=${formatTrafficForLog(lastSyncTraffic)}, 当前流量=${formatTrafficForLog(currentTraffic)}, 本次增量=${formatTrafficForLog(rawIncrement)}, ` +
-            `倍率=${trafficUsageMultiplier}, 倍率后增量=${formatTrafficForLog(increment)}`
-          );
-        }
-
-        totalIncrement += increment;
-        syncLogUpdates.push({ userId: user.id, serverId, currentTraffic, now });
+        userTrafficData[user.id] = {
+          email: user.email,
+          trafficUsed: newTrafficUsed,
+          trafficLimit,
+          isOverLimit,
+          increment: totalIncrement
+        };
       }
 
-      const newTrafficUsed = (Number(user.traffic_used) || 0) + totalIncrement;
-      const trafficLimit = Number(user.traffic_limit) || 0;
-      const isOverLimit = trafficLimit > 0 && newTrafficUsed >= trafficLimit;
-
-      userTrafficData[user.id] = {
-        email: user.email,
-        trafficUsed: newTrafficUsed,
-        trafficLimit,
-        isOverLimit,
-        increment: totalIncrement
+      await trafficRepository.upsertTrafficSyncLogs(client, syncLogUpdates);
+      return {
+        userTrafficData,
+        syncLogUpdateCount: syncLogUpdates.length
       };
-    }
+    });
 
-    if (syncLogUpdates.length > 0) {
-      const values = [];
-      const params = [];
-      let paramIndex = 1;
-      for (const update of syncLogUpdates) {
-        values.push(`($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3})`);
-        params.push(update.userId, update.serverId, update.currentTraffic, update.now);
-        paramIndex += 4;
-      }
-      await client.query(
-        `INSERT INTO traffic_sync_log (user_id, server_id, last_sync_traffic, last_sync_at)
-         VALUES ${values.join(', ')}
-         ON CONFLICT (user_id, server_id)
-         DO UPDATE SET last_sync_traffic = EXCLUDED.last_sync_traffic, last_sync_at = EXCLUDED.last_sync_at`,
-        params
-      );
-    }
-
-    await client.query('COMMIT');
-    logger.info(`计算用户流量完成，${Object.keys(userTrafficData).length} 个用户，${syncLogUpdates.length} 条同步记录更新`);
-    return userTrafficData;
+    logger.info(`计算用户流量完成，${Object.keys(result.userTrafficData).length} 个用户，${result.syncLogUpdateCount} 条同步记录更新`);
+    return result.userTrafficData;
   } catch (error) {
-    await client.query('ROLLBACK');
     logger.error(`计算用户流量事务失败，已回滚: ${error.message}`);
     throw error;
-  } finally {
-    client.release();
   }
 }
 
@@ -277,9 +258,12 @@ async function updateTrafficInDatabase(db, userTrafficData) {
       const data = userTrafficData[userId];
 
       try {
-        await db.prepare(`
-          UPDATE users SET traffic_used = ?, updated_at = ? WHERE id = ?
-        `).run(data.trafficUsed, Math.floor(Date.now() / 1000), userId);
+        await trafficRepository.updateUserTrafficUsed(
+          db,
+          userId,
+          data.trafficUsed,
+          Math.floor(Date.now() / 1000)
+        );
 
         updatedCount++;
       } catch (error) {
@@ -300,11 +284,7 @@ async function updateTrafficInDatabase(db, userTrafficData) {
  * @returns {Promise<Object|undefined>} 最新用户状态快照
  */
 async function getLatestUserDisableState(db, userId) {
-  return db.prepare(`
-    SELECT id, email, enabled, traffic_used, traffic_limit, traffic_used_at
-    FROM users
-    WHERE id = ?
-  `).get(userId);
+  return trafficRepository.findLatestUserDisableState(db, userId);
 }
 
 /**
@@ -363,9 +343,12 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
           };
         }
 
-        await db.prepare(`
-          UPDATE users SET enabled = 0, traffic_used_at = ?, disable_reason = ? WHERE id = ?
-        `).run(Math.floor(Date.now() / 1000), DISABLE_REASONS.TRAFFIC_LIMIT, userId);
+        await trafficRepository.disableUserByTrafficLimit(
+          db,
+          userId,
+          Math.floor(Date.now() / 1000),
+          DISABLE_REASONS.TRAFFIC_LIMIT
+        );
 
         return { success: true, action: 'disabled' };
       });
@@ -418,17 +401,13 @@ async function syncDisableStatusToXui(db, userId, disable, options = {}) {
   }
 
   try {
-    const user = await db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
+    const user = await trafficRepository.findUserEmailById(db, userId);
     if (!user) {
       logger.warn(`用户不存在: ${userId}`);
       return false;
     }
 
-    const servers = await db.prepare(`
-      SELECT id, name, api_url, api_token
-      FROM xui_servers
-      WHERE status = 1
-    `).all();
+    const servers = await trafficRepository.listOnlineServers(db);
 
     if (servers.length === 0) {
       logger.warn('没有在线服务器');

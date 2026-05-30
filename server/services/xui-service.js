@@ -6,6 +6,8 @@
 const XuiApiClient = require('./xui-api-client');
 const config = require('../config');
 const { createLogger } = require('../utils/logger');
+const xuiSyncRepository = require('../repositories/xui-sync-repository');
+const { isValidXuiAuth } = require('../utils/xui-auth');
 
 const logger = createLogger('XUI-SERVICE');
 
@@ -785,37 +787,31 @@ class XuiService {
     }
 
     const lockKey = this.buildUniqueClientLockKey(serverId, inboundId, email);
-    const lockResult = await db.prepare('SELECT pg_try_advisory_lock($1) AS locked').get(lockKey);
-
-    if (!lockResult || !lockResult.locked) {
+    const locked = await xuiSyncRepository.tryAcquireUniqueClientLock(db, lockKey);
+    if (!locked) {
       return { success: false, message: 'failed to acquire unique client lock' };
     }
 
     try {
       return await handler();
     } finally {
-      await db.prepare('SELECT pg_advisory_unlock($1) AS unlocked').get(lockKey);
+      await xuiSyncRepository.releaseUniqueClientLock(db, lockKey);
     }
   }
 
   async getNodeConfig(db, userId, serverId, inboundId) {
-    return db.prepare(
-      'SELECT uuid, auth, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
-    ).get(userId, serverId, inboundId);
+    return xuiSyncRepository.findUserNodeConfig(db, userId, serverId, inboundId);
   }
 
   async saveNodeConfig(db, userId, serverId, inboundId, uuid, auth, subId) {
-    const existing = await this.getNodeConfig(db, userId, serverId, inboundId);
-    if (existing) {
-      await db.prepare(
-        'UPDATE user_node_configs SET uuid = ?, auth = ?, sub_id = ? WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
-      ).run(uuid, auth, subId, userId, serverId, inboundId);
-      return;
-    }
-
-    await db.prepare(
-      'INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, auth, sub_id) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(userId, serverId, inboundId, uuid, auth, subId);
+    await xuiSyncRepository.saveUserNodeConfig(db, {
+      userId,
+      serverId,
+      inboundId,
+      uuid,
+      auth,
+      subId
+    });
   }
 
   chooseClientToKeep(existingClients, nodeConfig) {
@@ -836,7 +832,7 @@ class XuiService {
 
   normalizeClientSnapshot(client = {}) {
     return {
-      enable: client.enable !== false,
+      enable: this.normalizeClientEnabled(client.enable),
       expiryTime: Number(client.expiryTime || 0),
       totalBytes: Number(client.totalGB || 0),
       subId: client.subId || '',
@@ -845,10 +841,27 @@ class XuiService {
     };
   }
 
-  shouldUpdateClient(existingClient, desiredClient) {
+  normalizeClientEnabled(value) {
+    if (value === null || value === undefined || value === '') {
+      return true;
+    }
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      return value !== 0;
+    }
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized === '0' || normalized === 'false') {
+      return false;
+    }
+    return true;
+  }
+
+  buildClientDiff(existingClient, desiredClient) {
     const current = this.normalizeClientSnapshot(existingClient);
     const desired = {
-      enable: desiredClient.enable !== false,
+      enable: this.normalizeClientEnabled(desiredClient.enable),
       expiryTime: Number(desiredClient.expiryTime || 0),
       totalBytes: Number(desiredClient.totalGB || 0),
       subId: desiredClient.subId || '',
@@ -856,14 +869,39 @@ class XuiService {
       auth: desiredClient.auth || ''
     };
 
-    return (
-      current.enable !== desired.enable ||
-      current.expiryTime !== desired.expiryTime ||
-      current.totalBytes !== desired.totalBytes ||
-      current.subId !== desired.subId ||
-      current.flow !== desired.flow ||
-      current.auth !== desired.auth
-    );
+    const diff = {};
+    if (current.enable !== desired.enable) {
+      diff.enable = { current: current.enable, desired: desired.enable };
+    }
+    if (current.expiryTime !== desired.expiryTime) {
+      diff.expiryTime = { current: current.expiryTime, desired: desired.expiryTime };
+    }
+    if (current.totalBytes !== desired.totalBytes) {
+      diff.totalBytes = { current: current.totalBytes, desired: desired.totalBytes };
+    }
+    if (current.subId !== desired.subId) {
+      diff.subId = { current: current.subId, desired: desired.subId };
+    }
+    if (current.flow !== desired.flow) {
+      diff.flow = { current: current.flow, desired: desired.flow };
+    }
+    if (current.auth !== desired.auth) {
+      diff.auth = { current: current.auth, desired: desired.auth };
+    }
+
+    return diff;
+  }
+
+  shouldUpdateClient(existingClient, desiredClient) {
+    return Object.keys(this.buildClientDiff(existingClient, desiredClient)).length > 0;
+  }
+
+  buildNodeConfigSnapshot(currentClient, desiredClient = {}) {
+    return {
+      uuid: currentClient?.uuid || desiredClient.id || '',
+      auth: desiredClient.auth || currentClient?.auth || '',
+      subId: desiredClient.subId || currentClient?.subId || ''
+    };
   }
 
   extractClientsFromSettings(settings) {
@@ -905,6 +943,10 @@ class XuiService {
         return { success: false, message: listResult.message || '获取客户端列表失败' };
       }
 
+      if (desiredClient.strategy === 'hy2' && !isValidXuiAuth(desiredClient.auth)) {
+        return { success: false, message: `非法 hy2 auth: ${desiredClient.auth || 'empty'}` };
+      }
+
       const nodeConfig = await this.getNodeConfig(db, userId, serverId, inbound.id);
       const existingClients = listResult.clients;
 
@@ -928,17 +970,10 @@ class XuiService {
         }
 
         const finalKeep = verifyResult.clients[0];
-        await this.saveNodeConfig(
-          db,
-          userId,
-          serverId,
-          inbound.id,
-          finalKeep.uuid || '',
-          finalKeep.auth || '',
-          desiredClient.subId || finalKeep.subId || ''
-        );
-
-        if (!this.shouldUpdateClient(finalKeep, desiredClient)) {
+        const dedupDiff = this.buildClientDiff(finalKeep, desiredClient);
+        if (Object.keys(dedupDiff).length === 0) {
+          const snapshot = this.buildNodeConfigSnapshot(finalKeep, desiredClient);
+          await this.saveNodeConfig(db, userId, serverId, inbound.id, snapshot.uuid, snapshot.auth, snapshot.subId);
           return { success: true, action: 'dedup-skip-update' };
         }
 
@@ -953,23 +988,20 @@ class XuiService {
           flow: desiredClient.flow
         });
 
-        return updateResult.success
-          ? { success: true, action: 'dedup-update' }
-          : { success: false, message: updateResult.message || '更新保留客户端失败' };
+        if (!updateResult.success) {
+          return { success: false, message: updateResult.message || '更新保留客户端失败' };
+        }
+
+        const snapshot = this.buildNodeConfigSnapshot(finalKeep, desiredClient);
+        await this.saveNodeConfig(db, userId, serverId, inbound.id, snapshot.uuid, snapshot.auth, snapshot.subId);
+        return { success: true, action: 'dedup-update' };
       }
 
       if (existingClients.length === 1) {
-        await this.saveNodeConfig(
-          db,
-          userId,
-          serverId,
-          inbound.id,
-          existingClients[0].uuid || '',
-          existingClients[0].auth || '',
-          desiredClient.subId || existingClients[0].subId || ''
-        );
-
-        if (!this.shouldUpdateClient(existingClients[0], desiredClient)) {
+        const singleDiff = this.buildClientDiff(existingClients[0], desiredClient);
+        if (Object.keys(singleDiff).length === 0) {
+          const snapshot = this.buildNodeConfigSnapshot(existingClients[0], desiredClient);
+          await this.saveNodeConfig(db, userId, serverId, inbound.id, snapshot.uuid, snapshot.auth, snapshot.subId);
           return { success: true, action: 'skip-update' };
         }
 
@@ -984,9 +1016,13 @@ class XuiService {
           flow: desiredClient.flow
         });
 
-        return updateResult.success
-          ? { success: true, action: 'update' }
-          : { success: false, message: updateResult.message || '更新客户端失败' };
+        if (!updateResult.success) {
+          return { success: false, message: updateResult.message || '更新客户端失败' };
+        }
+
+        const snapshot = this.buildNodeConfigSnapshot(existingClients[0], desiredClient);
+        await this.saveNodeConfig(db, userId, serverId, inbound.id, snapshot.uuid, snapshot.auth, snapshot.subId);
+        return { success: true, action: 'update' };
       }
 
       const addResult = await this.addClientByContext(inbound.id, inbound.protocol, {
