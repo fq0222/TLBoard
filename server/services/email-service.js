@@ -1,6 +1,7 @@
 const { BrevoClient } = require('@getbrevo/brevo')
 const config = require('../config')
 const { createLogger } = require('../utils/logger')
+const emailRepository = require('../repositories/email-repository')
 
 const logger = createLogger('EMAIL-SERVICE')
 
@@ -17,9 +18,7 @@ class EmailService {
   }
 
   async getConfig(db) {
-    const rows = await db.prepare(
-      "SELECT key, value FROM system_settings WHERE key LIKE 'brevo_%'"
-    ).all()
+    const rows = await emailRepository.getBrevoConfigRows(db)
     const config = {}
     rows.forEach(row => {
       config[row.key] = row.value
@@ -30,12 +29,7 @@ class EmailService {
   async saveConfig(db, config) {
     const now = Math.floor(Date.now() / 1000)
     for (const [key, value] of Object.entries(config)) {
-      await db.pool.query(
-        `INSERT INTO system_settings (key, value, updated_at)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = $3`,
-        [key, value, now]
-      )
+      await emailRepository.saveBrevoConfigValue(db, key, value, now)
     }
   }
 
@@ -103,13 +97,7 @@ class EmailService {
   }
 
   async getUserVariables(db, userId) {
-    const user = await db.prepare(
-      `SELECT u.email, u.plan_id, u.traffic_used, u.traffic_limit, u.expire_at,
-              p.name as plan_name
-       FROM users u
-       LEFT JOIN plans p ON u.plan_id = p.id
-       WHERE u.id = ?`
-    ).get(userId)
+    const user = await emailRepository.findEmailUserProfileById(db, userId)
     if (!user) return null
 
     const username = user.email.split('@')[0]
@@ -121,12 +109,7 @@ class EmailService {
 
     // 获取用户有效的下载链接
     const now = Math.floor(Date.now() / 1000)
-    const downloadUrl = await db.prepare(
-      `SELECT download_token FROM resource_distributions 
-       WHERE user_id = ? AND enabled = 1 
-       AND (expire_at IS NULL OR expire_at > ?)
-       ORDER BY created_at DESC LIMIT 1`
-    ).get(userId, now)
+    const downloadUrl = await emailRepository.findLatestActiveDownloadTokenByUserId(db, userId, now)
 
     const siteBaseUrl = getSiteBaseUrl()
 
