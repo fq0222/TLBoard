@@ -1,7 +1,7 @@
 # 机场面板系统需求文档
 
-> 版本：V1.10
-> 更新日期：2026-05-22
+> 版本：V1.11
+> 更新日期：2026-05-30
 
 ---
 
@@ -82,6 +82,52 @@ VMQ 后台需要配置以下两个地址：
 
 - 异步回调用于支付结果落单、验签、激活订阅
 - 同步回调用于浏览器支付完成后的回跳，再由后端重定向到前端支付结果页
+
+### 3.5 后端目录与分层结构（2026-05 重构后）
+
+当前后端已经完成按职责拆分，核心目录结构如下：
+
+```text
+server/
+  app.js
+  routes/
+  controllers/
+  repositories/
+  services/
+    user/
+    admin/
+    shared/
+  integrations/
+    xui/
+    vmq/
+    email/
+  jobs/
+  db/
+```
+
+当前约束如下：
+
+- `app.js` 为统一启动入口，同时启动用户端 API（30000）和管理端 API（30001）
+- `routes/` 仅负责声明路由、中间件挂载和参数校验
+- `controllers/` 负责请求参数提取、调用 service 和响应格式兼容
+- `services/user/` 与 `services/admin/` 分别承载端别相关业务编排
+- `services/shared/` 承载跨端共享领域逻辑，例如订单处理、订阅生成、流量管理、工单等
+- `repositories/` 承接数据库访问与 SQL 下沉
+- `integrations/xui/`、`integrations/vmq/`、`integrations/email/` 分别承接 3X-UI、VMQ、Brevo 等外部系统适配
+- 原先独立的 `app-user.js` 与 `app-admin.js` 已移除，不再作为运行入口
+
+当前共享服务与集成目录中的典型职责如下：
+
+- `services/shared/order-service.js`：购买、续费激活、3X-UI 同步编排
+- `services/shared/traffic-manager.js`：流量汇总、超限禁用与恢复
+- `services/shared/subscription-service.js`：原始订阅模板缓存与修复
+- `services/shared/subscription-strategy.js`：节点策略识别与订阅改写
+- `services/shared/ticket-service.js`：工单共享领域动作
+- `integrations/xui/xui-service.js`：3X-UI 客户端增删改查适配
+- `integrations/xui/xui-sync-task-service.js`：3X-UI 同步补偿队列编排
+- `integrations/xui/xui-sync.js`：节点快照同步工具
+- `integrations/vmq/vmq-service.js`：VMQ 下单、查单与验签适配
+- `integrations/email/email-service.js`：Brevo 邮件发送与模板变量替换
 
 ---
 

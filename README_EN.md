@@ -10,6 +10,7 @@ A subscription management system for multi-3X-UI deployments, covering plan purc
 - User panel: `client-user/`, built with Vue 3 + Vite + Element Plus
 - Admin panel: `client-admin/`, built with Vue 3 + Vite + Element Plus
 - Package layout: three independent packages, no root `package.json`
+- Backend entrypoint: `server/app.js`, which starts both the user API on `30000` and the admin API on `30001`
 
 ## Current Capabilities
 
@@ -117,8 +118,19 @@ npm run init-db
 # Start backend only
 npm run dev
 
-# Start backend + user panel + admin panel together
+# Start backend in production mode
+npm run start
+
+# Current dev:all is a compatibility alias for the unified backend entry
 npm run dev:all
+
+# Start user panel frontend
+cd ../client-user
+npm run dev
+
+# Start admin panel frontend
+cd ../client-admin
+npm run dev
 ```
 
 ### Default Admin Account
@@ -169,8 +181,18 @@ When adding a 3X-UI server in the admin panel, configure:
 
 ```text
 server/
+  app.js
   routes/
+  controllers/
+  repositories/
   services/
+    admin/
+    user/
+    shared/
+  integrations/
+    xui/
+    vmq/
+    email/
   jobs/
   db/
 client-user/
@@ -182,12 +204,14 @@ docs/
 
 Important service files:
 
-- `server/services/order-service.js`: purchase, renewal, and 3X-UI sync flow
-- `server/services/xui-service.js`: 3X-UI API integration
-- `server/services/subscription-strategy.js`: strategy detection and link rewriting
-- `server/services/subscription-service.js`: raw subscription template cache and repair
-- `server/services/xui-sync-task-service.js`: 3X-UI compensation queue
-- `server/services/traffic-manager.js`: traffic aggregation and auto-disable logic
+- `server/services/shared/order-service.js`: purchase, renewal, and 3X-UI sync flow
+- `server/integrations/xui/xui-service.js`: 3X-UI API integration
+- `server/services/shared/subscription-strategy.js`: strategy detection and link rewriting
+- `server/services/shared/subscription-service.js`: raw subscription template cache and repair
+- `server/integrations/xui/xui-sync-task-service.js`: 3X-UI compensation queue
+- `server/services/shared/traffic-manager.js`: traffic aggregation and auto-disable logic
+- `server/integrations/vmq/vmq-service.js`: VMQ payment integration
+- `server/integrations/email/email-service.js`: Brevo email integration
 
 ## Documentation
 
@@ -196,6 +220,14 @@ Important service files:
 - [Deployment Guide](./docs/deploy-subscription-manager.md)
 
 ## Changelog
+
+### V1.7.1 (2026-05-30)
+
+- Completed the backend directory refactor around `routes / controllers / repositories / services / integrations`
+- Added `services/user`, `services/admin`, and `services/shared` to separate endpoint orchestration from shared domain logic
+- Added `integrations/xui`, `integrations/vmq`, and `integrations/email` for external adapters
+- Unified backend startup under `server/app.js` and removed the legacy `app-user.js` and `app-admin.js` entries
+- Updated the README, requirements doc, and API reference to match the current implementation
 
 ### V1.7.0 (2026-05-29)
 

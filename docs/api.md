@@ -1849,7 +1849,7 @@ md5(payId + param + type + price + reallyPrice + key)
 
 ## 7. 3X-UI 外部 API 调用
 
-系统通过 `server/services/xui-api-client.js` 使用 3X-UI API Token 访问 3X-UI 面板。
+系统通过 `server/integrations/xui/xui-api-client.js` 使用 3X-UI API Token 访问 3X-UI 面板。
 
 认证方式：
 

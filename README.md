@@ -10,6 +10,7 @@
 - 用户端：`client-user/`，Vue 3 + Vite + Element Plus
 - 管理端：`client-admin/`，Vue 3 + Vite + Element Plus
 - 启动方式：三个包独立安装依赖，无根 `package.json`
+- 后端入口：`server/app.js` 统一启动用户端 API（30000）和管理端 API（30001）
 
 ## 当前能力
 
@@ -117,8 +118,19 @@ npm run init-db
 # 仅启动后端
 npm run dev
 
-# 同时启动后端 + 用户端 + 管理端
+# 生产方式启动后端
+npm run start
+
+# 当前 dev:all 为统一后端入口兼容脚本，等价于 npm run dev
 npm run dev:all
+
+# 用户端前端开发
+cd ../client-user
+npm run dev
+
+# 管理端前端开发
+cd ../client-admin
+npm run dev
 ```
 
 ### 默认管理账号
@@ -169,8 +181,18 @@ SITE_HOST=yourdomain.com
 
 ```text
 server/
+  app.js
   routes/
+  controllers/
+  repositories/
   services/
+    admin/
+    user/
+    shared/
+  integrations/
+    xui/
+    vmq/
+    email/
   jobs/
   db/
 client-user/
@@ -182,12 +204,14 @@ docs/
 
 重点服务文件：
 
-- `server/services/order-service.js`：购买、续费与 3X-UI 同步
-- `server/services/xui-service.js`：3X-UI API 交互
-- `server/services/subscription-strategy.js`：订阅策略解析与链接改写
-- `server/services/subscription-service.js`：原始订阅模板缓存与修复
-- `server/services/xui-sync-task-service.js`：3X-UI 同步补偿队列
-- `server/services/traffic-manager.js`：流量统计、超限禁用与恢复
+- `server/services/shared/order-service.js`：购买、续费与 3X-UI 同步
+- `server/integrations/xui/xui-service.js`：3X-UI API 交互
+- `server/services/shared/subscription-strategy.js`：订阅策略解析与链接改写
+- `server/services/shared/subscription-service.js`：原始订阅模板缓存与修复
+- `server/integrations/xui/xui-sync-task-service.js`：3X-UI 同步补偿队列
+- `server/services/shared/traffic-manager.js`：流量统计、超限禁用与恢复
+- `server/integrations/vmq/vmq-service.js`：VMQ 支付适配
+- `server/integrations/email/email-service.js`：Brevo 邮件发送适配
 
 ## 文档入口
 
@@ -196,6 +220,14 @@ docs/
 - [部署文档](./docs/deploy-subscription-manager.md)
 
 ## 更新日志
+
+### V1.7.1 (2026-05-30)
+
+- 后端完成按 `routes / controllers / repositories / services / integrations` 的目录重构
+- 新增 `services/user`、`services/admin`、`services/shared` 三层职责划分
+- 新增 `integrations/xui`、`integrations/vmq`、`integrations/email` 外部系统适配目录
+- 统一后端启动入口为 `server/app.js`，移除旧的 `app-user.js` 与 `app-admin.js`
+- README、需求文档与 API 文档更新为当前实现结构
 
 ### V1.7.0 (2026-05-29)
 
