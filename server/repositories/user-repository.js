@@ -210,6 +210,17 @@ async function findUserProfileById(db, userId) {
 }
 
 /**
+ * 查询用户当前同步状态。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<Object|undefined>} 同步状态记录
+ */
+async function findUserSyncStatusById(db, userId) {
+  return db.prepare('SELECT sync_status FROM users WHERE id = ?').get(userId);
+}
+
+/**
  * 检查用户是否已分配 CF 优选 IP。
  *
  * @param {Object} db - 数据库代理对象
@@ -493,6 +504,7 @@ module.exports = {
   updateOrderPaymentInfo,
   findLoginUserByEmail,
   findUserProfileById,
+  findUserSyncStatusById,
   hasUserCfIps,
   hasUserSubscriptionCache,
   countUsers,

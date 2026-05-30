@@ -27,6 +27,51 @@ async function findAdminById(db, adminId) {
 }
 
 /**
+ * 查询管理员列表。
+ *
+ * @param {Object} db - 数据库实例
+ * @returns {Promise<Array>} 管理员列表
+ */
+async function listAdmins(db) {
+  return db.prepare(`
+    SELECT id, username, is_super, created_at
+    FROM admins
+    ORDER BY created_at DESC
+  `).all();
+}
+
+/**
+ * 创建管理员账号。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} payload - 管理员写入参数
+ * @returns {Promise<Object>} 插入结果
+ */
+async function createAdmin(db, payload) {
+  const {
+    username,
+    passwordHash,
+    isSuper
+  } = payload;
+
+  return db.prepare(`
+    INSERT INTO admins (username, password_hash, is_super)
+    VALUES (?, ?, ?)
+  `).run(username, passwordHash, isSuper);
+}
+
+/**
+ * 删除管理员账号。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} adminId - 管理员 ID
+ * @returns {Promise<void>}
+ */
+async function deleteAdmin(db, adminId) {
+  await db.prepare('DELETE FROM admins WHERE id = ?').run(adminId);
+}
+
+/**
  * 更新管理员密码哈希。
  *
  * @param {Object} db - 数据库代理对象
@@ -39,7 +84,10 @@ async function updateAdminPasswordHash(db, adminId, passwordHash) {
 }
 
 module.exports = {
+  listAdmins,
   findAdminByUsername,
   findAdminById,
+  createAdmin,
+  deleteAdmin,
   updateAdminPasswordHash
 };
