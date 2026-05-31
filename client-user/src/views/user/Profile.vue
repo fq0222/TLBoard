@@ -1823,6 +1823,10 @@ onBeforeUnmount(() => {
     width: 100%;
   }
 
+  .welcome-actions :deep(.el-button + .el-button) {
+    margin-left: 0;
+  }
+
   .guide-button {
     position: absolute;
     top: 18px;
