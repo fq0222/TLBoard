@@ -22,6 +22,7 @@ const tableDefinitions = [
         enabled INTEGER DEFAULT 0,
         payment_count INTEGER DEFAULT 0,
         sync_status INTEGER DEFAULT 0,
+        onboarding_completed INTEGER DEFAULT 0,
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
         updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
       )

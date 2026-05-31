@@ -104,6 +104,14 @@ const userApi = {
   },
 
   /**
+   * 标记当前账号已完成新手引导
+   * @returns {Promise<Object>} 响应数据
+   */
+  completeOnboarding() {
+    return apiClient.post('/onboarding/complete')
+  },
+
+  /**
    * 获取套餐列表
    * @returns {Promise<Object>} 响应数据
    */

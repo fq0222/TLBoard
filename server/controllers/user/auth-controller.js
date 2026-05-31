@@ -137,7 +137,8 @@ async function getProfile(req, res) {
         enabled: profile.enabled,
         created_at: profile.created_at,
         payment_count: profile.payment_count,
-        sync_status: profile.sync_status
+        sync_status: profile.sync_status,
+        onboarding_completed: profile.onboarding_completed
       }
     });
   } catch (error) {
@@ -145,8 +146,30 @@ async function getProfile(req, res) {
   }
 }
 
+/**
+ * 标记当前登录用户已完成新手引导。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function completeOnboarding(req, res) {
+  try {
+    const data = await authService.completeOnboarding(req.app.locals.db, req.user.id);
+    logger.info(`用户新手引导已完成: ${req.user.email}`);
+    return res.json({
+      code: 0,
+      message: 'ok',
+      data
+    });
+  } catch (error) {
+    return respondLegacyError(res, '完成新手引导', error);
+  }
+}
+
 module.exports = {
   registerAndPay,
   login,
-  getProfile
+  getProfile,
+  completeOnboarding
 };

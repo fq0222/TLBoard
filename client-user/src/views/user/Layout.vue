@@ -37,7 +37,7 @@
           <span>工单</span>
           <span v-if="unreadTicketCount > 0" class="badge"></span>
         </router-link>
-        <router-link to="/user/help" class="nav-item" active-class="active">
+        <router-link to="/user/help" class="nav-item onboarding-help-nav" active-class="active">
           <el-icon><QuestionFilled /></el-icon>
           <span>帮助</span>
         </router-link>
@@ -61,7 +61,7 @@
         :key="item.to"
         :to="item.to"
         class="bottom-nav-item"
-        :class="{ active: isMobileNavActive(item) }"
+        :class="{ active: isMobileNavActive(item), 'onboarding-help-bottom-nav': item.key === 'help' }"
       >
         <el-icon :size="20">
           <component :is="item.icon" />

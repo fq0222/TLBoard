@@ -297,12 +297,28 @@ async function getProfile(db, userId) {
     enabled: user.enabled,
     created_at: user.created_at,
     payment_count: user.payment_count,
-    sync_status: user.sync_status
+    sync_status: user.sync_status,
+    onboarding_completed: !!user.onboarding_completed
+  };
+}
+
+/**
+ * 标记当前用户已完成新手引导。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<Object>} 完成状态
+ */
+async function completeOnboarding(db, userId) {
+  await userRepository.markUserOnboardingCompleted(db, userId);
+  return {
+    onboarding_completed: true
   };
 }
 
 module.exports = {
   registerAndPay,
   login,
-  getProfile
+  getProfile,
+  completeOnboarding
 };

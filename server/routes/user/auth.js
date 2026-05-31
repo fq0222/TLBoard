@@ -43,5 +43,6 @@ router.post('/login', [
 ], authController.login);
 
 router.get('/profile', authenticateUser, authController.getProfile);
+router.post('/onboarding/complete', authenticateUser, authController.completeOnboarding);
 
 module.exports = router;

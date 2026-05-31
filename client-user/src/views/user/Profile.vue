@@ -20,6 +20,13 @@
 
         <div class="welcome-actions">
           <el-button
+            size="large"
+            class="guide-button"
+            @click="startOnboardingGuide(true)"
+          >
+            新手引导
+          </el-button>
+          <el-button
             type="info"
             size="large"
             class="renew-button"
@@ -71,7 +78,7 @@
 
     <section class="dashboard-grid">
       <div class="main-column">
-        <article class="panel-card">
+        <article class="panel-card subscription-workspace">
           <div class="panel-head">
             <div>
               <h2 class="panel-title">订阅工作区</h2>
@@ -112,38 +119,40 @@
           </div>
 
           <div v-if="userInfo.subscription_ready" class="subscription-links">
-            <div class="link-group">
-              <span class="link-label">通用订阅</span>
-              <el-input
-                :model-value="userInfo.subscription_url"
-                readonly
-                size="large"
-              >
-                <template #append>
-                  <el-button @click="copyLink(userInfo.subscription_url)">
-                    <el-icon><CopyDocument /></el-icon>
-                    复制
-                  </el-button>
-                </template>
-              </el-input>
-              <p class="link-tip">适用于 v2rayN、v2rayNG、Shadowrocket、Quantumult X 等客户端。</p>
-            </div>
+            <div class="subscription-copy-target">
+              <div class="link-group">
+                <span class="link-label">通用订阅</span>
+                <el-input
+                  :model-value="userInfo.subscription_url"
+                  readonly
+                  size="large"
+                >
+                  <template #append>
+                    <el-button @click="copyLink(userInfo.subscription_url)">
+                      <el-icon><CopyDocument /></el-icon>
+                      复制
+                    </el-button>
+                  </template>
+                </el-input>
+                <p class="link-tip">适用于 v2rayN、v2rayNG、Shadowrocket、Quantumult X 等客户端。</p>
+              </div>
 
-            <div class="link-group">
-              <span class="link-label">Clash 订阅</span>
-              <el-input
-                :model-value="userInfo.clash_url"
-                readonly
-                size="large"
-              >
-                <template #append>
-                  <el-button @click="copyLink(userInfo.clash_url)">
-                    <el-icon><CopyDocument /></el-icon>
-                    复制
-                  </el-button>
-                </template>
-              </el-input>
-              <p class="link-tip">适用于 Clash、Clash Verge、ClashX、Clash for Windows 等客户端。</p>
+              <div class="link-group">
+                <span class="link-label">Clash 订阅</span>
+                <el-input
+                  :model-value="userInfo.clash_url"
+                  readonly
+                  size="large"
+                >
+                  <template #append>
+                    <el-button @click="copyLink(userInfo.clash_url)">
+                      <el-icon><CopyDocument /></el-icon>
+                      复制
+                    </el-button>
+                  </template>
+                </el-input>
+                <p class="link-tip">适用于 Clash、Clash Verge、ClashX、Clash for Windows 等客户端。</p>
+              </div>
             </div>
 
             <div class="inline-tip">
@@ -257,12 +266,80 @@
         </div>
       </div>
     </el-dialog>
+
+    <el-tour
+      v-if="!isMobileView"
+      v-model="onboardingTourVisible"
+      v-model:current="onboardingTourCurrent"
+      :show-close="true"
+      :scroll-into-view-options="{ block: 'center', behavior: 'smooth' }"
+      @close="completeOnboardingGuide"
+      @finish="completeOnboardingGuide"
+      @change="handleOnboardingStepChange"
+    >
+      <el-tour-step
+        v-for="step in onboardingTourSteps"
+        :key="step.key"
+        :target="step.target"
+        :title="step.title"
+        :description="step.description"
+        :placement="step.placement"
+        :prev-button-props="{ children: '上一步' }"
+        :next-button-props="{ children: step.nextText }"
+      />
+    </el-tour>
+
+    <div
+      v-if="onboardingTourVisible && isMobileView"
+      class="mobile-onboarding-layer"
+      @touchmove.prevent
+      @wheel.prevent
+    >
+      <div class="mobile-onboarding-mask"></div>
+      <section class="mobile-onboarding-panel">
+        <button
+          type="button"
+          class="mobile-onboarding-close"
+          aria-label="关闭新手引导"
+          @click="completeOnboardingGuide"
+        >
+          跳过
+        </button>
+        <h3 class="mobile-onboarding-title">{{ currentOnboardingStep.title }}</h3>
+        <p class="mobile-onboarding-desc">{{ currentOnboardingStep.description }}</p>
+        <footer class="mobile-onboarding-footer">
+          <div class="mobile-onboarding-dots" aria-hidden="true">
+            <span
+              v-for="(step, index) in onboardingTourSteps"
+              :key="step.key"
+              :class="{ active: index === onboardingTourCurrent }"
+            ></span>
+          </div>
+          <div class="mobile-onboarding-actions">
+            <el-button
+              v-if="onboardingTourCurrent > 0"
+              class="mobile-onboarding-button mobile-onboarding-button-prev"
+              @click="handleMobileOnboardingPrev"
+            >
+              上一步
+            </el-button>
+            <el-button
+              type="primary"
+              class="mobile-onboarding-button mobile-onboarding-button-next"
+              @click="handleMobileOnboardingNext"
+            >
+              {{ currentOnboardingStep.nextText }}
+            </el-button>
+          </div>
+        </footer>
+      </section>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   CopyDocument,
@@ -276,6 +353,11 @@ import { marked } from 'marked'
 import { useUserStore } from '@/stores/user'
 import RenewDialog from '@/components/RenewDialog.vue'
 import api from '@/api'
+import {
+  getOnboardingGuideMode,
+  getOnboardingGuideSteps,
+  shouldCompleteOnboardingOnRouteLeave
+} from '@/utils/onboarding-guide'
 
 const userStore = useUserStore()
 const router = useRouter()
@@ -292,13 +374,25 @@ const showRenewDialog = ref(false)
 const syncLoading = ref(false)
 const syncTimer = ref(null)
 const windowWidth = ref(window.innerWidth)
+const onboardingTourVisible = ref(false)
+const onboardingTourCurrent = ref(0)
+const onboardingCompletionSaving = ref(false)
 
 const TEST_COUNT = 3
 const TEST_TIMEOUT = 5000
 const TEST_INTERVAL = 200
+const MOBILE_ONBOARDING_TARGET_CLASS = 'mobile-onboarding-target'
+const MOBILE_ONBOARDING_TARGET_HOST_CLASS = 'mobile-onboarding-target-host'
 
 const actionBusy = computed(() => optimizing.value || generatingSubscription.value)
 const optimizeDialogWidth = computed(() => (windowWidth.value <= 768 ? '94%' : '420px'))
+const onboardingGuideMode = computed(() => getOnboardingGuideMode(windowWidth.value))
+const isMobileView = computed(() => onboardingGuideMode.value === 'mobile')
+const onboardingTourSteps = computed(() => getOnboardingGuideSteps({
+  isMobile: isMobileView.value,
+  subscriptionReady: !!userInfo.value.subscription_ready
+}))
+const currentOnboardingStep = computed(() => onboardingTourSteps.value[onboardingTourCurrent.value] || onboardingTourSteps.value[0] || {})
 
 const displayName = computed(() => {
   if (!userInfo.value.email) return '欢迎回来'
@@ -349,6 +443,8 @@ async function checkSyncStatus() {
       if (result.data.payment_count === 1 && result.data.sync_status !== 2) {
         syncLoading.value = true
         startSyncPolling()
+      } else {
+        await scheduleOnboardingGuide(result.data)
       }
     }
   } catch (error) {
@@ -365,6 +461,7 @@ function startSyncPolling() {
         clearInterval(syncTimer.value)
         syncTimer.value = null
         await fetchUserInfo()
+        await scheduleOnboardingGuide(userInfo.value)
       }
     } catch (error) {
       console.error('检查同步状态失败:', error)
@@ -372,8 +469,269 @@ function startSyncPolling() {
   }, 5000)
 }
 
+/**
+ * 判断当前用户是否需要展示新手引导。
+ * 仅首单账号、同步完成且后端未标记完成时展示，避免老账号和已完成账号重复弹出。
+ *
+ * @param {Object} profile - 用户资料
+ * @returns {boolean} 是否需要展示
+ */
+function shouldShowOnboardingGuide(profile) {
+  return Number(profile?.payment_count) === 1 &&
+    Number(profile?.sync_status) === 2 &&
+    profile?.onboarding_completed !== true
+}
+
+/**
+ * 在同步弹窗关闭和 DOM 更新后启动新手引导。
+ * 移动端会先滚动到订阅工作区，解决首页首屏看不到操作区的问题。
+ *
+ * @param {Object} profile - 用户资料
+ * @returns {Promise<void>}
+ */
+async function scheduleOnboardingGuide(profile) {
+  if (!shouldShowOnboardingGuide(profile) || syncLoading.value || onboardingTourVisible.value) {
+    return
+  }
+
+  await startOnboardingGuide(false)
+}
+
+/**
+ * 启动新手引导流程。
+ * 自动触发时遵循后端完成状态，手动触发时允许用户重复查看。
+ *
+ * @param {boolean} manual - 是否用户手动触发
+ * @returns {Promise<void>}
+ */
+async function startOnboardingGuide(manual = false) {
+  if (!manual && !shouldShowOnboardingGuide(userInfo.value)) {
+    return
+  }
+
+  if (onboardingTourVisible.value) {
+    return
+  }
+
+  await nextTick()
+
+  if (isMobileView.value) {
+    scrollToOnboardingTarget(onboardingTourSteps.value[0]?.target)
+    await waitForScroll()
+  }
+
+  onboardingTourCurrent.value = 0
+    onboardingTourVisible.value = true
+
+  if (isMobileView.value) {
+    lockMobileOnboardingPage()
+    await nextTick()
+    activateMobileOnboardingTarget()
+  }
+}
+
+/**
+ * 引导步骤切换时确保目标可见，并在移动端刷新高亮元素。
+ *
+ * @param {number} current - 当前步骤索引
+ */
+function handleOnboardingStepChange(current) {
+  if (!isMobileView.value) {
+    return
+  }
+
+  const target = onboardingTourSteps.value[current]?.target
+  if (target) {
+    scrollToOnboardingTarget(target)
+  }
+}
+
+/**
+ * 移动端切换到指定引导步骤。
+ *
+ * @param {number} nextStep - 目标步骤索引
+ * @returns {Promise<void>}
+ */
+async function goToOnboardingStep(nextStep) {
+  onboardingTourCurrent.value = nextStep
+  const target = onboardingTourSteps.value[nextStep]?.target
+  if (target) {
+    scrollToOnboardingTarget(target)
+    await waitForScroll()
+    adjustMobileCopyStepScroll(nextStep)
+    await waitForScroll(120)
+  }
+  activateMobileOnboardingTarget()
+}
+
+/**
+ * 移动端处理下一步或完成。
+ */
+async function handleMobileOnboardingNext() {
+  blurActiveElement()
+
+  if (onboardingTourCurrent.value >= onboardingTourSteps.value.length - 1) {
+    await completeOnboardingGuide()
+    return
+  }
+
+  await goToOnboardingStep(onboardingTourCurrent.value + 1)
+}
+
+/**
+ * 移动端处理上一步。
+ *
+ * @returns {Promise<void>}
+ */
+async function handleMobileOnboardingPrev() {
+  blurActiveElement()
+  await goToOnboardingStep(onboardingTourCurrent.value - 1)
+}
+
+/**
+ * 清理移动端按钮触摸后的焦点态，避免按钮看起来像禁用。
+ */
+function blurActiveElement() {
+  if (document.activeElement && typeof document.activeElement.blur === 'function') {
+    document.activeElement.blur()
+  }
+}
+
+/**
+ * 为移动端当前目标添加高亮类。
+ */
+function activateMobileOnboardingTarget() {
+  clearMobileOnboardingTarget()
+  const target = currentOnboardingStep.value?.target
+  const element = target ? document.querySelector(target) : null
+  if (element) {
+    element.classList.add(MOBILE_ONBOARDING_TARGET_CLASS)
+    const fixedHost = element.closest('.bottom-nav')
+    if (fixedHost) {
+      fixedHost.classList.add(MOBILE_ONBOARDING_TARGET_HOST_CLASS)
+    }
+  }
+}
+
+/**
+ * 清理移动端目标高亮类。
+ */
+function clearMobileOnboardingTarget() {
+  document
+    .querySelectorAll(`.${MOBILE_ONBOARDING_TARGET_CLASS}`)
+    .forEach(element => element.classList.remove(MOBILE_ONBOARDING_TARGET_CLASS))
+  document
+    .querySelectorAll(`.${MOBILE_ONBOARDING_TARGET_HOST_CLASS}`)
+    .forEach(element => element.classList.remove(MOBILE_ONBOARDING_TARGET_HOST_CLASS))
+}
+
+/**
+ * 第三步目标较高，滚动后按说明面板位置修正，确保蓝框底部停在白色面板上方。
+ *
+ * @param {number} stepIndex - 步骤索引
+ */
+function adjustMobileCopyStepScroll(stepIndex) {
+  if (!isMobileView.value || onboardingTourSteps.value[stepIndex]?.key !== 'copy') {
+    return
+  }
+
+  const target = document.querySelector(currentOnboardingStep.value?.target)
+  const panel = document.querySelector('.mobile-onboarding-panel')
+  if (!target || !panel) {
+    return
+  }
+
+  const targetRect = target.getBoundingClientRect()
+  const panelRect = panel.getBoundingClientRect()
+  const gap = 14
+  const overlap = targetRect.bottom - panelRect.top + gap
+
+  if (overlap > 0) {
+    window.scrollBy({
+      top: overlap,
+      behavior: 'smooth'
+    })
+  }
+}
+
+/**
+ * 滚动到新手引导目标元素。
+ *
+ * @param {string} selector - 目标选择器
+ */
+function scrollToOnboardingTarget(selector) {
+  const element = document.querySelector(selector)
+  if (element) {
+    element.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+}
+
+/**
+ * 等待平滑滚动完成一个短周期，让 Tour 定位能拿到稳定位置。
+ *
+ * @returns {Promise<void>}
+ */
+function waitForScroll() {
+  return new Promise(resolve => setTimeout(resolve, 320))
+}
+
+/**
+ * 将当前用户的新手引导标记为完成。
+ * 完成或手动关闭都会写回后端，避免同一账号跨设备重复提示。
+ */
+async function completeOnboardingGuide() {
+  onboardingTourVisible.value = false
+  clearMobileOnboardingTarget()
+  unlockMobileOnboardingPage()
+
+  if (onboardingCompletionSaving.value || userInfo.value.onboarding_completed === true) {
+    return
+  }
+
+  try {
+    onboardingCompletionSaving.value = true
+    const response = await api.user.completeOnboarding()
+    if (response.code === 0) {
+      userInfo.value = {
+        ...userInfo.value,
+        onboarding_completed: true
+      }
+      userStore.userInfo = {
+        ...(userStore.userInfo || {}),
+        onboarding_completed: true
+      }
+    }
+  } catch (error) {
+    console.error('标记新手引导完成失败:', error)
+  } finally {
+    onboardingCompletionSaving.value = false
+  }
+}
+
 function handleResize() {
   windowWidth.value = window.innerWidth
+  if (onboardingTourVisible.value && isMobileView.value) {
+    lockMobileOnboardingPage()
+    activateMobileOnboardingTarget()
+  } else {
+    unlockMobileOnboardingPage()
+  }
+}
+
+/**
+ * 移动端引导期间锁住页面滚动，避免灰色背景区域仍可滑动。
+ */
+function lockMobileOnboardingPage() {
+  document.body.style.overflow = 'hidden'
+  document.documentElement.style.overflow = 'hidden'
+}
+
+/**
+ * 恢复移动端页面滚动。
+ */
+function unlockMobileOnboardingPage() {
+  document.body.style.overflow = ''
+  document.documentElement.style.overflow = ''
 }
 
 function renderMarkdown(content) {
@@ -662,8 +1020,20 @@ onMounted(() => {
   checkSyncStatus()
 })
 
+onBeforeRouteLeave(async () => {
+  if (shouldCompleteOnboardingOnRouteLeave({
+    visible: onboardingTourVisible.value,
+    current: onboardingTourCurrent.value,
+    steps: onboardingTourSteps.value
+  })) {
+    await completeOnboardingGuide()
+  }
+})
+
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  clearMobileOnboardingTarget()
+  unlockMobileOnboardingPage()
   if (syncTimer.value) {
     clearInterval(syncTimer.value)
     syncTimer.value = null
@@ -694,6 +1064,7 @@ onBeforeUnmount(() => {
 
 .welcome-card {
   padding: 24px;
+  position: relative;
 }
 
 .welcome-main {
@@ -765,6 +1136,22 @@ onBeforeUnmount(() => {
 .renew-button.is-disabled {
   background: linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%);
   box-shadow: none;
+}
+
+.guide-button {
+  min-width: 140px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 16px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.guide-button:hover,
+.guide-button:focus {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .progress-panel {
@@ -1244,6 +1631,149 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
+.mobile-onboarding-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.mobile-onboarding-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.52);
+}
+
+.mobile-onboarding-panel {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  z-index: 270;
+  padding: 22px 16px 16px;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.22);
+  pointer-events: auto;
+}
+
+.mobile-onboarding-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  min-width: 52px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.mobile-onboarding-close:active {
+  background: #edf2f7;
+}
+
+.mobile-onboarding-title {
+  margin: 0 42px 12px 0;
+  color: #0f172a;
+  font-size: 21px;
+  line-height: 1.35;
+}
+
+.mobile-onboarding-desc {
+  margin: 0;
+  color: #334155;
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+.mobile-onboarding-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.mobile-onboarding-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-onboarding-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.mobile-onboarding-dots span.active {
+  background: #409eff;
+}
+
+.mobile-onboarding-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mobile-onboarding-button {
+  min-width: 86px;
+  height: 44px;
+  border-radius: 10px;
+  font-size: 16px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-onboarding-button-prev,
+.mobile-onboarding-button-prev:focus,
+.mobile-onboarding-button-prev:hover {
+  border-color: #dcdfe6;
+  background: #fff;
+  color: #606266;
+}
+
+.mobile-onboarding-button-next,
+.mobile-onboarding-button-next:focus,
+.mobile-onboarding-button-next:hover {
+  border-color: #409eff;
+  background: #409eff;
+  color: #fff;
+}
+
+.mobile-onboarding-button-next:active {
+  border-color: #337ecc;
+  background: #337ecc;
+}
+
+.mobile-onboarding-button-prev:active {
+  border-color: #cdd0d6;
+  background: #f5f7fa;
+}
+
+:global(.mobile-onboarding-target) {
+  position: relative !important;
+  z-index: 260 !important;
+  scroll-margin-bottom: 360px;
+  outline: 3px solid rgba(64, 158, 255, 0.96);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.05), 0 16px 40px rgba(64, 158, 255, 0.24) !important;
+}
+
+:global(.subscription-copy-target.mobile-onboarding-target) {
+  scroll-margin-top: 64px;
+}
+
+:global(.mobile-onboarding-target-host) {
+  z-index: 260 !important;
+}
+
 @keyframes spin {
   from {
     transform: rotate(0deg);
@@ -1291,6 +1821,35 @@ onBeforeUnmount(() => {
 
   .welcome-actions :deep(.el-button) {
     width: 100%;
+  }
+
+  .guide-button {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    display: inline-flex !important;
+    flex: 0 0 auto !important;
+    width: fit-content !important;
+    min-width: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 4px 10px !important;
+    border: 1px solid rgba(37, 99, 235, 0.16);
+    border-radius: 999px;
+    background: #eff6ff;
+    color: #2563eb;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2 !important;
+    box-sizing: border-box;
+    box-shadow: none;
+  }
+
+  .guide-button:hover,
+  .guide-button:focus {
+    border-color: rgba(37, 99, 235, 0.28);
+    background: #dbeafe;
+    color: #1d4ed8;
   }
 
   .step-actions {

@@ -201,7 +201,7 @@ async function findUserProfileById(db, userId) {
     SELECT
       u.id, u.email, u.plan_id, u.subscription_token, u.sub_id,
       u.traffic_used, u.traffic_limit, u.expire_at, u.enabled, u.created_at,
-      u.payment_count, u.sync_status,
+      u.payment_count, u.sync_status, u.onboarding_completed,
       p.name as plan_name
     FROM users u
     LEFT JOIN plans p ON u.plan_id = p.id
@@ -218,6 +218,17 @@ async function findUserProfileById(db, userId) {
  */
 async function findUserSyncStatusById(db, userId) {
   return db.prepare('SELECT sync_status FROM users WHERE id = ?').get(userId);
+}
+
+/**
+ * 将用户新手引导标记为已完成。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<void>}
+ */
+async function markUserOnboardingCompleted(db, userId) {
+  await db.prepare('UPDATE users SET onboarding_completed = 1, updated_at = EXTRACT(EPOCH FROM NOW()) WHERE id = ?').run(userId);
 }
 
 /**
@@ -505,6 +516,7 @@ module.exports = {
   findLoginUserByEmail,
   findUserProfileById,
   findUserSyncStatusById,
+  markUserOnboardingCompleted,
   hasUserCfIps,
   hasUserSubscriptionCache,
   countUsers,
