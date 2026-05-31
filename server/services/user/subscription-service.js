@@ -10,6 +10,10 @@ const {
 const subscriptionRepository = require('../../repositories/subscription-repository');
 
 const SOURCE_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60;
+const CLASH_CONFIG_NAME_KEY = 'clash_config_name';
+const CLASH_PROFILE_UPDATE_INTERVAL_KEY = 'clash_profile_update_interval';
+const DEFAULT_CLASH_CONFIG_NAME = '天澜大陆';
+const DEFAULT_CLASH_PROFILE_UPDATE_INTERVAL_HOURS = '2';
 
 /**
  * 用户端订阅服务。
@@ -472,6 +476,55 @@ function assertActiveSubscriptionUser(user) {
 }
 
 /**
+ * 构建订阅客户端识别的用户流量响应头。
+ *
+ * @param {Object} subscription - 当前订阅记录
+ * @returns {Object} 包含流量用量、总量与到期时间的响应头
+ */
+function buildSubscriptionUserinfoHeaders(subscription) {
+  return {
+    'Subscription-Userinfo': `upload=0; download=${subscription.traffic_used}; total=${subscription.traffic_limit}; expire=${subscription.expire_at}`
+  };
+}
+
+/**
+ * 读取 Clash 订阅响应头配置，配置缺失或非法时回退默认值。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @returns {Promise<{configName:string,updateIntervalHours:string}>} Clash 订阅头配置
+ */
+async function getClashSubscriptionHeaderConfig(db) {
+  const [configNameRow, updateIntervalRow] = await Promise.all([
+    subscriptionRepository.findSystemSettingByKey(db, CLASH_CONFIG_NAME_KEY),
+    subscriptionRepository.findSystemSettingByKey(db, CLASH_PROFILE_UPDATE_INTERVAL_KEY)
+  ]);
+  const configName = String(configNameRow?.value || '').trim() || DEFAULT_CLASH_CONFIG_NAME;
+  const interval = Number(updateIntervalRow?.value);
+
+  return {
+    configName,
+    updateIntervalHours: Number.isFinite(interval) && interval > 0
+      ? String(interval)
+      : DEFAULT_CLASH_PROFILE_UPDATE_INTERVAL_HOURS
+  };
+}
+
+/**
+ * 构建 Clash 订阅专属响应头。
+ *
+ * @param {Object} subscription - 当前订阅记录，用于填充用户流量信息
+ * @param {Object} config - Clash 订阅头配置
+ * @returns {Object} Clash 订阅下载名、自动更新间隔与用户流量响应头
+ */
+function buildClashSubscriptionHeaders(subscription, config) {
+  return {
+    ...buildSubscriptionUserinfoHeaders(subscription),
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(config.configName)}`,
+    'Profile-Update-Interval': config.updateIntervalHours
+  };
+}
+
+/**
  * 生成用户订阅链接并刷新缓存。
  *
  * @param {Object} db - 数据库代理对象
@@ -660,10 +713,11 @@ async function getSubscriptionContent(db, token, query) {
 
   const nodes = JSON.parse(subscription.nodes_data || '[]');
   if (query.clash === '1') {
+    const clashHeaderConfig = await getClashSubscriptionHeaderConfig(db);
     return {
       email: subscription.email,
       contentType: 'text/yaml; charset=utf-8',
-      headers: {},
+      headers: buildClashSubscriptionHeaders(subscription, clashHeaderConfig),
       body: generateClashConfig(nodes, subscription)
     };
   }
@@ -681,9 +735,7 @@ async function getSubscriptionContent(db, token, query) {
   return {
     email: subscription.email,
     contentType: 'text/plain; charset=utf-8',
-    headers: {
-      'Subscription-Userinfo': `upload=0; download=${subscription.traffic_used}; total=${subscription.traffic_limit}; expire=${subscription.expire_at}`
-    },
+    headers: buildSubscriptionUserinfoHeaders(subscription),
     body: Buffer.from(v2rayConfig).toString('base64')
   };
 }

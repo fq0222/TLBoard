@@ -1,6 +1,7 @@
 const assert = require('assert');
 const subscriptionService = require('../services/user/subscription-service');
 const adminUsersService = require('../services/admin/users-service');
+const systemSettingsRouter = require('../routes/admin/system-settings');
 const subscriptionRepository = require('../repositories/subscription-repository');
 const userRepository = require('../repositories/user-repository');
 
@@ -10,17 +11,56 @@ const userRepository = require('../repositories/user-repository');
  * @param {Object} subscription - 预置订阅记录
  * @returns {Object} 测试用数据库对象
  */
-function createFakeDb(subscription) {
+function createFakeDb(subscription, settings = {}) {
   return {
     prepare(sql) {
       return {
-        get(token) {
+        get(param) {
+          if (sql.includes('FROM system_settings')) {
+            return settings[param] === undefined ? undefined : { value: settings[param] };
+          }
+
+          const token = param;
           if (sql.includes('FROM user_subscriptions') && token === subscription?.sub_id) {
             return subscription;
           }
           return undefined;
         }
       };
+    }
+  };
+}
+
+/**
+ * 构造仅覆盖订阅配置读写的轻量系统设置数据库。
+ *
+ * @param {Object} initialSettings - 初始系统设置
+ * @returns {{db:Object,writes:Array}} 假数据库与写入记录
+ */
+function createSystemSettingsFakeDb(initialSettings = {}) {
+  const settings = { ...initialSettings };
+  const writes = [];
+
+  return {
+    writes,
+    db: {
+      prepare(sql) {
+        return {
+          get(key) {
+            if (sql.includes('FROM system_settings')) {
+              return settings[key] === undefined ? undefined : { value: settings[key] };
+            }
+            return undefined;
+          }
+        };
+      },
+      pool: {
+        async query(sql, params) {
+          writes.push({ sql, params });
+          settings[params[0]] = params[1];
+          return { rows: [], rowCount: 1 };
+        }
+      }
     }
   };
 }
@@ -91,9 +131,88 @@ async function testClashSubscriptionShouldRenderYaml() {
   );
 
   assert.strictEqual(result.contentType, 'text/yaml; charset=utf-8');
+  assert.strictEqual(
+    result.headers['Subscription-Userinfo'],
+    'upload=0; download=0; total=0; expire=0'
+  );
+  assert.strictEqual(
+    result.headers['Content-Disposition'],
+    `attachment; filename*=UTF-8''${encodeURIComponent('天澜大陆')}`
+  );
+  assert.strictEqual(result.headers['Profile-Update-Interval'], '2');
   assert.ok(result.body.includes('type: vless'));
   assert.ok(result.body.includes('server: 2606:4700:4700::1111'));
   assert.ok(result.body.includes('Host: cdn.example.com'));
+}
+
+/**
+ * 验证 Clash 订阅响应头会优先使用系统设置中的订阅配置。
+ *
+ * @returns {Promise<void>}
+ */
+async function testClashSubscriptionShouldUseSystemSettingsHeaders() {
+  const subscription = {
+    sub_id: 'sub-token-settings',
+    email: 'user@example.com',
+    enabled: 1,
+    traffic_used: 1024,
+    traffic_limit: 2048,
+    expire_at: 1700000000,
+    nodes_data: '[]'
+  };
+
+  const result = await subscriptionService.getSubscriptionContent(
+    createFakeDb(subscription, {
+      clash_config_name: '自定义订阅',
+      clash_profile_update_interval: '6'
+    }),
+    'sub-token-settings',
+    { clash: '1' }
+  );
+
+  assert.strictEqual(
+    result.headers['Content-Disposition'],
+    `attachment; filename*=UTF-8''${encodeURIComponent('自定义订阅')}`
+  );
+  assert.strictEqual(result.headers['Profile-Update-Interval'], '6');
+  assert.strictEqual(
+    result.headers['Subscription-Userinfo'],
+    'upload=0; download=1024; total=2048; expire=1700000000'
+  );
+}
+
+/**
+ * 验证订阅配置缺失时管理端设置接口返回默认值。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSystemSettingsSubscriptionDefaults() {
+  const { db } = createSystemSettingsFakeDb();
+  const config = await systemSettingsRouter.getSubscriptionConfig(db);
+
+  assert.deepStrictEqual(config, {
+    clash_config_name: '天澜大陆',
+    clash_profile_update_interval: 2
+  });
+}
+
+/**
+ * 验证保存订阅配置会写入两个系统设置键。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSystemSettingsSubscriptionSave() {
+  const { db, writes } = createSystemSettingsFakeDb();
+  await systemSettingsRouter.saveSubscriptionConfig(db, {
+    clash_config_name: '自定义订阅',
+    clash_profile_update_interval: 6
+  });
+
+  assert.strictEqual(writes.length, 2);
+  assert.strictEqual(writes[0].params[0], 'clash_config_name');
+  assert.strictEqual(writes[0].params[1], '自定义订阅');
+  assert.strictEqual(writes[1].params[0], 'clash_profile_update_interval');
+  assert.strictEqual(writes[1].params[1], '6');
 }
 
 /**
@@ -193,6 +312,9 @@ async function testUserCfIpQueriesShouldMatchCurrentSchema() {
 async function run() {
   await testDefaultSubscriptionContentShouldReturnBase64AndUserinfo();
   await testClashSubscriptionShouldRenderYaml();
+  await testClashSubscriptionShouldUseSystemSettingsHeaders();
+  await testSystemSettingsSubscriptionDefaults();
+  await testSystemSettingsSubscriptionSave();
   await testDisabledSubscriptionShouldThrowBusinessError();
   await testAdminSubscriptionShouldReuseUserIncrementalGenerator();
   await testUserCfIpQueriesShouldMatchCurrentSchema();

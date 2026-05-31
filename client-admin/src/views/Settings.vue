@@ -154,6 +154,36 @@
           </el-form>
         </div>
       </el-tab-pane>
+
+      <el-tab-pane label="订阅配置" name="subscription">
+        <div class="content-card">
+          <h2 class="card-title">订阅响应配置</h2>
+          <el-form :model="subscriptionForm" label-width="160px" style="max-width: 640px;">
+            <el-form-item label="Clash 订阅名称">
+              <el-input
+                v-model="subscriptionForm.clash_config_name"
+                maxlength="100"
+                show-word-limit
+                placeholder="请输入订阅配置名称"
+              />
+            </el-form-item>
+            <el-form-item label="自动更新间隔">
+              <el-input-number
+                v-model="subscriptionForm.clash_profile_update_interval"
+                :min="1"
+                :max="168"
+                :step="1"
+                :precision="0"
+                placeholder="自动更新间隔"
+              />
+              <span style="margin-left: 10px; color: #666;">小时（写入 Profile-Update-Interval 响应头）</span>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="saveSubscriptionConfig" :loading="subscriptionSaving">保存配置</el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog v-model="adminDialogVisible" title="添加管理员" width="400px">
@@ -224,6 +254,12 @@ const trafficForm = ref({
   traffic_usage_multiplier: 1.0
 })
 const trafficSaving = ref(false)
+
+const subscriptionForm = ref({
+  clash_config_name: '天澜大陆',
+  clash_profile_update_interval: 2
+})
+const subscriptionSaving = ref(false)
 
 const passwordForm = reactive({
   old_password: '',
@@ -416,11 +452,56 @@ async function saveTrafficConfig() {
   }
 }
 
+/**
+ * 加载 Clash 订阅响应头配置。
+ * 关键分支：接口成功时覆盖默认表单值，失败时保留本地默认值供管理员继续编辑。
+ */
+async function loadSubscriptionConfig() {
+  try {
+    const res = await api.admin.getSubscriptionConfig()
+    if (res.code === 0) {
+      subscriptionForm.value = res.data
+    }
+  } catch (error) {
+    console.error('加载订阅配置失败:', error)
+  }
+}
+
+/**
+ * 保存 Clash 订阅响应头配置。
+ * 关键分支：名称为空时前端拦截，其余校验交给后端保证配置范围一致。
+ */
+async function saveSubscriptionConfig() {
+  if (!subscriptionForm.value.clash_config_name.trim()) {
+    ElMessage.warning('请输入 Clash 订阅名称')
+    return
+  }
+
+  try {
+    subscriptionSaving.value = true
+    const res = await api.admin.saveSubscriptionConfig({
+      clash_config_name: subscriptionForm.value.clash_config_name.trim(),
+      clash_profile_update_interval: subscriptionForm.value.clash_profile_update_interval
+    })
+    if (res.code === 0) {
+      subscriptionForm.value = res.data
+      ElMessage.success('订阅配置已保存')
+    } else {
+      ElMessage.error(res.message)
+    }
+  } catch (error) {
+    ElMessage.error('保存失败')
+  } finally {
+    subscriptionSaving.value = false
+  }
+}
+
 onMounted(() => {
   fetchAdmins()
   loadEmailConfig()
   loadResourceConfig()
   loadTrafficConfig()
+  loadSubscriptionConfig()
 })
 </script>
 

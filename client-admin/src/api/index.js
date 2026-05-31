@@ -681,6 +681,25 @@ const adminApi = {
     return apiClient.put('/system-settings/traffic', data)
   },
 
+  /**
+   * 获取订阅响应配置
+   * @returns {Promise<Object>} 订阅名称和自动更新间隔
+   */
+  getSubscriptionConfig() {
+    return apiClient.get('/system-settings/subscription')
+  },
+
+  /**
+   * 保存订阅响应配置
+   * @param {Object} data - 订阅配置
+   * @param {string} data.clash_config_name - Clash 订阅下载名称
+   * @param {number} data.clash_profile_update_interval - 自动更新间隔（小时）
+   * @returns {Promise<Object>} 保存后的订阅配置
+   */
+  saveSubscriptionConfig(data) {
+    return apiClient.put('/system-settings/subscription', data)
+  },
+
   // 分发资源给用户
   distributeResource(resourceId, data) {
     return apiClient.post(`/resources/${resourceId}/distribute`, data)

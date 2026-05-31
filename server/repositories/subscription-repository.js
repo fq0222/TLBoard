@@ -207,6 +207,17 @@ async function findSubscriptionContentByToken(db, token) {
 }
 
 /**
+ * 查询单个系统设置值。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {string} key - 系统设置键名
+ * @returns {Promise<Object|undefined>} 设置记录
+ */
+async function findSystemSettingByKey(db, key) {
+  return db.prepare('SELECT value FROM system_settings WHERE key = ?').get(key);
+}
+
+/**
  * 查询指定服务器的节点快照详情。
  *
  * @param {Object} db - 数据库代理对象
@@ -233,5 +244,6 @@ module.exports = {
   upsertSubscriptionSource,
   saveUserSubscriptionCache,
   findSubscriptionContentByToken,
+  findSystemSettingByKey,
   listServerNodes
 };
