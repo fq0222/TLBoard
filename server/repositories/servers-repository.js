@@ -114,37 +114,6 @@ async function deleteServer(db, serverId) {
 }
 
 /**
- * 覆盖服务器节点缓存。
- *
- * @param {Object} db - 数据库实例
- * @param {number} serverId - 服务器 ID
- * @param {Array<Object>} nodes - 节点列表
- * @returns {Promise<void>}
- */
-async function replaceServerNodes(db, serverId, nodes) {
-  await deleteServerNodes(db, serverId);
-
-  const insertStatement = db.prepare(`
-    INSERT INTO xui_nodes (server_id, inbound_id, remark, port, protocol, settings, stream_settings, user_count, online_count)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (const node of nodes) {
-    await insertStatement.run(
-      serverId,
-      node.inbound_id,
-      node.remark,
-      node.port,
-      node.protocol,
-      node.settings,
-      node.stream_settings,
-      node.user_count,
-      node.online_count
-    );
-  }
-}
-
-/**
  * 查询服务器当前缓存的节点列表。
  *
  * @param {Object} db - 数据库实例
@@ -169,6 +138,5 @@ module.exports = {
   updateServerStatus,
   deleteServerNodes,
   deleteServer,
-  replaceServerNodes,
   listCachedServerNodes
 };

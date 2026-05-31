@@ -2,6 +2,7 @@ const { formatTraffic } = require('../../shared/utils/format-traffic');
 const { createLogger } = require('../../utils/logger');
 const XuiService = require('../../integrations/xui/xui-service');
 const serversRepository = require('../../repositories/servers-repository');
+const xuiNodeSnapshotService = require('../shared/xui-node-snapshot-service');
 
 const logger = createLogger('ADMIN-SERVERS');
 
@@ -274,7 +275,7 @@ async function getServerDetail(db, serverId) {
 
     const onlineResult = await xuiService.getOnlineClients();
     const onlineEmails = onlineResult.success ? onlineResult.data : [];
-    const nodeRows = [];
+    const onlineCountByInboundId = new Map();
 
     for (const inbound of inboundsResult.data) {
       const clientStats = inbound.clientStats || [];
@@ -300,14 +301,16 @@ async function getServerDetail(db, serverId) {
       });
 
       const onlineCount = users.filter((user) => user.is_online).length;
-      nodeRows.push(toNodeCacheRow(inbound, onlineCount));
+      onlineCountByInboundId.set(inbound.id, onlineCount);
       nodes.push({
         ...toNodeCacheRow(inbound, onlineCount),
         users
       });
     }
 
-    await serversRepository.replaceServerNodes(db, serverId, nodeRows);
+    await xuiNodeSnapshotService.refreshServerNodeSnapshots(db, serverId, inboundsResult.data, {
+      onlineCountByInboundId
+    });
     logger.info(`从 3X-UI 获取节点信息成功: ${nodes.length} 个节点`);
   } catch (error) {
     logger.error(`从 3X-UI 获取信息错误: ${error.message}`);
@@ -350,20 +353,12 @@ async function syncServer(db, serverId) {
   await serversRepository.updateServerStatus(db, serverId, syncResult.status, syncedAt);
 
   if (syncResult.success && Array.isArray(syncResult.nodes) && syncResult.nodes.length > 0) {
-    const nodeRows = syncResult.nodes.map((node) => ({
-      inbound_id: node.inbound_id,
-      remark: node.remark,
-      port: node.port,
-      protocol: node.protocol,
-      settings: typeof node.settings === 'string' ? node.settings : JSON.stringify(node.settings || {}),
-      stream_settings: typeof node.stream_settings === 'string'
-        ? node.stream_settings
-        : JSON.stringify(node.stream_settings || {}),
-      user_count: node.user_count,
-      online_count: node.online_count
-    }));
-    await serversRepository.replaceServerNodes(db, serverId, nodeRows);
-    logger.info(`更新节点信息成功: ${nodeRows.length} 个节点`);
+    const refreshResult = await xuiNodeSnapshotService.refreshServerNodeSnapshots(
+      db,
+      serverId,
+      syncResult.nodes
+    );
+    logger.info(`更新节点信息成功: ${refreshResult.nodeCount} 个节点`);
   }
 
   return {

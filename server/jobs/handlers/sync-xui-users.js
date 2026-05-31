@@ -5,6 +5,7 @@
 
 const XuiService = require('../../integrations/xui/xui-service');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
+const xuiNodeSnapshotService = require('../../services/shared/xui-node-snapshot-service');
 const { createLogger } = require('../../utils/logger');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
 
@@ -256,6 +257,13 @@ async function syncUsersToServer(db, server, users) {
       logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${inboundsResult.message}`);
       return;
     }
+
+    const refreshResult = await xuiNodeSnapshotService.refreshServerNodeSnapshots(
+      db,
+      server.id,
+      inboundsResult.data
+    );
+    logger.info(`服务器 ${server.name} 节点快照已刷新: ${refreshResult.nodeCount} 个节点`);
 
     let syncCount = 0;
 

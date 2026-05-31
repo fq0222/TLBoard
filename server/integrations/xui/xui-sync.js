@@ -7,6 +7,7 @@
 const XuiService = require('./xui-service');
 const { createLogger } = require('../../utils/logger');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
+const xuiNodeSnapshotService = require('../../services/shared/xui-node-snapshot-service');
 
 const logger = createLogger('XUI-SYNC');
 
@@ -29,38 +30,22 @@ async function syncServerNodes(db, server) {
       return { success: false, message: inboundsResult.message };
     }
 
-    await xuiSyncRepository.deleteServerNodes(db, server.id);
+    const refreshResult = await xuiNodeSnapshotService.refreshServerNodeSnapshots(
+      db,
+      server.id,
+      inboundsResult.data
+    );
 
     for (const inbound of inboundsResult.data) {
-      const settings = typeof inbound.settings === 'string'
-        ? inbound.settings
-        : JSON.stringify(inbound.settings || {});
-      const streamSettings = typeof inbound.streamSettings === 'string'
-        ? inbound.streamSettings
-        : JSON.stringify(inbound.streamSettings || {});
-      const clientStats = inbound.clientStats || [];
-
-      await xuiSyncRepository.insertServerNodeSnapshot(db, {
-        serverId: server.id,
-        inboundId: inbound.id,
-        remark: inbound.remark,
-        port: inbound.port,
-        protocol: inbound.protocol,
-        settings,
-        streamSettings,
-        userCount: clientStats.length,
-        onlineCount: 0
-      });
-
       logger.info(`节点 ${inbound.remark}: inbound_id ${inbound.id}`);
     }
 
-    logger.info(`同步服务器 ${server.name} 完成，共 ${inboundsResult.data.length} 个节点`);
+    logger.info(`同步服务器 ${server.name} 完成，共 ${refreshResult.nodeCount} 个节点`);
 
     return {
       success: true,
       serverId: server.id,
-      nodeCount: inboundsResult.data.length
+      nodeCount: refreshResult.nodeCount
     };
   } catch (error) {
     logger.error(`同步服务器 ${server.name} 错误: ${error.message}`);

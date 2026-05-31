@@ -322,7 +322,5 @@ module.exports = {
   markXuiSyncTaskFailed,
   findUserForSyncTask,
   listUsersForXuiSync,
-  listOnlineXuiServers,
-  deleteServerNodes,
-  insertServerNodeSnapshot
+  listOnlineXuiServers
 };
