@@ -33,6 +33,15 @@ router.get('/', authenticateAdmin, [
     .withMessage('套餐ID必须是大于0的整数')
 ], usersController.listUsers);
 
+router.post('/batch-generate-subscriptions', authenticateAdmin, [
+  body('cf_optimized_only')
+    .optional()
+    .isIn([true, false, 0, 1, '0', '1', 'true', 'false'])
+    .withMessage('cf_optimized_only必须是布尔值')
+], usersController.startBatchGenerateSubscriptions);
+
+router.get('/batch-generate-subscriptions/status', authenticateAdmin, usersController.getBatchGenerateSubscriptionStatus);
+
 router.get('/:id', authenticateAdmin, [
   param('id')
     .isInt({ min: 1 })

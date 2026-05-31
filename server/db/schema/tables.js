@@ -175,6 +175,43 @@ const tableDefinitions = [
     `
   },
   {
+    logMessage: '批量订阅生成任务表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS batch_subscription_tasks (
+        id SERIAL PRIMARY KEY,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        filter_cf_optimized INTEGER DEFAULT 1,
+        total_count INTEGER DEFAULT 0,
+        completed_count INTEGER DEFAULT 0,
+        failed_count INTEGER DEFAULT 0,
+        current_email VARCHAR(255) DEFAULT '',
+        last_error TEXT,
+        started_at BIGINT,
+        finished_at BIGINT,
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+      )
+    `
+  },
+  {
+    logMessage: '批量订阅生成任务明细表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS batch_subscription_task_items (
+        id SERIAL PRIMARY KEY,
+        task_id INTEGER NOT NULL REFERENCES batch_subscription_tasks(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        email VARCHAR(255) NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        error_message TEXT,
+        started_at BIGINT,
+        finished_at BIGINT,
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        UNIQUE(user_id)
+      )
+    `
+  },
+  {
     logMessage: '3X-UI 同步任务队列表初始化完成',
     sql: `
       CREATE TABLE IF NOT EXISTS xui_sync_tasks (

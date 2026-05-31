@@ -45,6 +45,7 @@ const { registerReleaseExpiredSalesJob } = require('./handlers/release-expired-s
 const { registerEmailCampaignJob } = require('./handlers/process-email-campaigns');
 const { registerCleanEmailLogsJob } = require('./handlers/clean-email-logs');
 const { registerBackupXuiDbJob } = require('./handlers/backup-xui-db');
+const { registerBatchSubscriptionTaskJob } = require('./handlers/resume-batch-subscription-tasks');
 
 const logger = createLogger('JOBS');
 
@@ -118,6 +119,7 @@ function startAllJobs(db) {
     registerEmailCampaignJob(context);
     registerCleanEmailLogsJob(context);
     registerBackupXuiDbJob(context);
+    registerBatchSubscriptionTaskJob(context);
   } catch (error) {
     cleanupJobHandles();
     logger.error(`启动定时任务失败: ${error.message}`);

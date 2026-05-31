@@ -10,6 +10,7 @@ const { startAllJobs, stopAllJobs } = require('./jobs');
 const createUserApp = require('./bootstrap/create-user-app');
 const createAdminApp = require('./bootstrap/create-admin-app');
 const registerShutdown = require('./bootstrap/register-shutdown');
+const { registerAdminBatchSubscriptionWs } = require('./websocket/admin-batch-subscription-ws');
 const { createLogger } = require('./utils/logger');
 
 const logger = createLogger('APP');
@@ -51,6 +52,8 @@ async function startApp() {
   adminServer = adminApp.listen(config.admin.port, () => {
     logger.info(`管理端服务器启动成功，端口: ${config.admin.port}`);
   });
+  // 管理端批量任务进度使用 WebSocket 实时推送，不影响普通 HTTP API。
+  registerAdminBatchSubscriptionWs(adminServer, db);
 }
 
 startApp();

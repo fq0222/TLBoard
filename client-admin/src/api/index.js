@@ -299,6 +299,24 @@ const adminApi = {
   },
 
   /**
+   * 启动批量生成用户订阅链接任务
+   * @param {Object} data - 批处理选项
+   * @param {boolean} data.cf_optimized_only - 是否仅处理已配置优选 CF IP 的用户
+   * @returns {Promise<Object>} 响应数据
+   */
+  startBatchGenerateSubscriptions(data) {
+    return apiClient.post('/users/batch-generate-subscriptions', data)
+  },
+
+  /**
+   * 获取最近一次批量生成订阅链接任务状态
+   * @returns {Promise<Object>} 响应数据
+   */
+  getBatchGenerateSubscriptionStatus() {
+    return apiClient.get('/users/batch-generate-subscriptions/status')
+  },
+
+  /**
    * 获取订单列表
    * @param {Object} params - 查询参数
    * @returns {Promise<Object>} 响应数据

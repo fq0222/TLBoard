@@ -2,6 +2,7 @@ const { validationResult } = require('express-validator');
 const { createLogger } = require('../../utils/logger');
 const { generateSubscriptionUrls } = require('../../utils/site-url');
 const usersService = require('../../services/admin/users-service');
+const batchSubscriptionService = require('../../services/admin/batch-subscription-service');
 
 const logger = createLogger('ADMIN-USERS');
 
@@ -220,10 +221,61 @@ async function generateSubscription(req, res) {
   }
 }
 
+/**
+ * 启动批量重新生成订阅链接任务。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function startBatchGenerateSubscriptions(req, res) {
+  if (handleValidationFailure(req, res)) {
+    return;
+  }
+
+  try {
+    const cfOptimizedOnly = ![false, 0, '0', 'false'].includes(req.body.cf_optimized_only);
+    const data = await batchSubscriptionService.startTask(req.app.locals.db, {
+      cfOptimizedOnly
+    });
+
+    logger.info(`启动批量生成订阅任务: task=${data.id}, total=${data.total_count}`);
+    return res.json({
+      code: 0,
+      message: 'ok',
+      data
+    });
+  } catch (error) {
+    return handleControllerError(res, '启动批量生成订阅任务', error);
+  }
+}
+
+/**
+ * 获取最近一次批量重新生成订阅链接任务状态。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function getBatchGenerateSubscriptionStatus(req, res) {
+  try {
+    const data = await batchSubscriptionService.getLatestStatus(req.app.locals.db);
+    return res.json({
+      code: 0,
+      message: 'ok',
+      data
+    });
+  } catch (error) {
+    return handleControllerError(res, '获取批量生成订阅任务状态', error);
+  }
+}
+
 module.exports = {
   listUsers,
   getUserDetail,
   updateUser,
   updateUserCfIps,
-  generateSubscription
+  generateSubscription,
+  startBatchGenerateSubscriptions,
+  getBatchGenerateSubscriptionStatus
 };

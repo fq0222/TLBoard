@@ -4,6 +4,7 @@
  */
 
 const axios = require('axios');
+const xuiActivityTracker = require('../../utils/xui-activity-tracker');
 
 class XuiApiClient {
   constructor(baseURL, apiToken, options = {}) {
@@ -62,21 +63,31 @@ class XuiApiClient {
   }
 
   async request(method, path, data) {
-    const response = await this.api.request({
-      method,
-      url: path,
-      ...(data !== undefined ? { data } : {})
-    });
-    return response.data;
+    xuiActivityTracker.beginRequest();
+    try {
+      const response = await this.api.request({
+        method,
+        url: path,
+        ...(data !== undefined ? { data } : {})
+      });
+      return response.data;
+    } finally {
+      xuiActivityTracker.endRequest();
+    }
   }
 
   async download(path) {
-    const response = await this.api.request({
-      method: 'get',
-      url: path,
-      responseType: 'arraybuffer'
-    });
-    return response.data;
+    xuiActivityTracker.beginRequest();
+    try {
+      const response = await this.api.request({
+        method: 'get',
+        url: path,
+        responseType: 'arraybuffer'
+      });
+      return response.data;
+    } finally {
+      xuiActivityTracker.endRequest();
+    }
   }
 
   getInbounds() {

@@ -19,6 +19,14 @@
           <el-option label="已过期" value="expired" />
           <el-option label="已禁用" value="disabled" />
         </el-select>
+        <el-button type="warning" @click="batchDialogVisible = true">
+          批量生成订阅链接
+        </el-button>
+        <div v-if="batchProgress.id" class="batch-progress">
+          当前执行 {{ batchProgress.current_email || '-' }}
+          {{ batchProgress.completed_count }} / {{ batchProgress.total_count }}
+          状态：{{ batchProgress.status_text }}
+        </div>
       </div>
       
       <el-table :data="users" style="width: 100%">
@@ -192,11 +200,27 @@
         <el-button @click="dialogVisible = false" :disabled="submitting">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="batchDialogVisible" title="批量生成订阅链接" width="420px" :close-on-click-modal="!batchStarting">
+      <div class="batch-dialog-tip">
+        批处理会在 3X-UI 空闲时逐个执行；如果期间有其它 3X-UI 接口访问，后续用户会暂停等待，当前用户会继续完成。
+      </div>
+      <el-checkbox v-model="batchForm.cfOptimizedOnly">
+        仅处理已优选 CF IP 的用户
+      </el-checkbox>
+
+      <template #footer>
+        <el-button @click="batchDialogVisible = false" :disabled="batchStarting">取消</el-button>
+        <el-button type="primary" :loading="batchStarting" @click="startBatchGenerateSubscriptions">
+          开始执行
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Search, Loading, Delete, CopyDocument, Link } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
@@ -221,6 +245,24 @@ const generatingSubscription = ref(false)
 const subscriptionUrl = ref('')
 const clashUrl = ref('')
 const EDIT_DIALOG_ACTION_TIMEOUT = 30000
+const batchDialogVisible = ref(false)
+const batchStarting = ref(false)
+const batchSocket = ref(null)
+
+const batchForm = reactive({
+  cfOptimizedOnly: true
+})
+
+const batchProgress = reactive({
+  id: null,
+  status: '',
+  status_text: '',
+  current_email: '',
+  completed_count: 0,
+  total_count: 0,
+  failed_count: 0,
+  last_error: ''
+})
 
 const userForm = reactive({
   email: '',
@@ -291,6 +333,108 @@ async function fetchUsers() {
     }
   } catch (error) {
     console.error('获取用户列表失败:', error)
+  }
+}
+
+/**
+ * 写入批量任务进度，保持页面展示字段稳定。
+ */
+function applyBatchStatus(status) {
+  if (!status) return
+  Object.assign(batchProgress, {
+    id: status.id,
+    status: status.status || '',
+    status_text: status.status_text || '',
+    current_email: status.current_email || '',
+    completed_count: Number(status.completed_count) || 0,
+    total_count: Number(status.total_count) || 0,
+    failed_count: Number(status.failed_count) || 0,
+    last_error: status.last_error || ''
+  })
+}
+
+/**
+ * 构造管理端批量任务 WebSocket 地址。
+ * token 放在查询参数中，服务端会复用管理端 JWT 密钥进行校验。
+ */
+function buildBatchWsUrl(taskId) {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const token = encodeURIComponent(localStorage.getItem('admin_token') || '')
+  return `${protocol}//${window.location.host}/api/admin/users/batch-generate-subscriptions/ws?token=${token}&task_id=${taskId}`
+}
+
+/**
+ * 建立批量任务进度 WebSocket。
+ * 任务结束时服务端会主动关闭连接，前端只负责清理引用。
+ */
+function connectBatchWebSocket(taskId) {
+  if (batchSocket.value) {
+    batchSocket.value.close()
+  }
+
+  const socket = new WebSocket(buildBatchWsUrl(taskId))
+  batchSocket.value = socket
+
+  socket.onmessage = (event) => {
+    try {
+      const message = JSON.parse(event.data)
+      if (message.type === 'status') {
+        applyBatchStatus(message.data)
+      }
+    } catch (error) {
+      console.error('解析批量任务进度失败:', error)
+    }
+  }
+
+  socket.onclose = () => {
+    if (batchSocket.value === socket) {
+      batchSocket.value = null
+    }
+  }
+}
+
+/**
+ * 启动批量生成订阅链接任务。
+ * 当前只开放“优选过 CF IP 的用户”条件，后续可在弹窗中继续扩展筛选项。
+ */
+async function startBatchGenerateSubscriptions() {
+  try {
+    batchStarting.value = true
+    const response = await api.admin.startBatchGenerateSubscriptions({
+      cf_optimized_only: batchForm.cfOptimizedOnly
+    })
+
+    if (response.code === 0) {
+      applyBatchStatus(response.data)
+      connectBatchWebSocket(response.data.id)
+      batchDialogVisible.value = false
+      ElMessage.success('批量任务已启动')
+    } else {
+      ElMessage.error(response.message || '启动批量任务失败')
+    }
+  } catch (error) {
+    console.error('启动批量任务失败:', error)
+    ElMessage.error('启动批量任务失败')
+  } finally {
+    batchStarting.value = false
+  }
+}
+
+/**
+ * 页面加载时读取最近任务进度。
+ * 若任务仍在运行中，则重新建立 WebSocket，避免刷新页面后看不到实时状态。
+ */
+async function loadBatchStatus() {
+  try {
+    const response = await api.admin.getBatchGenerateSubscriptionStatus()
+    if (response.code === 0 && response.data) {
+      applyBatchStatus(response.data)
+      if (['pending', 'running', 'paused'].includes(response.data.status)) {
+        connectBatchWebSocket(response.data.id)
+      }
+    }
+  } catch (error) {
+    console.error('获取批量任务状态失败:', error)
   }
 }
 
@@ -464,6 +608,14 @@ function getStatusType(status) {
 
 onMounted(() => {
   fetchUsers()
+  loadBatchStatus()
+})
+
+onBeforeUnmount(() => {
+  if (batchSocket.value) {
+    batchSocket.value.close()
+    batchSocket.value = null
+  }
 })
 </script>
 
@@ -473,7 +625,9 @@ onMounted(() => {
 .page-title { font-size: 28px; color: #333; margin-bottom: 10px; }
 .page-subtitle { color: #666; font-size: 16px; }
 .content-card { background: #fff; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 20px; }
-.toolbar { display: flex; align-items: center; margin-bottom: 20px; }
+.toolbar { display: flex; align-items: center; margin-bottom: 20px; gap: 0; flex-wrap: wrap; }
 .pagination { margin-top: 20px; display: flex; justify-content: flex-end; }
 .section-actions { margin-top: 12px; display: flex; align-items: center; gap: 10px; }
+.batch-progress { margin-left: 16px; color: #606266; font-size: 13px; white-space: nowrap; }
+.batch-dialog-tip { margin-bottom: 12px; color: #606266; font-size: 13px; line-height: 1.6; }
 </style>
