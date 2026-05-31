@@ -12,6 +12,7 @@ const batchSubscriptionService = require('../services/admin/batch-subscription-s
 const logger = createLogger('ADMIN-BATCH-WS');
 const WS_PATH = '/api/admin/users/batch-generate-subscriptions/ws';
 const FINISHED_STATUSES = new Set(['completed', 'failed']);
+const STATUS_PUSH_INTERVAL = 2000;
 
 /**
  * 发送 JSON 消息。
@@ -79,6 +80,7 @@ function registerAdminBatchSubscriptionWs(server, db) {
 
   wsServer.on('connection', async (socket, request) => {
     logger.info(`批量订阅 WebSocket 已连接: ${request.admin.username}`);
+    const taskId = Number(request.batchTaskId) || null;
 
     const listener = (status) => {
       sendJson(socket, { type: 'status', data: status });
@@ -87,20 +89,30 @@ function registerAdminBatchSubscriptionWs(server, db) {
       }
     };
 
+    const pushCurrentStatus = async () => {
+      const status = taskId
+        ? await batchSubscriptionService.getStatusById(taskId)
+        : await batchSubscriptionService.getLatestStatus(db);
+
+      if (status) {
+        listener(status);
+      }
+    };
+
     batchSubscriptionService.on('status', listener);
+    const statusTimer = setInterval(() => {
+      pushCurrentStatus().catch(error => {
+        logger.warn(`推送批量订阅状态失败: ${error.message}`);
+      });
+    }, STATUS_PUSH_INTERVAL);
+
     socket.on('close', () => {
+      clearInterval(statusTimer);
       batchSubscriptionService.off('status', listener);
       logger.info(`批量订阅 WebSocket 已关闭: ${request.admin.username}`);
     });
 
-    const taskId = Number(request.batchTaskId) || null;
-    const status = taskId
-      ? await batchSubscriptionService.getStatusById(taskId)
-      : await batchSubscriptionService.getLatestStatus(db);
-
-    if (status) {
-      listener(status);
-    }
+    await pushCurrentStatus();
   });
 
   return wsServer;

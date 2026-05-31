@@ -248,6 +248,7 @@ const EDIT_DIALOG_ACTION_TIMEOUT = 30000
 const batchDialogVisible = ref(false)
 const batchStarting = ref(false)
 const batchSocket = ref(null)
+const batchReconnectTimer = ref(null)
 
 const batchForm = reactive({
   cfOptimizedOnly: true
@@ -369,7 +370,12 @@ function buildBatchWsUrl(taskId) {
  */
 function connectBatchWebSocket(taskId) {
   if (batchSocket.value) {
+    batchSocket.value.manualClose = true
     batchSocket.value.close()
+  }
+  if (batchReconnectTimer.value) {
+    clearTimeout(batchReconnectTimer.value)
+    batchReconnectTimer.value = null
   }
 
   const socket = new WebSocket(buildBatchWsUrl(taskId))
@@ -386,9 +392,18 @@ function connectBatchWebSocket(taskId) {
     }
   }
 
+  socket.onerror = (error) => {
+    console.error('批量任务 WebSocket 连接异常:', error)
+  }
+
   socket.onclose = () => {
     if (batchSocket.value === socket) {
       batchSocket.value = null
+    }
+    if (!socket.manualClose && ['pending', 'running', 'paused'].includes(batchProgress.status)) {
+      batchReconnectTimer.value = setTimeout(() => {
+        connectBatchWebSocket(taskId)
+      }, 2000)
     }
   }
 }
@@ -612,7 +627,12 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (batchReconnectTimer.value) {
+    clearTimeout(batchReconnectTimer.value)
+    batchReconnectTimer.value = null
+  }
   if (batchSocket.value) {
+    batchSocket.value.manualClose = true
     batchSocket.value.close()
     batchSocket.value = null
   }

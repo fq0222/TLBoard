@@ -67,9 +67,7 @@ class BatchSubscriptionService extends EventEmitter {
     this.bindDb(db);
     const activeTask = await batchRepository.findActiveTask(db);
     if (activeTask) {
-      this.processTask(activeTask.id).catch(error => {
-        logger.error(`继续批量订阅任务失败: ${error.message}`);
-      });
+      this.ensureTaskProcessing(activeTask.id, '继续批量订阅任务');
       return this.buildStatus(activeTask);
     }
 
@@ -81,9 +79,7 @@ class BatchSubscriptionService extends EventEmitter {
     });
 
     this.emitStatus(task);
-    this.processTask(task.id).catch(error => {
-      logger.error(`执行批量订阅任务失败: ${error.message}`);
-    });
+    this.ensureTaskProcessing(task.id, '执行批量订阅任务');
     return this.buildStatus(task);
   }
 
@@ -96,6 +92,9 @@ class BatchSubscriptionService extends EventEmitter {
   async getLatestStatus(db) {
     this.bindDb(db);
     const task = await batchRepository.findLatestTask(db);
+    if (task) {
+      this.ensureTaskProcessing(task.id, '唤醒批量订阅任务状态查询');
+    }
     return task ? this.buildStatus(task) : null;
   }
 
@@ -110,7 +109,28 @@ class BatchSubscriptionService extends EventEmitter {
       return null;
     }
     const task = await batchRepository.getTaskById(this.db, taskId);
+    if (task) {
+      this.ensureTaskProcessing(task.id, '唤醒批量订阅任务 WebSocket');
+    }
     return task ? this.buildStatus(task) : null;
+  }
+
+  /**
+   * 确保未结束任务有后台执行循环。
+   * WebSocket 或状态查询可能晚于任务创建，因此这里做一次幂等唤醒，避免页面只看到 pending 旧状态。
+   *
+   * @param {number} taskId - 任务 ID
+   * @param {string} action - 当前唤醒来源描述
+   * @returns {void}
+   */
+  ensureTaskProcessing(taskId, action) {
+    if (this.processing || !this.db) {
+      return;
+    }
+
+    this.processTask(taskId).catch(error => {
+      logger.error(`${action}失败: ${error.message}`);
+    });
   }
 
   /**

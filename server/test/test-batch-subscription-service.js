@@ -146,3 +146,35 @@ test('batch repository overwrites existing user item when creating new task', as
   assert.ok(itemInsert.sql.includes('task_id = EXCLUDED.task_id'));
   assert.equal(itemInsert.params[1], 31);
 });
+
+test('batch subscription status query wakes pending task processor', async () => {
+  const originalProcessTask = batchSubscriptionService.processTask;
+  let processTaskId = null;
+
+  batchSubscriptionService.processing = false;
+  batchSubscriptionService.processTask = async (taskId) => {
+    processTaskId = taskId;
+  };
+
+  const restoreRepository = replaceMethods(batchRepository, {
+    findLatestTask: async () => ({
+      id: 33,
+      status: 'pending',
+      current_email: '',
+      completed_count: 0,
+      total_count: 75,
+      failed_count: 0,
+      filter_cf_optimized: 1
+    })
+  });
+
+  try {
+    const status = await batchSubscriptionService.getLatestStatus({});
+    assert.equal(status.id, 33);
+    assert.equal(status.status_text, '等待中');
+    assert.equal(processTaskId, 33);
+  } finally {
+    restoreRepository();
+    batchSubscriptionService.processTask = originalProcessTask;
+  }
+});
