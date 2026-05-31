@@ -57,6 +57,9 @@
       <el-form :model="userForm" label-width="100px">
         <!-- 基本信息 -->
         <el-divider content-position="left">基本信息</el-divider>
+        <el-form-item label="邮箱">
+          <el-input v-model="userForm.email" readonly />
+        </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="userForm.enabled" :disabled="submitting" />
         </el-form-item>
@@ -220,6 +223,7 @@ const clashUrl = ref('')
 const EDIT_DIALOG_ACTION_TIMEOUT = 30000
 
 const userForm = reactive({
+  email: '',
   enabled: true,
   traffic_value: 0,
   traffic_unit: 'GB',
@@ -371,6 +375,7 @@ function copySubscriptionUrl(type = 'subscription') {
 
 async function showEditDialog(user) {
   editingId.value = user.id
+  userForm.email = user.email || ''
   // 将数字转换为布尔值（0 = false, 1 = true）
   userForm.enabled = !!user.enabled
   
