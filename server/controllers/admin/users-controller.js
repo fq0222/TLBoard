@@ -200,7 +200,8 @@ async function generateSubscription(req, res) {
   try {
     const data = await usersService.generateSubscription(
       req.app.locals.db,
-      parseInt(req.params.id, 10)
+      parseInt(req.params.id, 10),
+      logger
     );
     const urls = generateSubscriptionUrls(req, data.sub_id);
 

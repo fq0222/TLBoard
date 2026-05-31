@@ -323,7 +323,7 @@ async function listUserOrders(db, userId) {
  */
 async function listUserCfIps(db, userId) {
   return db.prepare(`
-    SELECT cp.id, cp.ip, cp.port, cp.location
+    SELECT cp.id, cp.ip, cp.enabled
     FROM user_cf_ips uci
     JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
     WHERE uci.user_id = ?
@@ -352,7 +352,7 @@ async function updateUserFields(db, userId, updates, values) {
  */
 async function findEnabledCfIpsByIds(db, ipPoolIds) {
   return db.prepare(`
-    SELECT id, ip, port, location
+    SELECT id, ip, enabled
     FROM cf_ip_pool
     WHERE id = ANY(?) AND enabled = 1
   `).all(ipPoolIds);
@@ -384,7 +384,7 @@ async function replaceUserCfIps(db, userId, ipPoolIds) {
  */
 async function findActiveCfIpsForUser(db, userId) {
   return db.prepare(`
-    SELECT cp.id, cp.ip, cp.port, cp.location
+    SELECT cp.id, cp.ip, cp.enabled
     FROM user_cf_ips uci
     JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
     WHERE uci.user_id = ? AND cp.enabled = 1

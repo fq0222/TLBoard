@@ -1,10 +1,9 @@
 const XuiService = require('../../integrations/xui/xui-service');
-const { syncAllServers } = require('../../integrations/xui/xui-sync');
-const { fetchOriginalSubscription, parseSubscriptionContent } = require('../shared/subscription-service');
-const { getStrategyFromRemark, processNodeLink } = require('../shared/subscription-strategy');
+const userSubscriptionService = require('../user/subscription-service');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
 const { parsePagination } = require('../../shared/utils/pagination');
 const userRepository = require('../../repositories/user-repository');
+const subscriptionRepository = require('../../repositories/subscription-repository');
 
 /**
  * 管理端用户服务。
@@ -28,6 +27,25 @@ function createLegacyBusinessError(message, options = {}) {
  */
 function getNowTimestamp() {
   return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * 统计订阅缓存中的节点数量，兼容缓存为空或历史脏数据的情况。
+ *
+ * @param {Object|undefined} subscription - 最新订阅缓存记录
+ * @returns {number} 可用节点数量
+ */
+function countSubscriptionNodes(subscription) {
+  if (!subscription || !subscription.nodes_data) {
+    return 0;
+  }
+
+  try {
+    const nodes = JSON.parse(subscription.nodes_data);
+    return Array.isArray(nodes) ? nodes.length : 0;
+  } catch (error) {
+    return 0;
+  }
 }
 
 /**
@@ -382,120 +400,20 @@ async function updateUserCfIps(db, userId, ipPoolIds) {
 }
 
 /**
- * 重新同步节点并生成指定用户的订阅缓存。
+ * 复用用户端增量流程重新生成指定用户的订阅缓存。
  *
  * @param {Object} db - 数据库代理对象
  * @param {number} userId - 用户 ID
+ * @param {Object} logger - 日志实例，用于透传用户端订阅生成过程
  * @returns {Promise<{sub_id:string,node_count:number}>} 生成结果
  */
-async function generateSubscription(db, userId) {
-  const user = await userRepository.findUserDetailById(db, userId);
-  if (!user) {
-    throw createLegacyBusinessError('用户不存在', {
-      code: 2004
-    });
-  }
-
-  if (!user.enabled) {
-    throw createLegacyBusinessError('账号已被禁用', {
-      code: 2003
-    });
-  }
-
-  const cfIps = await userRepository.findActiveCfIpsForUser(db, userId);
-  if (cfIps.length === 0) {
-    throw createLegacyBusinessError('请先配置优选 IP', {
-      code: 3001
-    });
-  }
-
-  await syncAllServers(db);
-  const servers = await userRepository.listActiveXuiServersForSubscription(db);
-  const allNodes = [];
-
-  for (const server of servers) {
-    try {
-      const nodeConfigs = await userRepository.listUserNodeConfigsByServer(db, userId, server.id);
-      if (nodeConfigs.length === 0 || !server.sub_url) {
-        continue;
-      }
-
-      const subscriptionResults = await Promise.all(nodeConfigs.map(async (config) => {
-        try {
-          const originalContent = await fetchOriginalSubscription(server.sub_url, config.sub_id);
-          const links = parseSubscriptionContent(originalContent);
-          return {
-            config,
-            originalLink: links[0] || null
-          };
-        } catch (error) {
-          return {
-            config,
-            originalLink: null
-          };
-        }
-      }));
-
-      for (const { config, originalLink } of subscriptionResults) {
-        if (!originalLink) {
-          continue;
-        }
-
-        const strategy = getStrategyFromRemark(config.remark);
-        if (strategy === 'cf') {
-          for (let index = 0; index < cfIps.length; index++) {
-            let processedLink = processNodeLink(originalLink, 'cf', {
-              cfIp: cfIps[index].ip,
-              clientPort: server.client_port,
-              host: server.host
-            });
-            const baseName = `${server.name}-${config.remark}`;
-            const nodeName = cfIps.length > 1 ? `${baseName}-${index + 1}` : baseName;
-            const hashIndex = processedLink.indexOf('#');
-            if (hashIndex > 0) {
-              processedLink = processedLink.substring(0, hashIndex + 1) + encodeURIComponent(nodeName);
-            }
-            allNodes.push({
-              server_name: server.name,
-              node_name: nodeName,
-              protocol: config.protocol,
-              strategy,
-              link: processedLink,
-              original_link: originalLink
-            });
-          }
-        } else {
-          let processedLink = processNodeLink(originalLink, 'direct');
-          const nodeName = `${server.name}-${config.remark}`;
-          const hashIndex = processedLink.indexOf('#');
-          if (hashIndex > 0) {
-            processedLink = processedLink.substring(0, hashIndex + 1) + encodeURIComponent(nodeName);
-          }
-          allNodes.push({
-            server_name: server.name,
-            node_name: nodeName,
-            protocol: config.protocol,
-            strategy,
-            link: processedLink,
-            original_link: originalLink
-          });
-        }
-      }
-    } catch (error) {
-      // 保持旧逻辑：单台服务异常不影响整体继续处理。
-    }
-  }
-
-  await userRepository.saveUserSubscriptionCache(db, {
-    userId,
-    subId: user.sub_id,
-    nodesData: JSON.stringify(allNodes),
-    updatedAt: getNowTimestamp()
-  });
+async function generateSubscription(db, userId, logger) {
+  const subId = await userSubscriptionService.generateSubscription(db, userId, logger);
+  const latestSubscription = await subscriptionRepository.findLatestUserSubscription(db, userId);
 
   return {
-    sub_id: user.sub_id,
-    node_count: allNodes.length
+    sub_id: subId,
+    node_count: countSubscriptionNodes(latestSubscription)
   };
 }
 

@@ -1,5 +1,8 @@
 const assert = require('assert');
 const subscriptionService = require('../services/user/subscription-service');
+const adminUsersService = require('../services/admin/users-service');
+const subscriptionRepository = require('../repositories/subscription-repository');
+const userRepository = require('../repositories/user-repository');
 
 /**
  * 构造仅覆盖订阅查询 SQL 的轻量假数据库。
@@ -119,10 +122,80 @@ async function testDisabledSubscriptionShouldThrowBusinessError() {
   );
 }
 
+/**
+ * 验证管理端生成订阅时复用用户端增量流程，避免重新走旧全量拉取逻辑。
+ *
+ * @returns {Promise<void>}
+ */
+async function testAdminSubscriptionShouldReuseUserIncrementalGenerator() {
+  const originalGenerateSubscription = subscriptionService.generateSubscription;
+  const originalFindLatestUserSubscription = subscriptionRepository.findLatestUserSubscription;
+  const fakeDb = {};
+  const fakeLogger = {};
+  let delegatedUserId = null;
+
+  subscriptionService.generateSubscription = async (db, userId, logger) => {
+    assert.strictEqual(db, fakeDb);
+    assert.strictEqual(logger, fakeLogger);
+    delegatedUserId = userId;
+    return 'sub-token';
+  };
+
+  subscriptionRepository.findLatestUserSubscription = async (db, userId) => {
+    assert.strictEqual(db, fakeDb);
+    assert.strictEqual(userId, 9);
+    return {
+      nodes_data: JSON.stringify([
+        { node_name: 'node-a' },
+        { node_name: 'node-b' }
+      ])
+    };
+  };
+
+  try {
+    const result = await adminUsersService.generateSubscription(fakeDb, 9, fakeLogger);
+
+    assert.strictEqual(delegatedUserId, 9);
+    assert.deepStrictEqual(result, {
+      sub_id: 'sub-token',
+      node_count: 2
+    });
+  } finally {
+    subscriptionService.generateSubscription = originalGenerateSubscription;
+    subscriptionRepository.findLatestUserSubscription = originalFindLatestUserSubscription;
+  }
+}
+
+/**
+ * 验证用户 CF IP 查询只读取当前 cf_ip_pool 表真实存在的字段。
+ *
+ * @returns {Promise<void>}
+ */
+async function testUserCfIpQueriesShouldMatchCurrentSchema() {
+  const fakeDb = {
+    prepare(sql) {
+      assert.ok(!sql.includes('cp.port'), 'SQL 不应读取不存在的 cp.port 字段');
+      assert.ok(!sql.includes('cp.location'), 'SQL 不应读取不存在的 cp.location 字段');
+      assert.ok(!sql.includes('port, location'), 'SQL 不应读取不存在的 port/location 字段');
+      return {
+        all() {
+          return [];
+        }
+      };
+    }
+  };
+
+  await userRepository.listUserCfIps(fakeDb, 1);
+  await userRepository.findActiveCfIpsForUser(fakeDb, 1);
+  await userRepository.findEnabledCfIpsByIds(fakeDb, [1, 2]);
+}
+
 async function run() {
   await testDefaultSubscriptionContentShouldReturnBase64AndUserinfo();
   await testClashSubscriptionShouldRenderYaml();
   await testDisabledSubscriptionShouldThrowBusinessError();
+  await testAdminSubscriptionShouldReuseUserIncrementalGenerator();
+  await testUserCfIpQueriesShouldMatchCurrentSchema();
   console.log('user subscription service tests passed');
 }
 
