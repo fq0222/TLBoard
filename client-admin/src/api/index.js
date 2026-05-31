@@ -281,19 +281,21 @@ const adminApi = {
    * 更新用户 CF IP
    * @param {number} id - 用户ID
    * @param {Array} ipPoolIds - CF IP 池 ID 列表
+   * @param {Object} config - axios 配置（可选，用于自定义超时等）
    * @returns {Promise<Object>} 响应数据
    */
-  updateUserCfIps(id, ipPoolIds) {
-    return apiClient.put(`/users/${id}/cf-ips`, { ip_pool_ids: ipPoolIds })
+  updateUserCfIps(id, ipPoolIds, config = {}) {
+    return apiClient.put(`/users/${id}/cf-ips`, { ip_pool_ids: ipPoolIds }, config)
   },
 
   /**
    * 生成用户订阅链接
    * @param {number} id - 用户ID
+   * @param {Object} config - axios 配置（可选，用于自定义超时等）
    * @returns {Promise<Object>} 响应数据
    */
-  generateUserSubscription(id) {
-    return apiClient.post(`/users/${id}/generate-subscription`)
+  generateUserSubscription(id, config = {}) {
+    return apiClient.post(`/users/${id}/generate-subscription`, {}, config)
   },
 
   /**

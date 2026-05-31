@@ -286,11 +286,15 @@ async function syncUserToXuiServers(db, user) {
       const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
       for (const inboundId of inboundIds) {
         const node = await userRepository.findXuiNodeByServerAndInbound(db, server.id, inboundId);
+        const strategy = getNodeUpdateStrategy(node);
         const nodeEmail = `${user.email}-${node?.remark || inboundId}`;
-        await xuiService.updateClient(inboundId, nodeEmail, {
+        await xuiService.updateClientByContext(inboundId, nodeEmail, {
+          protocol: node?.protocol || '',
+          strategy,
           enabled: !!user.enabled,
           expiryTime,
-          totalGB
+          totalGB,
+          flow: strategy === 'direct' ? 'xtls-rprx-vision' : ''
         });
       }
     } catch (error) {
@@ -415,6 +419,25 @@ async function generateSubscription(db, userId, logger) {
     sub_id: subId,
     node_count: countSubscriptionNodes(latestSubscription)
   };
+}
+
+/**
+ * 根据节点备注和协议判断 3X-UI 客户端更新策略。
+ *
+ * @param {Object} node - 节点快照
+ * @returns {string} 策略类型：hy2 / direct / cf
+ */
+function getNodeUpdateStrategy(node = {}) {
+  const remark = String(node.remark || '').toLowerCase();
+  const protocol = String(node.protocol || '').toLowerCase();
+
+  if (remark.includes('hy2') || protocol === 'hysteria' || protocol === 'hysteria2') {
+    return 'hy2';
+  }
+  if (remark.includes('direct')) {
+    return 'direct';
+  }
+  return 'cf';
 }
 
 module.exports = {

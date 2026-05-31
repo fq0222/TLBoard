@@ -75,6 +75,16 @@
         <el-form-item label="到期时间">
           <el-date-picker v-model="userForm.expire_at" type="datetime" placeholder="选择到期时间" :disabled="submitting" />
         </el-form-item>
+        <el-form-item>
+          <el-button
+            type="primary"
+            @click="saveBasicInfo"
+            :loading="basicSubmitting"
+            :disabled="cfIpsSubmitting || generatingSubscription"
+          >
+            更新基本信息
+          </el-button>
+        </el-form-item>
         
         <!-- CF IP 管理 -->
         <el-divider content-position="left">优选 IP（最多 5 个）</el-divider>
@@ -111,6 +121,16 @@
             
             <div v-if="cfIps.length === 0" style="color: #909399; font-size: 12px; margin-top: 5px;">
               未配置优选 IP
+            </div>
+            <div class="section-actions">
+              <el-button
+                type="primary"
+                @click="saveCfIps"
+                :loading="cfIpsSubmitting"
+                :disabled="basicSubmitting || generatingSubscription"
+              >
+                更新优选 IP
+              </el-button>
             </div>
           </div>
         </el-form-item>
@@ -166,15 +186,14 @@
       </div>
       
       <template #footer>
-        <el-button @click="dialogVisible = false" :disabled="submitting">取消</el-button>
-        <el-button type="primary" @click="handleSubmit" :loading="submitting">确定</el-button>
+        <el-button @click="dialogVisible = false" :disabled="submitting">关闭</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Search, Loading, Delete, CopyDocument, Link } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
@@ -186,7 +205,9 @@ const page = ref(1)
 const limit = ref(10)
 const total = ref(0)
 const dialogVisible = ref(false)
-const submitting = ref(false)
+const basicSubmitting = ref(false)
+const cfIpsSubmitting = ref(false)
+const submitting = computed(() => basicSubmitting.value || cfIpsSubmitting.value)
 const editingId = ref(null)
 
 // CF IP 相关
@@ -196,6 +217,7 @@ const cfIpPool = ref([])
 const generatingSubscription = ref(false)
 const subscriptionUrl = ref('')
 const clashUrl = ref('')
+const EDIT_DIALOG_ACTION_TIMEOUT = 30000
 
 const userForm = reactive({
   enabled: true,
@@ -320,7 +342,7 @@ async function generateSubscription() {
   
   try {
     generatingSubscription.value = true
-    const response = await api.admin.generateUserSubscription(editingId.value)
+    const response = await api.admin.generateUserSubscription(editingId.value, { timeout: EDIT_DIALOG_ACTION_TIMEOUT })
     if (response.code === 0) {
       subscriptionUrl.value = response.data.subscription_url
       clashUrl.value = response.data.clash_url
@@ -384,30 +406,49 @@ async function showEditDialog(user) {
   dialogVisible.value = true
 }
 
-async function handleSubmit() {
+/**
+ * 单独保存用户基础信息，并同步到 3X-UI。
+ * 仅提交启用状态、流量上限和到期时间，避免误更新优选 IP 配置。
+ */
+async function saveBasicInfo() {
   try {
-    submitting.value = true
+    basicSubmitting.value = true
     
-    // 保存基本信息
     const data = {
       enabled: userForm.enabled,
       traffic_limit: userForm.traffic_bytes,
       expire_at: userForm.expire_at ? Math.floor(userForm.expire_at.getTime() / 1000) : null
     }
-    await api.admin.updateUser(editingId.value, data, { timeout: 60000 })
-    
-    // 保存 CF IP
-    const ipPoolIds = cfIps.value.map(ip => ip.id)
-    await api.admin.updateUserCfIps(editingId.value, ipPoolIds)
-    
-    ElMessage.success('用户信息更新成功')
-    dialogVisible.value = false
+    await api.admin.updateUser(editingId.value, data, { timeout: EDIT_DIALOG_ACTION_TIMEOUT })
+
+    ElMessage.success('基本信息更新成功')
     fetchUsers()
   } catch (error) {
-    console.error('更新失败:', error)
-    ElMessage.error('更新失败')
+    console.error('更新基本信息失败:', error)
+    ElMessage.error('更新基本信息失败')
   } finally {
-    submitting.value = false
+    basicSubmitting.value = false
+  }
+}
+
+/**
+ * 单独保存用户优选 IP 列表。
+ * 只提交当前已选择的 IP 池 ID，避免误更新用户基础信息。
+ */
+async function saveCfIps() {
+  try {
+    cfIpsSubmitting.value = true
+
+    const ipPoolIds = cfIps.value.map(ip => ip.id)
+    await api.admin.updateUserCfIps(editingId.value, ipPoolIds, { timeout: EDIT_DIALOG_ACTION_TIMEOUT })
+
+    ElMessage.success('优选 IP 更新成功')
+    fetchUsers()
+  } catch (error) {
+    console.error('更新优选 IP 失败:', error)
+    ElMessage.error('更新优选 IP 失败')
+  } finally {
+    cfIpsSubmitting.value = false
   }
 }
 
@@ -429,4 +470,5 @@ onMounted(() => {
 .content-card { background: #fff; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 20px; }
 .toolbar { display: flex; align-items: center; margin-bottom: 20px; }
 .pagination { margin-top: 20px; display: flex; justify-content: flex-end; }
+.section-actions { margin-top: 12px; display: flex; align-items: center; gap: 10px; }
 </style>
