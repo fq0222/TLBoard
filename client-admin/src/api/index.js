@@ -54,6 +54,9 @@ apiClient.interceptors.response.use(
         case 404:
           ElMessage.error('请求的资源不存在')
           break
+        case 413:
+          ElMessage.error(data?.message || '上传文件过大，请检查资源管理设置中的文件大小限制或反向代理上传限制')
+          break
         case 429:
           ElMessage.error('请求过于频繁，请稍后再试')
           break
