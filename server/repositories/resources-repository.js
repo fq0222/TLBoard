@@ -35,7 +35,8 @@ async function countResources(db) {
 async function listResources(db, limit, offset) {
   return db.prepare(`
     SELECT id, name, filename, original_name, size, mimetype, download_token,
-           expire_at, download_count, enabled, created_at, updated_at
+           expire_at, download_count, enabled, is_download_resource, download_category,
+           created_at, updated_at
     FROM resources
     ORDER BY created_at DESC
     LIMIT ? OFFSET ?

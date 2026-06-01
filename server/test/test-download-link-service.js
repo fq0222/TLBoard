@@ -1,10 +1,22 @@
 ﻿const assert = require('assert');
-const { getOrCreateDownloadLink } = require('../services/shared/download-link-service');
+const {
+  getOrCreateDownloadLink,
+  listDownloadResources
+} = require('../services/shared/download-link-service');
 
 function createStatementMock(db, sql) {
   return {
     async all(...params) {
       db.calls.push({ method: 'all', sql, params });
+
+      if (sql.includes('FROM resources') && sql.includes('is_download_resource = 1')) {
+        const now = params[0];
+        return (db.resources || [])
+          .filter(resource => resource.enabled === 1)
+          .filter(resource => resource.is_download_resource === 1)
+          .filter(resource => !resource.expire_at || resource.expire_at > now)
+          .sort((a, b) => (a.download_category || '').localeCompare(b.download_category || '') || b.created_at - a.created_at);
+      }
 
       if (sql.includes('FROM resource_distributions')) {
         const distributions = db.distributions || (db.distribution ? [db.distribution] : []);
@@ -19,6 +31,15 @@ function createStatementMock(db, sql) {
     },
     async get(...params) {
       db.calls.push({ method: 'get', sql, params });
+
+      if (sql.includes('FROM resources') && sql.includes('WHERE id = ?')) {
+        const [resourceId, now] = params;
+        return (db.resources || [db.resource])
+          .filter(resource => Number(resource.id) === Number(resourceId))
+          .filter(resource => resource.enabled === 1)
+          .filter(resource => resource.is_download_resource === 1)
+          .filter(resource => !resource.expire_at || resource.expire_at > now)[0] || null;
+      }
 
       if (sql.includes('FROM resources')) {
         return db.resource || null;
@@ -76,8 +97,11 @@ function createDb(overrides = {}) {
     resource: {
       id: 7,
       name: 'Android-App 下载包',
-      enabled: 1
+      enabled: 1,
+      is_download_resource: 1,
+      download_category: 'Android'
     },
+    resources: null,
     distribution: null,
     distributions: null,
     deletedDistributionIds: [],
@@ -93,6 +117,7 @@ async function testCreateWhenMissing() {
 
   const result = await getOrCreateDownloadLink({
     db,
+    resourceId: 7,
     userId: 12,
     now: 1000,
     siteBaseUrl: 'https://example.com',
@@ -121,6 +146,7 @@ async function testResetWhenExpired() {
 
   const result = await getOrCreateDownloadLink({
     db,
+    resourceId: 7,
     userId: 12,
     now: 1000,
     siteBaseUrl: 'https://example.com',
@@ -148,6 +174,7 @@ async function testReuseWhenStillValid() {
 
   const result = await getOrCreateDownloadLink({
     db,
+    resourceId: 7,
     userId: 12,
     now: 1000,
     siteBaseUrl: 'https://example.com',
@@ -189,6 +216,7 @@ async function testReuseRemovesDuplicateRecords() {
 
   const result = await getOrCreateDownloadLink({
     db,
+    resourceId: 7,
     userId: 12,
     now: 1000,
     siteBaseUrl: 'https://example.com',
@@ -218,6 +246,7 @@ async function testResetWhenDisabled() {
 
   const result = await getOrCreateDownloadLink({
     db,
+    resourceId: 7,
     userId: 12,
     now: 1000,
     siteBaseUrl: 'https://example.com',
@@ -230,12 +259,55 @@ async function testResetWhenDisabled() {
   assert(db.calls.some(call => call.method === 'run' && call.sql.includes('UPDATE resource_distributions')));
 }
 
+async function testRejectsUnmarkedDownloadResource() {
+  const db = createDb({
+    resources: [
+      { id: 7, name: 'Android-App 下载包', enabled: 1, is_download_resource: 0, download_category: 'Android' }
+    ]
+  });
+
+  await assert.rejects(
+    getOrCreateDownloadLink({
+      db,
+      resourceId: 7,
+      userId: 12,
+      now: 1000,
+      siteBaseUrl: 'https://example.com',
+      tokenFactory: () => 'ffffffffffffffffffffffffffffffff'
+    }),
+    /暂无可用资源/
+  );
+}
+
+async function testListDownloadResourcesByExplicitFlagAndCategory() {
+  const db = createDb({
+    resources: [
+      { id: 1, name: 'Android 客户端', enabled: 1, is_download_resource: 1, download_category: 'Android', expire_at: null, size: 100, created_at: 20 },
+      { id: 2, name: '内部文件', enabled: 1, is_download_resource: 0, download_category: 'Android', expire_at: null, size: 100, created_at: 30 },
+      { id: 3, name: 'Windows 客户端', enabled: 1, is_download_resource: 1, download_category: 'Windows', expire_at: null, size: 100, created_at: 10 },
+      { id: 4, name: '过期客户端', enabled: 1, is_download_resource: 1, download_category: 'Android', expire_at: 900, size: 100, created_at: 40 }
+    ]
+  });
+
+  const resources = await listDownloadResources({
+    db,
+    now: 1000
+  });
+
+  assert.deepStrictEqual(resources, [
+    { id: 1, name: 'Android 客户端', category: 'Android', size: 100 },
+    { id: 3, name: 'Windows 客户端', category: 'Windows', size: 100 }
+  ]);
+}
+
 async function main() {
   await testCreateWhenMissing();
   await testResetWhenExpired();
   await testReuseWhenStillValid();
   await testReuseRemovesDuplicateRecords();
   await testResetWhenDisabled();
+  await testRejectsUnmarkedDownloadResource();
+  await testListDownloadResourcesByExplicitFlagAndCategory();
   console.log('download link service tests passed');
 }
 

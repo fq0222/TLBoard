@@ -1,19 +1,31 @@
 <template>
   <div class="help-container">
     <section class="help-layout">
-      <aside class="download-card">
+      <aside v-if="downloadItems.length > 0" class="download-card">
         <div class="download-head">
           <h2 class="download-title">下载</h2>
+          <div class="download-categories">
+            <button
+              v-for="item in downloadCategories"
+              :key="item"
+              type="button"
+              class="download-category"
+              :class="{ active: item === activeDownloadCategory }"
+              @click="handleDownloadCategoryChange(item)"
+            >
+              {{ item }}
+            </button>
+          </div>
         </div>
 
         <div class="download-list">
           <div
-            v-for="item in downloadItems"
+            v-for="item in visibleDownloadItems"
             :key="item.id"
             class="download-item"
           >
             <div class="download-item-main">
-              <span class="download-item-name">{{ item.name }}</span>
+              <span class="download-item-name" :title="item.name">{{ item.name }}</span>
             </div>
 
             <el-button
@@ -27,6 +39,15 @@
           </div>
         </div>
 
+        <div v-if="isMobile && filteredDownloadItems.length > mobileDownloadPageSize" class="download-pagination">
+          <el-pagination
+            v-model:current-page="downloadPage"
+            :page-size="mobileDownloadPageSize"
+            :total="filteredDownloadItems.length"
+            small
+            layout="prev, next"
+          />
+        </div>
       </aside>
 
       <div class="content-card">
@@ -86,7 +107,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ArrowRight } from '@element-plus/icons-vue'
 import api from '@/api'
@@ -100,13 +121,29 @@ const page = ref(1)
 const limit = ref(9)
 const total = ref(0)
 const downloadLoadingId = ref('')
+const downloadItems = ref([])
+const activeDownloadCategory = ref('')
+const downloadPage = ref(1)
+const isMobile = ref(false)
+const mobileDownloadPageSize = 2
 
-const downloadItems = ref([
-  {
-    id: 'android-app',
-    name: 'Android-App 下载'
+const downloadCategories = computed(() => {
+  const categorySet = new Set(downloadItems.value.map(item => item.category || '其他'))
+  return Array.from(categorySet)
+})
+
+const filteredDownloadItems = computed(() => (
+  downloadItems.value.filter(item => (item.category || '其他') === activeDownloadCategory.value)
+))
+
+const visibleDownloadItems = computed(() => {
+  if (!isMobile.value) {
+    return filteredDownloadItems.value
   }
-])
+
+  const start = (downloadPage.value - 1) * mobileDownloadPageSize
+  return filteredDownloadItems.value.slice(start, start + mobileDownloadPageSize)
+})
 
 function formatTime(timestamp) {
   if (!timestamp) return '-'
@@ -149,10 +186,24 @@ async function fetchArticles() {
   }
 }
 
+// 获取管理端标记为下载资源的列表，并初始化默认分类。
+async function fetchDownloadResources() {
+  try {
+    const response = await api.user.getDownloadResources()
+    if (response.code === 0) {
+      downloadItems.value = response.data || []
+      activeDownloadCategory.value = downloadCategories.value[0] || ''
+      downloadPage.value = 1
+    }
+  } catch (error) {
+    console.error('获取下载资源失败:', error)
+  }
+}
+
 async function handleDownload(item) {
   try {
     downloadLoadingId.value = item.id
-    const response = await api.user.getDownloadLink()
+    const response = await api.user.getDownloadLink(item.id)
 
     if (response.code === 0 && response.data?.download_url) {
       const win = window.open(response.data.download_url, '_blank', 'noopener,noreferrer')
@@ -171,6 +222,17 @@ async function handleDownload(item) {
   }
 }
 
+// 切换下载分类时回到第一页，避免移动端停留在无数据页。
+function handleDownloadCategoryChange(categoryName) {
+  activeDownloadCategory.value = categoryName
+  downloadPage.value = 1
+}
+
+// 同步移动端断点状态，用于控制下载栏每页展示数量。
+function syncMobileState() {
+  isMobile.value = window.matchMedia('(max-width: 768px)').matches
+}
+
 function handleSearch() {
   page.value = 1
   fetchArticles()
@@ -182,8 +244,15 @@ function handleFilterChange() {
 }
 
 onMounted(() => {
+  syncMobileState()
+  window.addEventListener('resize', syncMobileState)
+  fetchDownloadResources()
   fetchCategories()
   fetchArticles()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', syncMobileState)
 })
 </script>
 
@@ -217,6 +286,10 @@ onMounted(() => {
 }
 
 .download-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 14px;
 }
 
@@ -224,6 +297,38 @@ onMounted(() => {
   margin: 0;
   color: #0f172a;
   font-size: 18px;
+}
+
+.download-categories {
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.download-categories::-webkit-scrollbar {
+  display: none;
+}
+
+.download-category {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 999px;
+  background: #fff;
+  color: #606266;
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, background-color 0.2s;
+}
+
+.download-category.active {
+  border-color: #f97316;
+  background: #fff7ed;
+  color: #f97316;
+  font-weight: 600;
 }
 
 .download-list {
@@ -237,6 +342,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
+  min-height: 64px;
   padding: 14px 16px;
   border-radius: 14px;
   background: #f8fafc;
@@ -248,11 +354,18 @@ onMounted(() => {
 }
 
 .download-item-name {
+  display: block;
+  max-width: 100%;
   color: #0f172a;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .download-button {
+  flex: 0 0 76px;
+  min-width: 76px;
   border: none;
   border-radius: 999px;
   background: linear-gradient(135deg, #4ade80 0%, #16a34a 100%);
@@ -261,6 +374,34 @@ onMounted(() => {
 
 .download-button:deep(span) {
   color: #fff;
+}
+
+.download-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.download-pagination:deep(.el-pagination) {
+  gap: 6px;
+}
+
+.download-pagination:deep(.btn-prev),
+.download-pagination:deep(.btn-next) {
+  min-width: 46px;
+  height: 32px;
+  margin: 0;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  background: #fff;
+  color: #606266;
+  line-height: 30px;
+}
+
+.download-pagination:deep(.btn-prev:not(:disabled):hover),
+.download-pagination:deep(.btn-next:not(:disabled):hover) {
+  border-color: #409eff;
+  color: #409eff;
 }
 
 .filters {
@@ -364,6 +505,51 @@ onMounted(() => {
     padding: 16px;
   }
 
+  .download-card {
+    max-height: 320px;
+    overflow: hidden;
+  }
+
+  .download-head {
+    align-items: center;
+    flex-direction: row;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .download-categories {
+    flex: 1;
+    width: auto;
+  }
+
+  .download-title {
+    flex: 0 0 auto;
+    font-size: 18px;
+  }
+
+  .download-category {
+    min-height: 30px;
+    padding: 0 10px;
+    font-size: 13px;
+  }
+
+  .download-list {
+    gap: 10px;
+  }
+
+  .download-pagination {
+    justify-content: flex-end;
+    margin-top: 10px;
+  }
+
+  .download-pagination:deep(.btn-prev),
+  .download-pagination:deep(.btn-next) {
+    min-width: 56px;
+    height: 22px;
+    line-height: 20px;
+    border-radius: 8px;
+  }
+
   .filters {
     flex-direction: column;
   }
@@ -377,10 +563,13 @@ onMounted(() => {
   .download-item {
     align-items: center;
     flex-direction: row;
+    min-height: 56px;
+    padding: 10px 12px;
   }
 
   .download-button {
-    flex-shrink: 0;
+    flex: 0 0 68px;
+    min-width: 68px;
   }
 
   .article-list {

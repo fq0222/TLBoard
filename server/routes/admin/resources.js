@@ -90,7 +90,9 @@ router.put(
   [
     param('id').isInt({ min: 1 }).withMessage('ID必须是大于0的整数'),
     body('name').optional().notEmpty().withMessage('资源名称不能为空'),
-    body('enabled').optional().isBoolean().withMessage('enabled必须是布尔值')
+    body('enabled').optional().isBoolean().withMessage('enabled必须是布尔值'),
+    body('is_download_resource').optional().isBoolean().withMessage('is_download_resource必须是布尔值'),
+    body('download_category').optional().isLength({ max: 100 }).withMessage('下载分类不能超过100个字符')
   ],
   resourcesController.updateResource
 );

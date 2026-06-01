@@ -42,6 +42,7 @@ const indexStatements = [
   'CREATE INDEX IF NOT EXISTS idx_resources_download_token ON resources(download_token)',
   'CREATE INDEX IF NOT EXISTS idx_resources_enabled ON resources(enabled)',
   'CREATE INDEX IF NOT EXISTS idx_resources_expire_at ON resources(expire_at)',
+  'CREATE INDEX IF NOT EXISTS idx_resources_download_category ON resources(is_download_resource, download_category)',
   'CREATE INDEX IF NOT EXISTS idx_resource_distributions_resource_id ON resource_distributions(resource_id)',
   'CREATE INDEX IF NOT EXISTS idx_resource_distributions_download_token ON resource_distributions(download_token)',
   'CREATE INDEX IF NOT EXISTS idx_resource_distributions_expire_at ON resource_distributions(expire_at)',

@@ -399,6 +399,8 @@ const tableDefinitions = [
         expire_at BIGINT,
         download_count INTEGER DEFAULT 0,
         enabled INTEGER DEFAULT 1,
+        is_download_resource INTEGER DEFAULT 0,
+        download_category VARCHAR(100) DEFAULT '其他',
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
         updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
       )

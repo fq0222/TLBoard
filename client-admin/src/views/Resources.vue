@@ -22,6 +22,18 @@
           {{ row.download_count }}
         </template>
       </el-table-column>
+      <el-table-column label="下载栏" width="90" align="center">
+        <template #default="{ row }">
+          <el-tag :type="row.is_download_resource ? 'success' : 'info'" size="small">
+            {{ row.is_download_resource ? '显示' : '隐藏' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="下载分类" width="120" align="center" show-overflow-tooltip>
+        <template #default="{ row }">
+          {{ row.is_download_resource ? (row.download_category || '其他') : '-' }}
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="80" align="center">
         <template #default="{ row }">
           <el-tag :type="getStatusType(row)" size="small">
@@ -43,7 +55,7 @@
         <template #default="{ row }">
           <el-button size="small" @click="showDistributeDialog(row)">分发</el-button>
           <el-button size="small" @click="showDistributionsDialog(row)">分发列表</el-button>
-          <el-button size="small" @click="showRenameDialog(row)">重命名</el-button>
+          <el-button size="small" @click="showRenameDialog(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -61,13 +73,14 @@
     </div>
 
     <!-- 上传对话框 -->
-    <el-dialog v-model="uploadDialogVisible" title="上传文件" width="500">
+    <el-dialog v-model="uploadDialogVisible" title="上传文件" width="500" @closed="handleUploadDialogClosed">
       <el-upload
         ref="uploadRef"
         :auto-upload="false"
         :limit="5"
         :on-exceed="handleExceed"
         :on-change="handleFileChange"
+        :on-remove="handleFileChange"
         drag
       >
         <el-icon class="el-icon--upload"><Upload /></el-icon>
@@ -81,18 +94,29 @@
         </template>
       </el-upload>
       <template #footer>
-        <el-button @click="uploadDialogVisible = false">取消</el-button>
+        <el-button @click="handleUploadCancel">取消</el-button>
         <el-button type="primary" @click="handleUpload" :loading="uploading">
           上传
         </el-button>
       </template>
     </el-dialog>
 
-    <!-- 重命名对话框 -->
-    <el-dialog v-model="renameDialogVisible" title="重命名" width="400">
+    <!-- 资源编辑对话框 -->
+    <el-dialog v-model="renameDialogVisible" title="编辑资源" width="460">
       <el-form :model="renameForm" label-width="80px">
         <el-form-item label="资源名称">
           <el-input v-model="renameForm.name" placeholder="请输入资源名称" />
+        </el-form-item>
+        <el-form-item label="下载资源">
+          <el-switch v-model="renameForm.is_download_resource" active-text="显示" inactive-text="隐藏" />
+        </el-form-item>
+        <el-form-item v-if="renameForm.is_download_resource" label="下载分类">
+          <el-input
+            v-model="renameForm.download_category"
+            maxlength="100"
+            show-word-limit
+            placeholder="如 Android、Windows、iOS"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -224,9 +248,14 @@ const uploadDialogVisible = ref(false)
 const uploadRef = ref(null)
 const selectedFiles = ref([])
 
-// 重命名相关
+// 资源编辑相关
 const renameDialogVisible = ref(false)
-const renameForm = ref({ id: null, name: '' })
+const renameForm = ref({
+  id: null,
+  name: '',
+  is_download_resource: false,
+  download_category: '其他'
+})
 
 // 分发相关
 const distributeDialogVisible = ref(false)
@@ -318,15 +347,32 @@ const getStatusText = (row) => {
   return '正常'
 }
 
+// 清理上传组件内外两层文件列表，避免下次选择文件时夹带旧文件。
+const resetUploadFiles = () => {
+  selectedFiles.value = []
+  uploadRef.value?.clearFiles()
+}
+
 // 显示上传对话框
 const showUploadDialog = () => {
-  selectedFiles.value = []
+  resetUploadFiles()
   uploadDialogVisible.value = true
 }
 
 // 文件变更
 const handleFileChange = (file, fileList) => {
   selectedFiles.value = fileList
+}
+
+// 上传弹窗取消时主动清空文件列表。
+const handleUploadCancel = () => {
+  resetUploadFiles()
+  uploadDialogVisible.value = false
+}
+
+// 上传弹窗关闭后兜底清空，覆盖右上角关闭和遮罩关闭场景。
+const handleUploadDialogClosed = () => {
+  resetUploadFiles()
 }
 
 // 文件数量超出限制
@@ -352,6 +398,7 @@ const handleUpload = async () => {
       }
     }
     ElMessage.success('上传成功')
+    resetUploadFiles()
     uploadDialogVisible.value = false
     fetchResources()
   } catch (error) {
@@ -361,27 +408,39 @@ const handleUpload = async () => {
   }
 }
 
-// 显示重命名对话框
+// 显示资源编辑对话框
 const showRenameDialog = (row) => {
-  renameForm.value = { id: row.id, name: row.name }
+  renameForm.value = {
+    id: row.id,
+    name: row.name,
+    is_download_resource: !!row.is_download_resource,
+    download_category: row.download_category || '其他'
+  }
   renameDialogVisible.value = true
 }
 
-// 重命名
+// 保存资源编辑
 const handleRename = async () => {
+  if (renameForm.value.is_download_resource && !renameForm.value.download_category.trim()) {
+    ElMessage.warning('请输入下载分类')
+    return
+  }
+
   try {
     const res = await api.admin.updateResource(renameForm.value.id, {
-      name: renameForm.value.name
+      name: renameForm.value.name,
+      is_download_resource: renameForm.value.is_download_resource,
+      download_category: renameForm.value.download_category
     })
     if (res.code === 0) {
-      ElMessage.success('重命名成功')
+      ElMessage.success('保存成功')
       renameDialogVisible.value = false
       fetchResources()
     } else {
       ElMessage.error(res.message)
     }
   } catch (error) {
-    ElMessage.error('重命名失败')
+    ElMessage.error('保存失败')
   }
 }
 

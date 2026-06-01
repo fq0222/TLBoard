@@ -119,6 +119,16 @@ function normalizeExpireMinutes(expireMinutes) {
 }
 
 /**
+ * 规范化下载资源分类。
+ * @param {*} category - 管理端传入的分类文本
+ * @returns {string} 去除空白后的分类，空值归入“其他”
+ */
+function normalizeDownloadCategory(category) {
+  const normalizedCategory = String(category || '').trim();
+  return normalizedCategory || '其他';
+}
+
+/**
  * 校验资源是否存在。
  *
  * @param {Object} db - 数据库实例
@@ -216,6 +226,9 @@ async function updateResource(db, resourceId, payload) {
 
   const updates = [];
   const values = [];
+  const nextIsDownloadResource = payload.is_download_resource !== undefined
+    ? Boolean(payload.is_download_resource)
+    : undefined;
 
   if (payload.name !== undefined) {
     updates.push('name = ?');
@@ -225,6 +238,16 @@ async function updateResource(db, resourceId, payload) {
   if (payload.enabled !== undefined) {
     updates.push('enabled = ?');
     values.push(payload.enabled ? 1 : 0);
+  }
+
+  if (payload.is_download_resource !== undefined) {
+    updates.push('is_download_resource = ?');
+    values.push(nextIsDownloadResource ? 1 : 0);
+  }
+
+  if (payload.download_category !== undefined || nextIsDownloadResource === true) {
+    updates.push('download_category = ?');
+    values.push(normalizeDownloadCategory(payload.download_category));
   }
 
   if (updates.length === 0) {

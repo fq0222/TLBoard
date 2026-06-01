@@ -271,11 +271,20 @@ const userApi = {
   },
 
   /**
-   * 获取 Android-App 下载链接
+   * 获取帮助页下载资源列表
    * @returns {Promise<Object>} 响应数据
    */
-  getDownloadLink() {
-    return apiClient.post('/download/link', {}, { timeout: 30000 })
+  getDownloadResources() {
+    return apiClient.get('/download/resources')
+  },
+
+  /**
+   * 按资源 ID 获取下载链接
+   * @param {number|string} resourceId - 下载资源 ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  getDownloadLink(resourceId) {
+    return apiClient.post(`/download/link/${resourceId}`, {}, { timeout: 30000 })
   },
 
   /**

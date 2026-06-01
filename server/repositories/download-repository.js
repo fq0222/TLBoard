@@ -25,6 +25,42 @@ async function findLatestEnabledResourceByKeyword(db, keyword) {
 }
 
 /**
+ * 查询用户端帮助页可展示的下载资源列表。
+ * @param {Object} db - 数据库实例
+ * @param {number} now - 当前时间戳，用于过滤已过期资源
+ * @returns {Promise<Array>} 可下载资源列表
+ */
+async function listDownloadResources(db, now) {
+  return db.prepare(`
+    SELECT id, name, size, download_category
+    FROM resources
+    WHERE enabled = 1
+      AND is_download_resource = 1
+      AND (expire_at IS NULL OR expire_at > ?)
+    ORDER BY download_category ASC, created_at DESC, id DESC
+  `).all(now);
+}
+
+/**
+ * 按资源 ID 查询可生成用户下载链接的资源。
+ * @param {Object} db - 数据库实例
+ * @param {number} resourceId - 资源 ID
+ * @param {number} now - 当前时间戳，用于过滤已过期资源
+ * @returns {Promise<Object|undefined>} 可下载资源记录
+ */
+async function findDownloadResourceById(db, resourceId, now) {
+  return db.prepare(`
+    SELECT *
+    FROM resources
+    WHERE id = ?
+      AND enabled = 1
+      AND is_download_resource = 1
+      AND (expire_at IS NULL OR expire_at > ?)
+    LIMIT 1
+  `).get(resourceId, now);
+}
+
+/**
  * 按 token 查询分发下载记录。
  *
  * @param {Object} db - 数据库实例
@@ -88,6 +124,8 @@ async function incrementResourceDownloadCount(db, resourceId) {
 module.exports = {
   getResourceConfigRow,
   findLatestEnabledResourceByKeyword,
+  listDownloadResources,
+  findDownloadResourceById,
   findDistributionDownloadByToken,
   findResourceDownloadByToken,
   findResourceById,

@@ -1,7 +1,6 @@
 /**
  * 用户端下载路由。
- * 负责下载接口的鉴权、参数校验与 controller 映射，
- * 具体下载链接生成、资源校验和文件流编排均下沉到 controller / service。
+ * 负责下载资源列表、按资源 ID 生成下载链接，以及 token 文件下载的鉴权与参数校验。
  */
 
 const express = require('express');
@@ -11,7 +10,14 @@ const downloadController = require('../../controllers/user/download-controller')
 
 const router = express.Router();
 
-router.post('/link', authenticateUser, downloadController.getDownloadLink);
+router.get('/resources', authenticateUser, downloadController.getDownloadResources);
+
+router.post(
+  '/link/:resourceId',
+  authenticateUser,
+  [param('resourceId').isInt({ min: 1 }).withMessage('下载资源ID无效')],
+  downloadController.getDownloadLink
+);
 
 router.get('/:token', [
   param('token').isLength({ min: 32, max: 32 }).withMessage('下载链接无效')
