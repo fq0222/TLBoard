@@ -288,3 +288,40 @@ MIT License
 
 - Submit an [Issue](https://github.com/fq0222/TLBoard/issues)
 - Visit the [Wiki](https://github.com/fq0222/TLBoard/wiki)
+
+## Referral System Addendum (2026-06-01)
+
+### User-Facing Capabilities
+
+- Added a referral entry to the user "My" page, with overview and referral detail screens
+- Users can copy their dedicated referral link
+- Referral detail pages show click count, rewarded order count, rewarded traffic total, and per-order reward records
+- The user homepage now displays traffic as "used / total (plan + referral)"
+
+### Reward Rules
+
+- A referral click is recorded when a new visitor opens a referral link
+- Reward traffic is granted only when the referred user completes the first successful payment
+- Each referred user can trigger the reward only once; later renewals do not create more rewards
+- Reward traffic is configured from the admin system settings
+
+### Traffic Entitlement Semantics
+
+- Total traffic = plan traffic `traffic_limit` + referral traffic `referral_traffic_limit`
+- Traffic accounting, over-limit checks, and 3X-UI sync all use the combined total
+- Granting a referral reward does not immediately trigger a dedicated 3X-UI sync for the referrer; the new total is propagated by later sync flows or scheduled reconciliation jobs
+
+### Admin Capabilities
+
+- Added a dedicated "Referral Management" page
+- Admins can inspect each user's referral link, clicks, rewarded orders, and rewarded traffic
+- Admins can open per-user referral reward details
+- Admins can enable or disable referral functionality
+- Admins can reset a user's referral link
+
+### Configuration and Migration
+
+- Referral reward traffic is stored in the `referral_reward_traffic` system setting
+- Referral link generation depends on `USER_APP_URL` or the development `userAppUrl` fallback
+- New environments create referral tables during database initialization
+- Existing environments must run `node server/db/migrations/011-referral-system.js`

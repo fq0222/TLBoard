@@ -2215,3 +2215,187 @@ hysteria2://<auth>@host:port?security=tls&fp=chrome&alpn=h3&sni=example.com&mpor
   "traffic_usage_multiplier": 1.2
 }
 ```
+
+---
+
+## 9. 推广系统 API 补充（2026-06-01）
+
+### 9.1 用户端推广接口
+
+所有用户端推广接口前缀：`/api/user/referral`
+
+#### GET `/api/user/referral`
+
+获取当前登录用户的推广汇总。
+
+成功响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "code": "e174e2e6a4a870ea89f85c51a620fe96",
+    "enabled": true,
+    "referral_url": "https://example.com/?ref=e174e2e6a4a870ea89f85c51a620fe96",
+    "click_count": 12,
+    "reward_count": 3,
+    "reward_traffic": 16106127360,
+    "reward_traffic_text": "15 GB"
+  }
+}
+```
+
+#### POST `/api/user/referral/click`
+
+记录推广链接点击。该接口无需登录，可通过 `body.code` 或 `query.code` 传入推广码。
+
+请求体示例：
+
+```json
+{
+  "code": "e174e2e6a4a870ea89f85c51a620fe96"
+}
+```
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "recorded": true
+  }
+}
+```
+
+#### GET `/api/user/referral/rewards`
+
+分页获取当前登录用户的推广奖励明细。
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| page | number | 否 | 页码，默认 `1` |
+| limit | number | 否 | 每页条数，默认 `20`，最大 `100` |
+
+成功响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 1,
+    "page": 1,
+    "limit": 10,
+    "list": [
+      {
+        "referred_email": "user@gmail.com",
+        "out_trade_no": "ORD17803193295585hxv6dr4k",
+        "amount": 300,
+        "reward_traffic": 5368709120,
+        "created_at": 1780319352
+      }
+    ]
+  }
+}
+```
+
+### 9.2 管理端推广接口
+
+所有管理端推广接口前缀：`/api/admin/referrals`
+
+#### GET `/api/admin/referrals`
+
+分页获取推广管理列表。
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| page | number | 否 | 页码 |
+| limit | number | 否 | 每页条数 |
+| email | string | 否 | 按用户邮箱筛选 |
+| code | string | 否 | 按推广码筛选 |
+| enabled | boolean | 否 | 按启用状态筛选 |
+
+#### GET `/api/admin/referrals/:userId`
+
+获取指定用户的推广汇总和奖励明细。
+
+#### PUT `/api/admin/referrals/:userId/enabled`
+
+启用或禁用指定用户的推广功能。
+
+请求体示例：
+
+```json
+{
+  "enabled": true
+}
+```
+
+#### POST `/api/admin/referrals/:userId/reset-code`
+
+重置指定用户的推广码并返回新的推广链接。
+
+### 9.3 系统设置补充
+
+#### GET `/api/admin/system-settings/traffic`
+
+当前返回字段除 `traffic_usage_multiplier` 外，还包含：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| referral_reward_traffic | number | 首单推广奖励流量（字节） |
+
+#### PUT `/api/admin/system-settings/traffic`
+
+当前请求体除 `traffic_usage_multiplier` 外，还支持：
+
+```json
+{
+  "traffic_usage_multiplier": 1,
+  "referral_reward_traffic": 5368709120
+}
+```
+
+### 9.4 用户资料与流量字段补充
+
+#### GET `/api/user/profile`
+
+当前返回数据中已经包含并建议按如下语义理解：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| traffic_limit | number | 当前套餐流量上限（字节） |
+| referral_traffic_limit | number | 当前推广奖励流量上限（字节） |
+| total_traffic_limit | number | 套餐流量与推广流量之和（字节） |
+| traffic_limit_text | string | 套餐流量展示文本 |
+| referral_traffic_limit_text | string | 推广流量展示文本 |
+| total_traffic_limit_text | string | 总流量展示文本 |
+
+### 9.5 注册归因补充
+
+#### POST `/api/user/register-and-pay`
+
+当前注册并支付接口支持附带推广码归因：
+
+```json
+{
+  "email": "user@example.com",
+  "password": "Abc12345",
+  "plan_id": 1,
+  "pay_type": 2,
+  "referral_code": "e174e2e6a4a870ea89f85c51a620fe96"
+}
+```
+
+业务规则：
+
+- 推广码有效且不是自推广时，会在订单中记录 `referrer_user_id`
+- 只有该新用户首单支付成功时，才会真正发放奖励
+- 续费订单不参与推广奖励
