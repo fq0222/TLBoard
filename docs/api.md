@@ -43,6 +43,7 @@
 | 2003 | 账号已被禁用 |
 | 2004 | 用户、订单或订阅不存在 |
 | 4002 | IP ID 无效或已禁用 |
+| 413 | 请求体过大，通常由上传文件超过资源设置或反向代理上传限制导致 |
 | 429 | 请求过于频繁（速率限制） |
 | 500 | 服务器内部错误 |
 | 5002 | VMQ 创建订单失败 |
@@ -54,6 +55,7 @@
 - `1002` 在套餐售罄时返回"该套餐已售罄"
 - `1003` 在续费超时时返回"流量用完已超过 3 天，请等待名额释放后重新购买"
 - `429` 用户端登录和注册接口速率限制，15 分钟内最多 3 次失败尝试，响应包含 `Retry-After` 头
+- `413` 资源上传场景下需要同时检查“系统设置 -> 资源管理设置”的最大文件大小，以及 OpenResty/Nginx 的 `client_max_body_size`
 - `5003` 用于拦截 `isAuto=1` 的危险支付通道
 
 ---
@@ -1607,6 +1609,8 @@ md5(payId + param + type + price + reallyPrice + key)
         "expire_at": null,
         "download_count": 5,
         "enabled": 1,
+        "is_download_resource": 1,
+        "download_category": "Android",
         "created_at": 1746260000,
         "updated_at": 1746260000
       }
@@ -1639,10 +1643,17 @@ md5(payId + param + type + price + reallyPrice + key)
     "original_name": "app.apk",
     "size": 10485760,
     "download_token": "abc123...",
-    "enabled": 1
+    "enabled": 1,
+    "is_download_resource": 0,
+    "download_category": "其他"
   }
 }
 ```
+
+上传限制说明：
+
+- 后端按资源配置中的 `max_file_size` 校验单文件大小，超过时返回业务错误。
+- 如果部署在 OpenResty/Nginx 后方，代理层 `client_max_body_size` 也必须不小于 `max_file_size`，否则会在请求进入后端前返回 HTTP 413。
 
 #### PUT `/api/admin/resources/:id`
 
@@ -1653,9 +1664,20 @@ md5(payId + param + type + price + reallyPrice + key)
 ```json
 {
   "name": "新名称",
-  "enabled": true
+  "enabled": true,
+  "is_download_resource": true,
+  "download_category": "Android"
 }
 ```
+
+可更新字段说明：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| name | string | 否 | 用户端下载栏展示的资源名称 |
+| enabled | boolean | 否 | 是否启用资源 |
+| is_download_resource | boolean | 否 | 是否展示到用户端帮助中心下载栏 |
+| download_category | string | 否 | 下载分类，空值归入“其他” |
 
 #### DELETE `/api/admin/resources/:id`
 
@@ -1740,15 +1762,50 @@ md5(payId + param + type + price + reallyPrice + key)
 
 ### 6.2 用户端下载接口
 
-#### POST `/api/user/download/link`
+#### GET `/api/user/download/resources`
 
-获取当前用户的 Android-App 下载链接。
+获取帮助中心下载栏可展示的资源列表。
 
 说明：
 
+- 仅返回管理端标记为下载资源的记录。
+- 资源必须处于启用状态，且未超过资源级过期时间。
+- 返回的 `name` 使用管理端资源名称，用户端不再通过文件名模糊匹配展示名称。
+- `category` 使用管理端下载分类，空值归入“其他”。
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": [
+    {
+      "id": 1,
+      "name": "Android-App-v2rayNG",
+      "category": "Android",
+      "size": 10485760
+    },
+    {
+      "id": 2,
+      "name": "v2rayN-windows-64-desktop",
+      "category": "Windows",
+      "size": 52428800
+    }
+  ]
+}
+```
+
+#### POST `/api/user/download/link/:resourceId`
+
+按资源 ID 获取当前用户的下载链接。
+
+说明：
+
+- 仅允许对管理端标记为下载资源的记录生成链接
 - 如果用户没有分发记录，系统会自动创建一条分发记录
-- 如果已有分发记录但已过期或禁用，系统会重置 token 和有效期
-- 如果已有有效分发记录，系统会复用原链接
+- 如果已有分发记录但已过期、禁用或指向其他资源，系统会重置 token、资源 ID 和有效期
+- 如果已有当前资源的有效分发记录，系统会复用原链接
 - 同一用户只保留一条分发记录，避免重复分发
 
 成功响应：
@@ -1759,9 +1816,8 @@ md5(payId + param + type + price + reallyPrice + key)
   "message": "ok",
   "data": {
     "download_url": "https://example.com/api/user/download/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "resource_name": "Android-App",
+    "resource_name": "Android-App-v2rayNG",
     "expire_at": 1770000000,
-    "expire_text": "2026/6/1 12:00:00",
     "action": "created",
     "removed_duplicates": 0
   }
@@ -1776,31 +1832,12 @@ md5(payId + param + type + price + reallyPrice + key)
 | reset | 重置已有分发记录 |
 | reused | 复用有效分发记录 |
 
-#### POST `/api/user/email/download`
-
-请求下载链接邮件。
-
-说明：
-- 自动为用户创建分发记录（如果没有有效记录）
-- 模糊匹配模板名称包含 "Android-App" 的邮件模板
-- 每天限制发送 2 封邮件
-
-成功响应：
+常见失败响应：
 
 ```json
 {
-  "code": 0,
-  "message": "下载链接已发送到邮箱，请查收",
-  "data": null
-}
-```
-
-失败响应：
-
-```json
-{
-  "code": 6006,
-  "message": "今天已经发送过2封邮件，请明天再试",
+  "code": 7005,
+  "message": "暂无可用资源，请联系管理员",
   "data": null
 }
 ```

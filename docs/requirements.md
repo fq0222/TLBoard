@@ -1,7 +1,7 @@
 # 机场面板系统需求文档
 
-> 版本：V1.11
-> 更新日期：2026-05-30
+> 版本：V1.12
+> 更新日期：2026-06-01
 
 ---
 
@@ -680,7 +680,8 @@ server/
 | POST | `/api/user/tickets/:id/replies` | 回复工单 |
 | PUT | `/api/user/tickets/:id/close` | 关闭工单 |
 | POST | `/api/user/email/tutorial` | 请求教程邮件 |
-| POST | `/api/user/email/download` | 请求下载链接邮件 |
+| GET | `/api/user/download/resources` | 获取帮助中心下载资源列表 |
+| POST | `/api/user/download/link/:resourceId` | 按资源 ID 获取下载链接 |
 | GET | `/api/user/download/:token` | 下载文件 |
 
 ### 7.2 管理端
@@ -1020,12 +1021,14 @@ project/
 
 ```bash
 node server/db/migrations/001-node-subscription-strategy.js
+node server/db/migrations/006-resource-download-classification.js
 ```
 
 迁移内容：
 - `xui_servers` 表添加 `sub_url` 字段
 - `user_node_configs` 表从 `node_id` 改为 `server_id` + `inbound_id`
 - `users` 和 `user_node_configs` 表的 `sub_id` 更新为 16 位
+- `resources` 表补充 `is_download_resource` 和 `download_category`，用于用户端下载栏显式展示与分类
 
 ---
 
@@ -1033,7 +1036,7 @@ node server/db/migrations/001-node-subscription-strategy.js
 
 ### 13.1 功能概述
 
-系统支持管理员上传文件资源，并为不同用户分配独立的下载链接，支持设置有效期。用户可通过帮助弹窗获取下载链接邮件。
+系统支持管理员上传文件资源，并为不同用户分配独立的下载链接，支持设置有效期。管理员可以显式标记哪些资源展示在用户端下载栏，并设置下载分类；用户端只展示已标记为下载资源且启用、未过期的资源。
 
 ### 13.2 数据库设计
 
@@ -1052,6 +1055,8 @@ node server/db/migrations/001-node-subscription-strategy.js
 | expire_at | BIGINT | 过期时间戳 |
 | download_count | INTEGER | 下载次数 |
 | enabled | INTEGER | 是否启用 |
+| is_download_resource | INTEGER | 是否展示到用户端下载栏 |
+| download_category | VARCHAR(50) | 用户端下载栏分类，空值归入“其他” |
 | created_at | BIGINT | 创建时间 |
 | updated_at | BIGINT | 更新时间 |
 
@@ -1079,6 +1084,8 @@ node server/db/migrations/001-node-subscription-strategy.js
 
 配置存储在 `system_settings` 表，key 为 `resource_config`。
 
+部署在 OpenResty/Nginx 后方时，反向代理的 `client_max_body_size` 必须不小于资源管理设置中的最大文件大小，否则请求会在进入后端前返回 HTTP 413。
+
 ### 13.4 管理端功能
 
 **资源管理页面**：
@@ -1089,16 +1096,18 @@ node server/db/migrations/001-node-subscription-strategy.js
 - 分发资源给用户（支持批量选择用户、设置有效期）
 - 查看分发列表
 - 批量设置分发有效期
+- 设置是否展示到用户端下载栏
+- 设置下载资源分类（例如 Android、Windows、其他）
+- 用户端下载栏显示名称使用资源管理中配置的资源名称
 
 ### 13.5 用户端功能
 
-**帮助弹窗**：
-- 新增"Android-App下载"按钮
-- 点击后系统自动：
-  1. 检查用户是否已有有效分发记录
-  2. 如果没有，自动创建分发记录（关联最新资源，默认 60 分钟有效期）
-  3. 模糊匹配模板名称包含 "Android-App" 的邮件模板
-  4. 发送包含下载链接的邮件给用户
+**帮助中心下载栏**：
+- 下载栏从管理端显式标记的下载资源生成，不再通过文件名或模板名模糊匹配。
+- 资源按管理端设置的下载分类分组展示，用户可按分类快速区分资源。
+- 文件名称使用管理端设置的资源名称，名称过长时在按钮左侧可用空间内尽量显示，溢出部分使用省略号。
+- 点击“获取”后系统按资源 ID 获取或创建当前用户的独立下载链接。
+- 移动端下载栏高度受限，每页只显示 2 个资源，并提供上一页/下一页按钮。
 
 **下载文件**：
 - 通过分发链接下载（用户独立 token，优先验证）
