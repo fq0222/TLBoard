@@ -395,6 +395,7 @@ const handleUpload = async () => {
       const res = await api.admin.uploadResource(formData)
       if (res.code !== 0) {
         ElMessage.error(`上传失败: ${res.message}`)
+        continue
       }
     }
     ElMessage.success('上传成功')
@@ -402,7 +403,7 @@ const handleUpload = async () => {
     uploadDialogVisible.value = false
     fetchResources()
   } catch (error) {
-    ElMessage.error('上传失败')
+    ElMessage.error(error.response?.data?.message || error.message || '上传失败')
   } finally {
     uploading.value = false
   }

@@ -637,6 +637,7 @@ const adminApi = {
   // 上传文件
   uploadResource(formData) {
     return apiClient.post('/resources/upload', formData, {
+      timeout: 300000,
       headers: {
         'Content-Type': 'multipart/form-data'
       }
