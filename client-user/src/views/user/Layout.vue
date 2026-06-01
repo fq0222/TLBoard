@@ -10,36 +10,17 @@
           <el-icon><House /></el-icon>
           <span>首页</span>
         </router-link>
-        <router-link to="/user/my" class="nav-item" active-class="active">
-          <el-icon><User /></el-icon>
-          <span>我的</span>
-        </router-link>
-        <router-link
-          v-if="subscriptionReady"
-          to="/user/subscription"
-          class="nav-item"
-          active-class="active"
-        >
+        <router-link to="/user/subscription" class="nav-item" active-class="active">
           <el-icon><Link /></el-icon>
           <span>订阅</span>
-        </router-link>
-        <router-link
-          v-if="subscriptionReady"
-          to="/user/cf-optimize"
-          class="nav-item"
-          active-class="active"
-        >
-          <el-icon><Connection /></el-icon>
-          <span>IP 优选</span>
-        </router-link>
-        <router-link to="/user/tickets" class="nav-item" active-class="active">
-          <el-icon><ChatDotRound /></el-icon>
-          <span>工单</span>
-          <span v-if="unreadTicketCount > 0" class="badge"></span>
         </router-link>
         <router-link to="/user/help" class="nav-item onboarding-help-nav" active-class="active">
           <el-icon><QuestionFilled /></el-icon>
           <span>帮助</span>
+        </router-link>
+        <router-link to="/user/my" class="nav-item" active-class="active">
+          <el-icon><User /></el-icon>
+          <span>我的</span>
         </router-link>
       </nav>
 
@@ -73,12 +54,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import {
-  ChatDotRound,
-  Connection,
   House,
   Link,
   QuestionFilled,
@@ -86,14 +65,10 @@ import {
   User
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
-import api from '@/api'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
-const unreadTicketCount = ref(0)
-
-const subscriptionReady = computed(() => userStore.userInfo?.subscription_ready || false)
 
 const mobileNavItems = [
   { key: 'home', label: '首页', to: '/user', icon: House },
@@ -102,30 +77,12 @@ const mobileNavItems = [
   { key: 'my', label: '我的', to: '/user/my', icon: User }
 ]
 
-watch(
-  () => route.path,
-  () => {
-    fetchUnreadCount()
-  }
-)
-
 function isMobileNavActive(item) {
   if (item.to === '/user') {
     return route.path === '/user'
   }
 
   return route.path === item.to || route.path.startsWith(`${item.to}/`)
-}
-
-async function fetchUnreadCount() {
-  try {
-    const response = await api.user.getTicketUnreadCount()
-    if (response.code === 0) {
-      unreadTicketCount.value = response.data.count
-    }
-  } catch (error) {
-    console.error('获取未读工单数量失败:', error)
-  }
 }
 
 async function handleLogout() {
@@ -144,7 +101,6 @@ async function handleLogout() {
 }
 
 onMounted(() => {
-  fetchUnreadCount()
 })
 </script>
 
@@ -203,15 +159,6 @@ onMounted(() => {
 .nav-item.active {
   background: #ecf5ff;
   color: #409eff;
-}
-
-.badge {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  background: #f56c6c;
-  border-radius: 50%;
-  margin-left: 5px;
 }
 
 .sidebar-footer {

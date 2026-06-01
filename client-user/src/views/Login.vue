@@ -70,7 +70,7 @@
                   class="pay-option"
                   :class="{ 'is-selected': form.pay_type === 2 }"
                 >
-                  <el-radio :label="2" class="pay-radio">
+                  <el-radio :value="2" class="pay-radio">
                     <span class="pay-option-main">
                       <span class="pay-icon alipay">支</span>
                       <span class="pay-copy">
@@ -84,7 +84,7 @@
                   class="pay-option"
                   :class="{ 'is-selected': form.pay_type === 1 }"
                 >
-                  <el-radio :label="1" class="pay-radio">
+                  <el-radio :value="1" class="pay-radio">
                     <span class="pay-option-main">
                       <span class="pay-icon wechat">微</span>
                       <span class="pay-copy">
@@ -181,9 +181,10 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import api from '@/api'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
@@ -197,6 +198,8 @@ const selectedPlanId = computed(() => {
   const planId = Number(route.query.plan_id || 0)
   return planId > 0 ? planId : null
 })
+
+const referralCode = computed(() => String(route.query.ref || sessionStorage.getItem('referral_code') || '').trim())
 
 const planInfo = computed(() => ({
   name: route.query.plan_name || '未知套餐',
@@ -276,7 +279,8 @@ async function handleSubmit() {
         email: form.email,
         password: form.password,
         plan_id: selectedPlanId.value,
-        pay_type: form.pay_type
+        pay_type: form.pay_type,
+        referral_code: referralCode.value || undefined
       })
 
       if (!result.success) {
@@ -321,8 +325,34 @@ async function handleSubmit() {
 }
 
 function switchToLogin() {
-  router.push({ name: 'Login' })
+  router.push({
+    name: 'Login',
+    query: referralCode.value ? { ref: referralCode.value } : undefined
+  })
 }
+
+/**
+ * 初始化推广归因信息。
+ * 核心分支：有 ref 时先落本地再上报点击；无 ref 时沿用已缓存推广码，保证后续下单仍能归因。
+ */
+async function initializeReferralTracking() {
+  const queryCode = String(route.query.ref || '').trim()
+  if (!queryCode) {
+    return
+  }
+
+  sessionStorage.setItem('referral_code', queryCode)
+
+  try {
+    await api.user.recordReferralClick(queryCode)
+  } catch (error) {
+    console.error('记录推广点击失败:', error)
+  }
+}
+
+onMounted(() => {
+  initializeReferralTracking()
+})
 </script>
 
 <style scoped>

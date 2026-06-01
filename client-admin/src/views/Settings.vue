@@ -2,21 +2,39 @@
   <div class="settings-container">
     <div class="page-header">
       <h1 class="page-title">系统设置</h1>
-      <p class="page-subtitle">管理系统设置和管理员账号</p>
+      <p class="page-subtitle">管理系统设置、管理员账号和推广奖励流量</p>
     </div>
 
     <el-tabs v-model="activeTab" class="settings-tabs">
       <el-tab-pane label="修改密码" name="password">
         <div class="content-card">
-          <el-form :model="passwordForm" :rules="passwordRules" ref="passwordFormRef" label-width="100px" style="max-width: 500px;">
+          <el-form
+            ref="passwordFormRef"
+            :model="passwordForm"
+            :rules="passwordRules"
+            label-width="100px"
+            style="max-width: 500px;"
+          >
             <el-form-item label="原密码" prop="old_password">
-              <el-input v-model="passwordForm.old_password" type="password" show-password placeholder="请输入原密码" />
+              <el-input
+                v-model="passwordForm.old_password"
+                type="password"
+                show-password
+                placeholder="请输入原密码"
+              />
             </el-form-item>
             <el-form-item label="新密码" prop="new_password">
-              <el-input v-model="passwordForm.new_password" type="password" show-password placeholder="请输入新密码" />
+              <el-input
+                v-model="passwordForm.new_password"
+                type="password"
+                show-password
+                placeholder="请输入新密码"
+              />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="handleChangePassword" :loading="submitting">修改密码</el-button>
+              <el-button type="primary" :loading="submitting" @click="handleChangePassword">
+                修改密码
+              </el-button>
             </el-form-item>
           </el-form>
         </div>
@@ -34,19 +52,24 @@
           <el-table :data="admins" style="width: 100%">
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="username" label="用户名" />
-            <el-table-column prop="is_super" label="角色" width="120">
-              <template #default="scope">
-                <el-tag :type="scope.row.is_super ? 'danger' : 'info'">
-                  {{ scope.row.is_super ? '超级管理员' : '普通管理员' }}
+            <el-table-column prop="is_super" label="角色" width="140">
+              <template #default="{ row }">
+                <el-tag :type="row.is_super ? 'danger' : 'info'">
+                  {{ row.is_super ? '超级管理员' : '普通管理员' }}
                 </el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="created_at" label="创建时间">
-              <template #default="scope">{{ formatTime(scope.row.created_at) }}</template>
+              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
             <el-table-column label="操作" width="120">
-              <template #default="scope">
-                <el-button size="small" type="danger" @click="deleteAdmin(scope.row)" :disabled="!!scope.row.is_super">
+              <template #default="{ row }">
+                <el-button
+                  size="small"
+                  type="danger"
+                  :disabled="!!row.is_super"
+                  @click="deleteAdmin(row)"
+                >
                   删除
                 </el-button>
               </template>
@@ -58,47 +81,26 @@
       <el-tab-pane label="邮件配置" name="email">
         <div class="content-card">
           <h2 class="card-title">Brevo 邮件配置</h2>
-          <el-form :model="emailForm" label-width="120px" style="max-width: 600px;">
+          <el-form :model="emailForm" label-width="120px" style="max-width: 640px;">
             <el-form-item label="API Key">
-              <el-input
-                v-model="emailForm.api_key"
-                type="password"
-                show-password
-                placeholder="输入 Brevo API Key"
-              />
+              <el-input v-model="emailForm.api_key" type="password" show-password placeholder="输入 Brevo API Key" />
             </el-form-item>
             <el-form-item label="发件人邮箱">
-              <el-input
-                v-model="emailForm.sender_email"
-                placeholder="noreply@example.com"
-              />
+              <el-input v-model="emailForm.sender_email" placeholder="noreply@example.com" />
             </el-form-item>
             <el-form-item label="发件人名称">
-              <el-input
-                v-model="emailForm.sender_name"
-                placeholder="机场面板"
-              />
+              <el-input v-model="emailForm.sender_name" placeholder="机场面板" />
             </el-form-item>
             <el-form-item label="每日发送配额">
-              <el-input-number
-                v-model="emailForm.daily_limit"
-                :min="1"
-                :max="300"
-                placeholder="每日发送配额"
-              />
-              <span style="margin-left: 10px; color: #666;">封/天（所有邮件发送的总上限）</span>
+              <el-input-number v-model="emailForm.daily_limit" :min="1" :max="300" />
+              <span class="form-hint">封 / 天，所有邮件发送的总上限</span>
             </el-form-item>
             <el-form-item label="每日群发配额">
-              <el-input-number
-                v-model="emailForm.campaign_daily_limit"
-                :min="1"
-                :max="300"
-                placeholder="每日群发配额"
-              />
-              <span style="margin-left: 10px; color: #666;">封/天（群发任务专用配额）</span>
+              <el-input-number v-model="emailForm.campaign_daily_limit" :min="1" :max="300" />
+              <span class="form-hint">封 / 天，群发任务专用配额</span>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveEmailConfig" :loading="emailSaving">保存配置</el-button>
+              <el-button type="primary" :loading="emailSaving" @click="saveEmailConfig">保存配置</el-button>
               <el-button @click="showTestDialog = true">发送测试邮件</el-button>
             </el-form-item>
           </el-form>
@@ -108,26 +110,17 @@
       <el-tab-pane label="资源管理" name="resource">
         <div class="content-card">
           <h2 class="card-title">资源管理配置</h2>
-          <el-form :model="resourceForm" label-width="140px" style="max-width: 600px;">
+          <el-form :model="resourceForm" label-width="140px" style="max-width: 640px;">
             <el-form-item label="最大文件大小">
-              <el-input-number
-                v-model="resourceForm.max_file_size"
-                :min="1"
-                :max="1024"
-                placeholder="最大文件大小"
-              />
-              <span style="margin-left: 10px; color: #666;">MB（单个文件最大允许上传大小）</span>
+              <el-input-number v-model="resourceForm.max_file_size" :min="1" :max="1024" />
+              <span class="form-hint">MB，单个文件最大允许上传大小</span>
             </el-form-item>
-            <el-form-item label="总下载流量限制">
-              <el-input-number
-                v-model="resourceForm.download_speed_limit"
-                :min="0"
-                placeholder="总下载流量限制"
-              />
-              <span style="margin-left: 10px; color: #666;">KB/s（所有用户共享，0 表示不限速）</span>
+            <el-form-item label="总下载速度限制">
+              <el-input-number v-model="resourceForm.download_speed_limit" :min="0" />
+              <span class="form-hint">KB/s，0 表示不限速</span>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveResourceConfig" :loading="resourceSaving">保存配置</el-button>
+              <el-button type="primary" :loading="resourceSaving" @click="saveResourceConfig">保存配置</el-button>
             </el-form-item>
           </el-form>
         </div>
@@ -135,8 +128,8 @@
 
       <el-tab-pane label="流量配置" name="traffic">
         <div class="content-card">
-          <h2 class="card-title">流量统计配置</h2>
-          <el-form :model="trafficForm" label-width="140px" style="max-width: 600px;">
+          <h2 class="card-title">流量与推广奖励配置</h2>
+          <el-form :model="trafficForm" label-width="160px" style="max-width: 720px;">
             <el-form-item label="流量统计倍率">
               <el-input-number
                 v-model="trafficForm.traffic_usage_multiplier"
@@ -144,12 +137,35 @@
                 :max="100"
                 :step="0.1"
                 :precision="2"
-                placeholder="流量统计倍率"
               />
-              <span style="margin-left: 10px; color: #666;">倍（默认 1.0，仅影响后续新增流量）</span>
+              <span class="form-hint">默认 1.0，仅影响后续新增流量统计</span>
+            </el-form-item>
+            <el-form-item label="推广奖励流量">
+              <div class="traffic-input-row">
+                <el-input-number
+                  v-model="trafficForm.referral_reward_traffic_value"
+                  :min="0"
+                  :precision="2"
+                  @change="syncReferralRewardBytes"
+                />
+                <el-select
+                  v-model="trafficForm.referral_reward_traffic_unit"
+                  style="width: 120px;"
+                  @change="handleRewardUnitChange"
+                >
+                  <el-option label="B" value="B" />
+                  <el-option label="KB" value="KB" />
+                  <el-option label="MB" value="MB" />
+                  <el-option label="GB" value="GB" />
+                  <el-option label="TB" value="TB" />
+                </el-select>
+              </div>
+              <div class="form-block-hint">
+                支付完成后给推广人的首单奖励流量，当前按字节保存到系统设置。
+              </div>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveTrafficConfig" :loading="trafficSaving">保存配置</el-button>
+              <el-button type="primary" :loading="trafficSaving" @click="saveTrafficConfig">保存配置</el-button>
             </el-form-item>
           </el-form>
         </div>
@@ -174,12 +190,13 @@
                 :max="168"
                 :step="1"
                 :precision="0"
-                placeholder="自动更新间隔"
               />
-              <span style="margin-left: 10px; color: #666;">小时（写入 Profile-Update-Interval 响应头）</span>
+              <span class="form-hint">小时，写入 Profile-Update-Interval 响应头</span>
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="saveSubscriptionConfig" :loading="subscriptionSaving">保存配置</el-button>
+              <el-button type="primary" :loading="subscriptionSaving" @click="saveSubscriptionConfig">
+                保存配置
+              </el-button>
             </el-form-item>
           </el-form>
         </div>
@@ -200,7 +217,7 @@
       </el-form>
       <template #footer>
         <el-button @click="adminDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleAddAdmin" :loading="submitting">确定</el-button>
+        <el-button type="primary" :loading="submitting" @click="handleAddAdmin">确定</el-button>
       </template>
     </el-dialog>
 
@@ -212,25 +229,26 @@
       </el-form>
       <template #footer>
         <el-button @click="showTestDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleSendTest" :loading="testSending">发送</el-button>
+        <el-button type="primary" :loading="testSending" @click="handleSendTest">发送</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAdminStore } from '@/stores/admin'
 import api from '@/api'
 
 const adminStore = useAdminStore()
+
+const activeTab = ref('password')
 const admins = ref([])
 const submitting = ref(false)
 const adminDialogVisible = ref(false)
 const passwordFormRef = ref(null)
-const activeTab = ref('password')
 
 const emailForm = ref({
   api_key: '',
@@ -250,13 +268,16 @@ const resourceForm = ref({
 })
 const resourceSaving = ref(false)
 
-const trafficForm = ref({
-  traffic_usage_multiplier: 1.0
+const trafficForm = reactive({
+  traffic_usage_multiplier: 1,
+  referral_reward_traffic_bytes: 0,
+  referral_reward_traffic_value: 0,
+  referral_reward_traffic_unit: 'GB'
 })
 const trafficSaving = ref(false)
 
 const subscriptionForm = ref({
-  clash_config_name: '天澜大陆',
+  clash_config_name: '天涯大陆',
   clash_profile_update_interval: 2
 })
 const subscriptionSaving = ref(false)
@@ -270,7 +291,7 @@ const passwordRules = {
   old_password: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
   new_password: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 8, message: '密码长度至少8位', trigger: 'blur' }
+    { min: 8, message: '密码长度至少 8 位', trigger: 'blur' }
   ]
 }
 
@@ -279,6 +300,52 @@ const adminForm = reactive({
   password: '',
   is_super: false
 })
+
+const UNIT_MULTIPLIERS = {
+  B: 1,
+  KB: 1024,
+  MB: 1024 * 1024,
+  GB: 1024 * 1024 * 1024,
+  TB: 1024 * 1024 * 1024 * 1024
+}
+
+function bytesToDisplay(bytes) {
+  const safeBytes = Number(bytes) || 0
+  if (safeBytes <= 0) {
+    return { value: 0, unit: 'GB' }
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let currentUnitIndex = 0
+  let currentValue = safeBytes
+
+  while (currentValue >= 1024 && currentUnitIndex < units.length - 1) {
+    currentValue /= 1024
+    currentUnitIndex += 1
+  }
+
+  return {
+    value: Math.round(currentValue * 100) / 100,
+    unit: units[currentUnitIndex]
+  }
+}
+
+function syncReferralRewardBytes() {
+  trafficForm.referral_reward_traffic_bytes = Math.round(
+    Number(trafficForm.referral_reward_traffic_value || 0) *
+    UNIT_MULTIPLIERS[trafficForm.referral_reward_traffic_unit]
+  )
+}
+
+/**
+ * 切换显示单位时，始终基于原始字节值重新换算，避免多次转换产生误差。
+ */
+function handleRewardUnitChange(unit) {
+  const multiplier = UNIT_MULTIPLIERS[unit] || 1
+  trafficForm.referral_reward_traffic_value = Math.round(
+    ((Number(trafficForm.referral_reward_traffic_bytes) || 0) / multiplier) * 100
+  ) / 100
+}
 
 async function fetchAdmins() {
   try {
@@ -335,18 +402,24 @@ async function handleAddAdmin() {
 
 async function deleteAdmin(admin) {
   try {
-    await ElMessageBox.confirm(`确定要删除管理员 "${admin.username}" 吗？`, '提示', { type: 'warning' })
+    await ElMessageBox.confirm(`确定要删除管理员“${admin.username}”吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
     const response = await api.admin.deleteAdmin(admin.id)
     if (response.code === 0) {
       ElMessage.success('删除成功')
       fetchAdmins()
     }
-  } catch {}
+  } catch {
+    // 用户取消删除时不提示错误。
+  }
 }
 
 function formatTime(timestamp) {
   if (!timestamp) return ''
-  return new Date(timestamp * 1000).toLocaleString('zh-CN')
+  return new Date(Number(timestamp) * 1000).toLocaleString('zh-CN')
 }
 
 async function loadEmailConfig() {
@@ -381,6 +454,7 @@ async function handleSendTest() {
     ElMessage.warning('请输入测试邮箱')
     return
   }
+
   try {
     testSending.value = true
     const res = await api.admin.sendTestEmail({ email: testEmail.value })
@@ -429,7 +503,11 @@ async function loadTrafficConfig() {
   try {
     const res = await api.admin.getTrafficConfig()
     if (res.code === 0) {
-      trafficForm.value = res.data
+      trafficForm.traffic_usage_multiplier = Number(res.data.traffic_usage_multiplier || 1)
+      trafficForm.referral_reward_traffic_bytes = Number(res.data.referral_reward_traffic || 0)
+      const rewardDisplay = bytesToDisplay(trafficForm.referral_reward_traffic_bytes)
+      trafficForm.referral_reward_traffic_value = rewardDisplay.value
+      trafficForm.referral_reward_traffic_unit = rewardDisplay.unit
     }
   } catch (error) {
     console.error('加载流量配置失败:', error)
@@ -439,8 +517,13 @@ async function loadTrafficConfig() {
 async function saveTrafficConfig() {
   try {
     trafficSaving.value = true
-    const res = await api.admin.saveTrafficConfig(trafficForm.value)
+    syncReferralRewardBytes()
+    const res = await api.admin.saveTrafficConfig({
+      traffic_usage_multiplier: trafficForm.traffic_usage_multiplier,
+      referral_reward_traffic: trafficForm.referral_reward_traffic_bytes
+    })
     if (res.code === 0) {
+      trafficForm.referral_reward_traffic_bytes = Number(res.data.referral_reward_traffic || 0)
       ElMessage.success('流量配置已保存')
     } else {
       ElMessage.error(res.message)
@@ -452,10 +535,6 @@ async function saveTrafficConfig() {
   }
 }
 
-/**
- * 加载 Clash 订阅响应头配置。
- * 关键分支：接口成功时覆盖默认表单值，失败时保留本地默认值供管理员继续编辑。
- */
 async function loadSubscriptionConfig() {
   try {
     const res = await api.admin.getSubscriptionConfig()
@@ -467,10 +546,6 @@ async function loadSubscriptionConfig() {
   }
 }
 
-/**
- * 保存 Clash 订阅响应头配置。
- * 关键分支：名称为空时前端拦截，其余校验交给后端保证配置范围一致。
- */
 async function saveSubscriptionConfig() {
   if (!subscriptionForm.value.clash_config_name.trim()) {
     ElMessage.warning('请输入 Clash 订阅名称')
@@ -506,11 +581,60 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.settings-container { max-width: 1000px; }
-.page-header { margin-bottom: 30px; }
-.page-title { font-size: 28px; color: #333; margin-bottom: 10px; }
-.page-subtitle { color: #666; font-size: 16px; }
-.content-card { background: #fff; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 30px; margin-bottom: 20px; }
-.card-title { font-size: 20px; color: #333; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
-.toolbar { margin-bottom: 20px; }
+.settings-container {
+  max-width: 1000px;
+}
+
+.page-header {
+  margin-bottom: 30px;
+}
+
+.page-title {
+  margin-bottom: 10px;
+  color: #333;
+  font-size: 28px;
+}
+
+.page-subtitle {
+  color: #666;
+  font-size: 16px;
+}
+
+.content-card {
+  margin-bottom: 20px;
+  padding: 30px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.card-title {
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eee;
+  color: #333;
+  font-size: 20px;
+}
+
+.toolbar {
+  margin-bottom: 20px;
+}
+
+.form-hint {
+  margin-left: 10px;
+  color: #666;
+}
+
+.form-block-hint {
+  margin-top: 8px;
+  color: #666;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.traffic-input-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
 </style>

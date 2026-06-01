@@ -19,6 +19,7 @@ const adminEmailRoutes = require('../routes/admin/email');
 const adminResourcesRoutes = require('../routes/admin/resources');
 const adminBlogsRoutes = require('../routes/admin/blogs');
 const adminSystemSettingsRoutes = require('../routes/admin/system-settings');
+const adminReferralsRoutes = require('../routes/admin/referrals');
 
 function registerAdminRoutes(app, logger) {
   const adminPrefix = '/api/admin';
@@ -37,6 +38,7 @@ function registerAdminRoutes(app, logger) {
   app.use(`${adminPrefix}/resources`, adminResourcesRoutes);
   app.use(`${adminPrefix}/blogs`, adminBlogsRoutes);
   app.use(`${adminPrefix}/system-settings`, adminSystemSettingsRoutes);
+  app.use(`${adminPrefix}/referrals`, adminReferralsRoutes);
 
   app.use((req, res) => {
     res.status(404).json({ code: 404, message: '接口不存在', data: null });

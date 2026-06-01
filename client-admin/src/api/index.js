@@ -686,6 +686,44 @@ const adminApi = {
   },
 
   /**
+   * 获取推广管理分页列表。
+   * @param {Object} params - 查询参数
+   * @returns {Promise<Object>} 推广分页结果
+   */
+  getReferrals(params) {
+    return apiClient.get('/referrals', { params })
+  },
+
+  /**
+   * 获取单个用户的推广详情。
+   * @param {number} userId - 用户 ID
+   * @param {Object} params - 查询参数
+   * @returns {Promise<Object>} 推广详情
+   */
+  getReferralDetail(userId, params) {
+    return apiClient.get(`/referrals/${userId}`, { params })
+  },
+
+  /**
+   * 更新推广链接启用状态。
+   * @param {number} userId - 用户 ID
+   * @param {boolean} enabled - 是否启用
+   * @returns {Promise<Object>} 更新结果
+   */
+  updateReferralEnabled(userId, enabled) {
+    return apiClient.put(`/referrals/${userId}/enabled`, { enabled })
+  },
+
+  /**
+   * 重置用户推广链接。
+   * @param {number} userId - 用户 ID
+   * @returns {Promise<Object>} 新推广码信息
+   */
+  resetReferralCode(userId) {
+    return apiClient.post(`/referrals/${userId}/reset-code`)
+  },
+
+  /**
    * 获取订阅响应配置
    * @returns {Promise<Object>} 订阅名称和自动更新间隔
    */

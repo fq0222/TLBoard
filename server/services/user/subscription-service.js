@@ -269,7 +269,8 @@ async function ensureUserNodeConfigsComplete(db, user, servers, logger) {
   }
 
   logger.info(`用户 ${user.email} 缺少 ${missingPairs.length} 个节点配置，尝试同步用户到 3X-UI`);
-  const syncResult = await syncUserToXuiServers(db, user, { traffic_limit: user.traffic_limit });
+  const { totalTrafficLimit } = getUserTrafficEntitlement(user);
+  const syncResult = await syncUserToXuiServers(db, user, { traffic_limit: totalTrafficLimit });
   if (!syncResult.success) {
     logger.warn(`同步用户节点配置未完全成功: user=${user.email}, message=${syncResult.message || 'unknown'}`);
   }
@@ -476,14 +477,32 @@ function assertActiveSubscriptionUser(user) {
 }
 
 /**
+ * 统一计算订阅场景下的套餐流量、推广流量与总流量。
+ *
+ * @param {Object} user - 用户或订阅记录，需包含 traffic_limit/referral_traffic_limit
+ * @returns {{planTrafficLimit:number,referralTrafficLimit:number,totalTrafficLimit:number}} 流量口径
+ */
+function getUserTrafficEntitlement(user) {
+  const planTrafficLimit = Number(user?.traffic_limit) || 0;
+  const referralTrafficLimit = Number(user?.referral_traffic_limit) || 0;
+
+  return {
+    planTrafficLimit,
+    referralTrafficLimit,
+    totalTrafficLimit: planTrafficLimit + referralTrafficLimit
+  };
+}
+
+/**
  * 构建订阅客户端识别的用户流量响应头。
  *
  * @param {Object} subscription - 当前订阅记录
  * @returns {Object} 包含流量用量、总量与到期时间的响应头
  */
 function buildSubscriptionUserinfoHeaders(subscription) {
+  const { totalTrafficLimit } = getUserTrafficEntitlement(subscription);
   return {
-    'Subscription-Userinfo': `upload=0; download=${subscription.traffic_used}; total=${subscription.traffic_limit}; expire=${subscription.expire_at}`
+    'Subscription-Userinfo': `upload=0; download=${subscription.traffic_used}; total=${totalTrafficLimit}; expire=${subscription.expire_at}`
   };
 }
 
@@ -670,9 +689,13 @@ async function getSubscriptionInfo(db, userId) {
     }
   }
 
-  const trafficLimit = Number(user.traffic_limit);
   const trafficUsed = Number(user.traffic_used);
-  const safeTrafficLimit = Number.isFinite(trafficLimit) ? trafficLimit : 0;
+  const {
+    planTrafficLimit,
+    referralTrafficLimit,
+    totalTrafficLimit
+  } = getUserTrafficEntitlement(user);
+  const safeTrafficLimit = Number.isFinite(totalTrafficLimit) ? totalTrafficLimit : 0;
   const safeTrafficUsed = Number.isFinite(trafficUsed) ? trafficUsed : 0;
   const trafficPercent = safeTrafficLimit > 0
     ? Math.round((safeTrafficUsed / safeTrafficLimit) * 100 * 100) / 100
@@ -684,9 +707,16 @@ async function getSubscriptionInfo(db, userId) {
     expire_at: user.expire_at,
     expire_text: formatTime(user.expire_at),
     traffic_used: user.traffic_used,
-    traffic_limit: user.traffic_limit,
+    plan_traffic_limit: planTrafficLimit,
+    plan_traffic_limit_text: formatTraffic(planTrafficLimit),
+    referral_traffic_limit: referralTrafficLimit,
+    referral_traffic_limit_text: formatTraffic(referralTrafficLimit),
+    total_traffic_limit: totalTrafficLimit,
+    total_traffic_limit_text: formatTraffic(totalTrafficLimit),
+    // 兼容旧字段：订阅详情中的 traffic_limit 对外语义已切换为总流量上限。
+    traffic_limit: totalTrafficLimit,
     traffic_used_text: formatTraffic(user.traffic_used),
-    traffic_limit_text: formatTraffic(user.traffic_limit),
+    traffic_limit_text: formatTraffic(totalTrafficLimit),
     traffic_percent: trafficPercent,
     nodes
   };

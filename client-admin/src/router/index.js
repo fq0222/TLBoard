@@ -1,12 +1,11 @@
 /**
- * 管理端路由配置
- * 定义页面路由和导航守卫
+ * 管理端路由配置。
+ * 负责页面路由、登录守卫和标题更新。
  */
 
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAdminStore } from '@/stores/admin'
 
-// 路由配置
 const routes = [
   {
     path: '/admin/login',
@@ -66,7 +65,7 @@ const routes = [
         path: 'cf-ips',
         name: 'CfIps',
         component: () => import('@/views/CfIps.vue'),
-        meta: { title: 'CF IP池管理' }
+        meta: { title: 'CF IP 池管理' }
       },
       {
         path: 'tickets',
@@ -99,6 +98,12 @@ const routes = [
         meta: { title: '博客管理' }
       },
       {
+        path: 'referrals',
+        name: 'Referrals',
+        component: () => import('@/views/Referrals.vue'),
+        meta: { title: '推广管理' }
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('@/views/Settings.vue'),
@@ -118,45 +123,35 @@ const routes = [
   }
 ]
 
-// 创建路由实例
 const router = createRouter({
   history: createWebHistory(),
   routes,
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) {
       return savedPosition
-    } else {
-      return { top: 0 }
     }
+    return { top: 0 }
   }
 })
 
-// 全局前置守卫
 router.beforeEach((to, from, next) => {
-  // 设置页面标题
   document.title = to.meta.title ? `${to.meta.title} - 管理端` : '管理端'
-  
-  // 获取管理员状态
+
   const adminStore = useAdminStore()
-  
-  // 检查是否需要登录
   if (to.meta.requiresAuth && !adminStore.isLoggedIn) {
     next({ name: 'AdminLogin', query: { redirect: to.fullPath } })
     return
   }
-  
-  // 检查是否是游客页面（已登录管理员不应访问）
+
   if (to.meta.guest && adminStore.isLoggedIn) {
     next({ name: 'Dashboard' })
     return
   }
-  
+
   next()
 })
 
-// 全局后置守卫
 router.afterEach((to, from) => {
-  // 可以在这里添加页面加载完成后的逻辑
   console.log(`页面跳转: ${from.path} -> ${to.path}`)
 })
 

@@ -32,6 +32,51 @@
     <section class="content-card">
       <div class="section-head">
         <div>
+          <h2 class="section-title">推广</h2>
+          <p class="section-subtitle">分享专属链接，查看点击和奖励流量</p>
+        </div>
+        <router-link to="/user/referral" class="section-link">
+          <span>查看详情</span>
+          <el-icon><ArrowRight /></el-icon>
+        </router-link>
+      </div>
+
+      <div class="referral-overview">
+        <div class="referral-stat">
+          <span class="referral-stat-label">推广链接</span>
+          <div class="referral-link-row">
+            <span class="referral-link-text">{{ referralSummary.referral_url || '加载中...' }}</span>
+            <el-button
+              class="copy-button"
+              size="small"
+              :disabled="!referralSummary.referral_url"
+              @click="copyReferralLink"
+            >
+              复制
+            </el-button>
+          </div>
+        </div>
+
+        <div class="referral-metrics">
+          <div class="metric-card">
+            <span class="metric-label">点击量</span>
+            <span class="metric-value">{{ referralSummary.click_count || 0 }}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">奖励总流量</span>
+            <span class="metric-value">{{ rewardTrafficText }}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">奖励订单数</span>
+            <span class="metric-value">{{ referralSummary.reward_count || 0 }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="content-card">
+      <div class="section-head">
+        <div>
           <h2 class="section-title">我的服务</h2>
         </div>
       </div>
@@ -59,7 +104,7 @@
         <router-link v-if="subscriptionReady" to="/user/subscription" class="action-item">
           <div class="action-main">
             <span class="action-title">订阅信息</span>
-            <span class="action-desc">复制通用订阅与 Clash 订阅链接</span>
+            <span class="action-desc">复制通用订阅和 Clash 订阅链接</span>
           </div>
           <el-icon><ArrowRight /></el-icon>
         </router-link>
@@ -107,7 +152,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight } from '@element-plus/icons-vue'
 import api from '@/api'
 import { useUserStore } from '@/stores/user'
@@ -115,11 +160,46 @@ import { useUserStore } from '@/stores/user'
 const router = useRouter()
 const userStore = useUserStore()
 const unreadTicketCount = ref(0)
+const referralSummary = ref({})
 
 const userInfo = computed(() => userStore.userInfo || {})
 const subscriptionReady = computed(() => !!userStore.userInfo?.subscription_ready)
 const currentPlanText = computed(() => `当前套餐：${userInfo.value.plan_name || '未订阅'}`)
+const rewardTrafficText = computed(() => {
+  if (referralSummary.value.reward_traffic_text) {
+    return referralSummary.value.reward_traffic_text
+  }
 
+  return formatTraffic(referralSummary.value.reward_traffic)
+})
+
+/**
+ * 格式化流量显示，兼容空值和字符串数字。
+ *
+ * @param {*} bytes - 原始字节数
+ * @returns {string} 格式化后的流量文本
+ */
+function formatTraffic(bytes) {
+  if (bytes === null || bytes === undefined || bytes === '') return '0 B'
+
+  const numericValue = Number(bytes)
+  if (Number.isNaN(numericValue) || numericValue === 0) return '0 B'
+
+  const unitBase = 1024
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const unitIndex = Math.min(
+    Math.floor(Math.log(numericValue) / Math.log(unitBase)),
+    units.length - 1
+  )
+
+  return `${parseFloat((numericValue / (unitBase ** unitIndex)).toFixed(2))} ${units[unitIndex]}`
+}
+
+/**
+ * 获取未读工单数量。
+ *
+ * @returns {Promise<void>}
+ */
 async function fetchUnreadCount() {
   try {
     const response = await api.user.getTicketUnreadCount()
@@ -131,6 +211,77 @@ async function fetchUnreadCount() {
   }
 }
 
+/**
+ * 获取推广概览，用于“我的”页面的快捷预览。
+ *
+ * @returns {Promise<void>}
+ */
+async function fetchReferralSummary() {
+  try {
+    const response = await api.user.getReferralSummary()
+    if (response.code === 0) {
+      referralSummary.value = response.data || {}
+    }
+  } catch (error) {
+    console.error('获取推广概览失败:', error)
+  }
+}
+
+/**
+ * 兼容 HTTP、非安全上下文和旧浏览器的复制实现。
+ *
+ * @param {string} text - 需要复制的文本
+ * @returns {Promise<void>}
+ */
+async function copyToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'readonly')
+  textarea.style.position = 'fixed'
+  textarea.style.top = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+
+  try {
+    const copied = document.execCommand('copy')
+    if (!copied) {
+      throw new Error('execCommand copy failed')
+    }
+  } finally {
+    document.body.removeChild(textarea)
+  }
+}
+
+/**
+ * 复制推广链接，便于用户直接分享。
+ *
+ * @returns {Promise<void>}
+ */
+async function copyReferralLink() {
+  if (!referralSummary.value.referral_url) {
+    return
+  }
+
+  try {
+    await copyToClipboard(referralSummary.value.referral_url)
+    ElMessage.success('推广链接已复制')
+  } catch (error) {
+    console.error('复制推广链接失败:', error)
+    ElMessage.error('复制失败，请手动复制')
+  }
+}
+
+/**
+ * 退出当前登录账户。
+ *
+ * @returns {Promise<void>}
+ */
 async function handleLogout() {
   try {
     await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
@@ -153,7 +304,8 @@ onMounted(async () => {
 
   await Promise.allSettled([
     userStore.fetchUserProfile(),
-    fetchUnreadCount()
+    fetchUnreadCount(),
+    fetchReferralSummary()
   ])
 })
 </script>
@@ -207,7 +359,8 @@ onMounted(async () => {
   color: #606266;
 }
 
-.profile-shortcut {
+.profile-shortcut,
+.section-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -245,6 +398,10 @@ onMounted(async () => {
 }
 
 .section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 16px;
 }
 
@@ -252,6 +409,97 @@ onMounted(async () => {
   margin: 0;
   font-size: 18px;
   color: #303133;
+}
+
+.section-subtitle {
+  margin: 8px 0 0;
+  color: #909399;
+  line-height: 1.5;
+}
+
+.referral-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.referral-stat {
+  padding: 16px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+}
+
+.referral-stat-label {
+  display: block;
+  margin-bottom: 10px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.referral-link-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.referral-link-text {
+  flex: 1;
+  min-width: 0;
+  color: #303133;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.copy-button {
+  flex-shrink: 0;
+  min-width: 84px;
+  height: 40px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  font-weight: 700;
+  background: linear-gradient(135deg, #2563eb 0%, #14b8a6 100%);
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.22);
+}
+
+.copy-button:hover,
+.copy-button:focus-visible {
+  color: #fff;
+  background: linear-gradient(135deg, #1d4ed8 0%, #0f9f94 100%);
+}
+
+.copy-button.is-disabled,
+.copy-button.is-disabled:hover {
+  color: rgba(255, 255, 255, 0.78);
+  background: linear-gradient(135deg, #94a3b8 0%, #cbd5e1 100%);
+  box-shadow: none;
+}
+
+.referral-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.metric-label {
+  color: #909399;
+  font-size: 13px;
+}
+
+.metric-value {
+  color: #303133;
+  font-size: 20px;
+  font-weight: 600;
 }
 
 .action-list {
@@ -352,7 +600,9 @@ onMounted(async () => {
 }
 
 @media (max-width: 768px) {
-  .profile-top {
+  .profile-top,
+  .section-head,
+  .referral-link-row {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -363,8 +613,29 @@ onMounted(async () => {
   }
 
   .profile-meta,
-  .management-grid {
+  .management-grid,
+  .referral-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .section-link {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .profile-shortcut {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .referral-link-row {
+    align-items: stretch;
+  }
+
+  .copy-button {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
   }
 
   .action-item {

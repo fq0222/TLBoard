@@ -16,6 +16,7 @@ const tableDefinitions = [
         sub_id VARCHAR(255) UNIQUE,
         traffic_used BIGINT DEFAULT 0,
         traffic_limit BIGINT DEFAULT 0,
+        referral_traffic_limit BIGINT DEFAULT 0,
         traffic_used_at BIGINT,
         disable_reason VARCHAR(50),
         expire_at BIGINT,
@@ -86,7 +87,49 @@ const tableDefinitions = [
         status VARCHAR(50) DEFAULT 'pending',
         payment_url TEXT,
         paid_at BIGINT,
+        referrer_user_id INTEGER,
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+      )
+    `
+  },
+  {
+    logMessage: '推广码表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS referral_codes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        code VARCHAR(64) NOT NULL UNIQUE,
+        enabled INTEGER DEFAULT 1,
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+      )
+    `
+  },
+  {
+    logMessage: '推广点击记录表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS referral_clicks (
+        id SERIAL PRIMARY KEY,
+        referrer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        code VARCHAR(64) NOT NULL,
+        ip VARCHAR(64),
+        user_agent TEXT,
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+      )
+    `
+  },
+  {
+    logMessage: '推广奖励记录表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS referral_rewards (
+        id SERIAL PRIMARY KEY,
+        referrer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        referred_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        reward_traffic BIGINT NOT NULL,
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        UNIQUE(referred_user_id),
+        UNIQUE(order_id)
       )
     `
   },

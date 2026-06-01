@@ -17,6 +17,7 @@ const { createLogger } = require('../../utils/logger');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
 const orderRepository = require('../../repositories/order-repository');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
+const referralService = require('../referral-service');
 
 const logger = createLogger('ORDER-SERVICE');
 
@@ -69,6 +70,28 @@ function bytesToGB(bytes) {
 }
 
 /**
+ * 统一计算同步到 3X-UI 时应使用的总流量上限。
+ *
+ * @param {Object} user - 用户快照，可包含 traffic_limit/referral_traffic_limit/total_traffic_limit
+ * @param {Object} [plan={}] - 套餐快照，可包含 total_traffic_limit 或 traffic_limit
+ * @returns {number} 传给 3X-UI 的总字节数
+ */
+function getXuiTotalTrafficLimit(user, plan = {}) {
+  const payloadTotal = Number(plan?.total_traffic_limit);
+  if (Number.isFinite(payloadTotal) && payloadTotal >= 0) {
+    return payloadTotal;
+  }
+
+  if (Number.isFinite(Number(user?.total_traffic_limit))) {
+    return Number(user.total_traffic_limit);
+  }
+
+  const planTrafficLimit = Number(user?.traffic_limit ?? plan?.traffic_limit) || 0;
+  const referralTrafficLimit = Number(user?.referral_traffic_limit ?? plan?.referral_traffic_limit) || 0;
+  return planTrafficLimit + referralTrafficLimit;
+}
+
+/**
  * 生成写入同步任务 payload 的套餐快照，避免把整条套餐记录写进队列。
  * @param {Object} plan - 套餐信息
  * @returns {Object} 精简后的套餐信息
@@ -76,7 +99,8 @@ function bytesToGB(bytes) {
 function buildPayloadPlan(plan) {
   return {
     id: plan.id,
-    traffic_limit: plan.traffic_limit
+    traffic_limit: plan.traffic_limit,
+    total_traffic_limit: Number(plan.traffic_limit || 0)
   };
 }
 
@@ -191,7 +215,7 @@ async function legacySyncUserToXuiServers(db, user, plan = {}) {
             // 每个 inbound 使用“邮箱-节点备注”作为 3X-UI 客户端标识
             const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
             const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
-            const totalBytes = Number(user.traffic_limit || plan.traffic_limit || 0);
+            const totalBytes = getXuiTotalTrafficLimit(user, plan);
             const existingClient = await xuiService.getClientByEmail(inbound.id, nodeEmail);
 
             if (existingClient.success) {
@@ -326,7 +350,7 @@ async function syncUserToXuiServers(db, user, plan = {}) {
           try {
             const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
             const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
-            const totalBytes = Number(user.traffic_limit || plan.traffic_limit || 0);
+            const totalBytes = getXuiTotalTrafficLimit(user, plan);
             const strategy = inbound.remark && inbound.remark.toLowerCase().includes('hy2')
               ? 'hy2'
               : (inbound.remark && inbound.remark.toLowerCase().includes('direct') ? 'direct' : 'cf');
@@ -475,14 +499,14 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
     newTrafficLimit = Number(plan.traffic_limit || 0);
   }
 
-  const transaction = db.transaction(async () => {
-    await orderRepository.markOrderPaid(db, {
+  const transaction = db.transaction(async (transactionDb) => {
+    await orderRepository.markOrderPaid(transactionDb, {
       outTradeNo,
       tradeNo: finalTradeNo,
       paidAt: now
     });
 
-    await orderRepository.updateUserAfterPaidOrder(db, {
+    await orderRepository.updateUserAfterPaidOrder(transactionDb, {
       userId: order.user_id,
       planId: plan.id,
       trafficLimit: newTrafficLimit,
@@ -493,16 +517,21 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
     if (isRenewOrder) {
       const currentPlanId = order.current_plan_id;
       if (currentPlanId && currentPlanId !== plan.id) {
-        await orderRepository.decrementPlanSalesCount(db, currentPlanId);
-        await orderRepository.incrementPlanSalesCount(db, plan.id);
+        await orderRepository.decrementPlanSalesCount(transactionDb, currentPlanId);
+        await orderRepository.incrementPlanSalesCount(transactionDb, plan.id);
         logger.info(`续费切换套餐: 旧套餐 ${currentPlanId} -1, 新套餐 ${plan.id} +1`);
       } else if (!currentPlanId) {
-        await orderRepository.incrementPlanSalesCount(db, plan.id);
+        await orderRepository.incrementPlanSalesCount(transactionDb, plan.id);
         logger.info(`续费新套餐 ${plan.id} +1`);
       }
     } else {
-      await orderRepository.incrementPlanSalesCount(db, plan.id);
+      await orderRepository.incrementPlanSalesCount(transactionDb, plan.id);
       logger.info(`新购订单: ${plan.id} +1`);
+    }
+
+    // 首单奖励：仅新购、支付前 payment_count 为 0 且订单带推广人时，在同一事务内发放。
+    if (!isRenewOrder && Number(order.current_payment_count || 0) === 0 && order.referrer_user_id) {
+      await referralService.issueFirstPaymentReward(transactionDb, order);
     }
   });
 
@@ -539,7 +568,9 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
     email: order.email,
     subscription_token: order.subscription_token,
     expire_at: expireAt,
-    traffic_limit: newTrafficLimit
+    traffic_limit: newTrafficLimit,
+    referral_traffic_limit: Number(order.current_referral_traffic_limit || 0),
+    total_traffic_limit: newTrafficLimit + (Number(order.current_referral_traffic_limit) || 0)
   };
 
   const syncTaskType = isRenewOrder

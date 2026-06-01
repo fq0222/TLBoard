@@ -12,6 +12,16 @@ const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
 const logger = createLogger('JOBS');
 
 /**
+ * 统一计算巡检补偿同步时写回 3X-UI 的总流量上限。
+ *
+ * @param {Object} user - 用户快照，需包含 traffic_limit/referral_traffic_limit
+ * @returns {number} 总流量字节数
+ */
+function getXuiTotalTrafficLimit(user) {
+  return (Number(user?.traffic_limit) || 0) + (Number(user?.referral_traffic_limit) || 0);
+}
+
+/**
  * 同步一台 3X-UI 服务器上的用户状态
  * 历史实现保留，仅用于对照旧巡检逻辑。
  * @param {Object} db - 数据库实例
@@ -48,7 +58,7 @@ async function legacySyncUsersToServer(db, server, users) {
       for (const user of usersToAdd) {
         try {
           const expiryTime = user.expire_at ? user.expire_at * 1000 : 0;
-          const totalGB = user.traffic_limit || 0;
+          const totalGB = getXuiTotalTrafficLimit(user);
           const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
           const existingConfig = await xuiSyncRepository.findUserNodeConfig(
             db,
@@ -198,7 +208,7 @@ async function legacySyncUsersToServer(db, server, users) {
           }
         }
 
-        const expectedTotalGB = Number(user.traffic_limit || 0);
+        const expectedTotalGB = getXuiTotalTrafficLimit(user);
         const actualTotalGB = Number(xuiClient.totalGB || 0);
         const expectedExpiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
         const actualExpiryTime = Number(xuiClient.expiryTime || 0);
@@ -272,7 +282,7 @@ async function syncUsersToServer(db, server, users) {
         try {
           const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
           const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
-          const totalBytes = Number(user.traffic_limit || 0);
+          const totalBytes = getXuiTotalTrafficLimit(user);
           const strategy = inbound.remark && inbound.remark.toLowerCase().includes('hy2')
             ? 'hy2'
             : (inbound.remark && inbound.remark.toLowerCase().includes('direct') ? 'direct' : 'cf');

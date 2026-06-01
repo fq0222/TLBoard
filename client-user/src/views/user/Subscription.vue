@@ -932,6 +932,57 @@ onBeforeUnmount(() => {
     display: block;
   }
 
+  .node-mobile-card {
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .node-mobile-card + .node-mobile-card {
+    margin-top: 10px;
+  }
+
+  .node-mobile-head {
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .node-mobile-title {
+    font-size: 16px;
+    line-height: 1.35;
+  }
+
+  .node-mobile-tags {
+    gap: 4px;
+  }
+
+  .node-mobile-tags :deep(.protocol-tag) {
+    margin-right: 0;
+    margin-bottom: 0;
+  }
+
+  .node-mobile-meta {
+    gap: 8px;
+  }
+
+  .node-mobile-row {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+  }
+
+  .node-mobile-label {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .node-mobile-value {
+    font-size: 15px;
+    line-height: 1.5;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
   .link-group :deep(.el-input-group) {
     width: 100%;
   }

@@ -134,9 +134,11 @@ async function updateUserSyncStatus(db, userId, syncStatus) {
  */
 async function findPaidOrderContextByOutTradeNo(db, outTradeNo) {
   return db.prepare(`
-    SELECT o.*, u.expire_at as current_expire_at, u.traffic_limit as current_traffic_limit,
+    SELECT o.*, o.id, o.referrer_user_id,
+           u.expire_at as current_expire_at, u.traffic_limit as current_traffic_limit,
+           u.referral_traffic_limit as current_referral_traffic_limit,
            u.email, u.subscription_token, u.plan_id as current_plan_id, u.enabled as current_enabled,
-           u.disable_reason as current_disable_reason
+           u.disable_reason as current_disable_reason, u.payment_count as current_payment_count
     FROM orders o
     LEFT JOIN users u ON o.user_id = u.id
     WHERE o.out_trade_no = ?

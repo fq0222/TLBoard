@@ -1,12 +1,11 @@
 <template>
   <div class="admin-layout">
-    <!-- 侧边栏 -->
     <aside class="sidebar" :class="{ collapsed: isCollapsed }">
       <div class="sidebar-header">
-        <h1 class="sidebar-title" v-if="!isCollapsed">管理端</h1>
-        <h1 class="sidebar-title collapsed-title" v-else>管</h1>
+        <h1 v-if="!isCollapsed" class="sidebar-title">管理端</h1>
+        <h1 v-else class="sidebar-title collapsed-title">管</h1>
       </div>
-      
+
       <nav class="sidebar-nav">
         <router-link to="/admin" class="nav-item" exact-active-class="active">
           <el-icon><DataBoard /></el-icon>
@@ -34,7 +33,7 @@
         </router-link>
         <router-link to="/admin/cf-ips" class="nav-item" active-class="active">
           <el-icon><Connection /></el-icon>
-          <span v-if="!isCollapsed">CF IP池</span>
+          <span v-if="!isCollapsed">CF IP 池</span>
         </router-link>
         <router-link to="/admin/tickets" class="nav-item" active-class="active">
           <el-icon><ChatDotRound /></el-icon>
@@ -52,28 +51,30 @@
           <el-icon><Reading /></el-icon>
           <span v-if="!isCollapsed">博客管理</span>
         </router-link>
+        <router-link to="/admin/referrals" class="nav-item" active-class="active">
+          <el-icon><Share /></el-icon>
+          <span v-if="!isCollapsed">推广管理</span>
+        </router-link>
         <router-link to="/admin/settings" class="nav-item" active-class="active">
           <el-icon><Setting /></el-icon>
           <span v-if="!isCollapsed">系统设置</span>
         </router-link>
       </nav>
-      
+
       <div class="sidebar-footer">
-        <el-button type="danger" plain @click="handleLogout" :icon="SwitchButton">
+        <el-button type="danger" plain :icon="SwitchButton" @click="handleLogout">
           <span v-if="!isCollapsed">退出登录</span>
         </el-button>
       </div>
     </aside>
-    
-    <!-- 主要内容 -->
+
     <main class="main-content">
-      <!-- 顶部导航 -->
       <header class="header">
         <div class="header-left">
-          <el-button 
-            class="collapse-btn" 
-            @click="toggleCollapse"
+          <el-button
+            class="collapse-btn"
             :icon="isCollapsed ? Expand : Fold"
+            @click="toggleCollapse"
           />
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ path: '/admin' }">首页</el-breadcrumb-item>
@@ -82,7 +83,7 @@
             </el-breadcrumb-item>
           </el-breadcrumb>
         </div>
-        
+
         <div class="header-right">
           <el-dropdown @command="handleCommand">
             <span class="user-info">
@@ -99,8 +100,7 @@
           </el-dropdown>
         </div>
       </header>
-      
-      <!-- 内容区域 -->
+
       <div class="content">
         <router-view />
       </div>
@@ -110,66 +110,69 @@
 
 <script setup>
 /**
- * 管理端布局组件
- * 提供侧边栏导航和内容区域
+ * 管理端布局组件。
+ * 负责左侧导航、页头面包屑和退出登录交互。
  */
 
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAdminStore } from '@/stores/admin'
-import { 
-  DataBoard, Monitor, Goods, User, Document, 
-  Bell, Connection, Setting, SwitchButton, 
-  Expand, Fold, ArrowDown, ChatDotRound,
-  Message, Folder, Reading
+import {
+  ArrowDown,
+  Bell,
+  ChatDotRound,
+  Connection,
+  DataBoard,
+  Document,
+  Expand,
+  Fold,
+  Folder,
+  Goods,
+  Message,
+  Monitor,
+  Reading,
+  Setting,
+  Share,
+  SwitchButton,
+  User
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 
 const router = useRouter()
 const currentRoute = useRoute()
 const adminStore = useAdminStore()
-
-// 侧边栏折叠状态
 const isCollapsed = ref(false)
 
-/**
- * 切换侧边栏折叠状态
- */
 function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
 }
 
-/**
- * 处理下拉菜单命令
- * @param {string} command - 命令名称
- */
 function handleCommand(command) {
   if (command === 'settings') {
     router.push('/admin/settings')
-  } else if (command === 'logout') {
+    return
+  }
+
+  if (command === 'logout') {
     handleLogout()
   }
 }
 
 /**
- * 处理退出登录
+ * 退出登录前二次确认，避免误触中断后台操作。
  */
 async function handleLogout() {
   try {
-    await ElMessageBox.confirm(
-      '确定要退出登录吗？',
-      '提示',
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    
+    await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+
     adminStore.logout()
     router.push('/admin/login')
   } catch {
-    // 用户取消操作
+    // 用户取消时不执行额外操作。
   }
 }
 </script>
@@ -182,17 +185,17 @@ async function handleLogout() {
 }
 
 .sidebar {
-  width: 240px;
-  background: #304156;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
-  display: flex;
-  flex-direction: column;
-  transition: width 0.3s;
   position: fixed;
   top: 0;
   left: 0;
   bottom: 0;
   z-index: 100;
+  display: flex;
+  width: 240px;
+  flex-direction: column;
+  background: #304156;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+  transition: width 0.3s;
 }
 
 .sidebar.collapsed {
@@ -205,11 +208,11 @@ async function handleLogout() {
 }
 
 .sidebar-title {
-  font-size: 20px;
+  overflow: hidden;
   color: #fff;
   text-align: center;
   white-space: nowrap;
-  overflow: hidden;
+  font-size: 20px;
 }
 
 .collapsed-title {
@@ -257,16 +260,16 @@ async function handleLogout() {
 }
 
 .header {
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  padding: 0 20px;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   position: sticky;
   top: 0;
   z-index: 99;
+  display: flex;
+  height: 60px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .header-left {
@@ -278,9 +281,9 @@ async function handleLogout() {
 .collapse-btn {
   border: none;
   background: none;
-  font-size: 20px;
   cursor: pointer;
   padding: 5px;
+  font-size: 20px;
 }
 
 .header-right {

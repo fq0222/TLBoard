@@ -18,6 +18,7 @@ const userEmailRoutes = require('../routes/user/email');
 const userDownloadRoutes = require('../routes/user/download');
 const userSyncStatusRoutes = require('../routes/user/sync-status');
 const userHelpRoutes = require('../routes/user/help');
+const userReferralRoutes = require('../routes/user/referral');
 
 function registerUserRoutes(app, logger) {
   const userPrefix = '/api/user';
@@ -35,6 +36,7 @@ function registerUserRoutes(app, logger) {
   app.use(`${userPrefix}/download`, userDownloadRoutes);
   app.use(`${userPrefix}/sync-status`, userSyncStatusRoutes);
   app.use(`${userPrefix}/help`, userHelpRoutes);
+  app.use(`${userPrefix}/referral`, userReferralRoutes);
 
   app.use((req, res) => {
     res.status(404).json({ code: 404, message: '接口不存在', data: null });

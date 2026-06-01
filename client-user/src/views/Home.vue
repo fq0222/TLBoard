@@ -92,12 +92,13 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ArrowRight, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 
+const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
@@ -153,6 +154,28 @@ function getPlanSummary(plan) {
   return `提供 ${plan.traffic_text} 流量，可使用 ${duration} 天，适合想先明确预算和周期的用户。`
 }
 
+/**
+ * 初始化首页推广跟踪。
+ *
+ * 职责：处理落地页推广码缓存和点击记录，保证后续选套餐后仍能归因。
+ * 关键参数：推广码来自当前路由 query 中的 ref。
+ * 核心分支：存在 ref 时写入 sessionStorage 并上报点击，不存在时保持现有流程。
+ */
+async function initializeReferralTracking() {
+  const referralCode = String(route.query.ref || '').trim()
+  if (!referralCode) {
+    return
+  }
+
+  sessionStorage.setItem('referral_code', referralCode)
+
+  try {
+    await api.user.recordReferralClick(referralCode)
+  } catch (error) {
+    console.error('记录首页推广点击失败:', error)
+  }
+}
+
 function selectPlan(plan) {
   if (plan.is_soldout) {
     ElMessage.warning('该套餐已售罄')
@@ -177,6 +200,7 @@ function selectPlan(plan) {
 }
 
 onMounted(() => {
+  initializeReferralTracking()
   fetchPlans()
 })
 </script>

@@ -11,6 +11,7 @@ module.exports = {
         
         // 用户端端口
         USER_PORT: 30000,
+        USER_APP_URL: 'https://your-user-site.example.com',
         
         // 管理端端口
         ADMIN_PORT: 30001,
@@ -42,6 +43,7 @@ module.exports = {
       env_production: {
         NODE_ENV: 'production',
         USER_PORT: 30000,
+        USER_APP_URL: 'https://your-user-site.example.com',
         ADMIN_PORT: 30001,
         USER_JWT_SECRET: 'your_user_jwt_secret_here',
         ADMIN_JWT_SECRET: 'your_admin_jwt_secret_here',

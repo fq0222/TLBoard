@@ -28,7 +28,12 @@ router.post('/register-and-pay', [
   body('pay_type')
     .optional()
     .isIn([1, 2, '1', '2'])
-    .withMessage('支付方式必须是1(微信)或2(支付宝)')
+    .withMessage('支付方式必须是1(微信)或2(支付宝)'),
+  body('referral_code')
+    .optional({ nullable: true, checkFalsy: true })
+    .trim()
+    .isLength({ max: 64 })
+    .withMessage('推广码长度不能超过64')
 ], authController.registerAndPay);
 
 router.post('/login', [

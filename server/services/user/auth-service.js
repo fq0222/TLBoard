@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const config = require('../../config');
 const vmqService = require('../../integrations/vmq/vmq-service');
 const userRepository = require('../../repositories/user-repository');
+const referralService = require('../referral-service');
 
 /**
  * 用户认证服务。
@@ -44,6 +45,23 @@ function formatTraffic(bytes) {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const index = Math.floor(Math.log(numBytes) / Math.log(k));
   return parseFloat((numBytes / Math.pow(k, index)).toFixed(2)) + ' ' + sizes[index];
+}
+
+/**
+ * 统一计算用户的套餐流量、推广流量和总流量。
+ *
+ * @param {Object} user - 用户记录，需包含 traffic_limit 和 referral_traffic_limit
+ * @returns {{planTrafficLimit:number,referralTrafficLimit:number,totalTrafficLimit:number}} 流量权益汇总
+ */
+function getUserTrafficEntitlement(user) {
+  const planTrafficLimit = Number(user?.traffic_limit) || 0;
+  const referralTrafficLimit = Number(user?.referral_traffic_limit) || 0;
+
+  return {
+    planTrafficLimit,
+    referralTrafficLimit,
+    totalTrafficLimit: planTrafficLimit + referralTrafficLimit
+  };
 }
 
 /**
@@ -104,6 +122,8 @@ async function registerAndPay(db, payload) {
   const subId = crypto.randomBytes(8).toString('hex');
   const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
   const now = getNowTimestamp();
+  // 注册归因：推广码只用于绑定订单来源，无效或自推时返回 null，不阻断正常注册下单。
+  const referrerUserId = await referralService.resolveReferrerByCode(db, payload.referral_code, email);
 
   const transaction = db.transaction(async (transactionDb) => {
     let userId;
@@ -136,7 +156,8 @@ async function registerAndPay(db, payload) {
       email,
       planId,
       amount: plan.price,
-      outTradeNo
+      outTradeNo,
+      referrerUserId
     });
 
     return {
@@ -273,10 +294,14 @@ async function getProfile(db, userId) {
 
   const cfOptimized = !!(await userRepository.hasUserCfIps(db, userId));
   const subscriptionReady = cfOptimized && !!(await userRepository.hasUserSubscriptionCache(db, user.sub_id));
-  const trafficLimit = Number(user.traffic_limit) || 0;
   const trafficUsed = Number(user.traffic_used) || 0;
-  const trafficPercent = trafficLimit > 0
-    ? Math.round((trafficUsed / trafficLimit) * 100 * 100) / 100
+  const {
+    planTrafficLimit,
+    referralTrafficLimit,
+    totalTrafficLimit
+  } = getUserTrafficEntitlement(user);
+  const trafficPercent = totalTrafficLimit > 0
+    ? Math.round((trafficUsed / totalTrafficLimit) * 100 * 100) / 100
     : 0;
 
   return {
@@ -288,9 +313,16 @@ async function getProfile(db, userId) {
     cf_optimized: cfOptimized,
     subscription_ready: subscriptionReady,
     traffic_used: user.traffic_used,
-    traffic_limit: user.traffic_limit,
+    plan_traffic_limit: planTrafficLimit,
+    plan_traffic_limit_text: formatTraffic(planTrafficLimit),
+    referral_traffic_limit: referralTrafficLimit,
+    referral_traffic_limit_text: formatTraffic(referralTrafficLimit),
+    total_traffic_limit: totalTrafficLimit,
+    total_traffic_limit_text: formatTraffic(totalTrafficLimit),
+    // 兼容旧字段：旧页面继续读取总流量上限，避免把套餐流量误显示为总额度。
+    traffic_limit: totalTrafficLimit,
     traffic_used_text: formatTraffic(user.traffic_used),
-    traffic_limit_text: formatTraffic(user.traffic_limit),
+    traffic_limit_text: formatTraffic(totalTrafficLimit),
     traffic_percent: trafficPercent,
     expire_at: user.expire_at,
     expire_text: formatTime(user.expire_at),

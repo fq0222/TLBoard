@@ -28,6 +28,22 @@ function getSiteBaseUrl(req) {
 }
 
 /**
+ * 获取用户前端站点基础 URL。
+ * 优先使用单独的用户前端地址配置，未配置时回退到通用站点地址。
+ *
+ * @param {Object} [req] - Express 请求对象，可选
+ * @returns {string} 用户前端基础 URL，例如 http://192.168.31.233:5173
+ */
+function getUserAppBaseUrl(req) {
+  const userAppUrl = String((config.site && config.site.userAppUrl) || '').trim();
+  if (userAppUrl) {
+    return userAppUrl.replace(/\/+$/, '');
+  }
+
+  return getSiteBaseUrl(req);
+}
+
+/**
  * 生成订阅链接集合
  * 保持与旧工具一致的字段结构，避免影响现有调用方。
  *
@@ -55,5 +71,6 @@ function generateSubscriptionUrls(req, subId) {
 
 module.exports = {
   getSiteBaseUrl,
+  getUserAppBaseUrl,
   generateSubscriptionUrls
 };

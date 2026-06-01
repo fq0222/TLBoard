@@ -65,7 +65,7 @@
 
           <div class="overview-item">
             <span class="overview-label">流量</span>
-            <span class="overview-value">{{ userInfo.traffic_used_text || '0 B' }} / {{ userInfo.traffic_limit_text || '0 B' }}</span>
+            <span class="overview-value">{{ trafficSummaryText }}</span>
           </div>
         </div>
 
@@ -404,6 +404,15 @@ const greetingText = computed(() => {
   if (hour < 12) return '早上好'
   if (hour < 18) return '下午好'
   return '晚上好'
+})
+
+const trafficSummaryText = computed(() => {
+  const usedTrafficText = userInfo.value.traffic_used_text || '0 B'
+  const totalTrafficText = userInfo.value.total_traffic_limit_text || userInfo.value.traffic_limit_text || '0 B'
+  const planTrafficText = userInfo.value.plan_traffic_limit_text || '0 B'
+  const referralTrafficText = userInfo.value.referral_traffic_limit_text || '0 B'
+
+  return `${usedTrafficText} / ${totalTrafficText}（套餐：${planTrafficText} + 推广：${referralTrafficText}）`
 })
 
 async function fetchUserInfo() {

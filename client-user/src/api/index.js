@@ -217,6 +217,32 @@ const userApi = {
   },
 
   /**
+   * 获取当前用户推广概览
+   * @returns {Promise<Object>} 响应数据
+   */
+  getReferralSummary() {
+    return apiClient.get('/referral')
+  },
+
+  /**
+   * 获取当前用户推广奖励明细
+   * @param {Object} params - 查询参数
+   * @returns {Promise<Object>} 响应数据
+   */
+  getReferralRewards(params) {
+    return apiClient.get('/referral/rewards', { params })
+  },
+
+  /**
+   * 记录推广链接点击，用于后续首单归因统计。
+   * @param {string} code - 推广码
+   * @returns {Promise<Object>} 响应数据
+   */
+  recordReferralClick(code) {
+    return apiClient.post('/referral/click', { code })
+  },
+
+  /**
    * 获取未读工单数量
    * @returns {Promise<Object>} 响应数据
    */

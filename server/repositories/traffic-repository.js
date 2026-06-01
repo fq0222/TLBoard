@@ -38,7 +38,7 @@ async function listOnlineServers(db) {
  */
 async function listEnabledUsersForTrafficSync(db) {
   return db.prepare(`
-    SELECT id, email, traffic_used, traffic_limit
+    SELECT id, email, traffic_used, traffic_limit, referral_traffic_limit
     FROM users
     WHERE enabled = 1
   `).all();
@@ -135,7 +135,7 @@ async function updateUserTrafficUsed(db, userId, trafficUsed, updatedAt) {
  */
 async function findLatestUserDisableState(db, userId) {
   return db.prepare(`
-    SELECT id, email, enabled, traffic_used, traffic_limit, traffic_used_at
+    SELECT id, email, enabled, traffic_used, traffic_limit, referral_traffic_limit, traffic_used_at
     FROM users
     WHERE id = ?
   `).get(userId);

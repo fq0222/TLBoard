@@ -38,6 +38,16 @@ function formatTrafficForLog(bytes) {
 }
 
 /**
+ * 统一计算流量同步与禁用判断使用的总流量额度。
+ *
+ * @param {Object} user - 用户快照，需包含 traffic_limit/referral_traffic_limit
+ * @returns {number} 套餐流量与推广流量汇总后的总上限
+ */
+function getTotalTrafficLimit(user) {
+  return (Number(user?.traffic_limit) || 0) + (Number(user?.referral_traffic_limit) || 0);
+}
+
+/**
  * 获取流量统计倍率配置。
  *
  * @param {Object} db - 数据库实例
@@ -209,7 +219,7 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
         }
 
         const newTrafficUsed = (Number(user.traffic_used) || 0) + totalIncrement;
-        const trafficLimit = Number(user.traffic_limit) || 0;
+        const trafficLimit = getTotalTrafficLimit(user);
         const isOverLimit = trafficLimit > 0 && newTrafficUsed >= trafficLimit;
 
         userTrafficData[user.id] = {
@@ -322,7 +332,7 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
         }
 
         const latestUsed = Number(latestUser.traffic_used) || 0;
-        const latestLimit = Number(latestUser.traffic_limit) || 0;
+        const latestLimit = getTotalTrafficLimit(latestUser);
         const stillOverLimit = latestLimit > 0 && latestUsed >= latestLimit;
 
         if (!stillOverLimit) {

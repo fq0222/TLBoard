@@ -38,6 +38,12 @@ const routes = [
         meta: { title: '我的' }
       },
       {
+        path: 'referral',
+        name: 'UserReferral',
+        component: () => import('@/views/user/Referral.vue'),
+        meta: { title: '推广' }
+      },
+      {
         path: 'subscription',
         name: 'Subscription',
         component: () => import('@/views/user/Subscription.vue'),

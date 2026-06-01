@@ -15,7 +15,7 @@ async function findSubscriptionUserById(db, userId) {
   return db.prepare(`
     SELECT
       u.id, u.email, u.subscription_token, u.sub_id,
-      u.traffic_used, u.traffic_limit, u.expire_at, u.enabled,
+      u.traffic_used, u.traffic_limit, u.referral_traffic_limit, u.expire_at, u.enabled,
       p.name as plan_name
     FROM users u
     LEFT JOIN plans p ON u.plan_id = p.id
@@ -199,7 +199,7 @@ async function saveUserSubscriptionCache(db, userId, subId, nodes) {
  */
 async function findSubscriptionContentByToken(db, token) {
   return db.prepare(`
-    SELECT us.*, u.email, u.traffic_used, u.traffic_limit, u.expire_at, u.enabled
+    SELECT us.*, u.email, u.traffic_used, u.traffic_limit, u.referral_traffic_limit, u.expire_at, u.enabled
     FROM user_subscriptions us
     JOIN users u ON us.user_id = u.id
     WHERE us.sub_id = ?
