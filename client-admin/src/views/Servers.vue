@@ -534,8 +534,9 @@ onBeforeUnmount(() => {
 
 .server-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(360px, 360px));
   gap: 20px;
+  justify-content: flex-start;
 }
 
 .server-card {
@@ -544,6 +545,8 @@ onBeforeUnmount(() => {
   padding: 20px;
   transition: all 0.3s;
   border: 1px solid #e4e7ed;
+  width: 360px;
+  box-sizing: border-box;
 }
 
 .server-card:hover {
@@ -653,18 +656,34 @@ onBeforeUnmount(() => {
 }
 
 .server-footer {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-  flex-wrap: wrap;
   padding-top: 16px;
   border-top: 1px solid #ebeef5;
 }
 
 .server-footer .el-button {
-  flex: 1;
+  width: 100%;
+  min-width: 0;
+  margin-left: 0;
 }
 
 .sync-btn {
   min-width: 72px;
+}
+
+@media (max-width: 768px) {
+  .server-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .server-card {
+    width: 100%;
+  }
+
+  .server-footer {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>
