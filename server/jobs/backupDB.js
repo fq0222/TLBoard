@@ -1,12 +1,14 @@
 /**
  * 3X-UI 数据库备份定时任务。
- * 每天从 `xui_servers` 表读取所有 3X-UI 服务器，使用 API Token 下载 `x-ui.db`，
- * 并覆盖保存到 `server/backupDB` 目录，防止远端服务器数据丢失。
+ * 每天从 `xui_servers` 表读取所有 3X-UI 服务器，使用版本化客户端下载 `x-ui.db`，
+ * 并保存到 `server/backupDB` 目录，降低远端面板数据丢失风险。
  */
 
 const fs = require('fs');
 const path = require('path');
-const XuiApiClient = require('../integrations/xui/xui-api-client');
+const {
+  createXuiApiClient
+} = require('../integrations/xui/xui-api-client-factory');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('XUI-DB-BACKUP');
@@ -15,8 +17,8 @@ const defaultBackupDir = path.join(__dirname, '..', 'backupDB');
 /**
  * 清理服务器名称中的非法文件名字符。
  *
- * @param {string} value - 原始服务器名称
- * @returns {string} 可用于文件名的服务器名称
+ * @param {string} value - 原始服务器名称。
+ * @returns {string} 可用于文件名的服务器名称。
  */
 function sanitizeFileName(value) {
   const name = String(value || '').trim();
@@ -27,46 +29,69 @@ function sanitizeFileName(value) {
 /**
  * 校验下载内容是否为 SQLite 数据库文件。
  *
- * @param {Buffer} buffer - 数据库文件内容
- * @returns {boolean} 是否包含 SQLite 文件头
+ * @param {Buffer} buffer - 数据库文件内容。
+ * @returns {boolean} 是否包含 SQLite 文件头。
  */
 function isSqliteDatabase(buffer) {
   return Buffer.isBuffer(buffer) && buffer.subarray(0, 16).toString('utf8') === 'SQLite format 3\0';
 }
 
 /**
- * 读取所有 3X-UI 服务器配置。
+ * 读取全部 3X-UI 服务器配置。
  *
- * @param {Object} db - 数据库实例
- * @returns {Promise<Array>} 服务器列表
+ * @param {Object} db - 数据库实例。
+ * @returns {Promise<Array>} 服务器列表。
  */
 async function loadServers(db) {
   return db.prepare(`
-    SELECT id, name, api_url, api_token
+    SELECT id, name, api_url, api_token, panel_version
     FROM xui_servers
     ORDER BY id
   `).all();
 }
 
 /**
+ * 根据运行选项创建 3X-UI 客户端。
+ * 优先保留测试注入能力，其次再走版本工厂创建正式客户端。
+ *
+ * @param {Object} server - 服务器配置。
+ * @param {Object} options - 运行选项。
+ * @returns {Object} 3X-UI 客户端实例。
+ */
+function buildClient(server, options = {}) {
+  if (options.XuiApiClientClass) {
+    return new options.XuiApiClientClass(server.api_url, server.api_token, { timeout: 30000 });
+  }
+
+  if (typeof options.createClient === 'function') {
+    return options.createClient(server, options);
+  }
+
+  const { client } = createXuiApiClient(server.api_url, server.api_token, {
+    timeout: 30000,
+    apiVersion: options.apiVersion || server.panel_version
+  });
+  return client;
+}
+
+/**
  * 备份单台 3X-UI 服务器数据库。
  *
- * @param {Object} server - 服务器配置
- * @param {Object} options - 测试或运行时选项
- * @returns {Promise<Object>} 备份结果
+ * @param {Object} server - 服务器配置。
+ * @param {Object} options - 测试或运行时选项。
+ * @returns {Promise<Object>} 备份结果。
  */
 async function backupServer(server, options = {}) {
   const backupDir = options.backupDir || defaultBackupDir;
-  const XuiApiClientClass = options.XuiApiClientClass || XuiApiClient;
 
   if (!server.api_token) {
-    logger.warn(`跳过服务器 ${server.name}，api_token 为空`);
+    logger.warn(`跳过服务器 ${server.name}：api_token 为空`);
     return { success: false, skipped: true, server };
   }
 
   fs.mkdirSync(backupDir, { recursive: true });
 
-  const client = new XuiApiClientClass(server.api_url, server.api_token, { timeout: 30000 });
+  const client = buildClient(server, options);
   const data = await client.getDb();
   const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
   const filePath = path.join(backupDir, `${sanitizeFileName(server.name)}-x-ui.db`);
@@ -90,11 +115,11 @@ async function backupServer(server, options = {}) {
 }
 
 /**
- * 备份所有 3X-UI 服务器数据库。
+ * 备份全部 3X-UI 服务器数据库。
  *
- * @param {Object} db - 数据库实例
- * @param {Object} options - 测试或运行时选项
- * @returns {Promise<Object>} 汇总结果
+ * @param {Object} db - 数据库实例。
+ * @param {Object} options - 测试或运行时选项。
+ * @returns {Promise<Object>} 汇总结果。
  */
 async function backupXuiDatabases(db, options = {}) {
   const servers = await loadServers(db);
@@ -136,5 +161,7 @@ async function backupXuiDatabases(db, options = {}) {
 
 module.exports = {
   backupXuiDatabases,
+  backupServer,
+  buildClient,
   sanitizeFileName
 };

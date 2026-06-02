@@ -30,7 +30,9 @@ function getXuiTotalTrafficLimit(user) {
  */
 async function legacySyncUsersToServer(db, server, users) {
   try {
-    const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+      apiVersion: server.panel_version || '3.0.2'
+    });
     const inboundsResult = await xuiService.getInbounds();
 
     if (!inboundsResult.success) {
@@ -260,7 +262,9 @@ async function legacySyncUsersToServer(db, server, users) {
 async function syncUsersToServer(db, server, users) {
   try {
     const crypto = require('crypto');
-    const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+      apiVersion: server.panel_version || '3.0.2'
+    });
     const inboundsResult = await xuiService.getInbounds();
 
     if (!inboundsResult.success) {

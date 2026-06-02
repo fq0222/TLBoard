@@ -22,7 +22,9 @@ async function syncServerNodes(db, server) {
   try {
     logger.info(`开始同步服务器 ${server.name} 的节点信息`);
 
-    const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+      apiVersion: server.panel_version || '3.0.2'
+    });
     const inboundsResult = await xuiService.getInbounds();
 
     if (!inboundsResult.success) {

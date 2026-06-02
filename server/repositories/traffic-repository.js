@@ -24,7 +24,7 @@ async function findTrafficUsageMultiplierSetting(db) {
  */
 async function listOnlineServers(db) {
   return db.prepare(`
-    SELECT id, name, api_url, api_token
+    SELECT id, name, api_url, api_token, panel_version
     FROM xui_servers
     WHERE status = 1
   `).all();

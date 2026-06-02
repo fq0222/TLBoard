@@ -23,7 +23,11 @@ router.post('/', authenticateAdmin, [
     .withMessage('面板地址格式不正确'),
   body('api_token')
     .notEmpty()
-    .withMessage('API Token不能为空')
+    .withMessage('API Token不能为空'),
+  body('panel_version')
+    .optional()
+    .isString()
+    .withMessage('3X-UI 面板版本号格式不正确')
 ], serversController.createServer);
 
 router.put('/:id', authenticateAdmin, [
@@ -41,7 +45,11 @@ router.put('/:id', authenticateAdmin, [
   body('api_token')
     .optional({ checkFalsy: true })
     .notEmpty()
-    .withMessage('API Token不能为空')
+    .withMessage('API Token不能为空'),
+  body('panel_version')
+    .optional()
+    .isString()
+    .withMessage('3X-UI 面板版本号格式不正确')
 ], serversController.updateServer);
 
 router.delete('/:id', authenticateAdmin, [

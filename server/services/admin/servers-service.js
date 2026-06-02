@@ -54,6 +54,7 @@ function formatServerSummary(server, stats = {}) {
     name: server.name,
     api_url: server.api_url,
     has_api_token: !!server.api_token,
+    panel_version: server.panel_version || '3.0.2',
     host: server.host || '',
     client_port: server.client_port || 0,
     sub_url: server.sub_url || '',
@@ -111,10 +112,12 @@ function formatCachedNode(node) {
   };
 }
 
-async function testXuiConnection(apiUrl, apiToken) {
+async function testXuiConnection(apiUrl, apiToken, apiVersion) {
   try {
     logger.info(`测试3X-UI连接: ${apiUrl}`);
-    const xuiService = await XuiService.getInstance(apiUrl, apiToken);
+    const xuiService = await XuiService.getInstance(apiUrl, apiToken, {
+      apiVersion: apiVersion || '3.0.2'
+    });
     return await xuiService.testConnection();
   } catch (error) {
     logger.error(`测试3X-UI连接错误: ${error.message}`);
@@ -146,7 +149,8 @@ async function listServers(db) {
  * @returns {Promise<Object>} 新建服务器结果
  */
 async function createServer(db, payload) {
-  const isConnected = await testXuiConnection(payload.api_url, payload.api_token);
+  const panelVersion = payload.panel_version || '3.0.2';
+  const isConnected = await testXuiConnection(payload.api_url, payload.api_token, panelVersion);
   if (!isConnected) {
     throw createLegacyBusinessError('连接 3X-UI 面板失败，请检查地址和凭据', {
       code: 3001
@@ -157,6 +161,7 @@ async function createServer(db, payload) {
     name: payload.name,
     apiUrl: payload.api_url,
     apiToken: payload.api_token,
+    panelVersion,
     host: payload.host || '',
     clientPort: parseInt(payload.client_port, 10) || 0,
     subUrl: payload.sub_url || '',
@@ -203,6 +208,10 @@ async function updateServer(db, serverId, payload) {
     updates.push('host = ?');
     values.push(payload.host);
   }
+  if (payload.panel_version !== undefined) {
+    updates.push('panel_version = ?');
+    values.push(payload.panel_version || '3.0.2');
+  }
   if (payload.client_port !== undefined) {
     updates.push('client_port = ?');
     values.push(parseInt(payload.client_port, 10) || 0);
@@ -218,8 +227,12 @@ async function updateServer(db, serverId, payload) {
 
   await serversRepository.updateServerFields(db, serverId, updates, values);
 
-  if (payload.api_token !== undefined || payload.api_url !== undefined) {
-    XuiService.removeInstance(existingServer.api_url, existingServer.api_token);
+  if (payload.api_token !== undefined || payload.api_url !== undefined || payload.panel_version !== undefined) {
+    XuiService.removeInstance(
+      existingServer.api_url,
+      existingServer.api_token,
+      existingServer.panel_version || '3.0.2'
+    );
   }
 
   const updatedServer = await serversRepository.findServerById(db, serverId);
@@ -266,7 +279,9 @@ async function getServerDetail(db, serverId) {
   let nodes = [];
 
   try {
-    const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+      apiVersion: server.panel_version || '3.0.2'
+    });
     const inboundsResult = await xuiService.getInbounds();
 
     if (!inboundsResult.success) {
@@ -323,6 +338,7 @@ async function getServerDetail(db, serverId) {
       id: server.id,
       name: server.name,
       api_url: server.api_url,
+      panel_version: server.panel_version || '3.0.2',
       host: server.host || '',
       client_port: server.client_port || 0,
       sub_url: server.sub_url || '',
@@ -346,7 +362,9 @@ async function syncServer(db, serverId) {
     throw createLegacyBusinessError('服务器不存在');
   }
 
-  const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
+  const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+    apiVersion: server.panel_version || '3.0.2'
+  });
   const syncResult = await xuiService.syncServerStatus();
   const syncedAt = getUnixTimestamp();
 
@@ -384,7 +402,9 @@ async function updateServerUser(db, serverId, payload) {
     throw createLegacyBusinessError('服务器不存在');
   }
 
-  const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
+  const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+    apiVersion: server.panel_version || '3.0.2'
+  });
   const result = await xuiService.updateClient(payload.inboundId, payload.email, {
     expiryTime: payload.expiryTime,
     totalGB: payload.totalGB,
@@ -416,7 +436,9 @@ async function deleteServerUser(db, serverId, payload) {
     throw createLegacyBusinessError('服务器不存在');
   }
 
-  const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
+  const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+    apiVersion: server.panel_version || '3.0.2'
+  });
   const result = await xuiService.deleteClientByEmail(payload.inboundId, payload.email);
 
   if (!result.success) {

@@ -21,6 +21,10 @@
           <span class="info-value">{{ server.api_url }}</span>
         </div>
         <div class="info-item">
+          <span class="info-label">面板版本：</span>
+          <span class="info-value">{{ server.panel_version || '3.0.2' }}</span>
+        </div>
+        <div class="info-item">
           <span class="info-label">状态：</span>
           <el-tag :type="server.status === 1 ? 'success' : 'danger'">
             {{ server.status === 1 ? '在线' : '离线' }}

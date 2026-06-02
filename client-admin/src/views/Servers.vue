@@ -2,9 +2,9 @@
   <div class="servers-container">
     <div class="page-header">
       <h1 class="page-title">服务器管理</h1>
-      <p class="page-subtitle">管理3X-UI服务器节点</p>
+      <p class="page-subtitle">管理 3X-UI 服务器节点</p>
     </div>
-    
+
     <div class="content-card">
       <div class="toolbar">
         <el-button type="primary" @click="showAddDialog">
@@ -12,11 +12,11 @@
           添加服务器
         </el-button>
       </div>
-      
+
       <div class="server-grid">
-        <div 
-          v-for="server in servers" 
-          :key="server.id" 
+        <div
+          v-for="server in servers"
+          :key="server.id"
           class="server-card"
         >
           <div class="server-header">
@@ -27,11 +27,15 @@
               </el-tag>
             </div>
           </div>
-          
+
           <div class="server-body">
             <div class="info-row url-row">
               <el-icon><Link /></el-icon>
               <span class="url-text" :title="server.api_url">{{ server.api_url }}</span>
+            </div>
+            <div class="info-row version-row">
+              <el-icon><InfoFilled /></el-icon>
+              <span class="url-text">面板版本: {{ server.panel_version || '3.0.2' }}</span>
             </div>
             <div v-if="server.host" class="info-row host-row">
               <el-icon><Position /></el-icon>
@@ -45,7 +49,7 @@
               <el-icon><Tickets /></el-icon>
               <span class="url-text" :title="server.sub_url">订阅: {{ server.sub_url }}</span>
             </div>
-            
+
             <div class="info-grid">
               <div class="info-item">
                 <span class="info-icon">📦</span>
@@ -64,16 +68,16 @@
               </div>
             </div>
           </div>
-          
+
           <div class="server-footer">
             <el-button size="small" @click="viewDetail(server)">
               <el-icon><View /></el-icon>
               详情
             </el-button>
-            <el-button 
-              size="small" 
+            <el-button
+              size="small"
               class="sync-btn"
-              @click="syncServer(server)" 
+              @click="syncServer(server)"
               :loading="syncingId === server.id"
             >
               <el-icon v-if="syncingId !== server.id"><Refresh /></el-icon>
@@ -91,18 +95,17 @@
         </div>
       </div>
     </div>
-    
-    <!-- 添加/编辑对话框 -->
-    <el-dialog 
-      v-model="dialogVisible" 
+
+    <el-dialog
+      v-model="dialogVisible"
       :title="isEditing ? '编辑服务器' : '添加服务器'"
-      width="500px"
+      width="520px"
     >
-      <el-form 
-        ref="serverFormRef" 
-        :model="serverForm" 
-        :rules="serverRules" 
-        label-width="100px"
+      <el-form
+        ref="serverFormRef"
+        :model="serverForm"
+        :rules="serverRules"
+        label-width="110px"
       >
         <el-form-item label="服务器名称" prop="name">
           <el-input v-model="serverForm.name" placeholder="请输入服务器名称" />
@@ -111,15 +114,21 @@
           <el-input v-model="serverForm.api_url" placeholder="http://ip:port" />
         </el-form-item>
         <el-form-item label="API Token" prop="api_token">
-          <el-input 
-            v-model="serverForm.api_token" 
+          <el-input
+            v-model="serverForm.api_token"
             type="password"
-            :placeholder="isEditing ? '留空表示不修改 API Token' : '请输入3X-UI API Token'"
+            :placeholder="isEditing ? '留空表示不修改 API Token' : '请输入 3X-UI API Token'"
             show-password
           />
         </el-form-item>
+        <el-form-item label="面板版本号" prop="panel_version">
+          <el-input
+            v-model="serverForm.panel_version"
+            placeholder="例如 3.0.2 或 3.2.5"
+          />
+        </el-form-item>
         <el-form-item label="Host" prop="host">
-          <el-input v-model="serverForm.host" placeholder="CF端口转发的主机名，如 open.example.com" />
+          <el-input v-model="serverForm.host" placeholder="CF 端口转发的主机名，如 open.example.com" />
         </el-form-item>
         <el-form-item label="客户端端口" prop="client_port">
           <el-input-number v-model="serverForm.client_port" :min="0" :max="65535" placeholder="客户端连接端口" />
@@ -128,7 +137,7 @@
           <el-input v-model="serverForm.sub_url" placeholder="如：https://example.com/sub/aaa333/" />
         </el-form-item>
       </el-form>
-      
+
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="handleSubmit" :loading="submitting">
@@ -142,9 +151,22 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, View, Refresh, Edit, Delete, Link, Position, Odometer, Tickets } from '@element-plus/icons-vue'
+import {
+  Plus,
+  View,
+  Refresh,
+  Edit,
+  Delete,
+  Link,
+  Position,
+  Odometer,
+  Tickets,
+  InfoFilled
+} from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+
+const DEFAULT_PANEL_VERSION = '3.0.2'
 
 const router = useRouter()
 
@@ -160,6 +182,7 @@ const serverForm = reactive({
   name: '',
   api_url: '',
   api_token: '',
+  panel_version: DEFAULT_PANEL_VERSION,
   host: '',
   client_port: 0,
   sub_url: ''
@@ -171,19 +194,22 @@ const serverRules = {
   ],
   api_url: [
     { required: true, message: '请输入面板地址', trigger: 'blur' },
-    { pattern: /^https?:\/\/.+/, message: '请输入有效的URL', trigger: 'blur' }
+    { pattern: /^https?:\/\/.+/, message: '请输入有效的 URL', trigger: 'blur' }
   ],
   api_token: [
     {
       validator: (rule, value, callback) => {
         if (!isEditing.value && !value) {
-          callback(new Error('请输入API Token'))
+          callback(new Error('请输入 API Token'))
           return
         }
         callback()
       },
       trigger: 'blur'
     }
+  ],
+  panel_version: [
+    { required: true, message: '请输入 3X-UI 面板版本号', trigger: 'blur' }
   ]
 }
 
@@ -208,14 +234,15 @@ function showAddDialog() {
 function showEditDialog(server) {
   isEditing.value = true
   editingId.value = server.id
-  
+
   serverForm.name = server.name
   serverForm.api_url = server.api_url
   serverForm.api_token = ''
+  serverForm.panel_version = server.panel_version || DEFAULT_PANEL_VERSION
   serverForm.host = server.host || ''
   serverForm.client_port = server.client_port || 0
   serverForm.sub_url = server.sub_url || ''
-  
+
   dialogVisible.value = true
 }
 
@@ -223,6 +250,7 @@ function resetForm() {
   serverForm.name = ''
   serverForm.api_url = ''
   serverForm.api_token = ''
+  serverForm.panel_version = DEFAULT_PANEL_VERSION
   serverForm.host = ''
   serverForm.client_port = 0
   serverForm.sub_url = ''
@@ -232,11 +260,15 @@ async function handleSubmit() {
   try {
     await serverFormRef.value.validate()
     submitting.value = true
-    const payload = { ...serverForm }
+    const payload = {
+      ...serverForm,
+      panel_version: (serverForm.panel_version || DEFAULT_PANEL_VERSION).trim()
+    }
+
     if (isEditing.value && !payload.api_token) {
       delete payload.api_token
     }
-    
+
     if (isEditing.value) {
       const response = await api.admin.updateServer(editingId.value, payload)
       if (response.code === 0) {
@@ -289,7 +321,7 @@ async function deleteServer(server) {
         type: 'warning'
       }
     )
-    
+
     const response = await api.admin.deleteServer(server.id)
     if (response.code === 0) {
       ElMessage.success('删除成功')
@@ -376,47 +408,45 @@ onMounted(() => {
   margin-bottom: 16px;
 }
 
-.url-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: #f5f7fa;
-  border-radius: 8px;
-  margin-bottom: 16px;
-}
-
-.host-row {
+.url-row,
+.host-row,
+.port-row,
+.sub-row,
+.version-row {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: #ecf5ff;
   border-radius: 8px;
+}
+
+.url-row {
+  background: #f5f7fa;
+  margin-bottom: 8px;
+}
+
+.version-row {
+  background: #f4f4ff;
+  margin-bottom: 8px;
+}
+
+.host-row {
+  background: #ecf5ff;
   margin-bottom: 8px;
 }
 
 .port-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
   background: #f0f9eb;
-  border-radius: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .sub-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
   background: #fdf6ec;
-  border-radius: 8px;
   margin-bottom: 16px;
 }
 
-.url-row .el-icon {
+.url-row .el-icon,
+.version-row .el-icon {
   color: #409eff;
   flex-shrink: 0;
 }

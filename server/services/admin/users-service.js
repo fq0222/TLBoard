@@ -284,7 +284,9 @@ async function syncUserToXuiServers(db, user) {
     }
 
     try {
-      const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
+      const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+        apiVersion: server.panel_version || '3.0.2'
+      });
       for (const inboundId of inboundIds) {
         const node = await userRepository.findXuiNodeByServerAndInbound(db, server.id, inboundId);
         const strategy = getNodeUpdateStrategy(node);

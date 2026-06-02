@@ -3,7 +3,10 @@
  * 使用本地 API Token 客户端与 3X-UI 面板通信
  */
 
-const XuiApiClient = require('./xui-api-client');
+const {
+  DEFAULT_XUI_API_VERSION,
+  createXuiApiClient
+} = require('./xui-api-client-factory');
 const config = require('../../config');
 const { createLogger } = require('../../utils/logger');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
@@ -16,6 +19,11 @@ delete process.env.http_proxy;
 delete process.env.https_proxy;
 delete process.env.HTTP_PROXY;
 delete process.env.HTTPS_PROXY;
+
+function isClientApiNotFoundMessage(message) {
+  const normalized = String(message || '').trim().toLowerCase();
+  return normalized.includes('record not found');
+}
 
 /**
  * 3X-UI 服务类
@@ -31,10 +39,11 @@ class XuiService {
    * @param {string} apiToken - API Token
    * @returns {Promise<XuiService>} 已初始化的实例
    */
-  static async getInstance(apiUrl, apiToken) {
-    const key = `${apiUrl}:${apiToken}`;
+  static async getInstance(apiUrl, apiToken, options = {}) {
+    const apiVersion = options.apiVersion || DEFAULT_XUI_API_VERSION;
+    const key = `${apiUrl}:${apiToken}:${apiVersion}`;
     if (!this.instanceCache.has(key)) {
-      const instance = new XuiService(apiUrl, apiToken);
+      const instance = new XuiService(apiUrl, apiToken, options);
       await instance.init();
       this.instanceCache.set(key, instance);
     }
@@ -46,8 +55,8 @@ class XuiService {
    * @param {string} apiUrl - 面板地址
    * @param {string} apiToken - API Token
    */
-  static removeInstance(apiUrl, apiToken) {
-    this.instanceCache.delete(`${apiUrl}:${apiToken}`);
+  static removeInstance(apiUrl, apiToken, apiVersion = DEFAULT_XUI_API_VERSION) {
+    this.instanceCache.delete(`${apiUrl}:${apiToken}:${apiVersion}`);
   }
 
   /**
@@ -62,9 +71,10 @@ class XuiService {
    * @param {string} apiUrl - 面板地址
    * @param {string} apiToken - API Token
    */
-  constructor(apiUrl, apiToken) {
+  constructor(apiUrl, apiToken, options = {}) {
     this.apiUrl = apiUrl;
     this.apiToken = apiToken;
+    this.apiVersion = options.apiVersion || DEFAULT_XUI_API_VERSION;
     this.client = null;
   }
 
@@ -73,14 +83,22 @@ class XuiService {
    */
   async init() {
     try {
-      this.client = new XuiApiClient(
+      const { client, requestedVersion, resolvedVersion } = createXuiApiClient(
         this.apiUrl,
         this.apiToken,
         {
-          timeout: config.xui.timeout || 20000
+          timeout: config.xui.timeout || 20000,
+          apiVersion: this.apiVersion
         }
       );
+      this.client = client;
+      this.apiVersion = resolvedVersion;
       logger.info(`初始化 3X-UI 客户端: ${this.apiUrl}`);
+      if (requestedVersion !== resolvedVersion) {
+        logger.warn(`未识别的 3X-UI API 版本 ${requestedVersion}，已回退到 ${resolvedVersion}`);
+      } else {
+        logger.info(`当前使用 3X-UI API 版本: ${resolvedVersion}`);
+      }
       return true;
     } catch (error) {
       logger.error(`初始化 3X-UI 客户端失败: ${error.message}`);
@@ -431,6 +449,32 @@ class XuiService {
     return parseFloat((numBytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
+  /**
+   * 判断当前客户端是否使用 3.2.5 的 clients API。
+   * @returns {boolean} 是否启用新版 clients API。
+   */
+  usesClientApi() {
+    return Boolean(this.client && this.client.supportsClientApi);
+  }
+
+  /**
+   * 将 3.2.5 clients/get/:email 的响应映射为当前项目的统一客户端结构。
+   * @param {Object} client - 3X-UI 返回的客户端对象。
+   * @returns {Object} 统一后的客户端信息。
+   */
+  mapClientApiRecord(client = {}) {
+    return {
+      uuid: client.uuid || client.id || '',
+      email: client.email || '',
+      enable: client.enable,
+      expiryTime: client.expiryTime,
+      totalGB: client.totalGB || 0,
+      subId: client.subId || '',
+      flow: client.flow || '',
+      auth: client.auth || client.password || ''
+    };
+  }
+
   buildClientSettingsPayload(options = {}) {
     const {
       protocol = '',
@@ -584,6 +628,24 @@ class XuiService {
         await this.init();
       }
 
+      if (this.usesClientApi()) {
+        const result = await this.client.deleteClientByEmail(inboundId, email);
+
+        if (result.success) {
+          logger.info(`删除客户端成功: ${email}`);
+          return {
+            success: true,
+            message: result.msg
+          };
+        }
+
+        logger.warn(`删除客户端失败: ${result.msg}`);
+        return {
+          success: false,
+          message: result.msg
+        };
+      }
+
       // 先获取客户端信息以获取 UUID
       const clientInfo = await this.getClientByEmail(inboundId, email);
       
@@ -692,6 +754,46 @@ class XuiService {
     try {
       if (!this.client && typeof this.getInbound !== 'function') {
         await this.init();
+      }
+
+      if (this.usesClientApi() && typeof this.client.getClientByEmail === 'function') {
+        const response = await this.client.getClientByEmail(email);
+
+        if (!response.success) {
+          if (isClientApiNotFoundMessage(response.msg)) {
+            return {
+              success: true,
+              clients: []
+            };
+          }
+
+          return {
+            success: false,
+            message: response.msg || '获取客户端信息失败',
+            clients: []
+          };
+        }
+
+        const inboundIds = Array.isArray(response.obj?.inboundIds) ? response.obj.inboundIds : [];
+        if (inboundIds.length > 0 && !inboundIds.includes(Number(inboundId))) {
+          return {
+            success: true,
+            clients: []
+          };
+        }
+
+        const rawClient = response.obj?.client;
+        if (!rawClient) {
+          return {
+            success: true,
+            clients: []
+          };
+        }
+
+        return {
+          success: true,
+          clients: [this.mapClientApiRecord(rawClient)]
+        };
       }
 
       const response = typeof this.getInbound === 'function'

@@ -87,7 +87,9 @@ async function fetchAllServerTraffic(db) {
 
     const promises = servers.map(async (server) => {
       try {
-        const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
+        const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+          apiVersion: server.panel_version || '3.0.2'
+        });
 
         const inboundsResult = await xuiService.getInbounds();
         if (!inboundsResult.success) {
@@ -429,7 +431,9 @@ async function syncDisableStatusToXui(db, userId, disable, options = {}) {
     let successCount = 0;
     for (const server of servers) {
       try {
-        const xuiService = await XuiService.getInstance(server.api_url, server.api_token);
+        const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+          apiVersion: server.panel_version || '3.0.2'
+        });
 
         const inboundsResult = await xuiService.getInbounds();
         if (!inboundsResult.success) {

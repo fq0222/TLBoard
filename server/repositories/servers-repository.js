@@ -5,7 +5,7 @@
 
 async function listServers(db) {
   return db.prepare(`
-    SELECT id, name, api_url, api_token, host, client_port, sub_url, status, last_check_at, created_at
+    SELECT id, name, api_url, api_token, panel_version, host, client_port, sub_url, status, last_check_at, created_at
     FROM xui_servers
     ORDER BY created_at DESC
   `).all();
@@ -52,6 +52,7 @@ async function createServer(db, payload) {
     name,
     apiUrl,
     apiToken,
+    panelVersion,
     host,
     clientPort,
     subUrl,
@@ -59,9 +60,9 @@ async function createServer(db, payload) {
   } = payload;
 
   return db.prepare(`
-    INSERT INTO xui_servers (name, api_url, api_username, api_password, api_token, host, client_port, sub_url, status, last_check_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-  `).run(name, apiUrl, '', '', apiToken, host, clientPort, subUrl, lastCheckAt);
+    INSERT INTO xui_servers (name, api_url, api_username, api_password, api_token, panel_version, host, client_port, sub_url, status, last_check_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+  `).run(name, apiUrl, '', '', apiToken, panelVersion || '3.0.2', host, clientPort, subUrl, lastCheckAt);
 }
 
 /**
