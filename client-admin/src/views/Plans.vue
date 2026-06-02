@@ -268,7 +268,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.plans-container { max-width: 1200px; }
+.plans-container { width: 100%; max-width: 100%; }
 .page-header { margin-bottom: 30px; }
 .page-title { font-size: 28px; color: #333; margin-bottom: 10px; }
 .page-subtitle { color: #666; font-size: 16px; }

@@ -12,6 +12,8 @@ const router = express.Router();
 
 router.get('/', authenticateAdmin, serversController.listServers);
 
+router.post('/backup/run', authenticateAdmin, serversController.runBackupTask);
+
 router.post('/', authenticateAdmin, [
   body('name')
     .notEmpty()

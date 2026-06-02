@@ -3,6 +3,7 @@ const { createLogger } = require('../../utils/logger');
 const XuiService = require('../../integrations/xui/xui-service');
 const serversRepository = require('../../repositories/servers-repository');
 const xuiNodeSnapshotService = require('../shared/xui-node-snapshot-service');
+const xuiBackupTaskService = require('./xui-backup-task-service');
 
 const logger = createLogger('ADMIN-SERVERS');
 
@@ -389,6 +390,16 @@ async function syncServer(db, serverId) {
 }
 
 /**
+ * 启动一次 3X-UI 数据库手动备份任务。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @returns {Object} 当前备份任务状态
+ */
+function runBackupTask(db) {
+  return xuiBackupTaskService.startTask(db);
+}
+
+/**
  * 更新指定服务器某个节点上的用户信息。
  *
  * @param {Object} db - 数据库实例
@@ -459,6 +470,7 @@ module.exports = {
   deleteServer,
   getServerDetail,
   syncServer,
+  runBackupTask,
   updateServerUser,
   deleteServerUser
 };

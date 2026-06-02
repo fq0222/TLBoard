@@ -1,7 +1,7 @@
 /**
- * 统一启动入口
- * 同时启动用户端(30000)和管理端(30001)Express应用
- * 共享同一个数据库实例
+ * 统一启动入口。
+ * 同时启动用户端（30000）和管理端（30001）Express 应用，
+ * 并共享同一个数据库实例与后台任务注册中心。
  */
 
 const config = require('./config');
@@ -11,11 +11,12 @@ const createUserApp = require('./bootstrap/create-user-app');
 const createAdminApp = require('./bootstrap/create-admin-app');
 const registerShutdown = require('./bootstrap/register-shutdown');
 const { registerAdminBatchSubscriptionWs } = require('./websocket/admin-batch-subscription-ws');
+const { registerAdminXuiBackupWs } = require('./websocket/admin-xui-backup-ws');
 const { createLogger } = require('./utils/logger');
 
 const logger = createLogger('APP');
 
-// 保存服务器实例引用
+// 保存服务器实例引用，便于进程退出时统一关闭。
 let userServer = null;
 let adminServer = null;
 let db = null;
@@ -28,8 +29,8 @@ registerShutdown({
 });
 
 /**
- * 启动应用
- * 负责初始化数据库、启动定时任务并监听用户端与管理端端口
+ * 启动应用。
+ * 负责初始化数据库、启动定时任务，并监听用户端与管理端端口。
  */
 async function startApp() {
   try {
@@ -46,14 +47,16 @@ async function startApp() {
   const adminApp = createAdminApp({ db, logger });
 
   userServer = userApp.listen(config.user.port, () => {
-    logger.info(`用户端服务器启动成功，端口: ${config.user.port}`);
+    logger.info(`用户端服务器启动成功，端口 ${config.user.port}`);
   });
 
   adminServer = adminApp.listen(config.admin.port, () => {
-    logger.info(`管理端服务器启动成功，端口: ${config.admin.port}`);
+    logger.info(`管理端服务器启动成功，端口 ${config.admin.port}`);
   });
-  // 管理端批量任务进度使用 WebSocket 实时推送，不影响普通 HTTP API。
+
+  // 管理端长任务通过 WebSocket 推送实时进度，不影响普通 HTTP API。
   registerAdminBatchSubscriptionWs(adminServer, db);
+  registerAdminXuiBackupWs(adminServer);
 }
 
 startApp();

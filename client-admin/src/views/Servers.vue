@@ -11,6 +11,17 @@
           <el-icon><Plus /></el-icon>
           添加服务器
         </el-button>
+        <el-button type="warning" @click="runBackupTask" :loading="backupTaskRunning">
+          <el-icon><Refresh /></el-icon>
+          执行备份任务
+        </el-button>
+        <span
+          v-if="backupStatusText"
+          class="backup-status"
+          :class="`backup-status-${backupStatusKind}`"
+        >
+          {{ backupStatusText }}
+        </span>
       </div>
 
       <div class="server-grid">
@@ -52,7 +63,7 @@
 
             <div class="info-grid">
               <div class="info-item">
-                <span class="info-icon">📦</span>
+                <span class="info-icon">📌</span>
                 <span class="info-label">节点</span>
                 <span class="info-value">{{ server.node_count }}</span>
               </div>
@@ -149,7 +160,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Plus,
@@ -167,6 +178,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 
 const DEFAULT_PANEL_VERSION = '3.0.2'
+const BACKUP_TASK_WS_PATH = '/api/admin/servers/backup/ws'
 
 const router = useRouter()
 
@@ -177,6 +189,11 @@ const submitting = ref(false)
 const editingId = ref(null)
 const serverFormRef = ref(null)
 const syncingId = ref(null)
+const backupTaskRunning = ref(false)
+const backupTaskId = ref(null)
+const backupStatusText = ref('')
+const backupStatusKind = ref('info')
+const backupSocket = ref(null)
 
 const serverForm = reactive({
   name: '',
@@ -310,6 +327,127 @@ async function syncServer(server) {
   }
 }
 
+/**
+ * 构造 3X-UI 备份任务的 WebSocket 地址。
+ *
+ * @param {number} taskId - 备份任务 ID
+ * @returns {string} WebSocket 地址
+ */
+function buildBackupWsUrl(taskId) {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const token = encodeURIComponent(localStorage.getItem('admin_token') || '')
+  return `${protocol}//${window.location.host}${BACKUP_TASK_WS_PATH}?token=${token}&task_id=${taskId}`
+}
+
+/**
+ * 关闭当前备份任务 WebSocket，避免重复连接或页面卸载后的残留监听。
+ */
+function closeBackupSocket() {
+  if (!backupSocket.value) {
+    return
+  }
+  backupSocket.value.manualClose = true
+  backupSocket.value.close()
+  backupSocket.value = null
+}
+
+/**
+ * 将后端状态对象转换为页面可直接展示的备份进度文案。
+ *
+ * @param {Object} status - 备份任务状态
+ * @returns {string} 格式化后的展示文本
+ */
+function formatBackupStatusText(status) {
+  const completed = Number(status.completed_count) || 0
+  const total = Number(status.total_count) || 0
+  const failedServers = Array.isArray(status.failed_servers) ? status.failed_servers : []
+
+  if (status.status === 'pending' || status.status === 'running') {
+    const currentServerName = status.current_server_name || '准备中'
+    return `正在备份：${currentServerName}（${completed}/${total}）`
+  }
+
+  if (failedServers.length > 0) {
+    return `备份完成（${completed}/${total}），失败服务器：${failedServers.join('、')}`
+  }
+
+  return `备份完成（${completed}/${total}）`
+}
+
+/**
+ * 应用后端返回的备份任务状态，并同步按钮 loading 与文案颜色。
+ *
+ * @param {Object} status - 备份任务状态
+ */
+function applyBackupStatus(status) {
+  if (!status) {
+    return
+  }
+
+  backupTaskId.value = status.id || null
+  backupTaskRunning.value = ['pending', 'running'].includes(status.status)
+  backupStatusText.value = formatBackupStatusText(status)
+
+  if (backupTaskRunning.value) {
+    backupStatusKind.value = 'running'
+    return
+  }
+
+  backupStatusKind.value = Array.isArray(status.failed_servers) && status.failed_servers.length > 0
+    ? 'error'
+    : 'success'
+}
+
+/**
+ * 建立备份任务进度 WebSocket 连接，并在任务结束后自动断开。
+ *
+ * @param {number} taskId - 备份任务 ID
+ */
+function connectBackupSocket(taskId) {
+  closeBackupSocket()
+
+  const socket = new WebSocket(buildBackupWsUrl(taskId))
+  backupSocket.value = socket
+
+  socket.onmessage = (event) => {
+    try {
+      const message = JSON.parse(event.data)
+      if (message.type === 'status') {
+        applyBackupStatus(message.data)
+      }
+    } catch (error) {
+      console.error('解析备份任务进度失败:', error)
+    }
+  }
+
+  socket.onerror = (error) => {
+    console.error('备份任务 WebSocket 连接异常:', error)
+  }
+
+  socket.onclose = () => {
+    if (backupSocket.value === socket) {
+      backupSocket.value = null
+    }
+  }
+}
+
+/**
+ * 启动一次手动备份任务，并接入 WebSocket 实时进度展示。
+ */
+async function runBackupTask() {
+  try {
+    const response = await api.admin.runBackupTask()
+    if (response.code === 0) {
+      applyBackupStatus(response.data)
+      connectBackupSocket(response.data.id)
+      ElMessage.success(backupTaskRunning.value ? '备份任务已启动' : '已连接到备份任务结果')
+    }
+  } catch (error) {
+    console.error('启动备份任务失败:', error)
+    backupTaskRunning.value = false
+  }
+}
+
 async function deleteServer(server) {
   try {
     await ElMessageBox.confirm(
@@ -335,11 +473,16 @@ async function deleteServer(server) {
 onMounted(() => {
   fetchServers()
 })
+
+onBeforeUnmount(() => {
+  closeBackupSocket()
+})
 </script>
 
 <style scoped>
 .servers-container {
-  max-width: 1200px;
+  width: 100%;
+  max-width: 100%;
 }
 
 .page-header {
@@ -365,7 +508,28 @@ onMounted(() => {
 }
 
 .toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 20px;
+}
+
+.backup-status {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.backup-status-running {
+  color: #e6a23c;
+}
+
+.backup-status-success {
+  color: #67c23a;
+}
+
+.backup-status-error {
+  color: #f56c6c;
 }
 
 .server-grid {

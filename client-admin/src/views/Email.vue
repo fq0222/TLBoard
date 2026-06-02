@@ -830,7 +830,8 @@ onMounted(() => {
 
 <style scoped>
 .email-container {
-  max-width: 1200px;
+  width: 100%;
+  max-width: 100%;
 }
 
 .page-header {

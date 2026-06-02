@@ -582,7 +582,8 @@ onMounted(() => {
 
 <style scoped>
 .settings-container {
-  max-width: 1000px;
+  width: 100%;
+  max-width: 100%;
 }
 
 .page-header {

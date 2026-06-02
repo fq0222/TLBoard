@@ -189,6 +189,14 @@ const adminApi = {
   },
 
   /**
+   * 启动 3X-UI 数据库手动备份任务
+   * @returns {Promise<Object>} 当前备份任务状态
+   */
+  runBackupTask() {
+    return apiClient.post('/servers/backup/run', {}, { timeout: 10000 })
+  },
+
+  /**
    * 更新3X-UI用户信息
    * @param {number} serverId - 服务器ID
    * @param {Object} data - 用户数据

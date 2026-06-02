@@ -202,7 +202,8 @@ onMounted(() => {
 
 <style scoped>
 .dashboard-container {
-  max-width: 1200px;
+  width: 100%;
+  max-width: 100%;
 }
 
 .page-header {

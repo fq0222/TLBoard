@@ -39,7 +39,7 @@
           v-model:current-page="page"
           v-model:page-size="limit"
           :total="total"
-          :page-sizes="[10, 20, 50]"
+          :page-sizes="[15, 20, 50]"
           layout="total, sizes, prev, pager, next"
           @current-change="fetchOrders"
           @size-change="fetchOrders"
@@ -58,7 +58,7 @@ const email = ref('')
 const status = ref('')
 const dateRange = ref(null)
 const page = ref(1)
-const limit = ref(10)
+const limit = ref(15)
 const total = ref(0)
 
 async function fetchOrders() {
@@ -99,7 +99,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.orders-container { max-width: 1200px; }
+.orders-container { width: 100%; max-width: 100%; }
 .page-header { margin-bottom: 30px; }
 .page-title { font-size: 28px; color: #333; margin-bottom: 10px; }
 .page-subtitle { color: #666; font-size: 16px; }

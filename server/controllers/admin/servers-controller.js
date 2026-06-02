@@ -169,6 +169,23 @@ async function deleteServerUser(req, res) {
   }
 }
 
+/**
+ * 启动 3X-UI 数据库手动备份任务。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
+async function runBackupTask(req, res) {
+  try {
+    const result = await serversService.runBackupTask(req.app.locals.db);
+    logger.info(`启动 3X-UI 备份任务成功: taskId=${result.id}`);
+    return legacySuccess(res, result);
+  } catch (error) {
+    return handleControllerError(res, '启动 3X-UI 备份任务', error);
+  }
+}
+
 module.exports = {
   listServers,
   createServer,
@@ -176,6 +193,7 @@ module.exports = {
   deleteServer,
   getServerDetail,
   syncServer,
+  runBackupTask,
   updateServerUser,
   deleteServerUser
 };
