@@ -32,6 +32,9 @@ module.exports = {
         
         // 日志级别
         LOG_LEVEL: 'info',
+        TELEGRAM_INTERNAL_API_ENABLED: 'true',
+        TELEGRAM_INTERNAL_API_SECRET: 'dasfdafdsaf45sadfasw234erwerwe8765rwerrw',
+        TELEGRAM_INTERNAL_API_ALLOWED_SKEW_SECONDS: 300,
         
         // 安全配置
         RATE_LIMIT_WINDOW: 900000, // 15分钟 = 15 * 60 * 1000 = 900000毫秒
@@ -56,6 +59,9 @@ module.exports = {
         DB_IDLE_TIMEOUT: 60000, // 空闲超时60秒
         DB_CONNECT_TIMEOUT: 5000, // 连接超时5秒
         LOG_LEVEL: 'warn',
+        TELEGRAM_INTERNAL_API_ENABLED: 'true',
+        TELEGRAM_INTERNAL_API_SECRET: 'dasfdafdsaf45sadfasw234erwerwe8765rwerrw',
+        TELEGRAM_INTERNAL_API_ALLOWED_SKEW_SECONDS: 300,
         
         // 安全配置
         RATE_LIMIT_WINDOW: 900000,

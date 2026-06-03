@@ -201,6 +201,96 @@
           </el-form>
         </div>
       </el-tab-pane>
+
+      <el-tab-pane label="Telegram" name="telegram">
+        <div class="content-card">
+          <h2 class="card-title">Telegram 一期配置</h2>
+          <el-descriptions :column="1" border>
+            <el-descriptions-item label="内部接口开关">
+              <el-tag :type="telegramConfig.internal_api_enabled ? 'success' : 'info'">
+                {{ telegramConfig.internal_api_enabled ? '已启用' : '未启用' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="内部接口密钥">
+              <el-tag :type="telegramConfig.has_internal_api_secret ? 'success' : 'warning'">
+                {{ telegramConfig.has_internal_api_secret ? '已配置' : '未配置' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="路径前缀">
+              <code>{{ telegramConfig.internal_api_path_prefix || '/api/internal/telegram' }}</code>
+            </el-descriptions-item>
+            <el-descriptions-item label="允许时间偏移">
+              {{ telegramConfig.internal_api_allowed_skew_seconds || 300 }} 秒
+            </el-descriptions-item>
+          </el-descriptions>
+          <div class="form-block-hint">
+            一期只开放签名鉴权的内部 API，真实密钥仍通过 `server/config.js` 或 PM2 环境变量维护，不在页面中展示明文。
+          </div>
+        </div>
+
+        <div class="content-card">
+          <h2 class="card-title">生成管理员绑定码</h2>
+          <el-form :model="telegramBindForm" label-width="140px" style="max-width: 640px;">
+            <el-form-item label="目标管理员">
+              <el-select v-model="telegramBindForm.admin_id" placeholder="请选择管理员" style="width: 100%;">
+                <el-option
+                  v-for="item in admins"
+                  :key="item.id"
+                  :label="item.username"
+                  :value="item.id"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="有效期（秒）">
+              <el-input-number
+                v-model="telegramBindForm.expires_in_seconds"
+                :min="60"
+                :max="86400"
+                :step="60"
+              />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="telegramBindCreating" @click="handleCreateTelegramBindCode">
+                生成绑定码
+              </el-button>
+            </el-form-item>
+          </el-form>
+
+          <el-alert
+            v-if="telegramBindResult.bind_code"
+            title="最新绑定码"
+            type="success"
+            :closable="false"
+            show-icon
+          >
+            <template #default>
+              <div class="telegram-bind-code">
+                <div><strong>绑定码：</strong><code>{{ telegramBindResult.bind_code }}</code></div>
+                <div><strong>目标管理员：</strong>{{ telegramBindResult.username }}</div>
+                <div><strong>过期时间：</strong>{{ formatTime(telegramBindResult.expires_at) }}</div>
+              </div>
+            </template>
+          </el-alert>
+        </div>
+
+        <div class="content-card">
+          <h2 class="card-title">已绑定管理员</h2>
+          <el-table :data="telegramBindings" style="width: 100%">
+            <el-table-column prop="username" label="管理员" min-width="140" />
+            <el-table-column prop="chat_id" label="Chat ID" min-width="150" />
+            <el-table-column prop="telegram_username" label="Telegram 用户名" min-width="160">
+              <template #default="{ row }">
+                {{ row.telegram_username || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="updated_at" label="最近更新时间" min-width="180">
+              <template #default="{ row }">
+                {{ formatTime(row.updated_at) }}
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog v-model="adminDialogVisible" title="添加管理员" width="400px">
@@ -281,6 +371,23 @@ const subscriptionForm = ref({
   clash_profile_update_interval: 2
 })
 const subscriptionSaving = ref(false)
+const telegramConfig = ref({
+  internal_api_enabled: false,
+  has_internal_api_secret: false,
+  internal_api_allowed_skew_seconds: 300,
+  internal_api_path_prefix: '/api/internal/telegram'
+})
+const telegramBindings = ref([])
+const telegramBindCreating = ref(false)
+const telegramBindForm = reactive({
+  admin_id: null,
+  expires_in_seconds: 900
+})
+const telegramBindResult = reactive({
+  bind_code: '',
+  username: '',
+  expires_at: 0
+})
 
 const passwordForm = reactive({
   old_password: '',
@@ -352,6 +459,9 @@ async function fetchAdmins() {
     const response = await api.admin.getAdmins()
     if (response.code === 0) {
       admins.value = response.data.list
+      if (!telegramBindForm.admin_id && admins.value.length > 0) {
+        telegramBindForm.admin_id = admins.value[0].id
+      }
     }
   } catch (error) {
     console.error('获取管理员列表失败:', error)
@@ -571,12 +681,64 @@ async function saveSubscriptionConfig() {
   }
 }
 
+async function loadTelegramConfig() {
+  try {
+    const res = await api.admin.getTelegramConfig()
+    if (res.code === 0) {
+      telegramConfig.value = res.data
+    }
+  } catch (error) {
+    console.error('加载 Telegram 配置失败:', error)
+  }
+}
+
+async function loadTelegramBindings() {
+  try {
+    const res = await api.admin.getTelegramAdminBindings()
+    if (res.code === 0) {
+      telegramBindings.value = res.data.list || []
+    }
+  } catch (error) {
+    console.error('加载 Telegram 绑定列表失败:', error)
+  }
+}
+
+async function handleCreateTelegramBindCode() {
+  if (!telegramBindForm.admin_id) {
+    ElMessage.warning('请选择要绑定的管理员')
+    return
+  }
+
+  try {
+    telegramBindCreating.value = true
+    const res = await api.admin.createTelegramAdminBindCode({
+      admin_id: telegramBindForm.admin_id,
+      expires_in_seconds: telegramBindForm.expires_in_seconds
+    })
+    if (res.code === 0) {
+      telegramBindResult.bind_code = res.data.bind_code
+      telegramBindResult.username = res.data.username
+      telegramBindResult.expires_at = res.data.expires_at
+      loadTelegramBindings()
+      ElMessage.success('管理员绑定码已生成')
+    } else {
+      ElMessage.error(res.message)
+    }
+  } catch (error) {
+    ElMessage.error('生成绑定码失败')
+  } finally {
+    telegramBindCreating.value = false
+  }
+}
+
 onMounted(() => {
   fetchAdmins()
   loadEmailConfig()
   loadResourceConfig()
   loadTrafficConfig()
   loadSubscriptionConfig()
+  loadTelegramConfig()
+  loadTelegramBindings()
 })
 </script>
 
@@ -637,5 +799,12 @@ onMounted(() => {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+.telegram-bind-code {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
 }
 </style>

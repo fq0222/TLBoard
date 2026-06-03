@@ -750,6 +750,31 @@ const adminApi = {
     return apiClient.put('/system-settings/subscription', data)
   },
 
+  /**
+   * 获取 Telegram 一期基础配置。
+   * @returns {Promise<Object>} Telegram 内部接口配置概览
+   */
+  getTelegramConfig() {
+    return apiClient.get('/telegram/config')
+  },
+
+  /**
+   * 生成管理员 Telegram 绑定码。
+   * @param {Object} data - 生成参数
+   * @returns {Promise<Object>} 绑定码结果
+   */
+  createTelegramAdminBindCode(data) {
+    return apiClient.post('/telegram/admin-bind-codes', data)
+  },
+
+  /**
+   * 获取已绑定管理员列表。
+   * @returns {Promise<Object>} 绑定列表
+   */
+  getTelegramAdminBindings() {
+    return apiClient.get('/telegram/admin-bindings')
+  },
+
   // 分发资源给用户
   distributeResource(resourceId, data) {
     return apiClient.post(`/resources/${resourceId}/distribute`, data)

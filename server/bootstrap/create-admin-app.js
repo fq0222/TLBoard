@@ -14,6 +14,7 @@ const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const registerAdminRoutes = require('./register-admin-routes');
+const telegramInternalRoutes = require('../routes/internal/telegram');
 
 function createAdminApp({ db, logger }) {
   const app = express();
@@ -28,8 +29,19 @@ function createAdminApp({ db, logger }) {
     credentials: true
   }));
   app.use(morgan('short', { stream: { write: (msg) => logger.info(`[ADMIN] ${msg.trim()}`) } }));
-  app.use(express.json({ limit: config.security.maxRequestBodySize }));
+  app.use(express.json({
+    limit: config.security.maxRequestBodySize,
+    verify(req, res, buf) {
+      req.rawBody = buf.toString('utf8');
+    }
+  }));
   app.use(express.urlencoded({ extended: true, limit: config.security.maxRequestBodySize }));
+  app.use((req, res, next) => {
+    if (req.rawBody === undefined) {
+      req.rawBody = '';
+    }
+    next();
+  });
 
   const adminLimiter = rateLimit({
     windowMs: config.security.rateLimitWindow,
@@ -42,6 +54,7 @@ function createAdminApp({ db, logger }) {
     res.json({ code: 0, message: 'ok', data: { status: 'healthy', port: config.admin.port, timestamp: Date.now() } });
   });
 
+  app.use(telegramInternalRoutes);
   registerAdminRoutes(app, logger);
 
   return app;
