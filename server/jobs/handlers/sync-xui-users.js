@@ -6,7 +6,6 @@
 const XuiService = require('../../integrations/xui/xui-service');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const xuiNodeSnapshotService = require('../../services/shared/xui-node-snapshot-service');
-const telegramMonitorService = require('../../services/shared/telegram-monitor-service');
 const { createLogger } = require('../../utils/logger');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
 
@@ -261,7 +260,6 @@ async function legacySyncUsersToServer(db, server, users) {
  * @param {Array} users - 需要巡检同步的用户列表
  */
 async function syncUsersToServer(db, server, users) {
-  const checkedAt = Math.floor(Date.now() / 1000);
   try {
     const crypto = require('crypto');
     const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
@@ -271,24 +269,6 @@ async function syncUsersToServer(db, server, users) {
 
     if (!inboundsResult.success) {
       logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${inboundsResult.message}`);
-      await telegramMonitorService.recordServerHealthCheck(db, {
-        server_id: server.id,
-        panel_api_status: 'unhealthy',
-        panel_auth_status: 'unhealthy',
-        xray_runtime_status: 'unknown',
-        last_failure_at: checkedAt,
-        last_checked_at: checkedAt,
-        consecutive_failures: 1,
-        failure_reason: 'get_inbounds_failed',
-        failure_detail: inboundsResult.message || ''
-      });
-      await telegramMonitorService.openOrUpdateAlert(db, {
-        server_id: server.id,
-        alert_type: 'panel_unreachable',
-        title: `${server.name} 面板巡检失败`,
-        message: inboundsResult.message || '获取 inbounds 失败',
-        last_triggered_at: checkedAt
-      });
       return;
     }
 
@@ -367,39 +347,8 @@ async function syncUsersToServer(db, server, users) {
     if (syncCount > 0) {
       logger.info(`服务器 ${server.name} 同步完成，成功 ${syncCount} 个用户`);
     }
-
-    await telegramMonitorService.recordServerHealthCheck(db, {
-      server_id: server.id,
-      panel_api_status: 'healthy',
-      panel_auth_status: 'healthy',
-      xray_runtime_status: 'unknown',
-      last_success_at: checkedAt,
-      last_checked_at: checkedAt,
-      consecutive_failures: 0,
-      failure_reason: '',
-      failure_detail: ''
-    });
-    await telegramMonitorService.resolveAlert(db, server.id, 'panel_unreachable');
   } catch (error) {
     logger.error(`同步服务器 ${server.name} 错误: ${error.message}`);
-    await telegramMonitorService.recordServerHealthCheck(db, {
-      server_id: server.id,
-      panel_api_status: 'unhealthy',
-      panel_auth_status: 'unknown',
-      xray_runtime_status: 'unknown',
-      last_failure_at: checkedAt,
-      last_checked_at: checkedAt,
-      consecutive_failures: 1,
-      failure_reason: 'sync_exception',
-      failure_detail: error.message
-    });
-    await telegramMonitorService.openOrUpdateAlert(db, {
-      server_id: server.id,
-      alert_type: 'panel_unreachable',
-      title: `${server.name} 面板巡检异常`,
-      message: error.message,
-      last_triggered_at: checkedAt
-    });
   }
 }
 

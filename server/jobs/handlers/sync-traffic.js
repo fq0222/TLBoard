@@ -10,7 +10,7 @@ const logger = createLogger('JOBS');
 
 /**
  * 注册流量同步任务。
- * 启动后延迟 10 分钟执行第一次，之后每 1 小时执行一次。
+ * 启动后延迟 10 分钟执行第一次，之后每 30 分钟执行一次。
  *
  * @param {Object} context - 任务上下文
  * @param {Object} context.db - 数据库实例
@@ -24,10 +24,10 @@ function registerTrafficSyncJob({ db, intervals, registerTimeout }) {
 
   const interval = setInterval(async () => {
     await trafficManager.syncTrafficAndHandleDisable(db);
-  }, 60 * 60 * 1000);
+  }, 30 * 60 * 1000);
 
   intervals.push(interval);
-  logger.info('流量同步任务已注册（每 1 小时执行一次）');
+  logger.info('流量同步任务已注册（每 30 分钟执行一次）');
 }
 
 module.exports = {
