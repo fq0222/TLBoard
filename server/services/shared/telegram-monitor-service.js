@@ -174,7 +174,6 @@ async function resolveAlert(db, serverId, alertType) {
  */
 async function checkSingleServerHealth(db, server) {
   const checkedAt = getNowTimestamp();
-  logger.info(`开始巡检服务器 ${server.name}（ID=${server.id}）`);
 
   try {
     const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
@@ -184,9 +183,7 @@ async function checkSingleServerHealth(db, server) {
     const serverStatusResult = await xuiService.getServerStatus();
 
     if (serverStatusResult.success) {
-      logger.info(`服务器 ${server.name} 面板连通成功`);
       const xrayRuntimeStatus = normalizeXrayRuntimeStatus(serverStatusResult.data?.xrayState);
-      logger.info(`服务器 ${server.name} Xray 状态: ${xrayRuntimeStatus}`);
 
       await recordServerHealthCheck(db, {
         server_id: server.id,
