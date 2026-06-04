@@ -205,6 +205,14 @@ class XuiApiClientV302 {
   getDb() {
     return this.download(`${this.serverBasePath}/getDb`);
   }
+
+  /**
+   * 获取 3X-UI 面板的 server/status 信息。
+   * @returns {Promise<Object>} 服务器状态响应。
+   */
+  getServerStatus() {
+    return this.request('get', `${this.serverBasePath}/status`);
+  }
 }
 
 module.exports = XuiApiClientV302;

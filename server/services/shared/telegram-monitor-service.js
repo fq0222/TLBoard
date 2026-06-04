@@ -1,4 +1,9 @@
+const XuiService = require('../../integrations/xui/xui-service');
 const telegramRepository = require('../../repositories/telegram-repository');
+const trafficRepository = require('../../repositories/traffic-repository');
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger('TELEGRAM-MONITOR');
 
 /**
  * 归一化健康状态值，避免表中混入非预期文案。
@@ -9,6 +14,67 @@ const telegramRepository = require('../../repositories/telegram-repository');
 function normalizeStatus(status) {
   const allowed = new Set(['healthy', 'unhealthy', 'unknown']);
   return allowed.has(status) ? status : 'unknown';
+}
+
+/**
+ * 归一化 Xray 运行状态，统一输出 Telegram 展示可识别的值。
+ *
+ * @param {string} status - 原始运行状态
+ * @returns {string} 标准化后的运行状态
+ */
+function normalizeXrayRuntimeStatus(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (!normalized) {
+    return 'unknown';
+  }
+
+  if (['running', 'run', 'started', 'active', 'online'].includes(normalized)) {
+    return 'running';
+  }
+
+  if (['stopped', 'stop', 'inactive', 'offline'].includes(normalized)) {
+    return 'stopped';
+  }
+
+  return normalized || 'unknown';
+}
+
+/**
+ * 判断面板失败是否属于鉴权失败。
+ *
+ * @param {string} message - 失败消息
+ * @returns {boolean} 是否为鉴权失败
+ */
+function isPanelAuthFailure(message) {
+  const normalized = String(message || '').trim().toLowerCase();
+  return normalized.includes('status 401')
+    || normalized.includes('status 403')
+    || normalized.includes('unauthorized')
+    || normalized.includes('forbidden')
+    || normalized.includes('invalid token')
+    || normalized.includes('api token');
+}
+
+/**
+ * 将面板失败统一分类为 API 故障或鉴权故障。
+ *
+ * @param {string} message - 失败消息
+ * @returns {{panelApiStatus: string, panelAuthStatus: string, failureReason: string}}
+ */
+function classifyPanelFailure(message) {
+  if (isPanelAuthFailure(message)) {
+    return {
+      panelApiStatus: 'healthy',
+      panelAuthStatus: 'unhealthy',
+      failureReason: 'panel_auth_failed'
+    };
+  }
+
+  return {
+    panelApiStatus: 'unhealthy',
+    panelAuthStatus: 'unknown',
+    failureReason: 'panel_api_unreachable'
+  };
 }
 
 /**
@@ -33,7 +99,7 @@ async function recordServerHealthCheck(db, payload) {
     serverId: Number(payload.server_id),
     panelApiStatus: normalizeStatus(payload.panel_api_status),
     panelAuthStatus: normalizeStatus(payload.panel_auth_status),
-    xrayRuntimeStatus: normalizeStatus(payload.xray_runtime_status),
+    xrayRuntimeStatus: normalizeXrayRuntimeStatus(payload.xray_runtime_status),
     lastSuccessAt: payload.last_success_at || null,
     lastFailureAt: payload.last_failure_at || null,
     lastCheckedAt: now,
@@ -97,6 +163,150 @@ async function resolveAlert(db, serverId, alertType) {
 
   const now = getNowTimestamp();
   await telegramRepository.resolveAlert(db, existing.id, now);
+}
+
+/**
+ * 巡检单台服务器健康状态，并维护 Telegram 健康表与告警。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} server - 服务器配置
+ * @returns {Promise<void>}
+ */
+async function checkSingleServerHealth(db, server) {
+  const checkedAt = getNowTimestamp();
+  logger.info(`开始巡检服务器 ${server.name}（ID=${server.id}）`);
+
+  try {
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+      apiVersion: server.panel_version || '3.0.2'
+    });
+
+    const serverStatusResult = await xuiService.getServerStatus();
+
+    if (serverStatusResult.success) {
+      logger.info(`服务器 ${server.name} 面板连通成功`);
+      const xrayRuntimeStatus = normalizeXrayRuntimeStatus(serverStatusResult.data?.xrayState);
+      logger.info(`服务器 ${server.name} Xray 状态: ${xrayRuntimeStatus}`);
+
+      await recordServerHealthCheck(db, {
+        server_id: server.id,
+        panel_api_status: 'healthy',
+        panel_auth_status: 'healthy',
+        xray_runtime_status: xrayRuntimeStatus,
+        last_success_at: checkedAt,
+        last_checked_at: checkedAt,
+        consecutive_failures: 0,
+        failure_reason: '',
+        failure_detail: ''
+      });
+
+      await resolveAlert(db, server.id, 'panel_unreachable');
+      logger.info(`服务器 ${server.name} 巡检结果: panel_api_status=healthy, panel_auth_status=healthy, xray_runtime_status=${xrayRuntimeStatus}`);
+      return;
+    }
+
+    const serverStatusFailureDetail = String(serverStatusResult.message || '').trim();
+    logger.warn(`服务器 ${server.name} server/status 读取失败，准备回退 inbounds 判断面板状态: ${serverStatusFailureDetail || '未知错误'}`);
+
+    const inboundsResult = await xuiService.getInbounds();
+    if (!inboundsResult.success) {
+      const failure = classifyPanelFailure(inboundsResult.message || '');
+      const detail = String(inboundsResult.message || '').trim();
+      logger.warn(`服务器 ${server.name} 面板探测失败: ${detail || '获取 inbounds 失败'}`);
+
+      await recordServerHealthCheck(db, {
+        server_id: server.id,
+        panel_api_status: failure.panelApiStatus,
+        panel_auth_status: failure.panelAuthStatus,
+        xray_runtime_status: 'unknown',
+        last_failure_at: checkedAt,
+        last_checked_at: checkedAt,
+        consecutive_failures: 1,
+        failure_reason: failure.failureReason,
+        failure_detail: detail
+      });
+
+      await openOrUpdateAlert(db, {
+        server_id: server.id,
+        alert_type: 'panel_unreachable',
+        title: `${server.name} 面板巡检失败`,
+        message: detail || '访问 3X-UI 面板失败',
+        last_triggered_at: checkedAt
+      });
+      logger.warn(`服务器 ${server.name} 巡检结果: panel_api_status=${failure.panelApiStatus}, panel_auth_status=${failure.panelAuthStatus}, xray_runtime_status=unknown`);
+      return;
+    }
+
+    logger.info(`服务器 ${server.name} 面板连通成功`);
+    await recordServerHealthCheck(db, {
+      server_id: server.id,
+      panel_api_status: 'healthy',
+      panel_auth_status: 'healthy',
+      xray_runtime_status: 'unknown',
+      last_success_at: checkedAt,
+      last_checked_at: checkedAt,
+      consecutive_failures: 0,
+      failure_reason: '',
+      failure_detail: serverStatusFailureDetail
+    });
+
+    await resolveAlert(db, server.id, 'panel_unreachable');
+    logger.warn(`服务器 ${server.name} server/status 读取失败，已降级记录 xray_runtime_status=unknown`);
+    logger.info(`服务器 ${server.name} 巡检结果: panel_api_status=healthy, panel_auth_status=healthy, xray_runtime_status=unknown`);
+  } catch (error) {
+    const detail = String(error.message || '').trim();
+    logger.error(`服务器 ${server.name} 巡检异常: ${detail}`);
+
+    await recordServerHealthCheck(db, {
+      server_id: server.id,
+      panel_api_status: 'unhealthy',
+      panel_auth_status: 'unknown',
+      xray_runtime_status: 'unknown',
+      last_failure_at: checkedAt,
+      last_checked_at: checkedAt,
+      consecutive_failures: 1,
+      failure_reason: 'server_health_check_exception',
+      failure_detail: detail
+    });
+
+    await openOrUpdateAlert(db, {
+      server_id: server.id,
+      alert_type: 'panel_unreachable',
+      title: `${server.name} 面板巡检异常`,
+      message: detail || '服务器健康巡检异常',
+      last_triggered_at: checkedAt
+    });
+  }
+}
+
+/**
+ * 巡检所有在线服务器健康状态。
+ *
+ * @param {Object} db - 数据库实例
+ * @returns {Promise<void>}
+ */
+async function checkAllServersHealth(db) {
+  const servers = await trafficRepository.listOnlineServers(db);
+  logger.info(`开始执行 Telegram 服务器健康巡检，在线服务器 ${servers.length} 台`);
+
+  if (servers.length === 0) {
+    logger.warn('Telegram 服务器健康巡检结束：没有在线服务器');
+    return;
+  }
+
+  let successCount = 0;
+  let failureCount = 0;
+  for (const server of servers) {
+    try {
+      await checkSingleServerHealth(db, server);
+      successCount += 1;
+    } catch (error) {
+      failureCount += 1;
+      logger.error(`服务器 ${server.name} 巡检执行失败: ${error.message}`);
+    }
+  }
+
+  logger.info(`Telegram 服务器健康巡检完成：共 ${servers.length} 台，成功 ${successCount} 台，失败 ${failureCount} 台`);
 }
 
 /**
@@ -209,8 +419,10 @@ module.exports = {
   listAlerts,
   listPendingAlerts,
   markAlertSent,
+  checkAllServersHealth,
+  checkSingleServerHealth,
   openOrUpdateAlert,
+  normalizeXrayRuntimeStatus,
   recordServerHealthCheck,
   resolveAlert
 };
-

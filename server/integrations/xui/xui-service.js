@@ -133,6 +133,74 @@ class XuiService {
   }
 
   /**
+   * 解析服务器状态里的 Xray 状态
+   * @param {Object} payload - 原始状态数据
+   * @returns {string} Xray 状态，未命中时返回空字符串
+   */
+  extractXrayState(payload = {}) {
+    const state =
+      payload?.obj?.xray?.state ||
+      payload?.obj?.xrayState ||
+      payload?.obj?.xray?.status ||
+      payload?.obj?.state?.xray ||
+      payload?.xray?.state;
+
+    if (typeof state !== 'string') {
+      return '';
+    }
+
+    return state.trim();
+  }
+
+  /**
+   * 获取服务器状态
+   * @returns {Promise<Object>} 统一返回 { success, data, message }
+   */
+  async getServerStatus() {
+    try {
+      if (!this.client) {
+        await this.init();
+      }
+
+      const response = await this.client.getServerStatus();
+      const xrayState = this.extractXrayState(response);
+
+      if (!response?.success) {
+        const message = response?.msg || response?.message || '获取服务器状态失败';
+        logger.warn(`获取服务器状态失败: ${message}`);
+        return {
+          success: false,
+          data: {
+            xrayState: 'unknown',
+            raw: response || null
+          },
+          message
+        };
+      }
+
+      logger.info(`获取服务器状态成功: xrayState=${xrayState}`);
+      return {
+        success: true,
+        data: {
+          xrayState,
+          raw: response
+        },
+        message: response?.msg || ''
+      };
+    } catch (error) {
+      logger.error(`获取服务器状态错误: ${error.message}`);
+      return {
+        success: false,
+        data: {
+          xrayState: 'unknown',
+          raw: null
+        },
+        message: error.message
+      };
+    }
+  }
+
+  /**
    * 获取所有 inbounds（节点）
    * @returns {Promise<Object>} inbounds 列表
    */

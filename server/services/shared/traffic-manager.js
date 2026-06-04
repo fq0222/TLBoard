@@ -7,7 +7,6 @@ const XuiService = require('../../integrations/xui/xui-service');
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const { withUserStatusLock } = require('./user-status-lock');
 const { DISABLE_REASONS } = require('./renew-policy');
-const telegramMonitorService = require('./telegram-monitor-service');
 const { createLogger } = require('../../utils/logger');
 const trafficRepository = require('../../repositories/traffic-repository');
 
@@ -21,15 +20,6 @@ const DEFAULT_TRAFFIC_USAGE_MULTIPLIER = 1.0;
  * @param {string} message - 失败消息
  * @returns {boolean} 是否为鉴权失败
  */
-function isPanelAuthFailure(message) {
-  const normalized = String(message || '').trim().toLowerCase();
-  return normalized.includes('status 401')
-    || normalized.includes('status 403')
-    || normalized.includes('unauthorized')
-    || normalized.includes('forbidden')
-    || normalized.includes('invalid token')
-    || normalized.includes('api token');
-}
 
 /**
  * 将面板访问失败归类为 API 故障或鉴权故障。
@@ -37,21 +27,6 @@ function isPanelAuthFailure(message) {
  * @param {string} message - 失败消息
  * @returns {{panelApiStatus: string, panelAuthStatus: string, failureReason: string}}
  */
-function classifyPanelFailure(message) {
-  if (isPanelAuthFailure(message)) {
-    return {
-      panelApiStatus: 'healthy',
-      panelAuthStatus: 'unhealthy',
-      failureReason: 'panel_auth_failed'
-    };
-  }
-
-  return {
-    panelApiStatus: 'unhealthy',
-    panelAuthStatus: 'unknown',
-    failureReason: 'panel_api_unreachable'
-  };
-}
 
 /**
  * 记录单台服务器的面板健康成功状态。
@@ -61,24 +36,6 @@ function classifyPanelFailure(message) {
  * @param {number} checkedAt - 检查时间
  * @returns {Promise<void>}
  */
-async function recordPanelHealthSuccess(db, server, checkedAt) {
-  try {
-    await telegramMonitorService.recordServerHealthCheck(db, {
-      server_id: server.id,
-      panel_api_status: 'healthy',
-      panel_auth_status: 'healthy',
-      xray_runtime_status: 'unknown',
-      last_success_at: checkedAt,
-      last_checked_at: checkedAt,
-      consecutive_failures: 0,
-      failure_reason: '',
-      failure_detail: ''
-    });
-    await telegramMonitorService.resolveAlert(db, server.id, 'panel_unreachable');
-  } catch (error) {
-    logger.error(`写入服务器 ${server.name} 面板健康成功状态失败: ${error.message}`);
-  }
-}
 
 /**
  * 记录单台服务器的面板健康失败状态。
@@ -89,34 +46,6 @@ async function recordPanelHealthSuccess(db, server, checkedAt) {
  * @param {string} message - 失败消息
  * @returns {Promise<void>}
  */
-async function recordPanelHealthFailure(db, server, checkedAt, message) {
-  try {
-    const detail = String(message || '').trim();
-    const failure = classifyPanelFailure(detail);
-
-    await telegramMonitorService.recordServerHealthCheck(db, {
-      server_id: server.id,
-      panel_api_status: failure.panelApiStatus,
-      panel_auth_status: failure.panelAuthStatus,
-      xray_runtime_status: 'unknown',
-      last_failure_at: checkedAt,
-      last_checked_at: checkedAt,
-      consecutive_failures: 1,
-      failure_reason: failure.failureReason,
-      failure_detail: detail
-    });
-    await telegramMonitorService.openOrUpdateAlert(db, {
-      server_id: server.id,
-      alert_type: 'panel_unreachable',
-      title: `${server.name} 面板巡检失败`,
-      message: detail || '访问 3X-UI 面板失败',
-      last_triggered_at: checkedAt
-    });
-  } catch (error) {
-    logger.error(`写入服务器 ${server.name} 面板健康失败状态失败: ${error.message}`);
-  }
-}
-
 function formatTrafficForLog(bytes) {
   if (bytes === null || bytes === undefined || bytes === '') {
     return '0 B (0 B)';
@@ -189,7 +118,6 @@ async function fetchAllServerTraffic(db) {
     const serverTrafficData = {};
 
     const promises = servers.map(async (server) => {
-      const checkedAt = Math.floor(Date.now() / 1000);
       try {
         const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
           apiVersion: server.panel_version || '3.0.2'
@@ -198,7 +126,6 @@ async function fetchAllServerTraffic(db) {
         const inboundsResult = await xuiService.getInbounds();
         if (!inboundsResult.success) {
           logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${inboundsResult.message}`);
-          await recordPanelHealthFailure(db, server, checkedAt, inboundsResult.message || '获取 inbounds 失败');
           return;
         }
 
@@ -227,10 +154,8 @@ async function fetchAllServerTraffic(db) {
 
         serverTrafficData[server.id] = serverData;
         logger.info(`获取服务器 ${server.name} 流量数据成功，${Object.keys(serverData).length} 个用户`);
-        await recordPanelHealthSuccess(db, server, checkedAt);
       } catch (error) {
         logger.error(`获取服务器 ${server.name} 流量数据错误: ${error.message}`);
-        await recordPanelHealthFailure(db, server, checkedAt, error.message);
       }
     });
 
