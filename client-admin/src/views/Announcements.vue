@@ -30,6 +30,11 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="popup_show_limit" label="弹窗次数" width="110">
+          <template #default="scope">
+            {{ Number(scope.row.popup_show_limit || 0) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="created_at" label="创建时间">
           <template #default="scope">{{ formatTime(scope.row.created_at) }}</template>
         </el-table-column>
@@ -57,6 +62,15 @@
             </el-form-item>
             <el-form-item label="显示">
               <el-switch v-model="announcementForm.enabled" />
+            </el-form-item>
+            <el-form-item label="弹窗次数">
+              <el-input-number
+                v-model="announcementForm.popup_show_limit"
+                :min="0"
+                :step="1"
+                controls-position="right"
+              />
+              <div class="field-tip">0 表示不弹窗，正整数表示每个用户最多弹出次数。</div>
             </el-form-item>
           </el-form>
         </div>
@@ -90,7 +104,8 @@ const announcementForm = reactive({
   title: '',
   content: '',
   pinned: false,
-  enabled: true
+  enabled: true,
+  popup_show_limit: 0
 })
 
 const renderedContent = computed(() => {
@@ -116,6 +131,7 @@ function showAddDialog() {
   announcementForm.content = ''
   announcementForm.pinned = false
   announcementForm.enabled = true
+  announcementForm.popup_show_limit = 0
   dialogVisible.value = true
 }
 
@@ -126,6 +142,7 @@ function showEditDialog(announcement) {
   announcementForm.content = announcement.content
   announcementForm.pinned = !!announcement.pinned
   announcementForm.enabled = !!announcement.enabled
+  announcementForm.popup_show_limit = Number(announcement.popup_show_limit || 0)
   dialogVisible.value = true
 }
 
@@ -186,6 +203,13 @@ onMounted(() => {
 .page-subtitle { color: #666; font-size: 16px; }
 .content-card { background: #fff; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 20px; }
 .toolbar { margin-bottom: 20px; }
+
+.field-tip {
+  margin-top: 6px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.5;
+}
 
 .editor-container {
   display: flex;

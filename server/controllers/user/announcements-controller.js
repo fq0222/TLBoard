@@ -42,6 +42,58 @@ async function getAnnouncements(req, res) {
   }
 }
 
+/**
+ * 获取当前用户首页公告弹窗信息。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function getLatestPopupAnnouncement(req, res) {
+  try {
+    const data = await announcementsService.getLatestAnnouncementPopup(req.app.locals.db, req.user.id);
+    return legacySuccess(res, data);
+  } catch (error) {
+    logger.error(`获取公告弹窗错误: ${error.message}`);
+    return legacyFail(res);
+  }
+}
+
+/**
+ * 上报当前用户已关闭公告弹窗。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function reportPopupClose(req, res) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      logger.warn('公告弹窗关闭上报参数校验失败');
+      return legacyValidationError(res);
+    }
+
+    const announcementId = parseInt(req.params.id, 10);
+    const data = await announcementsService.reportAnnouncementPopupClose(
+      req.app.locals.db,
+      req.user.id,
+      announcementId
+    );
+
+    return legacySuccess(res, data);
+  } catch (error) {
+    logger.error(`公告弹窗关闭上报错误: ${error.message}`);
+    return legacyFail(res, {
+      statusCode: error.statusCode || 500,
+      code: error.statusCode === 404 ? 404 : 500,
+      message: error.statusCode === 404 ? error.message : undefined
+    });
+  }
+}
+
 module.exports = {
-  getAnnouncements
+  getAnnouncements,
+  getLatestPopupAnnouncement,
+  reportPopupClose
 };

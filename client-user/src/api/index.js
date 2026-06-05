@@ -129,6 +129,23 @@ const userApi = {
   },
 
   /**
+   * 获取当前用户首页公告弹窗信息。
+   * @returns {Promise<Object>} 公告弹窗判断结果
+   */
+  getLatestAnnouncementPopup() {
+    return apiClient.get('/announcements/popup/latest')
+  },
+
+  /**
+   * 上报用户已关闭公告弹窗。
+   * @param {number|string} id - 公告 ID
+   * @returns {Promise<Object>} 上报结果
+   */
+  reportAnnouncementPopupClose(id) {
+    return apiClient.post(`/announcements/${id}/popup-close`, {})
+  },
+
+  /**
    * 获取订单列表
    * @param {Object} params - 查询参数
    * @returns {Promise<Object>} 响应数据

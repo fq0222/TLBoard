@@ -194,6 +194,38 @@
       </div>
     </section>
 
+    <el-dialog
+      v-model="announcementPopupVisible"
+      :width="announcementDialogWidth"
+      :close-on-click-modal="false"
+      :show-close="false"
+      class="announcement-popup-dialog"
+      @close="handleAnnouncementPopupClose"
+    >
+      <template #header>
+        <div class="announcement-popup-dialog-header">
+          <span class="announcement-popup-dialog-title">系统公告</span>
+          <button
+            type="button"
+            class="announcement-popup-close-button"
+            @click="announcementPopupVisible = false"
+          >
+            关闭
+          </button>
+        </div>
+      </template>
+      <div v-if="popupAnnouncement" class="announcement-popup-body">
+        <div class="announcement-popup-head">
+          <h3 class="announcement-popup-title">{{ popupAnnouncement.title }}</h3>
+          <span class="announcement-popup-time">{{ formatDate(popupAnnouncement.created_at) }}</span>
+        </div>
+        <div
+          class="announcement-popup-content"
+          v-html="renderMarkdown(popupAnnouncement.content)"
+        ></div>
+      </div>
+    </el-dialog>
+
     <RenewDialog
       v-model:visible="showRenewDialog"
       :current-plan-id="userInfo.plan_id"
@@ -371,6 +403,9 @@ const optimizeProgress = ref(0)
 const optimizeStatusText = ref('')
 const generatingSubscription = ref(false)
 const showRenewDialog = ref(false)
+const announcementPopupVisible = ref(false)
+const popupAnnouncement = ref(null)
+const popupClosing = ref(false)
 const syncLoading = ref(false)
 const syncTimer = ref(null)
 const windowWidth = ref(window.innerWidth)
@@ -386,6 +421,7 @@ const MOBILE_ONBOARDING_TARGET_HOST_CLASS = 'mobile-onboarding-target-host'
 
 const actionBusy = computed(() => optimizing.value || generatingSubscription.value)
 const optimizeDialogWidth = computed(() => (windowWidth.value <= 768 ? '94%' : '420px'))
+const announcementDialogWidth = computed(() => (windowWidth.value <= 768 ? '92vw' : '720px'))
 const onboardingGuideMode = computed(() => getOnboardingGuideMode(windowWidth.value))
 const isMobileView = computed(() => onboardingGuideMode.value === 'mobile')
 const onboardingTourSteps = computed(() => getOnboardingGuideSteps({
@@ -439,6 +475,44 @@ async function fetchAnnouncements() {
     }
   } catch (error) {
     console.error('获取公告列表失败:', error)
+  }
+}
+
+/**
+ * 拉取首页公告弹窗判断结果。
+ * 后端负责判断最新公告和用户关闭次数，前端只在 should_popup 为 true 时展示。
+ */
+async function fetchAnnouncementPopup() {
+  try {
+    const response = await api.user.getLatestAnnouncementPopup()
+    if (response.code === 0 && response.data?.should_popup && response.data?.announcement) {
+      popupAnnouncement.value = response.data.announcement
+      announcementPopupVisible.value = true
+    }
+  } catch (error) {
+    console.error('获取公告弹窗失败:', error)
+  }
+}
+
+/**
+ * 处理公告弹窗关闭。
+ * 先关闭界面，再异步上报关闭次数，避免接口异常影响用户操作。
+ */
+async function handleAnnouncementPopupClose() {
+  const announcementId = popupAnnouncement.value?.id
+  announcementPopupVisible.value = false
+
+  if (!announcementId || popupClosing.value) {
+    return
+  }
+
+  try {
+    popupClosing.value = true
+    await api.user.reportAnnouncementPopupClose(announcementId)
+  } catch (error) {
+    console.error('上报公告弹窗关闭失败:', error)
+  } finally {
+    popupClosing.value = false
   }
 }
 
@@ -1026,6 +1100,7 @@ onMounted(() => {
   window.addEventListener('resize', handleResize)
   fetchUserInfo()
   fetchAnnouncements()
+  fetchAnnouncementPopup()
   checkSyncStatus()
 })
 
@@ -1507,6 +1582,163 @@ onBeforeUnmount(() => {
   text-decoration: none;
 }
 
+.announcement-popup-dialog :deep(.el-dialog) {
+  max-width: 92vw;
+  border-radius: 22px;
+  box-sizing: border-box;
+}
+
+.announcement-popup-dialog :deep(.el-dialog__body) {
+  overflow: hidden;
+}
+
+.announcement-popup-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.announcement-popup-dialog-title {
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.announcement-popup-body {
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+  min-width: 0;
+}
+
+.announcement-popup-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.announcement-popup-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 22px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.announcement-popup-time {
+  flex-shrink: 0;
+  color: #94a3b8;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.announcement-popup-content {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  color: #475569;
+  line-height: 1.8;
+  word-break: break-word;
+}
+
+.announcement-popup-content :deep(h1),
+.announcement-popup-content :deep(h2),
+.announcement-popup-content :deep(h3),
+.announcement-popup-content :deep(h4),
+.announcement-popup-content :deep(h5),
+.announcement-popup-content :deep(h6) {
+  margin: 16px 0 10px;
+  color: #0f172a;
+  line-height: 1.4;
+}
+
+.announcement-popup-content :deep(p) {
+  margin: 0 0 12px;
+}
+
+.announcement-popup-content :deep(a) {
+  color: #1d4ed8;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.announcement-popup-content :deep(code) {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.announcement-popup-content :deep(pre) {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 14px;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.announcement-popup-content :deep(pre code) {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.announcement-popup-content :deep(table) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.announcement-popup-content :deep(th),
+.announcement-popup-content :deep(td) {
+  border: 1px solid #e5e7eb;
+  padding: 8px 10px;
+}
+
+.announcement-popup-close-button {
+  flex-shrink: 0;
+  min-width: 88px;
+  min-height: 40px;
+  padding: 0.58em 1.35em;
+  border: 1px solid #e8e8e8;
+  border-radius: 0.6em;
+  background: #e8e8e8;
+  box-shadow: 6px 6px 12px #c5c5c5, -6px -6px 12px #ffffff;
+  color: #090909;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
+}
+
+.announcement-popup-close-button:hover,
+.announcement-popup-close-button:focus-visible {
+  border-color: #ffffff;
+  outline: none;
+}
+
+.announcement-popup-close-button:focus-visible {
+  box-shadow:
+    6px 6px 12px #c5c5c5,
+    -6px -6px 12px #ffffff,
+    0 0 0 3px rgba(64, 158, 255, 0.28);
+}
+
+.announcement-popup-close-button:active {
+  box-shadow: 4px 4px 12px #c5c5c5, -4px -4px 12px #ffffff;
+  transform: translateY(1px);
+}
+
 .overview-list {
   display: flex;
   flex-direction: column;
@@ -1931,6 +2163,40 @@ onBeforeUnmount(() => {
 
   .generate-dialog-content {
     padding: 4px 0 0;
+  }
+
+  .announcement-popup-dialog :deep(.el-dialog) {
+    width: 92vw !important;
+    max-width: 92vw;
+    margin-top: 4vh !important;
+  }
+
+  .announcement-popup-dialog :deep(.el-dialog__body) {
+    max-height: 80vh;
+    overflow: hidden;
+    padding: 16px !important;
+  }
+
+  .announcement-popup-body {
+    max-height: 74vh;
+  }
+
+  .announcement-popup-head {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .announcement-popup-time {
+    white-space: normal;
+  }
+
+  .announcement-popup-close-button {
+    min-width: 68px;
+    min-height: 34px;
+    padding: 0.48em 1em;
+    border-radius: 0.55em;
+    font-size: 13px;
+    box-shadow: 4px 4px 9px #c5c5c5, -4px -4px 9px #ffffff;
   }
 }
 </style>

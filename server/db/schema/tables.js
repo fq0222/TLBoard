@@ -281,8 +281,24 @@ const tableDefinitions = [
         content TEXT,
         pinned INTEGER DEFAULT 0,
         enabled INTEGER DEFAULT 1,
+        popup_show_limit INTEGER NOT NULL DEFAULT 0,
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
         updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+      )
+    `
+  },
+  {
+    logMessage: '用户公告弹窗统计表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_announcement_popup_stats (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+        shown_count INTEGER NOT NULL DEFAULT 0,
+        last_shown_at BIGINT,
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        UNIQUE(user_id, announcement_id)
       )
     `
   },

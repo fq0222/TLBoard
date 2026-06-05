@@ -80,7 +80,8 @@ async function createAnnouncement(req, res) {
       title: req.body.title,
       content: req.body.content === undefined ? null : req.body.content,
       pinned: req.body.pinned === undefined ? false : req.body.pinned,
-      enabled: req.body.enabled === undefined ? true : req.body.enabled
+      enabled: req.body.enabled === undefined ? true : req.body.enabled,
+      popup_show_limit: req.body.popup_show_limit === undefined ? 0 : req.body.popup_show_limit
     });
 
     logger.info(`添加公告成功: ${data.title} (ID: ${data.id})`);
