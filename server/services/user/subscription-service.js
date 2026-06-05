@@ -544,6 +544,53 @@ function buildClashSubscriptionHeaders(subscription, config) {
 }
 
 /**
+ * 将公告标题规范化为可显示的虚拟节点名称。
+ *
+ * @param {string} title - 公告标题
+ * @returns {string} 去除多余空白和换行后的节点名称
+ */
+function normalizeAnnouncementNodeName(title) {
+  return String(title || '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 构建只用于客户端显示标题的虚拟公告节点。
+ * 核心分支：只使用公告 title，不携带 content，避免节点列表显示过长。
+ *
+ * @param {Array<Object>} announcements - node_show=1 的公告列表
+ * @returns {Array<Object>} 可与真实节点一起输出的虚拟节点
+ */
+function buildAnnouncementVirtualNodes(announcements) {
+  return (announcements || [])
+    .map((announcement) => normalizeAnnouncementNodeName(announcement.title))
+    .filter(Boolean)
+    .map((nodeName) => ({
+      server_name: '系统公告',
+      node_name: nodeName,
+      protocol: 'vless',
+      strategy: 'announcement',
+      is_announcement: true,
+      link: `vless://00000000-0000-0000-0000-000000000000@127.0.0.1:1?encryption=none&security=none&type=tcp#${encodeURIComponent(nodeName)}`,
+      original_link: ''
+    }));
+}
+
+/**
+ * 在订阅输出阶段拼接公告虚拟节点。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Array<Object>} nodes - 缓存中的真实节点
+ * @returns {Promise<Array<Object>>} 真实节点 + 公告虚拟节点
+ */
+async function appendAnnouncementVirtualNodes(db, nodes) {
+  const announcements = await subscriptionRepository.listNodeShowAnnouncements(db);
+  return [
+    ...buildAnnouncementVirtualNodes(announcements),
+    ...nodes
+  ];
+}
+
+/**
  * 生成用户订阅链接并刷新缓存。
  *
  * @param {Object} db - 数据库代理对象
@@ -741,7 +788,10 @@ async function getSubscriptionContent(db, token, query) {
     throw createLegacyBusinessError(2003, '账号已被禁用', 400, null);
   }
 
-  const nodes = JSON.parse(subscription.nodes_data || '[]');
+  const nodes = await appendAnnouncementVirtualNodes(
+    db,
+    JSON.parse(subscription.nodes_data || '[]')
+  );
   if (query.clash === '1') {
     const clashHeaderConfig = await getClashSubscriptionHeaderConfig(db);
     return {
@@ -986,5 +1036,7 @@ module.exports = {
   getSubscriptionContent,
   generateClashConfig,
   generateV2RayConfig,
+  buildAnnouncementVirtualNodes,
+  appendAnnouncementVirtualNodes,
   createLegacyBusinessError
 };

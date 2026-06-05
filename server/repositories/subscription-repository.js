@@ -218,6 +218,21 @@ async function findSystemSettingByKey(db, key) {
 }
 
 /**
+ * 查询需要在订阅节点中显示的公告。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @returns {Promise<Array>} node_show=1 的公告列表
+ */
+async function listNodeShowAnnouncements(db) {
+  return db.prepare(`
+    SELECT id, title, content, node_show, created_at, updated_at
+    FROM announcements
+    WHERE COALESCE(node_show, 0) = 1
+    ORDER BY pinned DESC, created_at DESC, id DESC
+  `).all();
+}
+
+/**
  * 查询指定服务器的节点快照详情。
  *
  * @param {Object} db - 数据库代理对象
@@ -245,5 +260,6 @@ module.exports = {
   saveUserSubscriptionCache,
   findSubscriptionContentByToken,
   findSystemSettingByKey,
+  listNodeShowAnnouncements,
   listServerNodes
 };

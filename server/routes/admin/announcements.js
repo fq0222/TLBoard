@@ -27,7 +27,7 @@ router.get('/', authenticateAdmin, [
 
 /**
  * POST /api/admin/announcements
- * 创建公告。popup_show_limit 为 0 表示不弹窗，正整数表示每个用户最多弹出次数。
+ * 创建公告。popup_show_limit 为 0 表示不弹窗；node_show 为 true 表示只在订阅虚拟节点中展示。
  */
 router.post('/', authenticateAdmin, [
   body('title')
@@ -48,7 +48,11 @@ router.post('/', authenticateAdmin, [
   body('popup_show_limit')
     .optional()
     .isInt({ min: 0 })
-    .withMessage('popup_show_limit 必须是大于等于 0 的整数')
+    .withMessage('popup_show_limit 必须是大于等于 0 的整数'),
+  body('node_show')
+    .optional()
+    .isBoolean()
+    .withMessage('node_show 必须是布尔值')
 ], announcementsController.createAnnouncement);
 
 /**
@@ -78,7 +82,11 @@ router.put('/:id', authenticateAdmin, [
   body('popup_show_limit')
     .optional()
     .isInt({ min: 0 })
-    .withMessage('popup_show_limit 必须是大于等于 0 的整数')
+    .withMessage('popup_show_limit 必须是大于等于 0 的整数'),
+  body('node_show')
+    .optional()
+    .isBoolean()
+    .withMessage('node_show 必须是布尔值')
 ], announcementsController.updateAnnouncement);
 
 /**

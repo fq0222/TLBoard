@@ -10,7 +10,7 @@
  * @returns {Promise<number>} 已启用公告总数
  */
 async function countEnabledAnnouncements(db) {
-  const row = await db.prepare('SELECT COUNT(*) AS count FROM announcements WHERE enabled = 1').get();
+  const row = await db.prepare('SELECT COUNT(*) AS count FROM announcements WHERE enabled = 1 AND COALESCE(node_show, 0) = 0').get();
   return row.count;
 }
 
@@ -29,7 +29,7 @@ async function findEnabledAnnouncements(db, options) {
   return db.prepare(`
     SELECT id, title, content, pinned, popup_show_limit, created_at, updated_at
     FROM announcements
-    WHERE enabled = 1
+    WHERE enabled = 1 AND COALESCE(node_show, 0) = 0
     ORDER BY pinned DESC, created_at DESC
     LIMIT ? OFFSET ?
   `).all(limit, offset);
@@ -59,7 +59,7 @@ async function listAnnouncements(db, options) {
   const { limit, offset } = options;
 
   return db.prepare(`
-    SELECT id, title, content, pinned, enabled, popup_show_limit, created_at, updated_at
+    SELECT id, title, content, pinned, enabled, popup_show_limit, node_show, created_at, updated_at
     FROM announcements
     ORDER BY pinned DESC, created_at DESC
     LIMIT ? OFFSET ?
@@ -75,7 +75,7 @@ async function listAnnouncements(db, options) {
  */
 async function findAnnouncementById(db, announcementId) {
   return db.prepare(`
-    SELECT id, title, content, pinned, enabled, popup_show_limit, created_at, updated_at
+    SELECT id, title, content, pinned, enabled, popup_show_limit, node_show, created_at, updated_at
     FROM announcements
     WHERE id = ?
   `).get(announcementId);
@@ -89,9 +89,9 @@ async function findAnnouncementById(db, announcementId) {
  */
 async function findLatestEnabledAnnouncement(db) {
   return db.prepare(`
-    SELECT id, title, content, pinned, enabled, popup_show_limit, created_at, updated_at
+    SELECT id, title, content, pinned, enabled, popup_show_limit, node_show, created_at, updated_at
     FROM announcements
-    WHERE enabled = 1 AND popup_show_limit > 0
+    WHERE enabled = 1 AND popup_show_limit > 0 AND COALESCE(node_show, 0) = 0
     ORDER BY created_at DESC, id DESC
     LIMIT 1
   `).get();
@@ -111,13 +111,14 @@ async function findLatestEnabledAnnouncement(db) {
  * @returns {Promise<Object>} 数据库写入结果
  */
 async function createAnnouncement(db, payload) {
-  const { title, content, pinned, enabled, popup_show_limit } = payload;
+  const { title, content, pinned, enabled, popup_show_limit, node_show } = payload;
   const popupShowLimit = popup_show_limit ?? 0;
+  const nodeShow = node_show ?? 0;
 
   return db.prepare(`
-    INSERT INTO announcements (title, content, pinned, enabled, popup_show_limit)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(title, content, pinned, enabled, popupShowLimit);
+    INSERT INTO announcements (title, content, pinned, enabled, popup_show_limit, node_show)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(title, content, pinned, enabled, popupShowLimit, nodeShow);
 }
 
 /**

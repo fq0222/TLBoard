@@ -4,7 +4,7 @@
       <h1 class="page-title">公告管理</h1>
       <p class="page-subtitle">管理系统公告</p>
     </div>
-    
+
     <div class="content-card">
       <div class="toolbar">
         <el-button type="primary" @click="showAddDialog">
@@ -12,10 +12,10 @@
           添加公告
         </el-button>
       </div>
-      
+
       <el-table :data="announcements" style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="title" label="标题" />
+        <el-table-column prop="title" label="标题" min-width="180" />
         <el-table-column prop="pinned" label="置顶" width="80">
           <template #default="scope">
             <el-tag :type="scope.row.pinned ? 'danger' : 'info'" size="small">
@@ -30,12 +30,19 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="node_show" label="节点显示" width="100">
+          <template #default="scope">
+            <el-tag :type="scope.row.node_show ? 'warning' : 'info'" size="small">
+              {{ scope.row.node_show ? '是' : '否' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="popup_show_limit" label="弹窗次数" width="110">
           <template #default="scope">
             {{ Number(scope.row.popup_show_limit || 0) }}
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间">
+        <el-table-column prop="created_at" label="创建时间" min-width="170">
           <template #default="scope">{{ formatTime(scope.row.created_at) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="200">
@@ -46,16 +53,16 @@
         </el-table-column>
       </el-table>
     </div>
-    
+
     <el-dialog v-model="dialogVisible" :title="isEditing ? '编辑公告' : '添加公告'" width="900px">
       <div class="editor-container">
         <div class="editor-left">
-          <el-form :model="announcementForm" label-width="80px">
+          <el-form :model="announcementForm" label-width="96px">
             <el-form-item label="标题">
               <el-input v-model="announcementForm.title" placeholder="请输入公告标题" />
             </el-form-item>
             <el-form-item label="内容">
-              <el-input v-model="announcementForm.content" type="textarea" :rows="12" placeholder="请输入公告内容，支持Markdown" />
+              <el-input v-model="announcementForm.content" type="textarea" :rows="12" placeholder="请输入公告内容，支持 Markdown" />
             </el-form-item>
             <el-form-item label="置顶">
               <el-switch v-model="announcementForm.pinned" />
@@ -63,14 +70,19 @@
             <el-form-item label="显示">
               <el-switch v-model="announcementForm.enabled" />
             </el-form-item>
+            <el-form-item label="订阅节点">
+              <el-switch v-model="announcementForm.node_show" />
+              <div class="field-tip">开启后只在订阅链接的虚拟节点中显示公告标题，不在系统公告列表和弹窗中显示。</div>
+            </el-form-item>
             <el-form-item label="弹窗次数">
               <el-input-number
                 v-model="announcementForm.popup_show_limit"
                 :min="0"
                 :step="1"
+                :disabled="announcementForm.node_show"
                 controls-position="right"
               />
-              <div class="field-tip">0 表示不弹窗，正整数表示每个用户最多弹出次数。</div>
+              <div class="field-tip">0 表示不弹窗，正整数表示每个用户最多弹出次数；订阅节点公告会忽略该设置。</div>
             </el-form-item>
           </el-form>
         </div>
@@ -105,7 +117,8 @@ const announcementForm = reactive({
   content: '',
   pinned: false,
   enabled: true,
-  popup_show_limit: 0
+  popup_show_limit: 0,
+  node_show: false
 })
 
 const renderedContent = computed(() => {
@@ -132,6 +145,7 @@ function showAddDialog() {
   announcementForm.pinned = false
   announcementForm.enabled = true
   announcementForm.popup_show_limit = 0
+  announcementForm.node_show = false
   dialogVisible.value = true
 }
 
@@ -143,6 +157,7 @@ function showEditDialog(announcement) {
   announcementForm.pinned = !!announcement.pinned
   announcementForm.enabled = !!announcement.enabled
   announcementForm.popup_show_limit = Number(announcement.popup_show_limit || 0)
+  announcementForm.node_show = !!announcement.node_show
   dialogVisible.value = true
 }
 
@@ -173,7 +188,7 @@ async function handleSubmit() {
 
 async function deleteAnnouncement(announcement) {
   try {
-    await ElMessageBox.confirm(`确定要删除公告 "${announcement.title}" 吗？`, '提示', {
+    await ElMessageBox.confirm(`确定要删除公告"${announcement.title}"吗？`, '提示', {
       type: 'warning',
       confirmButtonText: '确定',
       cancelButtonText: '取消'

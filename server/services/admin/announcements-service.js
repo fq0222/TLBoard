@@ -78,7 +78,8 @@ async function createAnnouncement(db, payload) {
     content: payload.content,
     pinned: payload.pinned ? 1 : 0,
     enabled: payload.enabled ? 1 : 0,
-    popup_show_limit: payload.popup_show_limit === undefined ? 0 : Number(payload.popup_show_limit)
+    popup_show_limit: payload.popup_show_limit === undefined ? 0 : Number(payload.popup_show_limit),
+    node_show: payload.node_show ? 1 : 0
   });
 
   return announcementRepository.findAnnouncementById(db, result.lastInsertRowid);
@@ -121,6 +122,11 @@ async function updateAnnouncement(db, announcementId, payload) {
   if (payload.popup_show_limit !== undefined) {
     updates.push('popup_show_limit = ?');
     values.push(Number(payload.popup_show_limit));
+  }
+
+  if (payload.node_show !== undefined) {
+    updates.push('node_show = ?');
+    values.push(payload.node_show ? 1 : 0);
   }
 
   if (updates.length === 0) {
