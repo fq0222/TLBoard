@@ -2399,3 +2399,156 @@ hysteria2://<auth>@host:port?security=tls&fp=chrome&alpn=h3&sni=example.com&mpor
 - 推广码有效且不是自推广时，会在订单中记录 `referrer_user_id`
 - 只有该新用户首单支付成功时，才会真正发放奖励
 - 续费订单不参与推广奖励
+
+---
+
+## 10. 用户公告弹窗 API 补充（2026-06-05）
+
+本节用于补充用户端公告弹窗和管理端公告弹窗次数配置。所有用户端弹窗接口均要求登录，认证方式与其他用户端接口一致。
+
+### 10.1 获取最新可弹窗公告
+
+#### GET `/api/user/announcements/popup/latest`
+
+获取当前登录用户需要展示的最新一条公告弹窗。
+
+筛选规则：
+
+- 后端只查询 `enabled=1` 且 `popup_show_limit > 0` 的公告。
+- 候选公告按 `created_at DESC, id DESC` 取最新一条。
+- 如果当前用户对该公告的 `shown_count` 已达到 `popup_show_limit`，返回 `should_popup=false`。
+- 本接口只负责判断是否应该弹出，不写入 `user_announcement_popup_stats`。
+
+成功响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "announcement": {
+      "id": 1,
+      "title": "系统上线通知",
+      "content": "## 公告内容",
+      "created_at": 1778344146,
+      "popup_show_limit": 1
+    },
+    "shown_count": 0,
+    "should_popup": true
+  }
+}
+```
+
+没有可弹窗公告时的响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "announcement": null,
+    "shown_count": 0,
+    "should_popup": false
+  }
+}
+```
+
+返回字段说明：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `announcement` | object/null | 待弹窗公告；没有候选公告时为 `null` |
+| `announcement.id` | number | 公告 ID |
+| `announcement.title` | string | 公告标题 |
+| `announcement.content` | string | 公告内容，支持 Markdown |
+| `announcement.created_at` | number | 公告创建时间戳 |
+| `announcement.popup_show_limit` | number | 每个用户最多弹出的次数 |
+| `shown_count` | number | 当前用户已关闭该公告弹窗的次数 |
+| `should_popup` | boolean | 前端是否应该展示弹窗 |
+
+### 10.2 上报公告弹窗关闭
+
+#### POST `/api/user/announcements/:id/popup-close`
+
+用户主动关闭公告弹窗后调用，用于记录该用户对该公告的关闭次数。
+
+路径参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `id` | number | 是 | 公告 ID |
+
+成功响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "message": "公告弹窗关闭已记录"
+  }
+}
+```
+
+业务规则：
+
+- 公告必须存在且处于启用状态。
+- 首次关闭时插入 `user_announcement_popup_stats` 记录。
+- 后续关闭时按 `(user_id, announcement_id)` 累加 `shown_count`，并更新 `last_shown_at` 与 `updated_at`。
+- 关闭统计用于下一次调用 `/api/user/announcements/popup/latest` 时判断是否还需要弹窗。
+
+常见失败响应：
+
+```json
+{
+  "code": 404,
+  "message": "公告不存在或未启用",
+  "data": null
+}
+```
+
+### 10.3 管理端公告字段补充
+
+#### POST `/api/admin/announcements`
+#### PUT `/api/admin/announcements/:id`
+
+新增和编辑公告接口支持 `popup_show_limit` 字段。
+
+请求体字段补充：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `popup_show_limit` | number | 否 | 每个用户最多弹出的次数，默认 `0` |
+
+字段规则：
+
+- 必须是大于等于 0 的整数。
+- `0` 表示公告不弹窗，只按普通公告展示。
+- 正整数表示每个用户最多弹出的次数。
+
+请求示例：
+
+```json
+{
+  "title": "系统维护通知",
+  "content": "今晚 23:00 将进行维护。",
+  "pinned": false,
+  "enabled": true,
+  "popup_show_limit": 1
+}
+```
+
+管理端公告列表和详情响应中同样包含 `popup_show_limit`，前端用于展示“弹窗次数”列和编辑表单回填。
+
+### 10.4 数据库迁移
+
+已有环境部署公告弹窗前，需要执行迁移脚本：
+
+```bash
+node server/db/migrations/002-announcement-popup-settings.js
+```
+
+该迁移会补充：
+
+- `announcements.popup_show_limit`
+- `user_announcement_popup_stats`
