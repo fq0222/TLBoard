@@ -1245,16 +1245,19 @@ onBeforeUnmount(() => {
   background: #0088cc;
   box-shadow: 0 12px 24px rgba(0, 136, 204, 0.22);
   font-weight: 600;
+  text-decoration: none;
 }
 
 .telegram-channel-button:hover,
 .telegram-channel-button:focus {
   background: #0a9fe3;
+  text-decoration: none;
 }
 
 .telegram-channel-button:deep(span),
 .telegram-channel-button:deep(.el-icon) {
   color: #fff;
+  text-decoration: none;
 }
 
 .guide-button {
