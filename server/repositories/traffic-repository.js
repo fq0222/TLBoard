@@ -31,6 +31,21 @@ async function listOnlineServers(db) {
 }
 
 /**
+ * 查询 Telegram 健康巡检需要覆盖的全部 3X-UI 服务器。
+ * status=0 通常表示上次探测离线，健康巡检必须继续探测这些服务器才能触发告警和恢复判断。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @returns {Promise<Array>} 全量服务器列表
+ */
+async function listAllServersForHealthCheck(db) {
+  return db.prepare(`
+    SELECT id, name, api_url, api_token, panel_version, status
+    FROM xui_servers
+    ORDER BY id ASC
+  `).all();
+}
+
+/**
  * 查询所有启用用户的流量统计基础信息。
  *
  * @param {Object} db - 数据库代理对象
@@ -169,6 +184,7 @@ async function findUserEmailById(db, userId) {
 
 module.exports = {
   findTrafficUsageMultiplierSetting,
+  listAllServersForHealthCheck,
   listOnlineServers,
   listEnabledUsersForTrafficSync,
   withTrafficSyncTransaction,

@@ -277,17 +277,17 @@ async function checkSingleServerHealth(db, server) {
 }
 
 /**
- * 巡检所有在线服务器健康状态。
+ * 巡检所有已配置服务器健康状态。
  *
  * @param {Object} db - 数据库实例
  * @returns {Promise<void>}
  */
 async function checkAllServersHealth(db) {
-  const servers = await trafficRepository.listOnlineServers(db);
-  logger.info(`开始执行 Telegram 服务器健康巡检，在线服务器 ${servers.length} 台`);
+  const servers = await trafficRepository.listAllServersForHealthCheck(db);
+  logger.info(`开始执行 Telegram 服务器健康巡检，已配置服务器 ${servers.length} 台`);
 
   if (servers.length === 0) {
-    logger.warn('Telegram 服务器健康巡检结束：没有在线服务器');
+    logger.warn('Telegram 服务器健康巡检结束：没有已配置服务器');
     return;
   }
 
