@@ -6,6 +6,8 @@ const vmqService = require('../../integrations/vmq/vmq-service');
 const userRepository = require('../../repositories/user-repository');
 const referralService = require('../referral-service');
 
+const TELEGRAM_CHANNEL_URL_KEY = 'telegram_channel_url';
+
 /**
  * 用户认证服务。
  * 负责注册下单、登录、资料聚合等用户认证相关业务编排，
@@ -28,6 +30,17 @@ function createLegacyBusinessError(message, options = {}) {
  */
 function getNowTimestamp() {
   return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * 获取官方 Telegram 频道链接。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @returns {Promise<string>} 频道链接
+ */
+async function getTelegramChannelUrl(db) {
+  const setting = await userRepository.findSystemSettingByKey(db, TELEGRAM_CHANNEL_URL_KEY);
+  return String(setting?.value || '').trim();
 }
 
 /**
@@ -294,6 +307,7 @@ async function getProfile(db, userId) {
 
   const cfOptimized = !!(await userRepository.hasUserCfIps(db, userId));
   const subscriptionReady = cfOptimized && !!(await userRepository.hasUserSubscriptionCache(db, user.sub_id));
+  const telegramChannelUrl = await getTelegramChannelUrl(db);
   const trafficUsed = Number(user.traffic_used) || 0;
   const {
     planTrafficLimit,
@@ -312,6 +326,7 @@ async function getProfile(db, userId) {
     sub_id: user.sub_id,
     cf_optimized: cfOptimized,
     subscription_ready: subscriptionReady,
+    telegram_channel_url: telegramChannelUrl,
     traffic_used: user.traffic_used,
     plan_traffic_limit: planTrafficLimit,
     plan_traffic_limit_text: formatTraffic(planTrafficLimit),

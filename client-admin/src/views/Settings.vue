@@ -193,6 +193,14 @@
               />
               <span class="form-hint">小时，写入 Profile-Update-Interval 响应头</span>
             </el-form-item>
+            <el-form-item label="官方电报频道">
+              <el-input
+                v-model="subscriptionForm.telegram_channel_url"
+                maxlength="255"
+                placeholder="请输入 Telegram 频道链接"
+              />
+              <span class="form-hint">用户端首页“官方电报频道”按钮会跳转到该链接</span>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="subscriptionSaving" @click="saveSubscriptionConfig">
                 保存配置
@@ -368,8 +376,14 @@ const trafficSaving = ref(false)
 
 const subscriptionForm = ref({
   clash_config_name: '天涯大陆',
-  clash_profile_update_interval: 2
+  clash_profile_update_interval: 2,
+  telegram_channel_url: ''
 })
+const DEFAULT_SUBSCRIPTION_CONFIG = {
+  clash_config_name: '天涯大陆',
+  clash_profile_update_interval: 2,
+  telegram_channel_url: ''
+}
 const subscriptionSaving = ref(false)
 const telegramConfig = ref({
   internal_api_enabled: false,
@@ -649,10 +663,24 @@ async function loadSubscriptionConfig() {
   try {
     const res = await api.admin.getSubscriptionConfig()
     if (res.code === 0) {
-      subscriptionForm.value = res.data
+      subscriptionForm.value = normalizeSubscriptionConfig(res.data)
     }
   } catch (error) {
     console.error('加载订阅配置失败:', error)
+  }
+}
+
+/**
+ * 归一化订阅配置，兼容后端旧响应缺少新增字段的情况。
+ *
+ * @param {Object} config - 后端返回或本地合并后的订阅配置
+ * @returns {Object} 可直接绑定到表单的订阅配置
+ */
+function normalizeSubscriptionConfig(config = {}) {
+  return {
+    ...DEFAULT_SUBSCRIPTION_CONFIG,
+    ...config,
+    telegram_channel_url: String(config.telegram_channel_url || '').trim()
   }
 }
 
@@ -662,14 +690,30 @@ async function saveSubscriptionConfig() {
     return
   }
 
+  const telegramChannelUrl = String(subscriptionForm.value.telegram_channel_url || '').trim()
+  if (telegramChannelUrl && !/^https?:\/\/\S+$/i.test(telegramChannelUrl)) {
+    ElMessage.warning('请输入有效的官方电报频道链接')
+    return
+  }
+
   try {
     subscriptionSaving.value = true
-    const res = await api.admin.saveSubscriptionConfig({
+    const payload = {
       clash_config_name: subscriptionForm.value.clash_config_name.trim(),
-      clash_profile_update_interval: subscriptionForm.value.clash_profile_update_interval
-    })
+      clash_profile_update_interval: subscriptionForm.value.clash_profile_update_interval,
+      telegram_channel_url: telegramChannelUrl
+    }
+    const res = await api.admin.saveSubscriptionConfig(payload)
     if (res.code === 0) {
-      subscriptionForm.value = res.data
+      if (!Object.prototype.hasOwnProperty.call(res.data || {}, 'telegram_channel_url')) {
+        ElMessage.warning('后端未返回电报频道链接，请重启后端服务后重新保存')
+        subscriptionForm.value = normalizeSubscriptionConfig({
+          ...(res.data || {})
+        })
+        return
+      }
+
+      subscriptionForm.value = normalizeSubscriptionConfig(res.data)
       ElMessage.success('订阅配置已保存')
     } else {
       ElMessage.error(res.message)

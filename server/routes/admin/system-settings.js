@@ -12,6 +12,7 @@ const REFERRAL_REWARD_TRAFFIC_KEY = 'referral_reward_traffic';
 const DEFAULT_REFERRAL_REWARD_TRAFFIC = 0;
 const CLASH_CONFIG_NAME_KEY = 'clash_config_name';
 const CLASH_PROFILE_UPDATE_INTERVAL_KEY = 'clash_profile_update_interval';
+const TELEGRAM_CHANNEL_URL_KEY = 'telegram_channel_url';
 const DEFAULT_CLASH_CONFIG_NAME = '天涯大陆';
 const DEFAULT_CLASH_PROFILE_UPDATE_INTERVAL = 2;
 
@@ -88,12 +89,13 @@ async function saveTrafficConfig(db, payload) {
  * 读取订阅响应配置。
  *
  * @param {Object} db - 数据库实例
- * @returns {Promise<{clash_config_name:string,clash_profile_update_interval:number}>} 订阅配置
+ * @returns {Promise<{clash_config_name:string,clash_profile_update_interval:number,telegram_channel_url:string}>} 订阅配置
  */
 async function getSubscriptionConfig(db) {
-  const [configNameValue, updateIntervalValue] = await Promise.all([
+  const [configNameValue, updateIntervalValue, telegramChannelUrlValue] = await Promise.all([
     getSystemSettingValue(db, CLASH_CONFIG_NAME_KEY),
-    getSystemSettingValue(db, CLASH_PROFILE_UPDATE_INTERVAL_KEY)
+    getSystemSettingValue(db, CLASH_PROFILE_UPDATE_INTERVAL_KEY),
+    getSystemSettingValue(db, TELEGRAM_CHANNEL_URL_KEY)
   ]);
   const updateInterval = Number(updateIntervalValue);
 
@@ -101,7 +103,8 @@ async function getSubscriptionConfig(db) {
     clash_config_name: String(configNameValue || '').trim() || DEFAULT_CLASH_CONFIG_NAME,
     clash_profile_update_interval: Number.isFinite(updateInterval) && updateInterval > 0
       ? updateInterval
-      : DEFAULT_CLASH_PROFILE_UPDATE_INTERVAL
+      : DEFAULT_CLASH_PROFILE_UPDATE_INTERVAL,
+    telegram_channel_url: String(telegramChannelUrlValue || '').trim()
   };
 }
 
@@ -112,12 +115,14 @@ async function getSubscriptionConfig(db) {
  * @param {Object} config - 订阅配置
  * @param {string} config.clash_config_name - Clash 订阅下载名称
  * @param {number} config.clash_profile_update_interval - 自动更新间隔（小时）
+ * @param {string} config.telegram_channel_url - 官方 Telegram 频道链接
  * @returns {Promise<void>}
  */
 async function saveSubscriptionConfig(db, config) {
   await Promise.all([
     saveSystemSettingValue(db, CLASH_CONFIG_NAME_KEY, String(config.clash_config_name).trim()),
-    saveSystemSettingValue(db, CLASH_PROFILE_UPDATE_INTERVAL_KEY, Number(config.clash_profile_update_interval))
+    saveSystemSettingValue(db, CLASH_PROFILE_UPDATE_INTERVAL_KEY, Number(config.clash_profile_update_interval)),
+    saveSystemSettingValue(db, TELEGRAM_CHANNEL_URL_KEY, String(config.telegram_channel_url || '').trim())
   ]);
 }
 
@@ -223,7 +228,12 @@ router.put('/subscription', authenticateAdmin, [
     .withMessage('订阅名称不能超过 100 个字符'),
   body('clash_profile_update_interval')
     .isInt({ min: 1, max: 168 })
-    .withMessage('自动更新间隔必须是 1 到 168 之间的整数')
+    .withMessage('自动更新间隔必须是 1 到 168 之间的整数'),
+  body('telegram_channel_url')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isURL({ require_protocol: true, protocols: ['http', 'https'] })
+    .withMessage('Telegram 频道链接必须是有效的 http 或 https 地址')
 ], async (req, res) => {
   if (handleValidationFailure(req, res)) {
     return;
@@ -232,7 +242,8 @@ router.put('/subscription', authenticateAdmin, [
   try {
     const data = {
       clash_config_name: String(req.body.clash_config_name).trim(),
-      clash_profile_update_interval: Number(req.body.clash_profile_update_interval)
+      clash_profile_update_interval: Number(req.body.clash_profile_update_interval),
+      telegram_channel_url: String(req.body.telegram_channel_url || '').trim()
     };
     await saveSubscriptionConfig(req.app.locals.db, data);
 

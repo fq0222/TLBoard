@@ -127,6 +127,7 @@ async function getProfile(req, res) {
         clash_url: profile.cf_optimized ? urls.clash_url : '',
         cf_optimized: profile.cf_optimized,
         subscription_ready: profile.subscription_ready,
+        telegram_channel_url: profile.telegram_channel_url,
         traffic_used: profile.traffic_used,
         plan_traffic_limit: profile.plan_traffic_limit,
         plan_traffic_limit_text: profile.plan_traffic_limit_text,

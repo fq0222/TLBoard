@@ -212,6 +212,17 @@ async function findUserProfileById(db, userId) {
 }
 
 /**
+ * 按键读取系统设置。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {string} key - 系统设置键名
+ * @returns {Promise<Object|undefined>} 设置记录
+ */
+async function findSystemSettingByKey(db, key) {
+  return db.prepare('SELECT value FROM system_settings WHERE key = ?').get(key);
+}
+
+/**
  * 查询用户当前同步状态。
  *
  * @param {Object} db - 数据库实例
@@ -517,6 +528,7 @@ module.exports = {
   updateOrderPaymentInfo,
   findLoginUserByEmail,
   findUserProfileById,
+  findSystemSettingByKey,
   findUserSyncStatusById,
   markUserOnboardingCompleted,
   hasUserCfIps,

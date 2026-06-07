@@ -36,6 +36,18 @@
             <el-icon><Refresh /></el-icon>
             续费套餐
           </el-button>
+          <el-button
+            v-if="telegramChannelUrl"
+            tag="a"
+            :href="telegramChannelUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            size="large"
+            class="telegram-channel-button"
+          >
+            <el-icon><Promotion /></el-icon>
+            官方电报频道
+          </el-button>
         </div>
       </section>
 
@@ -379,6 +391,7 @@ import {
   Link,
   Loading,
   MagicStick,
+  Promotion,
   Refresh
 } from '@element-plus/icons-vue'
 import { marked } from 'marked'
@@ -433,6 +446,10 @@ const currentOnboardingStep = computed(() => onboardingTourSteps.value[onboardin
 const displayName = computed(() => {
   if (!userInfo.value.email) return '欢迎回来'
   return userInfo.value.email.split('@')[0]
+})
+
+const telegramChannelUrl = computed(() => {
+  return String(userInfo.value.telegram_channel_url || '').trim()
 })
 
 const greetingText = computed(() => {
@@ -1220,6 +1237,24 @@ onBeforeUnmount(() => {
 .renew-button.is-disabled {
   background: linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%);
   box-shadow: none;
+}
+
+.telegram-channel-button {
+  border: none;
+  border-radius: 16px;
+  background: #0088cc;
+  box-shadow: 0 12px 24px rgba(0, 136, 204, 0.22);
+  font-weight: 600;
+}
+
+.telegram-channel-button:hover,
+.telegram-channel-button:focus {
+  background: #0a9fe3;
+}
+
+.telegram-channel-button:deep(span),
+.telegram-channel-button:deep(.el-icon) {
+  color: #fff;
 }
 
 .guide-button {
