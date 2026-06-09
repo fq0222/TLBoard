@@ -282,6 +282,33 @@ async function countEmailLogs(db) {
 }
 
 /**
+ * 统计今日已记录的邮件数量。
+ * 职责：复用系统每日总配额口径，包含群发、单发、教程与密码重置等所有写入 email_logs 的邮件。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} todayTimestamp - 今日零点时间戳
+ * @returns {Promise<{count:number}>} 今日邮件日志数量
+ */
+async function countTodayEmailLogs(db, todayTimestamp) {
+  return db.prepare(
+    'SELECT COUNT(*) as count FROM email_logs WHERE created_at >= ?'
+  ).get(todayTimestamp);
+}
+
+/**
+ * 读取 Brevo 每日总配额。
+ * 职责：提供非群发邮件发送前的统一配额检查，未配置时沿用系统默认值 200。
+ *
+ * @param {Object} db - 数据库实例
+ * @returns {Promise<{value:string}|undefined>} 配额配置记录
+ */
+async function findBrevoDailyLimit(db) {
+  return db.prepare(
+    "SELECT value FROM system_settings WHERE key = 'brevo_daily_limit'"
+  ).get();
+}
+
+/**
  * 写入邮件发送日志。
  *
  * @param {Object} db - 数据库实例
@@ -450,6 +477,8 @@ module.exports = {
   countCampaignLogs,
   listEmailLogs,
   countEmailLogs,
+  countTodayEmailLogs,
+  findBrevoDailyLimit,
   createEmailLog,
   deleteEmailLogsBefore,
   deleteEmailLogsByIds,

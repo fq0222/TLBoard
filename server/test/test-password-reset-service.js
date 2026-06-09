@@ -15,6 +15,10 @@ function createFakeDb() {
       }
     ],
     tokens: [],
+    emailLogs: [],
+    systemSettings: {
+      brevo_daily_limit: '300'
+    },
     executedSql: []
   };
 
@@ -39,6 +43,18 @@ function createFakeDb() {
             const [userId, createdAfter] = params;
             const count = state.tokens.filter(token => token.user_id === userId && token.created_at >= createdAfter).length;
             return { count };
+          }
+
+          if (sql.includes('COUNT(*) as count') && sql.includes('email_logs')) {
+            const [createdAfter] = params;
+            const count = state.emailLogs.filter(log => log.created_at >= createdAfter).length;
+            return { count };
+          }
+
+          if (sql.includes('FROM system_settings') && sql.includes("key = 'brevo_daily_limit'")) {
+            return state.systemSettings.brevo_daily_limit
+              ? { value: state.systemSettings.brevo_daily_limit }
+              : undefined;
           }
 
           return undefined;
@@ -77,6 +93,21 @@ function createFakeDb() {
             return { changes: user ? 1 : 0 };
           }
 
+          if (sql.includes('INSERT INTO email_logs')) {
+            const [userId, campaignId, email, subject, status, sentAt, createdAt] = params;
+            state.emailLogs.push({
+              id: state.emailLogs.length + 1,
+              user_id: userId,
+              campaign_id: campaignId,
+              email,
+              subject,
+              status,
+              sent_at: sentAt,
+              created_at: createdAt
+            });
+            return { lastInsertRowid: state.emailLogs.length, changes: 1 };
+          }
+
           return { changes: 0 };
         }
       };
@@ -111,6 +142,43 @@ async function testRequestPasswordResetCreatesTokenAndSendsGenericMessage() {
     assert(sentEmail.content.includes('https://example.com/reset-password?token='));
     assert(sentEmail.content.includes('该链接只能使用一次'));
     assert(sentEmail.content.includes('每天只能申请重置一次密码'));
+    assert.strictEqual(db.state.emailLogs.length, 1);
+    assert.strictEqual(db.state.emailLogs[0].user_id, 1);
+    assert.strictEqual(db.state.emailLogs[0].subject, '【天澜大陆消息】密码重置');
+    assert.strictEqual(db.state.emailLogs[0].status, 'sent');
+  } finally {
+    sharedEmailService.sendEmail = originalSendEmail;
+  }
+}
+
+async function testRequestPasswordResetRespectsDailyEmailLimit() {
+  const db = createFakeDb();
+  db.state.systemSettings.brevo_daily_limit = '1';
+  db.state.emailLogs.push({
+    user_id: 99,
+    email: 'used@example.com',
+    subject: '已发送邮件',
+    status: 'sent',
+    created_at: Math.floor(Date.now() / 1000)
+  });
+  const originalSendEmail = sharedEmailService.sendEmail;
+  let sendCount = 0;
+  sharedEmailService.sendEmail = async () => {
+    sendCount += 1;
+    return { success: true };
+  };
+
+  try {
+    const result = await authService.requestPasswordReset(db, {
+      email: 'reset@example.com',
+      ip: '203.0.113.10',
+      baseUrl: 'https://example.com'
+    });
+
+    assert.strictEqual(result.message, RESET_MESSAGE);
+    assert.strictEqual(result.audit.status, 'daily_email_limit_reached');
+    assert.strictEqual(sendCount, 0);
+    assert.strictEqual(db.state.tokens.length, 0);
   } finally {
     sharedEmailService.sendEmail = originalSendEmail;
   }
@@ -221,6 +289,7 @@ async function testResetPasswordConsumesInvalidAttempt() {
 
 async function run() {
   await testRequestPasswordResetCreatesTokenAndSendsGenericMessage();
+  await testRequestPasswordResetRespectsDailyEmailLimit();
   await testRequestPasswordResetKeepsUnknownEmailGeneric();
   await testRequestPasswordResetAllowsOnePerUserPerDay();
   await testResetPasswordConsumesTokenAndUpdatesPassword();

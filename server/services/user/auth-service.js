@@ -5,6 +5,7 @@ const config = require('../../config');
 const vmqService = require('../../integrations/vmq/vmq-service');
 const sharedEmailService = require('../../integrations/email/email-service');
 const userRepository = require('../../repositories/user-repository');
+const emailRepository = require('../../repositories/email-repository');
 const referralService = require('../referral-service');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
 
@@ -58,6 +59,38 @@ function buildPasswordResetEmailContent(resetUrl) {
 }
 
 /**
+ * 获取今日零点秒级时间戳。
+ * 职责：与邮件群发任务保持同一日配额统计口径。
+ *
+ * @returns {number} 今日零点秒级时间戳
+ */
+function getTodayStartTimestamp() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.floor(today.getTime() / 1000);
+}
+
+/**
+ * 检查 Brevo 每日总邮件配额是否仍有余量。
+ * 职责：让密码重置邮件计入并遵守后台配置的每日总发送限制。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @returns {Promise<{allowed:boolean,todayCount:number,dailyLimit:number}>} 配额状态
+ */
+async function checkDailyEmailQuota(db) {
+  const todayCountRow = await emailRepository.countTodayEmailLogs(db, getTodayStartTimestamp());
+  const dailyLimitRow = await emailRepository.findBrevoDailyLimit(db);
+  const todayCount = Number(todayCountRow?.count || 0);
+  const dailyLimit = dailyLimitRow ? parseInt(dailyLimitRow.value, 10) : 200;
+
+  return {
+    allowed: todayCount < dailyLimit,
+    todayCount,
+    dailyLimit
+  };
+}
+
+/**
  * 申请密码重置邮件。
  * 职责：始终返回模糊提示；邮箱存在且未超过每日限制时创建高熵 Token 并发送邮件。
  * 核心分支：未知邮箱直接返回；今日已申请直接返回；邮件发送失败不向前端暴露账号状态。
@@ -93,14 +126,6 @@ async function requestPasswordReset(db, payload) {
 
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = now + PASSWORD_RESET_TOKEN_TTL_SECONDS;
-  await userRepository.createPasswordResetToken(db, {
-    userId: user.id,
-    token,
-    expiresAt,
-    requestIp: payload.ip || '',
-    createdAt: now
-  });
-
   const baseUrl = String(payload.baseUrl || '').replace(/\/+$/, '');
   if (!baseUrl) {
     return {
@@ -112,12 +137,44 @@ async function requestPasswordReset(db, payload) {
     };
   }
 
+  const quota = await checkDailyEmailQuota(db);
+  if (!quota.allowed) {
+    return {
+      message: PASSWORD_RESET_MESSAGE,
+      audit: {
+        status: 'daily_email_limit_reached',
+        userId: user.id,
+        todayCount: quota.todayCount,
+        dailyLimit: quota.dailyLimit
+      }
+    };
+  }
+
+  await userRepository.createPasswordResetToken(db, {
+    userId: user.id,
+    token,
+    expiresAt,
+    requestIp: payload.ip || '',
+    createdAt: now
+  });
+
   const resetUrl = `${baseUrl}/reset-password?token=${token}`;
   const emailResult = await sharedEmailService.sendEmail(db, {
     to: user.email,
     subject: '【天澜大陆消息】密码重置',
     content: buildPasswordResetEmailContent(resetUrl)
   });
+
+  if (emailResult?.success) {
+    await emailRepository.createEmailLog(db, {
+      userId: user.id,
+      email: user.email,
+      subject: '【天澜大陆消息】密码重置',
+      status: 'sent',
+      sentAt: now,
+      createdAt: now
+    });
+  }
 
   return {
     message: PASSWORD_RESET_MESSAGE,
