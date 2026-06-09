@@ -6,7 +6,12 @@
 const express = require('express');
 const { body } = require('express-validator');
 const { authenticateUser } = require('../../middleware/auth-user');
-const { userLoginLimiter, userRegisterLimiter } = require('../../middleware/rate-limiter');
+const {
+  userLoginLimiter,
+  userRegisterLimiter,
+  passwordResetEmailLimiter,
+  passwordResetSubmitLimiter
+} = require('../../middleware/rate-limiter');
 const authController = require('../../controllers/user/auth-controller');
 
 const router = express.Router();
@@ -46,6 +51,21 @@ router.post('/login', [
     .notEmpty()
     .withMessage('密码不能为空')
 ], authController.login);
+
+router.post('/forgot-password', [
+  passwordResetEmailLimiter,
+  body('email')
+    .isEmail()
+    .withMessage('请输入有效的邮箱地址')
+    .normalizeEmail({ gmail_remove_dots: false })
+], authController.requestPasswordReset);
+
+router.post('/reset-password', [
+  passwordResetSubmitLimiter,
+  body('token')
+    .isLength({ min: 64, max: 64 })
+    .withMessage('重置链接无效')
+], authController.resetPassword);
 
 router.get('/profile', authenticateUser, authController.getProfile);
 router.post('/onboarding/complete', authenticateUser, authController.completeOnboarding);

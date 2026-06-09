@@ -55,7 +55,10 @@ const indexStatements = [
   'CREATE INDEX IF NOT EXISTS idx_resource_distributions_resource_id ON resource_distributions(resource_id)',
   'CREATE INDEX IF NOT EXISTS idx_resource_distributions_download_token ON resource_distributions(download_token)',
   'CREATE INDEX IF NOT EXISTS idx_resource_distributions_expire_at ON resource_distributions(expire_at)',
-  'CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_distributions_user_id_unique ON resource_distributions(user_id)'
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_distributions_user_id_unique ON resource_distributions(user_id)',
+  'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_created ON password_reset_tokens(user_id, created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(token)',
+  'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at)'
 ];
 
 /**

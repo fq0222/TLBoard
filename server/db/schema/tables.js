@@ -568,6 +568,20 @@ const tableDefinitions = [
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
       )
     `
+  },
+  {
+    logMessage: '密码重置 Token 表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token VARCHAR(64) UNIQUE NOT NULL,
+        expires_at BIGINT NOT NULL,
+        used_at BIGINT,
+        request_ip VARCHAR(64) DEFAULT '',
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+      )
+    `
   }
 ];
 

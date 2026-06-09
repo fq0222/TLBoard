@@ -96,6 +96,27 @@ const userApi = {
   },
 
   /**
+   * 申请密码重置邮件
+   * @param {Object} data - 申请数据
+   * @param {string} data.email - 用户邮箱
+   * @returns {Promise<Object>} 统一模糊提示响应
+   */
+  requestPasswordReset(data) {
+    return apiClient.post('/forgot-password', data)
+  },
+
+  /**
+   * 使用一次性 Token 重置密码
+   * @param {Object} data - 重置数据
+   * @param {string} data.token - 邮件链接中的一次性 Token
+   * @param {string} data.password - 新密码
+   * @returns {Promise<Object>} 重置结果
+   */
+  resetPassword(data) {
+    return apiClient.post('/reset-password', data)
+  },
+
+  /**
    * 获取用户个人信息
    * @returns {Promise<Object>} 响应数据
    */

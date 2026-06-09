@@ -116,7 +116,9 @@
             已有账户？
             <el-button text type="primary" @click="switchToLogin">直接登录</el-button>
           </p>
-          <p v-else>
+          <p v-else class="login-footer-row">
+            <router-link to="/forgot-password" class="forgot-link">忘记密码？</router-link>
+            <span class="footer-separator"></span>
             还没有账户？
             <router-link to="/" class="link">返回首页选择套餐</router-link>
           </p>
@@ -669,13 +671,33 @@ onMounted(() => {
   color: #5f6c8d;
 }
 
-.link {
-  color: #0f766e;
+.login-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.forgot-link {
+  color: #ff4d4f;
   text-decoration: none;
 }
 
+.forgot-link:hover,
 .link:hover {
   text-decoration: underline;
+}
+
+.footer-separator {
+  width: 1px;
+  height: 16px;
+  background: rgba(95, 108, 141, 0.25);
+}
+
+.link {
+  color: #0f766e;
+  text-decoration: none;
 }
 
 @media (max-width: 1024px) {

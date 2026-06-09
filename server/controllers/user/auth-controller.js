@@ -1,6 +1,6 @@
 const { validationResult } = require('express-validator');
 const { createLogger } = require('../../utils/logger');
-const { generateSubscriptionUrls } = require('../../utils/site-url');
+const { generateSubscriptionUrls, getUserAppBaseUrl } = require('../../utils/site-url');
 const authService = require('../../services/user/auth-service');
 
 const logger = createLogger('USER-AUTH');
@@ -154,6 +154,109 @@ async function getProfile(req, res) {
 }
 
 /**
+ * 记录密码重置申请的内部审计日志。
+ * 职责：在不暴露给前端的前提下，让服务端日志能区分未知邮箱、每日限制和邮件发送结果。
+ *
+ * @param {string} email - 用户提交的邮箱
+ * @param {Object} audit - 服务层返回的审计状态
+ * @returns {void}
+ */
+function logPasswordResetAudit(email, audit = {}) {
+  switch (audit.status) {
+    case 'unknown_email':
+      logger.info(`密码重置申请已模糊处理: ${email}，邮箱不存在或未注册`);
+      break;
+    case 'daily_limit_reached':
+      logger.info(`密码重置申请已模糊处理: ${email}，该邮箱今天已经申请过一次`);
+      break;
+    case 'missing_base_url':
+      logger.warn(`密码重置申请未发送邮件: ${email}，用户端站点地址未配置`);
+      break;
+    case 'email_send_failed':
+      logger.warn(`密码重置邮件发送失败: ${email}，原因: ${audit.error || '未知错误'}`);
+      break;
+    case 'email_sent':
+      logger.info(`密码重置邮件已发送: ${email}`);
+      break;
+    default:
+      logger.info(`密码重置申请已处理: ${email}`);
+  }
+}
+
+/**
+ * 构造密码重置申请的公开响应数据。
+ * 职责：过滤内部审计字段，保证接口仍不暴露邮箱是否注册或是否已触发每日限制。
+ *
+ * @param {Object} data - 服务层结果
+ * @returns {{message:string}} 公开响应数据
+ */
+function buildPublicPasswordResetResponse(data) {
+  return {
+    message: data.message
+  };
+}
+
+/**
+ * 处理忘记密码申请。
+ * 职责：校验邮箱格式并调用服务层发送一次性重置链接，响应始终保持模糊提示。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function requestPasswordReset(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    logger.warn('密码重置申请参数校验失败');
+    return respondValidationError(res, errors);
+  }
+
+  try {
+    const data = await authService.requestPasswordReset(req.app.locals.db, {
+      email: req.body.email,
+      ip: req.ip || req.socket.remoteAddress,
+      baseUrl: getUserAppBaseUrl(req)
+    });
+    logPasswordResetAudit(req.body.email, data.audit);
+    return res.json({
+      code: 0,
+      message: data.message,
+      data: buildPublicPasswordResetResponse(data)
+    });
+  } catch (error) {
+    return respondLegacyError(res, '密码重置申请', error);
+  }
+}
+
+/**
+ * 处理密码重置提交。
+ * 职责：接收 URL Token 与新密码，交由服务层完成一次性 Token 校验和密码更新。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function resetPassword(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    logger.warn('密码重置提交参数校验失败');
+    return respondValidationError(res, errors);
+  }
+
+  try {
+    const data = await authService.resetPassword(req.app.locals.db, req.body);
+    logger.info('密码重置成功');
+    return res.json({
+      code: 0,
+      message: '密码重置成功，请使用新密码登录',
+      data
+    });
+  } catch (error) {
+    return respondLegacyError(res, '密码重置提交', error);
+  }
+}
+
+/**
  * 标记当前登录用户已完成新手引导。
  *
  * @param {Object} req - Express 请求对象
@@ -177,6 +280,8 @@ async function completeOnboarding(req, res) {
 module.exports = {
   registerAndPay,
   login,
+  requestPasswordReset,
+  resetPassword,
   getProfile,
   completeOnboarding
 };

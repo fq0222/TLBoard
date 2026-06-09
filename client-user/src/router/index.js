@@ -20,6 +20,18 @@ const routes = [
     meta: { title: '登录', guest: true }
   },
   {
+    path: '/forgot-password',
+    name: 'ForgotPassword',
+    component: () => import('@/views/ForgotPassword.vue'),
+    meta: { title: '忘记密码', guest: true }
+  },
+  {
+    path: '/reset-password',
+    name: 'ResetPassword',
+    component: () => import('@/views/ResetPassword.vue'),
+    meta: { title: '重置密码', guest: true }
+  },
+  {
     path: '/user',
     name: 'UserLayout',
     component: () => import('@/views/user/Layout.vue'),

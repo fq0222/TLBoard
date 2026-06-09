@@ -3,10 +3,15 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const config = require('../../config');
 const vmqService = require('../../integrations/vmq/vmq-service');
+const sharedEmailService = require('../../integrations/email/email-service');
 const userRepository = require('../../repositories/user-repository');
 const referralService = require('../referral-service');
 
 const TELEGRAM_CHANNEL_URL_KEY = 'telegram_channel_url';
+const PASSWORD_RESET_MESSAGE = '如果该邮箱已注册，重置密码邮件已发送，请查收。';
+const PASSWORD_RESET_TOKEN_TTL_SECONDS = 15 * 60;
+const PASSWORD_RESET_DAILY_WINDOW_SECONDS = 24 * 60 * 60;
+const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
 
 /**
  * 用户认证服务。
@@ -30,6 +35,132 @@ function createLegacyBusinessError(message, options = {}) {
  */
 function getNowTimestamp() {
   return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * 生成密码重置邮件 HTML 内容。
+ * 职责：把一次性重置链接和频率限制说明封装成固定安全文案。
+ *
+ * @param {string} resetUrl - 不包含邮箱或用户 ID 的重置链接
+ * @returns {string} 邮件 HTML 内容
+ */
+function buildPasswordResetEmailContent(resetUrl) {
+  return `
+    <div style="font-family: Arial, 'Microsoft YaHei', sans-serif; line-height: 1.8; color: #14213d;">
+      <h2>密码重置</h2>
+      <p>你正在申请重置天澜大陆账号密码，请点击下面的链接完成操作：</p>
+      <p><a href="${resetUrl}" target="_blank" rel="noopener noreferrer">${resetUrl}</a></p>
+      <p>该链接只能使用一次，有效期为 15 分钟。每天只能申请重置一次密码。</p>
+      <p>如果这不是你本人发起的请求，请忽略本邮件。</p>
+    </div>
+  `;
+}
+
+/**
+ * 申请密码重置邮件。
+ * 职责：始终返回模糊提示；邮箱存在且未超过每日限制时创建高熵 Token 并发送邮件。
+ * 核心分支：未知邮箱直接返回；今日已申请直接返回；邮件发送失败不向前端暴露账号状态。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {{email:string,ip:string,baseUrl:string}} payload - 申请参数
+ * @returns {Promise<{message:string}>} 模糊提示结果
+ */
+async function requestPasswordReset(db, payload) {
+  const email = String(payload.email || '').trim().toLowerCase();
+  const user = await userRepository.findPasswordResetUserByEmail(db, email);
+  if (!user) {
+    return {
+      message: PASSWORD_RESET_MESSAGE,
+      audit: {
+        status: 'unknown_email'
+      }
+    };
+  }
+
+  const now = getNowTimestamp();
+  const createdAfter = now - PASSWORD_RESET_DAILY_WINDOW_SECONDS;
+  const todayCount = await userRepository.countPasswordResetTokensSince(db, user.id, createdAfter);
+  if (Number(todayCount?.count || 0) >= 1) {
+    return {
+      message: PASSWORD_RESET_MESSAGE,
+      audit: {
+        status: 'daily_limit_reached',
+        userId: user.id
+      }
+    };
+  }
+
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = now + PASSWORD_RESET_TOKEN_TTL_SECONDS;
+  await userRepository.createPasswordResetToken(db, {
+    userId: user.id,
+    token,
+    expiresAt,
+    requestIp: payload.ip || '',
+    createdAt: now
+  });
+
+  const baseUrl = String(payload.baseUrl || '').replace(/\/+$/, '');
+  if (!baseUrl) {
+    return {
+      message: PASSWORD_RESET_MESSAGE,
+      audit: {
+        status: 'missing_base_url',
+        userId: user.id
+      }
+    };
+  }
+
+  const resetUrl = `${baseUrl}/reset-password?token=${token}`;
+  const emailResult = await sharedEmailService.sendEmail(db, {
+    to: user.email,
+    subject: '【天澜大陆消息】密码重置',
+    content: buildPasswordResetEmailContent(resetUrl)
+  });
+
+  return {
+    message: PASSWORD_RESET_MESSAGE,
+    audit: {
+      status: emailResult?.success ? 'email_sent' : 'email_send_failed',
+      userId: user.id,
+      error: emailResult?.error || ''
+    }
+  };
+}
+
+/**
+ * 使用一次性 Token 重置密码。
+ * 职责：验证 Token 存在、未过期、未使用；提交后立即标记已使用，再更新密码。
+ * 核心分支：Token 无效拒绝；有效 Token 会先失效，密码不合规则不会保留重试机会。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {{token:string,password:string}} payload - 重置参数
+ * @returns {Promise<{reset:boolean}>} 重置结果
+ */
+async function resetPassword(db, payload) {
+  const token = String(payload.token || '').trim();
+  const password = String(payload.password || '');
+  const now = getNowTimestamp();
+  const resetToken = await userRepository.findPasswordResetToken(db, token);
+
+  if (!resetToken || resetToken.used_at || Number(resetToken.expires_at) < now) {
+    throw createLegacyBusinessError('重置链接无效或已过期，请重新申请', {
+      code: 2010
+    });
+  }
+
+  await userRepository.markPasswordResetTokenUsed(db, token, now);
+
+  if (!PASSWORD_PATTERN.test(password)) {
+    throw createLegacyBusinessError('密码需至少8位，并同时包含字母和数字', {
+      code: 1001
+    });
+  }
+
+  const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
+  await userRepository.updateUserPasswordHash(db, resetToken.user_id, passwordHash, now);
+
+  return { reset: true };
 }
 
 /**
@@ -366,6 +497,8 @@ async function completeOnboarding(db, userId) {
 module.exports = {
   registerAndPay,
   login,
+  requestPasswordReset,
+  resetPassword,
   getProfile,
   completeOnboarding
 };

@@ -192,6 +192,111 @@ async function findLoginUserByEmail(db, email) {
 }
 
 /**
+ * 查询密码重置流程需要的用户记录。
+ * 职责：只返回生成重置 Token 所需的最小字段，避免服务层读取多余隐私信息。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {string} email - 用户邮箱
+ * @returns {Promise<Object|undefined>} 用户基础记录
+ */
+async function findPasswordResetUserByEmail(db, email) {
+  return db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
+}
+
+/**
+ * 统计指定用户最近一次密码重置申请窗口内的 Token 数量。
+ * 职责：支撑“单邮箱每天最多申请一次”的频率限制。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {number} createdAfter - 统计起点秒级时间戳
+ * @returns {Promise<Object>} 统计结果
+ */
+async function countPasswordResetTokensSince(db, userId, createdAfter) {
+  return db.prepare(`
+    SELECT COUNT(*) as count
+    FROM password_reset_tokens
+    WHERE user_id = ? AND created_at >= ?
+  `).get(userId, createdAfter);
+}
+
+/**
+ * 创建密码重置 Token。
+ * 职责：记录高熵 Token、过期时间与请求 IP，Token 明文仅用于一次性邮件链接。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} payload - Token 创建参数
+ * @returns {Promise<Object>} 插入结果
+ */
+async function createPasswordResetToken(db, payload) {
+  const {
+    userId,
+    token,
+    expiresAt,
+    requestIp,
+    createdAt
+  } = payload;
+
+  return db.prepare(`
+    INSERT INTO password_reset_tokens (user_id, token, expires_at, request_ip, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(userId, token, expiresAt, requestIp, createdAt);
+}
+
+/**
+ * 按 Token 查询密码重置记录及用户邮箱。
+ * 职责：验证 Token 状态时一次性拿到用户 ID 与密码更新所需信息。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {string} token - 重置 Token
+ * @returns {Promise<Object|undefined>} Token 记录
+ */
+async function findPasswordResetToken(db, token) {
+  return db.prepare(`
+    SELECT prt.*, u.email
+    FROM password_reset_tokens prt
+    JOIN users u ON u.id = prt.user_id
+    WHERE prt.token = ?
+  `).get(token);
+}
+
+/**
+ * 标记密码重置 Token 已使用。
+ * 职责：实现提交即失效，防止同一 Token 被重复播放。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {string} token - 重置 Token
+ * @param {number} usedAt - 使用时间戳
+ * @returns {Promise<Object>} 更新结果
+ */
+async function markPasswordResetTokenUsed(db, token, usedAt) {
+  return db.prepare(`
+    UPDATE password_reset_tokens
+    SET used_at = ?
+    WHERE token = ? AND used_at IS NULL
+  `).run(usedAt, token);
+}
+
+/**
+ * 更新用户密码哈希。
+ * 职责：只接受已经完成 bcrypt/argon2 等安全哈希后的密码摘要。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {string} passwordHash - 新密码哈希
+ * @param {number} updatedAt - 更新时间戳
+ * @returns {Promise<Object>} 更新结果
+ */
+async function updateUserPasswordHash(db, userId, passwordHash, updatedAt) {
+  return db.prepare(`
+    UPDATE users SET
+      password_hash = ?,
+      updated_at = ?
+    WHERE id = ?
+  `).run(passwordHash, updatedAt, userId);
+}
+
+/**
  * 查询用户个人中心展示所需资料。
  *
  * @param {Object} db - 数据库代理对象
@@ -527,6 +632,12 @@ module.exports = {
   markOrderExpiredByOutTradeNo,
   updateOrderPaymentInfo,
   findLoginUserByEmail,
+  findPasswordResetUserByEmail,
+  countPasswordResetTokensSince,
+  createPasswordResetToken,
+  findPasswordResetToken,
+  markPasswordResetTokenUsed,
+  updateUserPasswordHash,
   findUserProfileById,
   findSystemSettingByKey,
   findUserSyncStatusById,
