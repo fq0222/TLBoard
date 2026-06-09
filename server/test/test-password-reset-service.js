@@ -140,6 +140,9 @@ async function testRequestPasswordResetCreatesTokenAndSendsGenericMessage() {
     assert.strictEqual(sentEmail.to, 'reset@example.com');
     assert.strictEqual(sentEmail.subject, '【天澜大陆消息】密码重置');
     assert(sentEmail.content.includes('https://example.com/reset-password?token='));
+    assert(sentEmail.content.includes('>重置密码<'));
+    assert(!sentEmail.content.includes(`>${db.state.tokens[0].token}<`));
+    assert(!sentEmail.content.includes(`>${'https://example.com/reset-password?token=' + db.state.tokens[0].token}<`));
     assert(sentEmail.content.includes('该链接只能使用一次'));
     assert(sentEmail.content.includes('每天只能申请重置一次密码'));
     assert.strictEqual(db.state.emailLogs.length, 1);

@@ -48,12 +48,26 @@ function getNowTimestamp() {
  */
 function buildPasswordResetEmailContent(resetUrl) {
   return `
-    <div style="font-family: Arial, 'Microsoft YaHei', sans-serif; line-height: 1.8; color: #14213d;">
-      <h2>密码重置</h2>
-      <p>你正在申请重置天澜大陆账号密码，请点击下面的链接完成操作：</p>
-      <p><a href="${resetUrl}" target="_blank" rel="noopener noreferrer">${resetUrl}</a></p>
-      <p>该链接只能使用一次，有效期为 15 分钟。每天只能申请重置一次密码。</p>
-      <p>如果这不是你本人发起的请求，请忽略本邮件。</p>
+    <div style="margin:0;padding:32px 16px;background:#eef4f2;font-family:Arial,'Microsoft YaHei',sans-serif;color:#14213d;line-height:1.7;">
+      <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #dce7e4;border-radius:16px;overflow:hidden;">
+        <div style="padding:24px 28px;background:#0f766e;color:#ffffff;">
+          <div style="font-size:14px;letter-spacing:0;font-weight:700;opacity:0.9;">天澜大陆消息</div>
+          <h2 style="margin:8px 0 0;font-size:24px;line-height:1.35;font-weight:700;">密码重置</h2>
+        </div>
+        <div style="padding:28px;">
+          <p style="margin:0 0 18px;font-size:15px;color:#334155;">你正在申请重置天澜大陆账号密码，请点击下方按钮完成操作。</p>
+          <div style="margin:26px 0;text-align:center;">
+            <a href="${resetUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:13px 30px;border-radius:10px;background:#0f766e;color:#ffffff;text-decoration:none;font-size:16px;font-weight:700;">重置密码</a>
+          </div>
+          <div style="margin:22px 0;padding:14px 16px;border-left:4px solid #f59e0b;background:#fff7ed;border-radius:8px;color:#7c2d12;font-size:14px;">
+            该链接只能使用一次，有效期为 15 分钟。每天只能申请重置一次密码。
+          </div>
+          <p style="margin:18px 0 0;font-size:14px;color:#64748b;">如果这不是你本人发起的请求，请忽略本邮件。为了账号安全，请不要将邮件转发给他人。</p>
+        </div>
+        <div style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:12px;">
+          此邮件由系统自动发送，请勿直接回复。
+        </div>
+      </div>
     </div>
   `;
 }
