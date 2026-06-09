@@ -574,7 +574,6 @@ async function syncDisableStatusToXui(db, userId, disable, options = {}) {
           for (const [nodeEmail, snapshotClient] of snapshotEntries) {
             if (snapshotClient.enabledKnown && snapshotClient.enabled === desiredEnabled) {
               skippedCount++;
-              logger.info(`跳过服务器 ${server.name} 的 inbound ${snapshotClient.inboundId}: ${nodeEmail} 状态已一致`);
               continue;
             }
 
