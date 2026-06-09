@@ -53,9 +53,8 @@ async function listAllServersForHealthCheck(db) {
  */
 async function listEnabledUsersForTrafficSync(db) {
   return db.prepare(`
-    SELECT id, email, traffic_used, traffic_limit, referral_traffic_limit
+    SELECT id, email, enabled, traffic_used, traffic_limit, referral_traffic_limit
     FROM users
-    WHERE enabled = 1
   `).all();
 }
 

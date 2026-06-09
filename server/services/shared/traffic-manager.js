@@ -80,6 +80,63 @@ function getTotalTrafficLimit(user) {
 }
 
 /**
+ * 将 3X-UI 客户端启用字段统一转换为布尔值。
+ *
+ * @param {*} value - 3X-UI 返回的 enable/enabled 字段
+ * @returns {boolean} 是否启用，缺省按启用处理
+ */
+function normalizeClientEnabled(value) {
+  if (value === null || value === undefined || value === '') {
+    return true;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  return normalized !== '0' && normalized !== 'false';
+}
+
+/**
+ * 从 inbound.settings 中解析客户端配置，用于复用本轮流量拉取时的 3X-UI 状态快照。
+ *
+ * @param {Object} inbound - 3X-UI inbound 快照
+ * @returns {Array} 客户端配置列表
+ */
+function extractInboundClients(inbound) {
+  try {
+    const settings = typeof inbound.settings === 'string'
+      ? JSON.parse(inbound.settings || '{}')
+      : (inbound.settings || {});
+    return Array.isArray(settings.clients) ? settings.clients : [];
+  } catch (error) {
+    logger.warn(`解析 inbound ${inbound.id} 客户端配置失败: ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * 根据节点协议和备注判断更新客户端时应使用的策略。
+ *
+ * @param {Object} inbound - 3X-UI inbound 快照
+ * @returns {string} 更新策略：hy2 / direct / cf
+ */
+function getInboundUpdateStrategy(inbound = {}) {
+  const remark = String(inbound.remark || '').toLowerCase();
+  const protocol = String(inbound.protocol || '').toLowerCase();
+
+  if (remark.includes('hy2') || protocol === 'hysteria' || protocol === 'hysteria2') {
+    return 'hy2';
+  }
+  if (remark.includes('direct')) {
+    return 'direct';
+  }
+  return 'cf';
+}
+
+/**
  * 获取流量统计倍率配置。
  *
  * @param {Object} db - 数据库实例
@@ -133,6 +190,8 @@ async function fetchAllServerTraffic(db) {
 
         for (const inbound of inboundsResult.data) {
           const clientStats = inbound.clientStats || [];
+          const clients = extractInboundClients(inbound);
+          const clientsByEmail = new Map(clients.map(client => [client.email, client]));
 
           for (const client of clientStats) {
             const email = client.email;
@@ -146,9 +205,16 @@ async function fetchAllServerTraffic(db) {
               };
             }
 
+            const settingsClient = clientsByEmail.get(email);
+            const enabledValue = client.enable !== undefined ? client.enable : settingsClient?.enable;
             serverData[email].up += client.up || 0;
             serverData[email].down += client.down || 0;
             serverData[email].total += (client.up || 0) + (client.down || 0);
+            serverData[email].enabled = normalizeClientEnabled(enabledValue);
+            serverData[email].enabledKnown = enabledValue !== undefined;
+            serverData[email].inboundId = inbound.id;
+            serverData[email].protocol = inbound.protocol || '';
+            serverData[email].strategy = getInboundUpdateStrategy(inbound);
           }
         }
 
@@ -258,6 +324,7 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
 
         userTrafficData[user.id] = {
           email: user.email,
+          enabled: user.enabled,
           trafficUsed: newTrafficUsed,
           trafficLimit,
           isOverLimit,
@@ -337,7 +404,7 @@ async function getLatestUserDisableState(db, userId) {
  * @param {Object} userTrafficData - 用户流量数据
  * @returns {Promise<{disabledCount: number, retryCount: number}>} 禁用数量与待重试数量
  */
-async function checkAndDisableOverLimitUsers(db, userTrafficData) {
+async function checkAndDisableOverLimitUsers(db, userTrafficData, clientStatusSnapshot = {}) {
   try {
     const userIds = Object.keys(userTrafficData);
 
@@ -349,6 +416,7 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
     logger.info(`开始检查 ${userIds.length} 个用户的流量限制`);
 
     let disabledCount = 0;
+    let compensatedCount = 0;
     let retryCount = 0;
 
     for (const userId of userIds) {
@@ -360,9 +428,9 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
 
       const lockedResult = await withUserStatusLock(db, Number(userId), async () => {
         const latestUser = await getLatestUserDisableState(db, userId);
-        if (!latestUser || latestUser.enabled === 0) {
-          logger.info(`用户 ${data.email} 当前已是禁用状态，跳过重复禁用`);
-          return { success: true, action: 'skip-disabled' };
+        if (!latestUser) {
+          logger.info(`用户 ${data.email} 不存在，跳过禁用检查`);
+          return { success: true, action: 'skip-missing' };
         }
 
         const latestUsed = Number(latestUser.traffic_used) || 0;
@@ -376,16 +444,24 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
           return { success: true, action: 'skip-rechecked' };
         }
 
-        logger.info(`用户 ${data.email} 流量超限，开始禁用: ${latestUsed}/${latestLimit}`);
+        if (latestUser.enabled === 0) {
+          logger.info(`用户 ${data.email} 本地已禁用，开始补偿同步 3X-UI 禁用状态`);
+          const syncSuccess = await syncDisableStatusToXui(db, userId, true, {
+            skipLock: true,
+            clientStatusSnapshot
+          });
+          if (!syncSuccess) {
+            return {
+              success: false,
+              retryable: true,
+              message: `补偿同步禁用状态到 3X-UI 失败: user=${userId}`
+            };
+          }
 
-        const syncSuccess = await syncDisableStatusToXui(db, userId, true, { skipLock: true });
-        if (!syncSuccess) {
-          return {
-            success: false,
-            retryable: true,
-            message: `同步禁用状态到3X-UI失败: user=${userId}`
-          };
+          return { success: true, action: 'compensated' };
         }
+
+        logger.info(`用户 ${data.email} 流量超限，开始禁用: ${latestUsed}/${latestLimit}`);
 
         await trafficRepository.disableUserByTrafficLimit(
           db,
@@ -394,11 +470,27 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
           DISABLE_REASONS.TRAFFIC_LIMIT
         );
 
+        const syncSuccess = await syncDisableStatusToXui(db, userId, true, {
+          skipLock: true,
+          clientStatusSnapshot
+        });
+        if (!syncSuccess) {
+          return {
+            success: false,
+            retryable: true,
+            action: 'disabled-retry',
+            message: `同步禁用状态到3X-UI失败: user=${userId}`
+          };
+        }
+
         return { success: true, action: 'disabled' };
       });
 
       if (lockedResult.retryable) {
         retryCount++;
+        if (lockedResult.action === 'disabled-retry') {
+          disabledCount++;
+        }
         logger.warn(`用户 ${data.email} 状态锁忙或禁用同步失败，等待重试: ${lockedResult.message}`);
         continue;
       }
@@ -408,16 +500,21 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData) {
         logger.info(`禁用用户 ${data.email} 成功`);
       }
 
+      if (lockedResult.success && lockedResult.action === 'compensated') {
+        compensatedCount++;
+        logger.info(`补偿同步用户 ${data.email} 禁用状态成功`);
+      }
+
       if (!lockedResult.success && lockedResult.message) {
         logger.error(`禁用用户 ${data.email} 错误: ${lockedResult.message}`);
       }
     }
 
-    logger.info(`检查用户流量限制完成，禁用 ${disabledCount} 个用户，待重试 ${retryCount} 个用户`);
-    return { disabledCount, retryCount };
+    logger.info(`检查用户流量限制完成，禁用 ${disabledCount} 个用户，补偿同步 ${compensatedCount} 个用户，待重试 ${retryCount} 个用户`);
+    return { disabledCount, compensatedCount, retryCount };
   } catch (error) {
     logger.error(`检查用户流量限制错误: ${error.message}`);
-    return { disabledCount: 0, retryCount: 0 };
+    return { disabledCount: 0, compensatedCount: 0, retryCount: 0 };
   }
 }
 
@@ -460,39 +557,75 @@ async function syncDisableStatusToXui(db, userId, disable, options = {}) {
 
     logger.info(`开始同步禁用状态到 ${servers.length} 台服务器: 用户 ${user.email}, 禁用 ${disable}`);
 
+    const desiredEnabled = !disable;
+    const clientStatusSnapshot = options.clientStatusSnapshot || {};
     let successCount = 0;
+    let skippedCount = 0;
+    let failureCount = 0;
     for (const server of servers) {
       try {
         const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
           apiVersion: server.panel_version || '3.0.2'
         });
 
+        const snapshotEntries = Object.entries(clientStatusSnapshot[server.id] || {})
+          .filter(([email]) => email.startsWith(`${user.email}-`));
+        if (snapshotEntries.length > 0) {
+          for (const [nodeEmail, snapshotClient] of snapshotEntries) {
+            if (snapshotClient.enabledKnown && snapshotClient.enabled === desiredEnabled) {
+              skippedCount++;
+              logger.info(`跳过服务器 ${server.name} 的 inbound ${snapshotClient.inboundId}: ${nodeEmail} 状态已一致`);
+              continue;
+            }
+
+            const updateResult = await xuiService.updateClientByContext(snapshotClient.inboundId, nodeEmail, {
+              enabled: desiredEnabled,
+              protocol: snapshotClient.protocol || '',
+              strategy: snapshotClient.strategy || 'direct'
+            });
+
+            if (updateResult.success) {
+              successCount++;
+              logger.info(`同步服务器 ${server.name} 的 inbound ${snapshotClient.inboundId} 成功`);
+            } else {
+              failureCount++;
+              logger.warn(`同步服务器 ${server.name} 的 inbound ${snapshotClient.inboundId} 失败: ${updateResult.message}`);
+            }
+          }
+          continue;
+        }
+
         const inboundsResult = await xuiService.getInbounds();
         if (!inboundsResult.success) {
+          failureCount++;
           logger.warn(`获取服务器 ${server.name} 的 inbounds 失败`);
           continue;
         }
 
         for (const inbound of inboundsResult.data) {
           const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
-          const updateResult = await xuiService.updateClient(inbound.id, nodeEmail, {
-            enabled: !disable
+          const updateResult = await xuiService.updateClientByContext(inbound.id, nodeEmail, {
+            enabled: desiredEnabled,
+            protocol: inbound.protocol || '',
+            strategy: getInboundUpdateStrategy(inbound)
           });
 
           if (updateResult.success) {
             successCount++;
             logger.info(`同步服务器 ${server.name} 的 inbound ${inbound.id} 成功`);
           } else {
+            failureCount++;
             logger.warn(`同步服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${updateResult.message}`);
           }
         }
       } catch (error) {
+        failureCount++;
         logger.error(`同步服务器 ${server.name} 禁用状态错误: ${error.message}`);
       }
     }
 
-    logger.info(`同步禁用状态完成: 用户 ${user.email}, 禁用 ${disable}, 成功 ${successCount} 个 inbound`);
-    return successCount > 0;
+    logger.info(`同步禁用状态完成: 用户 ${user.email}, 禁用 ${disable}, 成功 ${successCount} 个 inbound，跳过 ${skippedCount} 个 inbound，失败 ${failureCount} 个 inbound`);
+    return failureCount === 0 && successCount + skippedCount > 0;
   } catch (error) {
     logger.error(`同步禁用状态错误: ${error.message}`);
     return false;
@@ -562,7 +695,7 @@ async function syncTrafficAndHandleDisable(db) {
     }
 
     await updateTrafficInDatabase(db, userTrafficData);
-    await checkAndDisableOverLimitUsers(db, userTrafficData);
+    await checkAndDisableOverLimitUsers(db, userTrafficData, serverTrafficData);
 
     logger.info('流量同步与禁用检查任务完成');
   } catch (error) {
