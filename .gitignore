@@ -149,6 +149,7 @@ server/test/*
 !server/test/test-user-subscription-service.js
 !server/test/test-user-onboarding.js
 !server/test/test-referral-service.js
+!server/test/test-login-traffic-disabled.js
 server/config.js
 server/uploads/
 server/backupDB/

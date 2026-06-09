@@ -6,6 +6,7 @@ const vmqService = require('../../integrations/vmq/vmq-service');
 const sharedEmailService = require('../../integrations/email/email-service');
 const userRepository = require('../../repositories/user-repository');
 const referralService = require('../referral-service');
+const { DISABLE_REASONS } = require('../shared/renew-policy');
 
 const TELEGRAM_CHANNEL_URL_KEY = 'telegram_channel_url';
 const PASSWORD_RESET_MESSAGE = '如果该邮箱已注册，重置密码邮件已发送，请查收。';
@@ -209,6 +210,21 @@ function getUserTrafficEntitlement(user) {
 }
 
 /**
+ * 判断禁用用户是否应被登录入口拦截。
+ * 职责：区分管理员封禁账号和流量超限暂停节点，流量超限用户仍需登录后续费。
+ *
+ * @param {Object} user - 登录查询返回的用户记录
+ * @returns {boolean} 是否需要拒绝登录
+ */
+function shouldBlockDisabledUserLogin(user) {
+  if (user.enabled) {
+    return false;
+  }
+
+  return user.disable_reason !== DISABLE_REASONS.TRAFFIC_LIMIT;
+}
+
+/**
  * 格式化用户到期时间，兼容不限期账号。
  *
  * @param {*} timestamp - 秒级时间戳
@@ -392,7 +408,7 @@ async function login(db, payload) {
     });
   }
 
-  if (!user.enabled) {
+  if (shouldBlockDisabledUserLogin(user)) {
     throw createLegacyBusinessError('账号已被禁用，请联系管理员', {
       code: 2003
     });
