@@ -155,7 +155,12 @@
               <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                 <el-input v-model="subscriptionUrl" readonly>
                   <template #append>
-                    <el-button @click="copySubscriptionUrl('subscription')">
+                    <el-button
+                      :loading="copySubmittingType === 'subscription'"
+                      :disabled="!!copySubmittingType"
+                      aria-label="复制通用订阅链接"
+                      @click="copySubscriptionUrl('subscription')"
+                    >
                       <el-icon><CopyDocument /></el-icon>
                     </el-button>
                   </template>
@@ -165,7 +170,12 @@
               <div style="display: flex; gap: 10px;">
                 <el-input v-model="clashUrl" readonly>
                   <template #append>
-                    <el-button @click="copySubscriptionUrl('clash')">
+                    <el-button
+                      :loading="copySubmittingType === 'clash'"
+                      :disabled="!!copySubmittingType"
+                      aria-label="复制 Clash 订阅链接"
+                      @click="copySubscriptionUrl('clash')"
+                    >
                       <el-icon><CopyDocument /></el-icon>
                     </el-button>
                   </template>
@@ -242,6 +252,7 @@ const cfIps = ref([])
 const selectedCfIpId = ref('')
 const cfIpPool = ref([])
 const generatingSubscription = ref(false)
+const copySubmittingType = ref('')
 const subscriptionUrl = ref('')
 const clashUrl = ref('')
 const EDIT_DIALOG_ACTION_TIMEOUT = 30000
@@ -522,13 +533,63 @@ async function generateSubscription() {
 }
 
 /**
- * 复制订阅链接
+ * 复制文本到剪贴板。
+ * text 为待复制内容；优先使用浏览器 Clipboard API，失败时回退到临时 textarea。
  */
-function copySubscriptionUrl(type = 'subscription') {
+async function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch (error) {
+    console.warn('Clipboard API 复制失败，尝试降级复制:', error)
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.top = '-9999px'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+
+  try {
+    const copied = document.execCommand('copy')
+    if (!copied) {
+      throw new Error('execCommand copy returned false')
+    }
+    return true
+  } catch (error) {
+    console.warn('降级复制失败:', error)
+    return false
+  } finally {
+    document.body.removeChild(textarea)
+  }
+}
+
+/**
+ * 复制订阅链接。
+ * type 区分通用订阅和 Clash 订阅；复制失败时提示管理员手动复制。
+ */
+async function copySubscriptionUrl(type = 'subscription') {
   const url = type === 'clash' ? clashUrl.value : subscriptionUrl.value
-  if (url) {
-    navigator.clipboard.writeText(url)
+  if (!url) {
+    ElMessage.warning('暂无可复制的订阅链接')
+    return
+  }
+
+  try {
+    copySubmittingType.value = type
+    const copied = await copyTextToClipboard(url)
+    if (!copied) {
+      ElMessage.error('复制失败，请手动复制输入框内容')
+      return
+    }
     ElMessage.success('订阅链接已复制')
+  } finally {
+    copySubmittingType.value = ''
   }
 }
 
