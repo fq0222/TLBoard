@@ -678,7 +678,7 @@ async function saveCfIps() {
 }
 
 function getStatusType(status) {
-  const typeMap = { active: 'success', expired: 'warning', disabled: 'danger' }
+  const typeMap = { active: 'success', expired: 'warning', disabled: 'danger', renew: 'warning' }
   return typeMap[status] || 'info'
 }
 

@@ -307,7 +307,7 @@ async function findUserProfileById(db, userId) {
   return db.prepare(`
     SELECT
       u.id, u.email, u.plan_id, u.subscription_token, u.sub_id,
-      u.traffic_used, u.traffic_limit, u.referral_traffic_limit, u.expire_at, u.enabled, u.created_at,
+      u.traffic_used, u.traffic_limit, u.referral_traffic_limit, u.expire_at, u.enabled, u.disable_reason, u.created_at,
       u.payment_count, u.sync_status, u.onboarding_completed,
       p.name as plan_name
     FROM users u
@@ -397,7 +397,7 @@ async function listUsers(db, whereClause, params, limit, offset) {
   return db.prepare(`
     SELECT
       u.id, u.email, u.plan_id, u.traffic_used, u.traffic_limit,
-      u.expire_at, u.enabled, u.created_at,
+      u.expire_at, u.enabled, u.disable_reason, u.created_at,
       p.name as plan_name
     FROM users u
     LEFT JOIN plans p ON u.plan_id = p.id

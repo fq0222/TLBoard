@@ -98,7 +98,7 @@ function getOrderStatusText(status) {
 }
 
 /**
- * 根据用户启用状态和到期时间推导管理端列表状态。
+ * 根据用户启用状态、禁用原因和到期时间推导管理端列表状态。
  *
  * @param {Object} user - 用户记录
  * @returns {{status:string,status_text:string}} 状态信息
@@ -110,8 +110,13 @@ function buildUserStatus(user) {
   let statusText = '正常';
 
   if (!user.enabled) {
-    status = 'disabled';
-    statusText = '已禁用';
+    if (user.disable_reason === DISABLE_REASONS.TRAFFIC_LIMIT) {
+      status = 'renew';
+      statusText = '续费';
+    } else {
+      status = 'disabled';
+      statusText = '已禁用';
+    }
   } else if (expireAt !== 0 && expireAt <= now) {
     status = 'expired';
     statusText = '已过期';
@@ -192,6 +197,7 @@ async function listUsers(db, query) {
       expire_at: user.expire_at,
       expire_text: formatTime(user.expire_at),
       enabled: user.enabled,
+      disable_reason: user.disable_reason,
       created_at: user.created_at,
       ...buildUserStatus(user)
     }))

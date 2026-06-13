@@ -296,6 +296,34 @@ function shouldBlockDisabledUserLogin(user) {
 }
 
 /**
+ * 推导用户端个人中心账号状态。
+ * 职责：账号未禁用统一显示正常；禁用时按 disable_reason 区分管理员禁用和流量超限续费。
+ *
+ * @param {Object} user - 用户资料记录
+ * @returns {{status:string,status_text:string}} 前端展示状态
+ */
+function buildUserProfileStatus(user) {
+  if (user.enabled) {
+    return {
+      status: 'active',
+      status_text: '正常'
+    };
+  }
+
+  if (user.disable_reason === DISABLE_REASONS.TRAFFIC_LIMIT) {
+    return {
+      status: 'renew',
+      status_text: '续费'
+    };
+  }
+
+  return {
+    status: 'disabled',
+    status_text: '禁用'
+  };
+}
+
+/**
  * 格式化用户到期时间，兼容不限期账号。
  *
  * @param {*} timestamp - 秒级时间戳
@@ -535,6 +563,7 @@ async function getProfile(db, userId) {
   const trafficPercent = totalTrafficLimit > 0
     ? Math.round((trafficUsed / totalTrafficLimit) * 100 * 100) / 100
     : 0;
+  const profileStatus = buildUserProfileStatus(user);
 
   return {
     id: user.id,
@@ -560,6 +589,9 @@ async function getProfile(db, userId) {
     expire_at: user.expire_at,
     expire_text: formatTime(user.expire_at),
     enabled: user.enabled,
+    disable_reason: user.disable_reason,
+    status: profileStatus.status,
+    status_text: profileStatus.status_text,
     created_at: user.created_at,
     payment_count: user.payment_count,
     sync_status: user.sync_status,

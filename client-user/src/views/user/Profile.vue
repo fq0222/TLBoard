@@ -9,8 +9,8 @@
           <div class="status-pills">
             <span class="status-pill">
               账号状态：
-              <el-tag size="small" :type="userInfo.enabled ? 'success' : 'danger'">
-                {{ userInfo.enabled ? '正常' : '禁用' }}
+              <el-tag size="small" :type="accountStatusType">
+                {{ accountStatusText }}
               </el-tag>
             </span>
             <span class="status-pill">订阅状态：{{ userInfo.subscription_ready ? '已生成' : '未生成' }}</span>
@@ -71,7 +71,7 @@
             </div>
             <div class="overview-item">
               <span class="overview-label">状态</span>
-              <span class="overview-value">{{ userInfo.enabled ? '正常' : '禁用' }}</span>
+              <span class="overview-value">{{ accountStatusText }}</span>
             </div>
           </div>
 
@@ -466,6 +466,16 @@ const trafficSummaryText = computed(() => {
   const referralTrafficText = userInfo.value.referral_traffic_limit_text || '0 B'
 
   return `${usedTrafficText} / ${totalTrafficText}（套餐：${planTrafficText} + 推广：${referralTrafficText}）`
+})
+
+const accountStatusText = computed(() => {
+  return userInfo.value.status_text || (userInfo.value.enabled ? '正常' : '禁用')
+})
+
+const accountStatusType = computed(() => {
+  const status = userInfo.value.status || (userInfo.value.enabled ? 'active' : 'disabled')
+  const typeMap = { active: 'success', disabled: 'danger', renew: 'warning' }
+  return typeMap[status] || 'info'
 })
 
 async function fetchUserInfo() {
