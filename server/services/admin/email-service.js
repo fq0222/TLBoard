@@ -6,6 +6,7 @@
 const { parsePagination } = require('../../shared/utils/pagination');
 const emailRepository = require('../../repositories/email-repository');
 const sharedEmailService = require('../../integrations/email/email-service');
+const systemSettingsService = require('./system-settings-service');
 
 /**
  * 构造兼容旧接口的业务异常。
@@ -23,11 +24,6 @@ function createLegacyBusinessError(message, options = {}) {
   return error;
 }
 
-/**
- * 获取当前 Unix 时间戳。
- *
- * @returns {number} 秒级时间戳
- */
 function getNowTimestamp() {
   return Math.floor(Date.now() / 1000);
 }
@@ -100,20 +96,7 @@ function ensureCampaignExists(campaign) {
  * @returns {Promise<Object>} 配置对象
  */
 async function getConfig(db) {
-  const rows = await emailRepository.getBrevoConfigRows(db);
-  const config = {};
-
-  for (const row of rows) {
-    config[row.key] = row.value;
-  }
-
-  return {
-    api_key: config.brevo_api_key || '',
-    sender_email: config.brevo_sender_email || '',
-    sender_name: config.brevo_sender_name || '',
-    daily_limit: parseInt(config.brevo_daily_limit, 10) || 200,
-    campaign_daily_limit: parseInt(config.brevo_campaign_daily_limit, 10) || 100
-  };
+  return systemSettingsService.getEmailConfig(db);
 }
 
 /**
@@ -124,18 +107,7 @@ async function getConfig(db) {
  * @returns {Promise<void>}
  */
 async function saveConfig(db, payload) {
-  const configEntries = {
-    brevo_api_key: payload.api_key || '',
-    brevo_sender_email: payload.sender_email || '',
-    brevo_sender_name: payload.sender_name || '',
-    brevo_daily_limit: payload.daily_limit ? String(payload.daily_limit) : '200',
-    brevo_campaign_daily_limit: payload.campaign_daily_limit ? String(payload.campaign_daily_limit) : '100'
-  };
-  const now = getNowTimestamp();
-
-  for (const [key, value] of Object.entries(configEntries)) {
-    await emailRepository.saveBrevoConfigValue(db, key, value, now);
-  }
+  await systemSettingsService.saveEmailConfig(db, payload);
 }
 
 /**

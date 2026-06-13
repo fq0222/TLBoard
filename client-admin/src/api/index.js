@@ -550,11 +550,11 @@ const adminApi = {
 
   // 邮件配置
   getEmailConfig() {
-    return apiClient.get('/email/config')
+    return apiClient.get('/system-settings/email')
   },
 
   updateEmailConfig(data) {
-    return apiClient.put('/email/config', data)
+    return apiClient.put('/system-settings/email', data)
   },
 
   sendTestEmail(data) {
@@ -677,12 +677,12 @@ const adminApi = {
 
   // 获取资源配置
   getResourceConfig() {
-    return apiClient.get('/resources/config')
+    return apiClient.get('/system-settings/resource')
   },
 
   // 保存资源配置
   saveResourceConfig(data) {
-    return apiClient.put('/resources/config', data)
+    return apiClient.put('/system-settings/resource', data)
   },
 
   getTrafficConfig() {
@@ -744,6 +744,8 @@ const adminApi = {
    * @param {Object} data - 订阅配置
    * @param {string} data.clash_config_name - Clash 订阅下载名称
    * @param {number} data.clash_profile_update_interval - 自动更新间隔（小时）
+   * @param {string} data.telegram_channel_url - 官方 Telegram 频道链接
+   * @param {string} data.online_customer_service_url - 在线客服链接
    * @returns {Promise<Object>} 保存后的订阅配置
    */
   saveSubscriptionConfig(data) {

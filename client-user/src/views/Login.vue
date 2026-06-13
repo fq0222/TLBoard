@@ -121,6 +121,17 @@
             <span class="footer-separator"></span>
             还没有账户？
             <router-link to="/" class="link">返回首页选择套餐</router-link>
+            <template v-if="onlineCustomerServiceUrl">
+              <span class="footer-separator"></span>
+              <a
+                :href="onlineCustomerServiceUrl"
+                class="link contact-link"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                联系我们
+              </a>
+            </template>
           </p>
         </div>
       </section>
@@ -195,6 +206,7 @@ const userStore = useUserStore()
 
 const formRef = ref(null)
 const loading = ref(false)
+const onlineCustomerServiceUrl = ref('')
 
 const selectedPlanId = computed(() => {
   const planId = Number(route.query.plan_id || 0)
@@ -352,8 +364,24 @@ async function initializeReferralTracking() {
   }
 }
 
+/**
+ * 加载登录页公开设置。
+ * 核心分支：后端未配置客服链接时保持空字符串，模板会隐藏“联系我们”入口。
+ */
+async function loadPublicSettings() {
+  try {
+    const res = await api.user.getPublicSettings()
+    if (res.code === 0) {
+      onlineCustomerServiceUrl.value = String(res.data?.online_customer_service_url || '').trim()
+    }
+  } catch (error) {
+    console.error('加载公开设置失败:', error)
+  }
+}
+
 onMounted(() => {
   initializeReferralTracking()
+  loadPublicSettings()
 })
 </script>
 
@@ -685,6 +713,7 @@ onMounted(() => {
 }
 
 .forgot-link:hover,
+.contact-link:hover,
 .link:hover {
   text-decoration: underline;
 }

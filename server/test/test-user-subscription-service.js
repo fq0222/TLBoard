@@ -15,6 +15,12 @@ function createFakeDb(subscription, settings = {}) {
   return {
     prepare(sql) {
       return {
+        all() {
+          if (sql.includes('FROM announcements')) {
+            return [];
+          }
+          throw new Error(`未支持的 all 查询: ${sql}`);
+        },
         get(param) {
           if (sql.includes('FROM system_settings')) {
             return settings[param] === undefined ? undefined : { value: settings[param] };
@@ -191,8 +197,10 @@ async function testSystemSettingsSubscriptionDefaults() {
   const config = await systemSettingsRouter.getSubscriptionConfig(db);
 
   assert.deepStrictEqual(config, {
-    clash_config_name: '天澜大陆',
-    clash_profile_update_interval: 2
+    clash_config_name: '天涯大陆',
+    clash_profile_update_interval: 2,
+    telegram_channel_url: '',
+    online_customer_service_url: ''
   });
 }
 
@@ -205,14 +213,20 @@ async function testSystemSettingsSubscriptionSave() {
   const { db, writes } = createSystemSettingsFakeDb();
   await systemSettingsRouter.saveSubscriptionConfig(db, {
     clash_config_name: '自定义订阅',
-    clash_profile_update_interval: 6
+    clash_profile_update_interval: 6,
+    telegram_channel_url: 'https://t.me/customChannel',
+    online_customer_service_url: 'https://service.example.com/chat'
   });
 
-  assert.strictEqual(writes.length, 2);
+  assert.strictEqual(writes.length, 4);
   assert.strictEqual(writes[0].params[0], 'clash_config_name');
   assert.strictEqual(writes[0].params[1], '自定义订阅');
   assert.strictEqual(writes[1].params[0], 'clash_profile_update_interval');
   assert.strictEqual(writes[1].params[1], '6');
+  assert.strictEqual(writes[2].params[0], 'telegram_channel_url');
+  assert.strictEqual(writes[2].params[1], 'https://t.me/customChannel');
+  assert.strictEqual(writes[3].params[0], 'online_customer_service_url');
+  assert.strictEqual(writes[3].params[1], 'https://service.example.com/chat');
 }
 
 /**

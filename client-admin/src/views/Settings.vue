@@ -201,6 +201,14 @@
               />
               <span class="form-hint">用户端首页“官方电报频道”按钮会跳转到该链接</span>
             </el-form-item>
+            <el-form-item label="在线客服链接">
+              <el-input
+                v-model="subscriptionForm.online_customer_service_url"
+                maxlength="255"
+                placeholder="请输入在线客服链接"
+              />
+              <span class="form-hint">用户端登录页“联系我们”会在新标签页打开该链接</span>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="subscriptionSaving" @click="saveSubscriptionConfig">
                 保存配置
@@ -377,12 +385,14 @@ const trafficSaving = ref(false)
 const subscriptionForm = ref({
   clash_config_name: '天涯大陆',
   clash_profile_update_interval: 2,
-  telegram_channel_url: ''
+  telegram_channel_url: '',
+  online_customer_service_url: ''
 })
 const DEFAULT_SUBSCRIPTION_CONFIG = {
   clash_config_name: '天涯大陆',
   clash_profile_update_interval: 2,
-  telegram_channel_url: ''
+  telegram_channel_url: '',
+  online_customer_service_url: ''
 }
 const subscriptionSaving = ref(false)
 const telegramConfig = ref({
@@ -680,7 +690,8 @@ function normalizeSubscriptionConfig(config = {}) {
   return {
     ...DEFAULT_SUBSCRIPTION_CONFIG,
     ...config,
-    telegram_channel_url: String(config.telegram_channel_url || '').trim()
+    telegram_channel_url: String(config.telegram_channel_url || '').trim(),
+    online_customer_service_url: String(config.online_customer_service_url || '').trim()
   }
 }
 
@@ -696,17 +707,27 @@ async function saveSubscriptionConfig() {
     return
   }
 
+  const onlineCustomerServiceUrl = String(subscriptionForm.value.online_customer_service_url || '').trim()
+  if (onlineCustomerServiceUrl && !/^https?:\/\/\S+$/i.test(onlineCustomerServiceUrl)) {
+    ElMessage.warning('请输入有效的在线客服链接')
+    return
+  }
+
   try {
     subscriptionSaving.value = true
     const payload = {
       clash_config_name: subscriptionForm.value.clash_config_name.trim(),
       clash_profile_update_interval: subscriptionForm.value.clash_profile_update_interval,
-      telegram_channel_url: telegramChannelUrl
+      telegram_channel_url: telegramChannelUrl,
+      online_customer_service_url: onlineCustomerServiceUrl
     }
     const res = await api.admin.saveSubscriptionConfig(payload)
     if (res.code === 0) {
-      if (!Object.prototype.hasOwnProperty.call(res.data || {}, 'telegram_channel_url')) {
-        ElMessage.warning('后端未返回电报频道链接，请重启后端服务后重新保存')
+      if (
+        !Object.prototype.hasOwnProperty.call(res.data || {}, 'telegram_channel_url') ||
+        !Object.prototype.hasOwnProperty.call(res.data || {}, 'online_customer_service_url')
+      ) {
+        ElMessage.warning('后端未返回新增链接配置，请重启后端服务后重新保存')
         subscriptionForm.value = normalizeSubscriptionConfig({
           ...(res.data || {})
         })
