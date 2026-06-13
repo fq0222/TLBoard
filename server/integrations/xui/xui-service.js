@@ -1094,12 +1094,33 @@ class XuiService {
     return [];
   }
 
+  /**
+   * 从已获取的 inbound 客户端快照中提取目标 email 的客户端列表。
+   *
+   * @param {Array<Object>|undefined} clientsSnapshot - inbound.settings.clients 快照
+   * @param {string} email - 节点 email 标识
+   * @returns {{success:boolean,clients:Array<Object>}|null} 提取结果；null 表示未提供快照
+   */
+  getClientsByEmailFromSnapshot(clientsSnapshot, email) {
+    if (!Array.isArray(clientsSnapshot)) {
+      return null;
+    }
+
+    return {
+      success: true,
+      clients: clientsSnapshot
+        .filter(item => item.email === email)
+        .map(item => this.mapClientApiRecord(item))
+    };
+  }
+
   async upsertUniqueClient(db, context) {
     const {
       userId,
       serverId,
       inbound,
       email,
+      existingClientsSnapshot,
       desiredClient
     } = context;
 
@@ -1108,7 +1129,8 @@ class XuiService {
       inboundId: inbound.id,
       email
     }, async () => {
-      const listResult = await this.getClientsByEmail(inbound.id, email);
+      const listResult = this.getClientsByEmailFromSnapshot(existingClientsSnapshot, email)
+        || await this.getClientsByEmail(inbound.id, email);
       if (!listResult.success) {
         return { success: false, message: listResult.message || '获取客户端列表失败' };
       }

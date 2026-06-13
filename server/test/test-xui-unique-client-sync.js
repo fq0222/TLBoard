@@ -318,6 +318,48 @@ async function testUpsertUniqueClientSkipsUpdateWhenStateMatches() {
   assert.ok(!service._calls.some(item => item.type === 'updateClient'));
 }
 
+async function testUpsertUniqueClientUsesSnapshotForSkipUpdate() {
+  const totalBytes = 10 * 1024 * 1024 * 1024;
+  const db = createFakeDb([
+    { user_id: 10, server_id: 1, inbound_id: 100, uuid: 'snapshot-uuid', sub_id: 'snapshot-sub' }
+  ]);
+  const service = createFakeXuiService([]);
+  service.getClientsByEmail = async function getClientsByEmail() {
+    throw new Error('getClientsByEmail should not be called when snapshot is available');
+  };
+
+  const result = await service.upsertUniqueClient(db, {
+    userId: 10,
+    serverId: 1,
+    inbound: { id: 100, protocol: 'vless', remark: 'direct-node' },
+    email: 'snapshot@test.com-direct',
+    existingClientsSnapshot: [
+      {
+        id: 'snapshot-uuid',
+        email: 'snapshot@test.com-direct',
+        enable: true,
+        expiryTime: 99,
+        totalGB: totalBytes,
+        subId: 'snapshot-sub',
+        flow: 'xtls-rprx-vision'
+      }
+    ],
+    desiredClient: {
+      id: 'snapshot-uuid',
+      email: 'snapshot@test.com-direct',
+      enable: true,
+      expiryTime: 99,
+      totalGB: totalBytes,
+      subId: 'snapshot-sub',
+      flow: 'xtls-rprx-vision'
+    }
+  });
+
+  assert.strictEqual(result.success, true);
+  assert.strictEqual(result.action, 'skip-update');
+  assert.strictEqual(service._calls.length, 0);
+}
+
 async function testShouldNotUpdateWhenServerTotalGBStoresBytes() {
   const totalBytes = 10 * 1024 * 1024 * 1024;
   const service = createFakeXuiService([]);
@@ -451,6 +493,7 @@ async function run() {
   await testUpsertUniqueClientFailsWhenLockNotAcquired();
   await testUpsertUniqueClientUpdatesSingleMatch();
   await testUpsertUniqueClientSkipsUpdateWhenStateMatches();
+  await testUpsertUniqueClientUsesSnapshotForSkipUpdate();
   await testShouldNotUpdateWhenServerTotalGBStoresBytes();
   await testUpdateClientByContextShouldKeepUuidWhenAuthIsEmpty();
   await testHy2ClientShouldStillCheckSubId();

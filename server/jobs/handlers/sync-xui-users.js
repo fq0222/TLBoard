@@ -22,6 +22,33 @@ function getXuiTotalTrafficLimit(user) {
 }
 
 /**
+ * 从 3X-UI inbound 快照中解析客户端列表。
+ *
+ * @param {Object} inbound - 3X-UI inbound 原始对象
+ * @returns {Array<Object>|null} 客户端快照；null 表示 settings 解析失败，应跳过该 inbound
+ */
+function parseInboundClientsSnapshot(inbound) {
+  if (!inbound || !inbound.settings) {
+    return [];
+  }
+
+  if (typeof inbound.settings === 'string') {
+    try {
+      const settings = JSON.parse(inbound.settings || '{}');
+      return Array.isArray(settings.clients) ? settings.clients : [];
+    } catch (error) {
+      return null;
+    }
+  }
+
+  if (typeof inbound.settings === 'object') {
+    return Array.isArray(inbound.settings.clients) ? inbound.settings.clients : [];
+  }
+
+  return [];
+}
+
+/**
  * 同步一台 3X-UI 服务器上的用户状态
  * 历史实现保留，仅用于对照旧巡检逻辑。
  * @param {Object} db - 数据库实例
@@ -282,6 +309,12 @@ async function syncUsersToServer(db, server, users) {
     let syncCount = 0;
 
     for (const inbound of inboundsResult.data) {
+      const existingClientsSnapshot = parseInboundClientsSnapshot(inbound);
+      if (existingClientsSnapshot === null) {
+        logger.warn(`服务器 ${server.name} inbound ${inbound.id} 的 settings 解析失败，跳过该 inbound 本轮用户同步`);
+        continue;
+      }
+
       for (const user of users) {
         try {
           const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
@@ -329,6 +362,7 @@ async function syncUsersToServer(db, server, users) {
             serverId: server.id,
             inbound,
             email: nodeEmail,
+            existingClientsSnapshot,
             desiredClient
           });
 
