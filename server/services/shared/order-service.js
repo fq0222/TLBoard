@@ -92,6 +92,19 @@ function getXuiTotalTrafficLimit(user, plan = {}) {
 }
 
 /**
+ * 将本地用户启用状态归一化为 3X-UI enable 布尔值。
+ * 职责：确保数据库返回的 0/'0'/false 都会同步为禁用。
+ * 关键参数：value 是 users.enabled 当前值。
+ * 核心分支：只有 1/'1'/true 视为启用，其余值默认禁用。
+ *
+ * @param {*} value - 本地 users.enabled 值。
+ * @returns {boolean} 3X-UI 客户端 enable 状态。
+ */
+function normalizeUserEnabled(value) {
+  return value === true || value === 1 || value === '1';
+}
+
+/**
  * 生成写入同步任务 payload 的套餐快照，避免把整条套餐记录写进队列。
  * @param {Object} plan - 套餐信息
  * @returns {Object} 精简后的套餐信息
@@ -251,7 +264,7 @@ async function legacySyncUserToXuiServers(db, user, plan = {}) {
               const addOpts = {
                 email: nodeEmail,
                 id: config.uuid,
-                enable: true,
+                enable: normalizeUserEnabled(user.enabled),
                 expiryTime,
                 totalGB: totalBytes,
                 limitIp: 0,
@@ -371,7 +384,7 @@ async function syncUserToXuiServers(db, user, plan = {}) {
               id: config.uuid,
               auth: config.auth,
               email: nodeEmail,
-              enable: true,
+              enable: normalizeUserEnabled(user.enabled),
               expiryTime,
               totalGB: totalBytes,
               subId: config.subId,

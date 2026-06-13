@@ -8,6 +8,29 @@
 
 const XuiApiClientV302 = require('./xui-api-client-v302');
 
+/**
+ * 归一化 3X-UI 客户端启用状态。
+ * 职责：兼容旧 settings payload 中的布尔、数字和字符串启用值。
+ * 关键参数：value 是 client.enable 的原始值。
+ * 核心分支：空值默认启用；false/0/'0'/'false' 明确禁用。
+ *
+ * @param {*} value - 客户端启用状态原始值。
+ * @returns {boolean} clients API 需要的布尔 enable。
+ */
+function normalizeClientEnabled(value) {
+  if (value === null || value === undefined || value === '') {
+    return true;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  return normalized !== '0' && normalized !== 'false';
+}
+
 class XuiApiClientV325 extends XuiApiClientV302 {
   /**
    * 创建 3.2.5 版本客户端。
@@ -60,7 +83,7 @@ class XuiApiClientV325 extends XuiApiClientV302 {
   buildClientApiPayload(client, options = {}) {
     const payload = {
       email: client.email || '',
-      enable: client.enable !== false,
+      enable: normalizeClientEnabled(client.enable),
       expiryTime: Number(client.expiryTime || 0),
       totalGB: Number(client.totalGB || 0),
       limitIp: Number(client.limitIp || 0),

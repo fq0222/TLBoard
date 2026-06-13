@@ -73,6 +73,22 @@ function createFakeXuiService(initialClients = []) {
   service._lockStates = new Set();
   service._forceLockBusy = false;
   service.client = {
+    addClient: async function addClient(config) {
+      service._calls.push({ type: 'client.addClient', config });
+      const payload = JSON.parse(config.settings).clients[0];
+      service._clients.push({
+        inboundId: config.id,
+        uuid: payload.id || '',
+        auth: payload.auth || payload.password || '',
+        email: payload.email,
+        enable: payload.enable,
+        expiryTime: payload.expiryTime || 0,
+        totalGB: payload.totalGB || 0,
+        subId: payload.subId || '',
+        flow: payload.flow || ''
+      });
+      return { success: true, msg: 'ok' };
+    },
     updateClient: async function updateClient(clientId, config) {
       service._calls.push({ type: 'client.updateClient', clientId, config });
       const payload = JSON.parse(config.settings).clients[0];
@@ -473,6 +489,24 @@ async function testGeneratedXuiAuthShouldBeAlphanumericAndTenChars() {
   assert.strictEqual(isValidXuiAuth('PnF71NOt_KdMuRCX'), false);
 }
 
+async function testAddClientByContextShouldKeepNumericDisabledState() {
+  const service = createFakeXuiService([]);
+
+  const result = await service.addClientByContext(100, 'vless', {
+    email: 'disabled@test.com-cf',
+    id: 'disabled-uuid',
+    enable: 0,
+    subId: 'disabled-sub',
+    strategy: 'cf'
+  });
+
+  assert.strictEqual(result.success, true);
+  const addCall = service._calls.find(item => item.type === 'client.addClient');
+  assert.ok(addCall, 'expected low-level addClient to be called');
+  const payload = JSON.parse(addCall.config.settings).clients[0];
+  assert.strictEqual(payload.enable, false);
+}
+
 async function testOrderAndJobPathsShouldUseUpsertUniqueClient() {
   const service = createFakeXuiService([]);
   let called = 0;
@@ -498,6 +532,7 @@ async function run() {
   await testUpdateClientByContextShouldKeepUuidWhenAuthIsEmpty();
   await testHy2ClientShouldStillCheckSubId();
   await testGeneratedXuiAuthShouldBeAlphanumericAndTenChars();
+  await testAddClientByContextShouldKeepNumericDisabledState();
   await testOrderAndJobPathsShouldUseUpsertUniqueClient();
   console.log('xui unique client sync tests passed');
 }

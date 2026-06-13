@@ -597,7 +597,7 @@ class XuiService {
       const clientObj = {
         id: options.id || this.generateUuid(),
         email: options.email || '',
-        enable: options.enable !== false,
+        enable: this.normalizeClientEnabled(options.enable),
         expiryTime: options.expiryTime || 0,
         totalGB: options.totalGB || 0,
         limitIp: options.limitIp || 0,
@@ -1269,7 +1269,7 @@ class XuiService {
       const updateClientObj = {
         id: clientInfo.uuid,
         email: email,
-        enable: options.enabled !== undefined ? options.enabled : clientInfo.enable,
+        enable: this.normalizeClientEnabled(options.enabled !== undefined ? options.enabled : clientInfo.enable),
         expiryTime: options.expiryTime !== undefined ? options.expiryTime : clientInfo.expiryTime,
         totalGB: options.totalGB !== undefined ? options.totalGB * 1073741824 : clientInfo.totalGB, // GB 转字节
         limitIp: 0,
@@ -1330,7 +1330,7 @@ class XuiService {
         strategy: options.strategy || 'direct',
         credential: options.auth || options.id || this.generateUuid(),
         email: options.email || '',
-        enable: options.enable !== false,
+        enable: this.normalizeClientEnabled(options.enable),
         expiryTime: options.expiryTime || 0,
         totalGB: options.totalGB || 0,
         limitIp: options.limitIp || 0,
@@ -1391,7 +1391,7 @@ class XuiService {
         strategy,
         credential,
         email,
-        enable: options.enabled !== undefined ? options.enabled : clientInfo.enable,
+        enable: this.normalizeClientEnabled(options.enabled !== undefined ? options.enabled : clientInfo.enable),
         expiryTime: options.expiryTime !== undefined ? options.expiryTime : clientInfo.expiryTime,
         totalGB: options.totalGB !== undefined ? options.totalGB * 1073741824 : clientInfo.totalGB,
         limitIp: 0,
