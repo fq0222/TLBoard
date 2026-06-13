@@ -6,6 +6,7 @@
 const assert = require('assert');
 const trafficManager = require('../services/shared/traffic-manager');
 const XuiService = require('../integrations/xui/xui-service');
+const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
 
 function createTrafficDb(options = {}) {
   const executedUpdates = [];
@@ -79,6 +80,51 @@ function createTrafficDb(options = {}) {
           release() {}
         };
       }
+    }
+  };
+}
+
+function createRecoveryDb() {
+  const executedUpdates = [];
+
+  return {
+    executedUpdates,
+    prepare(sql) {
+      return {
+        async get(param) {
+          if (sql.includes('pg_try_advisory_lock')) {
+            return { locked: true };
+          }
+          if (sql.includes('pg_advisory_unlock')) {
+            return { unlocked: true };
+          }
+          if (sql.includes('FROM users') && sql.includes('WHERE id = ?')) {
+            return {
+              id: Number(param),
+              email: 'restored@example.com',
+              enabled: 0,
+              traffic_used: 900,
+              traffic_limit: 1000,
+              referral_traffic_limit: 0,
+              traffic_used_at: 1710000000,
+              disable_reason: 'traffic_limit'
+            };
+          }
+          if (sql.includes('SELECT email FROM users WHERE id = ?')) {
+            return { email: 'restored@example.com' };
+          }
+          return undefined;
+        },
+        async all() {
+          if (sql.includes('FROM xui_servers')) {
+            return [];
+          }
+          return [];
+        },
+        async run(...params) {
+          executedUpdates.push({ sql, params });
+        }
+      };
     }
   };
 }
@@ -196,9 +242,43 @@ async function testPartialXuiFailureStillDisablesLocalUser() {
   }
 }
 
+async function testTrafficLimitedUserRestoresWhenUsageFallsUnderLimit() {
+  const db = createRecoveryDb();
+  const queued = [];
+  const originalEnqueueTask = xuiSyncTaskService.enqueueTask;
+
+  xuiSyncTaskService.enqueueTask = async (_db, task) => {
+    queued.push(task);
+    return 1;
+  };
+
+  try {
+    const result = await trafficManager.checkAndEnableUnderLimitUsers(db, {
+      1: {
+        email: 'restored@example.com',
+        enabled: 0,
+        trafficUsed: 900,
+        trafficLimit: 1000,
+        isOverLimit: false
+      }
+    });
+
+    assert.strictEqual(result.enabledCount, 1);
+    assert.strictEqual(db.executedUpdates.length, 1);
+    assert(db.executedUpdates[0].sql.includes('UPDATE users SET enabled = 1'));
+    assert(db.executedUpdates[0].sql.includes('disable_reason = NULL'));
+    assert(db.executedUpdates[0].sql.includes('traffic_used_at = NULL'));
+    assert.strictEqual(queued.length, 1);
+    assert.strictEqual(queued[0].taskType, xuiSyncTaskService.TASK_TYPES.ENABLE_SYNC);
+  } finally {
+    xuiSyncTaskService.enqueueTask = originalEnqueueTask;
+  }
+}
+
 async function run() {
   await testDisabledUserCompensatesWithContextUpdater();
   await testPartialXuiFailureStillDisablesLocalUser();
+  await testTrafficLimitedUserRestoresWhenUsageFallsUnderLimit();
   console.log('test-traffic-disabled-compensation: PASS');
 }
 

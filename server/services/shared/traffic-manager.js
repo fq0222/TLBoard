@@ -399,6 +399,85 @@ async function getLatestUserDisableState(db, userId) {
 }
 
 /**
+ * 检查并恢复因流量超限禁用、但当前已低于总流量上限的用户。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} userTrafficData - 本轮流量同步计算出的用户流量数据
+ * @returns {Promise<{enabledCount: number, retryCount: number}>} 本地解禁数量与待重试同步数量
+ */
+async function checkAndEnableUnderLimitUsers(db, userTrafficData) {
+  try {
+    const userIds = Object.keys(userTrafficData);
+
+    if (userIds.length === 0) {
+      logger.info('没有需要检查解禁的用户');
+      return { enabledCount: 0, retryCount: 0 };
+    }
+
+    logger.info(`开始检查 ${userIds.length} 个用户的流量解禁条件`);
+
+    let enabledCount = 0;
+    let retryCount = 0;
+    const syncUserIds = [];
+
+    for (const userId of userIds) {
+      const data = userTrafficData[userId];
+
+      if (data.isOverLimit) {
+        continue;
+      }
+
+      const lockedResult = await withUserStatusLock(db, Number(userId), async () => {
+        const latestUser = await getLatestUserDisableState(db, userId);
+        if (!latestUser) {
+          logger.info(`用户 ${data.email} 不存在，跳过解禁检查`);
+          return { success: true, action: 'skip-missing' };
+        }
+
+        const latestUsed = Number(latestUser.traffic_used) || 0;
+        const latestLimit = getTotalTrafficLimit(latestUser);
+        const canRestore = Number(latestUser.enabled) === 0
+          && latestUser.disable_reason === DISABLE_REASONS.TRAFFIC_LIMIT
+          && latestLimit > 0
+          && latestUsed < latestLimit;
+
+        if (!canRestore) {
+          return { success: true, action: 'skip-rechecked' };
+        }
+
+        await trafficRepository.enableUserAfterTrafficLimitRecovery(db, userId);
+        return { success: true, action: 'enabled' };
+      });
+
+      if (lockedResult.retryable) {
+        retryCount++;
+        logger.warn(`用户 ${data.email} 状态锁忙，等待下轮解禁检查: ${lockedResult.message}`);
+        continue;
+      }
+
+      if (lockedResult.success && lockedResult.action === 'enabled') {
+        enabledCount++;
+        syncUserIds.push(Number(userId));
+        logger.info(`用户 ${data.email} 本地解禁成功，准备同步 3X-UI 启用状态`);
+      }
+    }
+
+    for (const userId of syncUserIds) {
+      const syncResult = await enqueueUserStatusSync(db, userId, false);
+      if (syncResult.retryable) {
+        retryCount++;
+      }
+    }
+
+    logger.info(`检查用户流量解禁完成，解禁 ${enabledCount} 个用户，待重试 ${retryCount} 个用户`);
+    return { enabledCount, retryCount };
+  } catch (error) {
+    logger.error(`检查用户流量解禁错误: ${error.message}`);
+    return { enabledCount: 0, retryCount: 0 };
+  }
+}
+
+/**
  * 检查并禁用超量用户
  * @param {Object} db - 数据库实例
  * @param {Object} userTrafficData - 用户流量数据
@@ -694,6 +773,7 @@ async function syncTrafficAndHandleDisable(db) {
     }
 
     await updateTrafficInDatabase(db, userTrafficData);
+    await checkAndEnableUnderLimitUsers(db, userTrafficData);
     await checkAndDisableOverLimitUsers(db, userTrafficData, serverTrafficData);
 
     logger.info('流量同步与禁用检查任务完成');
@@ -707,6 +787,7 @@ module.exports = {
   fetchAllServerTraffic,
   calculateUserTotalTraffic,
   updateTrafficInDatabase,
+  checkAndEnableUnderLimitUsers,
   checkAndDisableOverLimitUsers,
   syncDisableStatusToXui,
   enqueueUserStatusSync,

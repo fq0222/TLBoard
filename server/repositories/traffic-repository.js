@@ -149,7 +149,7 @@ async function updateUserTrafficUsed(db, userId, trafficUsed, updatedAt) {
  */
 async function findLatestUserDisableState(db, userId) {
   return db.prepare(`
-    SELECT id, email, enabled, traffic_used, traffic_limit, referral_traffic_limit, traffic_used_at
+    SELECT id, email, enabled, traffic_used, traffic_limit, referral_traffic_limit, traffic_used_at, disable_reason
     FROM users
     WHERE id = ?
   `).get(userId);
@@ -168,6 +168,19 @@ async function disableUserByTrafficLimit(db, userId, trafficUsedAt, disableReaso
   await db.prepare(`
     UPDATE users SET enabled = 0, traffic_used_at = ?, disable_reason = ? WHERE id = ?
   `).run(trafficUsedAt, disableReason, userId);
+}
+
+/**
+ * 恢复因流量超限禁用、但当前流量已低于上限的用户。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number|string} userId - 用户 ID
+ * @returns {Promise<void>}
+ */
+async function enableUserAfterTrafficLimitRecovery(db, userId) {
+  await db.prepare(`
+    UPDATE users SET enabled = 1, traffic_used_at = NULL, disable_reason = NULL WHERE id = ?
+  `).run(userId);
 }
 
 /**
@@ -192,5 +205,6 @@ module.exports = {
   updateUserTrafficUsed,
   findLatestUserDisableState,
   disableUserByTrafficLimit,
+  enableUserAfterTrafficLimitRecovery,
   findUserEmailById
 };
