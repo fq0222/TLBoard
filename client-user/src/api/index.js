@@ -117,6 +117,14 @@ const userApi = {
   },
 
   /**
+   * 获取匿名公开设置
+   * @returns {Promise<Object>} 公开设置响应
+   */
+  getPublicSettings() {
+    return apiClient.get('/public-settings')
+  },
+
+  /**
    * 获取用户个人信息
    * @returns {Promise<Object>} 响应数据
    */
