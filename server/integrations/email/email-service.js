@@ -2,6 +2,7 @@
 const config = require('../../config')
 const { createLogger } = require('../../utils/logger')
 const emailRepository = require('../../repositories/email-repository')
+const systemSettingsService = require('../../services/admin/system-settings-service')
 
 const logger = createLogger('EMAIL-SERVICE')
 
@@ -24,12 +25,14 @@ class EmailService {
    * @returns {Promise<Object>} 配置键值对
    */
   async getConfig(db) {
-    const rows = await emailRepository.getBrevoConfigRows(db)
-    const config = {}
-    rows.forEach(row => {
-      config[row.key] = row.value
-    })
-    return config
+    const emailConfig = await systemSettingsService.getEmailConfig(db)
+    return {
+      brevo_api_key: emailConfig.api_key,
+      brevo_sender_email: emailConfig.sender_email,
+      brevo_sender_name: emailConfig.sender_name,
+      brevo_daily_limit: String(emailConfig.daily_limit),
+      brevo_campaign_daily_limit: String(emailConfig.campaign_daily_limit)
+    }
   }
 
   /**
@@ -40,10 +43,13 @@ class EmailService {
    * @returns {Promise<void>}
    */
   async saveConfig(db, config) {
-    const now = Math.floor(Date.now() / 1000)
-    for (const [key, value] of Object.entries(config)) {
-      await emailRepository.saveBrevoConfigValue(db, key, value, now)
-    }
+    await systemSettingsService.saveEmailConfig(db, {
+      api_key: config.brevo_api_key,
+      sender_email: config.brevo_sender_email,
+      sender_name: config.brevo_sender_name,
+      daily_limit: config.brevo_daily_limit,
+      campaign_daily_limit: config.brevo_campaign_daily_limit
+    })
   }
 
   /**

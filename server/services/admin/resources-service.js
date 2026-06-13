@@ -5,14 +5,10 @@ const { parsePagination } = require('../../shared/utils/pagination');
 const { getUnixTimestamp } = require('../../shared/utils/time');
 const { createLogger } = require('../../utils/logger');
 const resourcesRepository = require('../../repositories/resources-repository');
+const systemSettingsService = require('./system-settings-service');
 const { upsertUserDistribution } = require('../shared/resource-distribution-service');
 
 const logger = createLogger('ADMIN-RESOURCES');
-
-const DEFAULT_RESOURCE_CONFIG = {
-  max_file_size: 100,
-  download_speed_limit: 0
-};
 
 /**
  * 管理端资源服务。
@@ -162,25 +158,11 @@ async function requireExistingUsers(db, userIds) {
 }
 
 async function getResourceConfig(db) {
-  const configRow = await resourcesRepository.getResourceConfigRow(db);
-  if (!configRow) {
-    return DEFAULT_RESOURCE_CONFIG;
-  }
-
-  return JSON.parse(configRow.value);
+  return systemSettingsService.getResourceConfig(db);
 }
 
 async function saveResourceConfig(db, payload) {
-  const config = {
-    max_file_size: parseInt(payload.max_file_size, 10),
-    download_speed_limit: parseInt(payload.download_speed_limit, 10)
-  };
-
-  await resourcesRepository.saveResourceConfig(
-    db,
-    JSON.stringify(config),
-    getUnixTimestamp()
-  );
+  const config = await systemSettingsService.saveResourceConfig(db, payload);
 
   logger.info(`保存资源配置成功: ${JSON.stringify(config)}`);
   return config;

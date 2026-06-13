@@ -1,32 +1,7 @@
 /**
  * 资源仓储。
- * 负责 resources、resource_distributions 以及 resource_config 的数据库访问。
+ * 负责 resources 与 resource_distributions 的数据库访问。
  */
-
-async function getResourceConfigRow(db) {
-  return db.prepare("SELECT value FROM system_settings WHERE key = 'resource_config'").get();
-}
-
-/**
- * 保存资源配置。
- * system_settings 的 UPSERT 不能走 prepare().run()，否则 PostgreSQL 代理会追加 RETURNING id。
- *
- * @param {Object} db - 数据库实例
- * @param {string} value - JSON 配置字符串
- * @param {number} updatedAt - 更新时间戳
- * @returns {Promise<void>}
- */
-async function saveResourceConfig(db, value, updatedAt) {
-  await db.pool.query(
-    `
-      INSERT INTO system_settings (key, value, updated_at)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (key) DO UPDATE
-      SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
-    `,
-    ['resource_config', value, updatedAt]
-  );
-}
 
 async function countResources(db) {
   return db.prepare('SELECT COUNT(*) as count FROM resources').get();
@@ -216,8 +191,6 @@ async function createDistribution(db, payload) {
 }
 
 module.exports = {
-  getResourceConfigRow,
-  saveResourceConfig,
   countResources,
   listResources,
   findResourceById,

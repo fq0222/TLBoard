@@ -1,39 +1,8 @@
 /**
  * Email 仓储。
- * 负责 system_settings、email_templates、email_campaigns、email_logs、users、
- * resource_distributions 等与 email 模块相关的数据访问与事务操作。
+ * 负责 email_templates、email_campaigns、email_logs、users、resource_distributions
+ * 等与 email 模块相关的数据访问与事务操作。
  */
-
-/**
- * 查询 Brevo 配置项。
- *
- * @param {Object} db - 数据库实例
- * @returns {Promise<Array<{key:string,value:string}>>} 配置项列表
- */
-async function getBrevoConfigRows(db) {
-  return db.prepare(
-    "SELECT key, value FROM system_settings WHERE key LIKE 'brevo_%'"
-  ).all();
-}
-
-/**
- * 保存单个 Brevo 配置项。
- * system_settings 的 UPSERT 使用 pool.query，避免 prepare().run() 自动拼接 RETURNING。
- *
- * @param {Object} db - 数据库实例
- * @param {string} key - 配置键
- * @param {string} value - 配置值
- * @param {number} updatedAt - 更新时间戳
- * @returns {Promise<void>}
- */
-async function saveBrevoConfigValue(db, key, value, updatedAt) {
-  await db.pool.query(
-    `INSERT INTO system_settings (key, value, updated_at)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = $3`,
-    [key, value, updatedAt]
-  );
-}
 
 /**
  * 查询模板列表。
@@ -460,8 +429,6 @@ async function findLatestActiveDownloadTokenByUserId(db, userId, now) {
 }
 
 module.exports = {
-  getBrevoConfigRows,
-  saveBrevoConfigValue,
   listEmailTemplates,
   findEmailTemplateById,
   findEmailTemplateByNameLike,
