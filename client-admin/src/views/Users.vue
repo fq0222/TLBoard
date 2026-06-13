@@ -285,6 +285,12 @@ const userForm = reactive({
   expire_at: null
 })
 
+const basicInfoSnapshot = reactive({
+  enabled: true,
+  traffic_bytes: 0,
+  expire_at: null
+})
+
 // 单位到字节的转换系数
 const unitMultipliers = {
   'B': 1,
@@ -327,6 +333,47 @@ function handleUnitChange(newUnit) {
 function handleValueChange() {
   // 当用户修改数值时，更新存储的字节值
   userForm.traffic_bytes = Math.round(userForm.traffic_value * unitMultipliers[userForm.traffic_unit])
+}
+
+/**
+ * 将日期值转换成保存接口使用的秒级时间戳。
+ * 空值表示不限期，按现有接口约定提交 null。
+ */
+function toExpireTimestamp(value) {
+  return value ? Math.floor(value.getTime() / 1000) : null
+}
+
+/**
+ * 记录编辑弹窗打开时的基础信息，用于保存时只提交变化字段。
+ */
+function captureBasicInfoSnapshot() {
+  basicInfoSnapshot.enabled = !!userForm.enabled
+  basicInfoSnapshot.traffic_bytes = Number(userForm.traffic_bytes) || 0
+  basicInfoSnapshot.expire_at = toExpireTimestamp(userForm.expire_at)
+}
+
+/**
+ * 构造基础信息差异数据。
+ * 核心分支：启用状态、流量上限、到期时间分别比较；未变化字段不进入请求体。
+ */
+function buildBasicInfoChanges() {
+  const data = {}
+  const currentExpireAt = toExpireTimestamp(userForm.expire_at)
+  const currentTrafficBytes = Number(userForm.traffic_bytes) || 0
+
+  if (!!userForm.enabled !== basicInfoSnapshot.enabled) {
+    data.enabled = !!userForm.enabled
+  }
+
+  if (currentTrafficBytes !== basicInfoSnapshot.traffic_bytes) {
+    data.traffic_limit = currentTrafficBytes
+  }
+
+  if (currentExpireAt !== basicInfoSnapshot.expire_at) {
+    data.expire_at = currentExpireAt
+  }
+
+  return data
 }
 
 async function fetchUsers() {
@@ -609,6 +656,7 @@ async function showEditDialog(user) {
   // 处理到期时间：0 或 "0" 表示无限期，应设为 null
   const expireAt = Number(user.expire_at) || 0
   userForm.expire_at = expireAt > 0 ? new Date(expireAt * 1000) : null
+  captureBasicInfoSnapshot()
   
   // 获取 CF IP 池
   fetchCfIpPool()
@@ -633,20 +681,21 @@ async function showEditDialog(user) {
 
 /**
  * 单独保存用户基础信息，并同步到 3X-UI。
- * 仅提交启用状态、流量上限和到期时间，避免误更新优选 IP 配置。
+ * 仅提交发生变化的启用状态、流量上限和到期时间，避免误更新优选 IP 配置或禁用原因。
  */
 async function saveBasicInfo() {
   try {
-    basicSubmitting.value = true
-    
-    const data = {
-      enabled: userForm.enabled,
-      traffic_limit: userForm.traffic_bytes,
-      expire_at: userForm.expire_at ? Math.floor(userForm.expire_at.getTime() / 1000) : null
+    const data = buildBasicInfoChanges()
+    if (Object.keys(data).length === 0) {
+      ElMessage.info('基本信息没有变化')
+      return
     }
+
+    basicSubmitting.value = true
     await api.admin.updateUser(editingId.value, data, { timeout: EDIT_DIALOG_ACTION_TIMEOUT })
 
     ElMessage.success('基本信息更新成功')
+    captureBasicInfoSnapshot()
     fetchUsers()
   } catch (error) {
     console.error('更新基本信息失败:', error)

@@ -30,6 +30,37 @@ function getNowTimestamp() {
 }
 
 /**
+ * 将启用状态统一成布尔值，兼容数据库 0/1 和请求布尔值。
+ *
+ * @param {*} value - 原始启用状态
+ * @returns {boolean} 是否启用
+ */
+function normalizeEnabled(value) {
+  return !!value;
+}
+
+/**
+ * 将字节数统一成数字，兼容数据库字符串数字。
+ *
+ * @param {*} value - 原始字节数
+ * @returns {number} 规范化后的字节数
+ */
+function normalizeBytes(value) {
+  return Number(value) || 0;
+}
+
+/**
+ * 将到期时间统一成比较值，null、空值和 0 都视为不限期。
+ *
+ * @param {*} value - 原始秒级时间戳
+ * @returns {number} 规范化后的秒级时间戳
+ */
+function normalizeExpireAt(value) {
+  const expireAt = Number(value) || 0;
+  return expireAt > 0 ? expireAt : 0;
+}
+
+/**
  * 统计订阅缓存中的节点数量，兼容缓存为空或历史脏数据的情况。
  *
  * @param {Object|undefined} subscription - 最新订阅缓存记录
@@ -331,24 +362,25 @@ async function updateUser(db, userId, payload) {
   const updates = [];
   const values = [];
 
-  if (payload.enabled !== undefined) {
+  if (payload.enabled !== undefined && normalizeEnabled(payload.enabled) !== normalizeEnabled(user.enabled)) {
+    const nextEnabled = normalizeEnabled(payload.enabled);
     updates.push('enabled = ?');
-    values.push(payload.enabled ? 1 : 0);
+    values.push(nextEnabled ? 1 : 0);
     updates.push('disable_reason = ?');
-    values.push(payload.enabled ? null : DISABLE_REASONS.ADMIN);
+    values.push(nextEnabled ? null : DISABLE_REASONS.ADMIN);
   }
 
-  if (payload.plan_id !== undefined) {
+  if (payload.plan_id !== undefined && Number(payload.plan_id) !== Number(user.plan_id)) {
     updates.push('plan_id = ?');
     values.push(payload.plan_id);
   }
 
-  if (payload.traffic_limit !== undefined) {
+  if (payload.traffic_limit !== undefined && normalizeBytes(payload.traffic_limit) !== normalizeBytes(user.traffic_limit)) {
     updates.push('traffic_limit = ?');
     values.push(payload.traffic_limit);
   }
 
-  if (payload.expire_at !== undefined) {
+  if (payload.expire_at !== undefined && normalizeExpireAt(payload.expire_at) !== normalizeExpireAt(user.expire_at)) {
     updates.push('expire_at = ?');
     values.push(payload.expire_at);
   }

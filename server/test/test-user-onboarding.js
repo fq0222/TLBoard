@@ -35,6 +35,7 @@ function replaceMethods(target, replacements) {
     });
   };
 }
+
 /**
  * 创建管理端用户列表测试数据库桩。
  * 职责：只模拟 countUsers/listUsers 需要的查询，捕获列表 SQL 以验证字段选择。
@@ -125,6 +126,54 @@ test('admin user list marks traffic limited disabled account as renew status', a
   ]);
 });
 
+test('admin user update preserves disable reason when enabled value is unchanged', async () => {
+  const originalUser = {
+    id: 10,
+    email: 'traffic-limited@example.com',
+    plan_id: 1,
+    plan_name: '基础套餐',
+    traffic_used: 2048,
+    traffic_limit: 1024,
+    expire_at: 0,
+    enabled: 0,
+    disable_reason: DISABLE_REASONS.TRAFFIC_LIMIT,
+    created_at: 1
+  };
+  const updatedUser = {
+    ...originalUser,
+    traffic_limit: 4096
+  };
+  const updateCalls = [];
+  let detailCallCount = 0;
+
+  const restoreRepository = replaceMethods(userRepository, {
+    findUserDetailById: async () => {
+      detailCallCount += 1;
+      return detailCallCount === 1 ? originalUser : updatedUser;
+    },
+    updateUserFields: async (db, userId, updates, values) => {
+      updateCalls.push({ userId, updates, values });
+    },
+    listOnlineXuiServersForSync: async () => []
+  });
+
+  try {
+    await usersService.updateUser({}, 10, {
+      enabled: false,
+      traffic_limit: 4096
+    });
+
+    assert.equal(updateCalls.length, 1);
+    assert.deepEqual(updateCalls[0].updates, [
+      'traffic_limit = ?',
+      'updated_at = ?'
+    ]);
+    assert.equal(updateCalls[0].values[0], 4096);
+  } finally {
+    restoreRepository();
+  }
+});
+
 test('user profile exposes onboarding completed as boolean', async () => {
   const restoreRepository = replaceMethods(userRepository, {
     findUserProfileById: async () => ({
@@ -154,6 +203,7 @@ test('user profile exposes onboarding completed as boolean', async () => {
     restoreRepository();
   }
 });
+
 test('user profile marks traffic limited disabled account as renew status', async () => {
   const restoreRepository = replaceMethods(userRepository, {
     findUserProfileById: async () => ({
