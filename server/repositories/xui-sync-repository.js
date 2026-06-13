@@ -251,9 +251,9 @@ async function findUserForSyncTask(db, userId) {
  */
 async function listUsersForXuiSync(db, now) {
   return db.prepare(`
-    SELECT id, email, subscription_token, enabled, traffic_limit, referral_traffic_limit, expire_at
+    SELECT id, email, subscription_token, enabled, traffic_limit, referral_traffic_limit, expire_at, payment_count
     FROM users
-    WHERE enabled = 1 AND (expire_at = 0 OR expire_at = '0' OR expire_at IS NULL OR expire_at > ?)
+    WHERE payment_count > 0 AND (expire_at = 0 OR expire_at = '0' OR expire_at IS NULL OR expire_at > ?)
   `).all(now);
 }
 
