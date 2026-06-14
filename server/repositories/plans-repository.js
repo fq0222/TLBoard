@@ -36,20 +36,24 @@ async function createPlan(db, payload) {
     price,
     durationDays,
     trafficLimit,
+    planType,
+    showOnHome,
     sortOrder,
     enabled,
     salesLimit
   } = payload;
 
   return db.prepare(`
-    INSERT INTO plans (name, description, price, duration_days, traffic_limit, sort_order, enabled, sales_limit)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO plans (name, description, price, duration_days, traffic_limit, plan_type, show_on_home, sort_order, enabled, sales_limit)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     name,
     description,
     price,
     durationDays,
     trafficLimit,
+    planType,
+    showOnHome,
     sortOrder,
     enabled,
     salesLimit

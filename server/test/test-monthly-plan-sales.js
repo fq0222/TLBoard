@@ -63,3 +63,52 @@ test('timed renew preview reports remaining traffic and time', () => {
   assert.equal(preview.reset_traffic_limit, 20 * 1024);
   assert.equal(preview.reset_expire_at, 1702592000);
 });
+
+test('admin plan service formats plan type and show on home', async () => {
+  const plansService = require('../services/admin/plans-service');
+  const db = {
+    prepare(sql) {
+      return {
+        all() {
+          assert.match(sql, /SELECT \*/);
+          return [{
+            id: 1,
+            name: '月卡',
+            description: '',
+            price: 990,
+            duration_days: 30,
+            traffic_limit: 1024,
+            plan_type: 'timed',
+            show_on_home: 1,
+            sort_order: 0,
+            enabled: 1,
+            sales_limit: -1,
+            sales_count: 0,
+            updated_at: 1700000000,
+            created_at: 1700000000
+          }];
+        }
+      };
+    }
+  };
+
+  const result = await plansService.listPlans(db);
+  assert.equal(result.list[0].plan_type, 'timed');
+  assert.equal(result.list[0].plan_type_text, '限时套餐');
+  assert.equal(result.list[0].show_on_home, 1);
+});
+
+test('admin plan service rejects lifetime plans with duration days', async () => {
+  const plansService = require('../services/admin/plans-service');
+  await assert.rejects(
+    () => plansService.createPlan({}, {
+      name: '不限时套餐',
+      price: 1000,
+      duration_days: 30,
+      traffic_limit: 1024,
+      plan_type: 'lifetime',
+      show_on_home: 0
+    }),
+    /不限时套餐的有效天数必须为 0/
+  );
+});

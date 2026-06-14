@@ -25,6 +25,14 @@ router.post('/', authenticateAdmin, [
   body('traffic_limit')
     .isInt({ min: 0 })
     .withMessage('流量上限必须是非负整数'),
+  body('plan_type')
+    .optional()
+    .isIn(['lifetime', 'timed'])
+    .withMessage('套餐类型无效'),
+  body('show_on_home')
+    .optional()
+    .isBoolean()
+    .withMessage('show_on_home必须是布尔值'),
   body('sort_order')
     .optional()
     .isInt({ min: 0 })
@@ -55,6 +63,14 @@ router.put('/:id', authenticateAdmin, [
     .optional()
     .isInt({ min: 0 })
     .withMessage('流量上限必须是非负整数'),
+  body('plan_type')
+    .optional()
+    .isIn(['lifetime', 'timed'])
+    .withMessage('套餐类型无效'),
+  body('show_on_home')
+    .optional()
+    .isBoolean()
+    .withMessage('show_on_home必须是布尔值'),
   body('sort_order')
     .optional()
     .isInt({ min: 0 })

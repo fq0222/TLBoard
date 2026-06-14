@@ -1,5 +1,10 @@
 const { formatTraffic } = require('../../shared/utils/format-traffic');
 const plansRepository = require('../../repositories/plans-repository');
+const {
+  PLAN_TYPES,
+  normalizePlanType,
+  validatePlanDuration
+} = require('../shared/plan-type');
 
 /**
  * 管理端套餐服务。
@@ -13,6 +18,16 @@ function createLegacyBusinessError(message, options = {}) {
   error.code = options.code || 1001;
   error.data = options.data === undefined ? null : options.data;
   return error;
+}
+
+/**
+ * 获取套餐类型展示文案。
+ *
+ * @param {string|null|undefined} planType - 原始套餐类型，空值按历史不限时套餐处理
+ * @returns {string} 管理端列表展示用中文类型名
+ */
+function getPlanTypeText(planType) {
+  return normalizePlanType(planType) === PLAN_TYPES.TIMED ? '限时套餐' : '不限时套餐';
 }
 
 /**
@@ -31,6 +46,9 @@ function formatPlan(plan) {
     duration_days: plan.duration_days,
     traffic_limit: plan.traffic_limit,
     traffic_text: formatTraffic(plan.traffic_limit),
+    plan_type: normalizePlanType(plan.plan_type),
+    plan_type_text: getPlanTypeText(plan.plan_type),
+    show_on_home: plan.show_on_home === undefined ? 1 : Number(plan.show_on_home),
     sort_order: plan.sort_order,
     enabled: plan.enabled,
     sales_limit: plan.sales_limit,
@@ -56,12 +74,24 @@ async function listPlans(db) {
  * @returns {Promise<Object>} 新建套餐
  */
 async function createPlan(db, payload) {
+  const normalizedPlanType = normalizePlanType(payload.plan_type);
+  const durationCheck = validatePlanDuration({
+    plan_type: normalizedPlanType,
+    duration_days: payload.duration_days
+  });
+
+  if (!durationCheck.valid) {
+    throw createLegacyBusinessError(durationCheck.message);
+  }
+
   const result = await plansRepository.createPlan(db, {
     name: payload.name,
     description: payload.description || null,
     price: payload.price,
     durationDays: payload.duration_days,
     trafficLimit: payload.traffic_limit,
+    planType: normalizedPlanType,
+    showOnHome: payload.show_on_home === undefined ? 1 : (payload.show_on_home ? 1 : 0),
     sortOrder: payload.sort_order === undefined ? 0 : payload.sort_order,
     enabled: payload.enabled === undefined ? 1 : (payload.enabled ? 1 : 0),
     salesLimit: payload.sales_limit === undefined ? -1 : payload.sales_limit
@@ -83,6 +113,16 @@ async function updatePlan(db, planId, payload) {
   const existingPlan = await plansRepository.findPlanById(db, planId);
   if (!existingPlan) {
     throw createLegacyBusinessError('套餐不存在');
+  }
+
+  const nextPlan = {
+    ...existingPlan,
+    plan_type: payload.plan_type === undefined ? existingPlan.plan_type : normalizePlanType(payload.plan_type),
+    duration_days: payload.duration_days === undefined ? existingPlan.duration_days : payload.duration_days
+  };
+  const durationCheck = validatePlanDuration(nextPlan);
+  if (!durationCheck.valid) {
+    throw createLegacyBusinessError(durationCheck.message);
   }
 
   const updates = [];
@@ -107,6 +147,14 @@ async function updatePlan(db, planId, payload) {
   if (payload.traffic_limit !== undefined) {
     updates.push('traffic_limit = ?');
     values.push(payload.traffic_limit);
+  }
+  if (payload.plan_type !== undefined) {
+    updates.push('plan_type = ?');
+    values.push(normalizePlanType(payload.plan_type));
+  }
+  if (payload.show_on_home !== undefined) {
+    updates.push('show_on_home = ?');
+    values.push(payload.show_on_home ? 1 : 0);
   }
   if (payload.sort_order !== undefined) {
     updates.push('sort_order = ?');
