@@ -782,3 +782,100 @@ test('paid timed renew resets traffic and starts expiry from payment time', asyn
   assert.equal(result.expireAt, 1702592000);
   assert.equal(result.resetTrafficUsed, true);
 });
+
+test('paid lifetime renew enqueue payload uses final accumulated traffic limit', async () => {
+  const orderRepository = require('../repositories/order-repository');
+  const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
+  const orderService = require('../services/shared/order-service');
+  const transactionDb = { name: 'transaction-db' };
+  let enqueuedPayload = null;
+
+  const originalRepository = {
+    findPaidOrderContextByOutTradeNo: orderRepository.findPaidOrderContextByOutTradeNo,
+    findPlanById: orderRepository.findPlanById,
+    markOrderPaid: orderRepository.markOrderPaid,
+    updateUserAfterPaidOrder: orderRepository.updateUserAfterPaidOrder,
+    incrementPlanSalesCount: orderRepository.incrementPlanSalesCount,
+    decrementPlanSalesCount: orderRepository.decrementPlanSalesCount
+  };
+  const originalXuiSyncTaskService = {
+    enqueueTask: xuiSyncTaskService.enqueueTask,
+    processTask: xuiSyncTaskService.processTask
+  };
+
+  orderRepository.findPaidOrderContextByOutTradeNo = async () => ({
+    id: 50,
+    out_trade_no: 'REN-LIFETIME',
+    status: 'pending',
+    user_id: 20,
+    email: 'renew@example.com',
+    subscription_token: 'sub-token',
+    plan_id: 3,
+    current_plan_id: 3,
+    current_traffic_limit: 1024,
+    current_expire_at: 0,
+    current_enabled: 1,
+    current_disable_reason: null,
+    current_payment_count: 1,
+    trade_no: 'OLD-TRADE'
+  });
+  orderRepository.findPlanById = async () => ({
+    id: 3,
+    plan_type: 'lifetime',
+    duration_days: 0,
+    traffic_limit: 2048
+  });
+  orderRepository.markOrderPaid = async () => {};
+  orderRepository.updateUserAfterPaidOrder = async () => {};
+  orderRepository.incrementPlanSalesCount = async () => {};
+  orderRepository.decrementPlanSalesCount = async () => {};
+  xuiSyncTaskService.enqueueTask = async (db, task) => {
+    enqueuedPayload = task.payload;
+    return 88;
+  };
+  xuiSyncTaskService.processTask = () => Promise.resolve();
+
+  const db = {
+    transaction(callback) {
+      return async () => callback(transactionDb);
+    }
+  };
+
+  try {
+    await orderService.completePaidOrder(db, 'REN-LIFETIME', 'TRADE-1');
+    assert.equal(enqueuedPayload.user.total_traffic_limit, 3072);
+    assert.equal(enqueuedPayload.plan.total_traffic_limit, 3072);
+    assert.equal(enqueuedPayload.plan.traffic_limit, 3072);
+  } finally {
+    Object.assign(orderRepository, originalRepository);
+    Object.assign(xuiSyncTaskService, originalXuiSyncTaskService);
+  }
+});
+
+test('repository paid user update can reset traffic used with valid params', async () => {
+  const orderRepository = require('../repositories/order-repository');
+  let capturedSql = '';
+  let capturedValues = [];
+  const db = {
+    prepare(sql) {
+      capturedSql = sql;
+      return {
+        run(...values) {
+          capturedValues = values;
+        }
+      };
+    }
+  };
+
+  await orderRepository.updateUserAfterPaidOrder(db, {
+    userId: 9,
+    planId: 2,
+    trafficLimit: 4096,
+    expireAt: 1702592000,
+    resetTrafficUsed: true,
+    updatedAt: 1700000000
+  });
+
+  assert.match(capturedSql, /traffic_used = 0/);
+  assert.deepEqual(capturedValues, [2, 4096, 1702592000, 1700000000, 9]);
+});

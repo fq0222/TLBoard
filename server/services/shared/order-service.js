@@ -628,15 +628,20 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
     traffic_limit: newTrafficLimit,
     total_traffic_limit: newTrafficLimit
   };
+  const syncPlan = {
+    ...plan,
+    traffic_limit: newTrafficLimit,
+    total_traffic_limit: newTrafficLimit
+  };
 
   const syncTaskType = isRenewOrder
     ? xuiSyncTaskService.TASK_TYPES.RENEW_SYNC
     : xuiSyncTaskService.TASK_TYPES.INITIAL_USER_SYNC;
 
   // 支付流程不等待 3X-UI 完全成功，失败由持久化队列继续重试
-  enqueueAndTryUserSync(db, syncTaskType, userInfo, plan).catch(error => {
+  enqueueAndTryUserSync(db, syncTaskType, userInfo, syncPlan).catch(error => {
     logger.error(`创建 3X-UI 同步任务失败，降级为直接同步: ${error.message}`);
-    syncUserToXuiServers(db, userInfo, plan).catch(syncError => {
+    syncUserToXuiServers(db, userInfo, syncPlan).catch(syncError => {
       logger.error(`后台同步用户到 3X-UI 失败: ${syncError.message}`);
     });
   });
