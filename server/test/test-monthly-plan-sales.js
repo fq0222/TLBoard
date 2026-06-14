@@ -112,3 +112,102 @@ test('admin plan service rejects lifetime plans with duration days', async () =>
     /不限时套餐的有效天数必须为 0/
   );
 });
+
+test('admin plan service stores string false show on home as 0 on create', async () => {
+  const plansService = require('../services/admin/plans-service');
+  let insertValues = [];
+  const db = {
+    prepare(sql) {
+      if (/INSERT INTO plans/.test(sql)) {
+        return {
+          run(...values) {
+            insertValues = values;
+            return { lastInsertRowid: 2 };
+          }
+        };
+      }
+
+      return {
+        get() {
+          return {
+            id: 2,
+            name: '月卡',
+            description: '',
+            price: 990,
+            duration_days: 30,
+            traffic_limit: 1024,
+            plan_type: 'timed',
+            show_on_home: insertValues[6],
+            sort_order: 0,
+            enabled: 1,
+            sales_limit: -1,
+            sales_count: 0,
+            updated_at: 1700000000,
+            created_at: 1700000000
+          };
+        }
+      };
+    }
+  };
+
+  const result = await plansService.createPlan(db, {
+    name: '月卡',
+    price: 990,
+    duration_days: 30,
+    traffic_limit: 1024,
+    plan_type: 'timed',
+    show_on_home: 'false'
+  });
+
+  assert.equal(insertValues[6], 0);
+  assert.equal(result.show_on_home, 0);
+});
+
+test('admin plan service stores string 0 show on home as 0 on update', async () => {
+  const plansService = require('../services/admin/plans-service');
+  let updateValues = [];
+  const existingPlan = {
+    id: 3,
+    name: '月卡',
+    description: '',
+    price: 990,
+    duration_days: 30,
+    traffic_limit: 1024,
+    plan_type: 'timed',
+    show_on_home: 1,
+    sort_order: 0,
+    enabled: 1,
+    sales_limit: -1,
+    sales_count: 0,
+    updated_at: 1700000000,
+    created_at: 1700000000
+  };
+  const db = {
+    prepare(sql) {
+      if (/UPDATE plans SET/.test(sql)) {
+        assert.match(sql, /show_on_home = \?/);
+        return {
+          run(...values) {
+            updateValues = values;
+          }
+        };
+      }
+
+      return {
+        get() {
+          return {
+            ...existingPlan,
+            show_on_home: updateValues.length > 0 ? updateValues[0] : existingPlan.show_on_home
+          };
+        }
+      };
+    }
+  };
+
+  const result = await plansService.updatePlan(db, 3, {
+    show_on_home: '0'
+  });
+
+  assert.equal(updateValues[0], 0);
+  assert.equal(result.show_on_home, 0);
+});

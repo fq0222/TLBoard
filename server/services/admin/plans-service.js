@@ -31,6 +31,20 @@ function getPlanTypeText(planType) {
 }
 
 /**
+ * 将管理端布尔输入归一化为数据库整数。
+ *
+ * @param {boolean|string|number} value - 路由校验后的布尔值，兼容 true/false、'true'/'false'、1/0、'1'/'0'
+ * @returns {number} 明确开启返回 1，明确关闭返回 0，其他值按关闭处理
+ */
+function normalizeBooleanFlag(value) {
+  if (value === true || value === 'true' || value === 1 || value === '1') {
+    return 1;
+  }
+
+  return 0;
+}
+
+/**
  * 格式化套餐输出，统一补齐价格与流量展示字段。
  *
  * @param {Object} plan - 原始套餐记录
@@ -91,7 +105,7 @@ async function createPlan(db, payload) {
     durationDays: payload.duration_days,
     trafficLimit: payload.traffic_limit,
     planType: normalizedPlanType,
-    showOnHome: payload.show_on_home === undefined ? 1 : (payload.show_on_home ? 1 : 0),
+    showOnHome: payload.show_on_home === undefined ? 1 : normalizeBooleanFlag(payload.show_on_home),
     sortOrder: payload.sort_order === undefined ? 0 : payload.sort_order,
     enabled: payload.enabled === undefined ? 1 : (payload.enabled ? 1 : 0),
     salesLimit: payload.sales_limit === undefined ? -1 : payload.sales_limit
@@ -154,7 +168,7 @@ async function updatePlan(db, planId, payload) {
   }
   if (payload.show_on_home !== undefined) {
     updates.push('show_on_home = ?');
-    values.push(payload.show_on_home ? 1 : 0);
+    values.push(normalizeBooleanFlag(payload.show_on_home));
   }
   if (payload.sort_order !== undefined) {
     updates.push('sort_order = ?');
