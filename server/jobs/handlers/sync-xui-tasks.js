@@ -72,7 +72,7 @@ async function getLatestUserForSyncTask(db, task, payload) {
  * @param {Object} db - 数据库实例
  * @param {Object} task - 同步任务
  * @param {boolean} disable - 本次任务是否想禁用用户
- * @returns {Promise<{skip:boolean,message:string}>} 是否跳过真实同步
+ * @returns {Promise<{skip:boolean,message:string,userId:number|string|null}>} 是否跳过真实同步
  */
 async function shouldSkipStaleStatusSyncTask(db, task, disable) {
   const userId = task.user_id || task.payload_data?.user?.id;

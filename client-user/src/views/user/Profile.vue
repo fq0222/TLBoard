@@ -241,6 +241,7 @@
     <RenewDialog
       v-model:visible="showRenewDialog"
       :current-plan-id="userInfo.plan_id"
+      :submitting="renewSubmitting"
       @renew="handleRenew"
     />
 
@@ -416,6 +417,7 @@ const optimizeProgress = ref(0)
 const optimizeStatusText = ref('')
 const generatingSubscription = ref(false)
 const showRenewDialog = ref(false)
+const renewSubmitting = ref(false)
 const announcementPopupVisible = ref(false)
 const popupAnnouncement = ref(null)
 const popupClosing = ref(false)
@@ -1098,7 +1100,7 @@ function formatDate(timestamp) {
   })
 }
 
-async function handleRenew({ planId, payType, confirmReset = false }) {
+async function submitRenewRequest({ planId, payType, confirmReset = false }) {
   try {
     const response = await api.user.renew({
       plan_id: planId,
@@ -1134,10 +1136,34 @@ async function handleRenew({ planId, payType, confirmReset = false }) {
       } catch {
         return
       }
-      await handleRenew({ planId, payType, confirmReset: true })
+      await submitRenewRequest({ planId, payType, confirmReset: true })
       return
     }
     ElMessage.error(getRenewErrorMessage(error))
+  }
+}
+
+/**
+ * 处理续费提交并在父组件保持提交锁。
+ * 职责：覆盖首次提交、409 确认和确认后重试的完整生命周期，避免重复订单。
+ * 关键参数：planId/payType 来自续费弹窗当前选择。
+ * 核心分支：提交中直接忽略新的点击，直到本轮请求/确认流程结束。
+ *
+ * @param {Object} payload - 续费提交参数
+ * @param {number} payload.planId - 套餐 ID
+ * @param {number} payload.payType - 支付方式
+ * @returns {Promise<void>}
+ */
+async function handleRenew({ planId, payType }) {
+  if (renewSubmitting.value) {
+    return
+  }
+
+  renewSubmitting.value = true
+  try {
+    await submitRenewRequest({ planId, payType })
+  } finally {
+    renewSubmitting.value = false
   }
 }
 

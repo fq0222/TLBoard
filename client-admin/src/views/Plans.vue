@@ -30,7 +30,7 @@
         </el-table-column>
         <el-table-column label="有效天数">
           <template #default="scope">
-            {{ scope.row.duration_days === 0 ? '无限期' : scope.row.duration_days + '天' }}
+            {{ formatDuration(scope.row) }}
           </template>
         </el-table-column>
         <el-table-column prop="traffic_text" label="流量上限" />
@@ -203,6 +203,14 @@ function formatTime(timestamp) {
   })
 }
 
+function resolvePlanType(plan) {
+  return plan.plan_type || (Number(plan.duration_days) === 0 ? 'lifetime' : 'timed')
+}
+
+function formatDuration(plan) {
+  return resolvePlanType(plan) === 'lifetime' ? '无限期' : `${plan.duration_days}天`
+}
+
 // 监听流量值和单位变化，计算实际字节数
 watch([trafficValue, trafficUnit], () => {
   planForm.traffic_limit = Math.round(trafficValue.value * trafficUnit.value)
@@ -242,7 +250,7 @@ function showEditDialog(plan) {
   planForm.name = plan.name
   planForm.description = plan.description
   planForm.price = plan.price
-  planForm.plan_type = plan.plan_type || (Number(plan.duration_days) === 0 ? 'lifetime' : 'timed')
+  planForm.plan_type = resolvePlanType(plan)
   planForm.duration_days = plan.duration_days
   planForm.sort_order = plan.sort_order
   planForm.enabled = !!plan.enabled  // 将数字转换为布尔值

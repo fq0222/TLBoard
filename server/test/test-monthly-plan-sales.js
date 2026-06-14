@@ -972,8 +972,12 @@ test('repository expired disable update avoids top-level plans join', async () =
   const disabled = await trafficRepository.disableUserByExpired(db, 11, 'expired', 1700000000);
 
   assert.equal(disabled, true);
-  assert.doesNotMatch(capturedSql, /\n\s+FROM plans\n/);
+  const updateHeader = capturedSql.slice(0, capturedSql.indexOf('WHERE users.id'));
+  assert.doesNotMatch(updateHeader, /FROM\s+plans\b/i);
   assert.match(capturedSql, /EXISTS \(/);
+  assert.match(capturedSql, /users\.enabled = 1/);
+  assert.match(capturedSql, /users\.expire_at <= \?/);
+  assert.match(capturedSql, /COALESCE\(p\.plan_type, 'lifetime'\) = 'timed'/);
   assert.deepEqual(capturedValues, ['expired', 11, 1700000000]);
 });
 
@@ -1297,6 +1301,67 @@ test('subscription content rejects expired timed plan token', async () => {
   );
 });
 
+test('subscription content rejects timed plan token with zero expire at', async () => {
+  const subscriptionService = require('../services/user/subscription-service');
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM user_subscriptions')) {
+        return {
+          get() {
+            return {
+              sub_id: 'zero-expire-token',
+              email: 'zero-expire@example.com',
+              enabled: 1,
+              plan_type: 'timed',
+              expire_at: 0,
+              traffic_used: 0,
+              traffic_limit: 4096,
+              nodes_data: '[]'
+            };
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  await assert.rejects(
+    () => subscriptionService.getSubscriptionContent(db, 'zero-expire-token', {}),
+    /套餐已到期/
+  );
+});
+
+test('subscription info keeps admin disabled message before timed expiry message', async () => {
+  const subscriptionService = require('../services/user/subscription-service');
+  const now = Math.floor(Date.now() / 1000);
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users u') && sql.includes('LEFT JOIN plans')) {
+        return {
+          get() {
+            return {
+              id: 32,
+              email: 'admin-expired@example.com',
+              enabled: 0,
+              disable_reason: 'admin',
+              plan_type: 'timed',
+              expire_at: now - 1,
+              traffic_used: 0,
+              traffic_limit: 4096
+            };
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  await assert.rejects(
+    () => subscriptionService.getSubscriptionInfo(db, 32),
+    /账号已被禁用，请联系管理员/
+  );
+});
+
 test('subscription content keeps lifetime plan token valid with expire at zero', async () => {
   const subscriptionService = require('../services/user/subscription-service');
   const db = {
@@ -1332,6 +1397,64 @@ test('subscription content keeps lifetime plan token valid with expire at zero',
   const result = await subscriptionService.getSubscriptionContent(db, 'lifetime-token', {});
   assert.equal(result.email, 'lifetime-token@example.com');
   assert.equal(result.headers['Subscription-Userinfo'], 'upload=0; download=0; total=4096; expire=0');
+});
+
+test('xui sync worker uses payload user id for non-stale status sync', async () => {
+  const syncHandler = require('../jobs/handlers/sync-xui-tasks');
+  const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
+  const trafficManager = require('../services/shared/traffic-manager');
+  const calls = [];
+
+  const originalXuiSyncTaskService = {
+    processDueTasks: xuiSyncTaskService.processDueTasks
+  };
+  const originalTrafficManager = {
+    syncDisableStatusToXui: trafficManager.syncDisableStatusToXui
+  };
+
+  xuiSyncTaskService.processDueTasks = async (db, handler) => {
+    const result = await handler({
+      id: 203,
+      user_id: null,
+      task_type: xuiSyncTaskService.TASK_TYPES.DISABLE_SYNC,
+      payload_data: { user: { id: 42 }, disable: true }
+    });
+
+    assert.equal(result.success, true);
+    return { processed: 1, success: 1, failed: 0, finalFailed: 0 };
+  };
+  trafficManager.syncDisableStatusToXui = async (db, userId, disable) => {
+    calls.push({ userId, disable });
+    return true;
+  };
+
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users')) {
+        return {
+          get(userId) {
+            assert.equal(userId, 42);
+            return {
+              id: 42,
+              email: 'payload-user@example.com',
+              enabled: 0,
+              traffic_limit: 4096,
+              expire_at: 1700000000
+            };
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  try {
+    await syncHandler.runXuiSyncTasks(db);
+    assert.deepEqual(calls[0], { userId: 42, disable: true });
+  } finally {
+    Object.assign(xuiSyncTaskService, originalXuiSyncTaskService);
+    Object.assign(trafficManager, originalTrafficManager);
+  }
 });
 
 test('xui sync worker skips stale enable task when user is still disabled', async () => {

@@ -44,7 +44,10 @@ apiClient.interceptors.response.use(
           // 400 多为表单校验错误，交给具体页面决定如何提示，避免重复弹窗
           break
         case 409:
-          // 409 用于需要用户确认的业务分支，交给具体页面弹出确认内容。
+          // 4091 用于续费重置确认，交给续费页面弹出确认内容；其他 409 仍正常提示。
+          if (Number(data?.code) !== 4091) {
+            ElMessage.error(userMessage)
+          }
           break
         case 401:
           localStorage.removeItem('user_token')

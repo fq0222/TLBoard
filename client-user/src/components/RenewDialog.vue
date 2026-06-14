@@ -150,7 +150,7 @@
         <el-button
           type="primary"
           class="footer-button confirm-button"
-          :disabled="!selectedPlanId"
+          :disabled="!selectedPlanId || submitting"
           :loading="submitting"
           @click="handleRenew"
         >
@@ -175,6 +175,10 @@ const props = defineProps({
   currentPlanId: {
     type: Number,
     default: null
+  },
+  submitting: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -186,7 +190,6 @@ const dialogVisible = computed({
 })
 
 const loading = ref(false)
-const submitting = ref(false)
 const plans = ref([])
 const selectedPlanId = ref(null)
 const payType = ref(1)
@@ -303,21 +306,16 @@ function handleClose() {
 }
 
 async function handleRenew() {
+  if (props.submitting) {
+    return
+  }
+
   if (!selectedPlanId.value) {
     ElMessage.warning('请选择套餐')
     return
   }
 
-  submitting.value = true
-
-  try {
-    emit('renew', { planId: selectedPlanId.value, payType: payType.value })
-  } catch (error) {
-    console.error('续费失败:', error)
-    ElMessage.error('续费失败，请重试')
-  } finally {
-    submitting.value = false
-  }
+  emit('renew', { planId: selectedPlanId.value, payType: payType.value })
 }
 </script>
 
