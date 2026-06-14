@@ -206,14 +206,17 @@ async function disableUserByExpired(db, userId, disableReason, now) {
   const result = await db.prepare(`
     UPDATE users
     SET enabled = 0, disable_reason = ?
-    FROM plans
     WHERE users.id = ?
-      AND users.plan_id = plans.id
       AND users.enabled = 1
-      AND COALESCE(plans.plan_type, 'lifetime') = 'timed'
       AND users.expire_at IS NOT NULL
       AND users.expire_at != 0
       AND users.expire_at <= ?
+      AND EXISTS (
+        SELECT 1
+        FROM plans p
+        WHERE p.id = users.plan_id
+          AND COALESCE(p.plan_type, 'lifetime') = 'timed'
+      )
   `).run(disableReason, userId, now);
 
   return Number(result?.changes || 0) > 0;

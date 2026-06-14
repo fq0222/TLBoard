@@ -77,26 +77,26 @@ async function getLatestUserForSyncTask(db, task, payload) {
 async function shouldSkipStaleStatusSyncTask(db, task, disable) {
   const userId = task.user_id || task.payload_data?.user?.id;
   if (!userId) {
-    return { skip: true, message: '任务缺少用户 ID，已跳过' };
+    return { skip: true, message: '任务缺少用户 ID，已跳过', userId: null };
   }
 
   const user = await xuiSyncRepository.findUserForSyncTask(db, userId);
   if (!user) {
-    return { skip: true, message: '用户不存在，任务已跳过' };
+    return { skip: true, message: '用户不存在，任务已跳过', userId };
   }
 
   const latestEnabled = Number(user.enabled) === 1;
   if (disable && latestEnabled) {
     logger.info(`跳过过期禁用同步任务: task=${task.id}, user=${user.email}, enabled=${user.enabled}`);
-    return { skip: true, message: '用户已启用，过期禁用任务已跳过' };
+    return { skip: true, message: '用户已启用，过期禁用任务已跳过', userId };
   }
 
   if (!disable && !latestEnabled) {
     logger.info(`跳过过期启用同步任务: task=${task.id}, user=${user.email}, enabled=${user.enabled}`);
-    return { skip: true, message: '用户已禁用，过期启用任务已跳过' };
+    return { skip: true, message: '用户已禁用，过期启用任务已跳过', userId };
   }
 
-  return { skip: false, message: '' };
+  return { skip: false, message: '', userId };
 }
 
 /**
@@ -140,7 +140,7 @@ async function runXuiSyncTasks(db) {
           return { success: true, message: staleCheck.message };
         }
 
-        const ok = await trafficManager.syncDisableStatusToXui(db, task.user_id, false);
+        const ok = await trafficManager.syncDisableStatusToXui(db, staleCheck.userId, false);
         return { success: ok, message: ok ? 'ok' : '同步启用状态失败' };
       }
 
@@ -150,7 +150,7 @@ async function runXuiSyncTasks(db) {
           return { success: true, message: staleCheck.message };
         }
 
-        const ok = await trafficManager.syncDisableStatusToXui(db, task.user_id, true);
+        const ok = await trafficManager.syncDisableStatusToXui(db, staleCheck.userId, true);
         return { success: ok, message: ok ? 'ok' : '同步禁用状态失败' };
       }
 

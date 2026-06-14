@@ -953,6 +953,30 @@ test('repository paid user update can reset traffic used with valid params', asy
   assert.deepEqual(capturedValues, [2, 4096, 1702592000, 1700000000, 9]);
 });
 
+test('repository expired disable update avoids top-level plans join', async () => {
+  const trafficRepository = require('../repositories/traffic-repository');
+  let capturedSql = '';
+  let capturedValues = [];
+  const db = {
+    prepare(sql) {
+      capturedSql = sql;
+      return {
+        run(...values) {
+          capturedValues = values;
+          return { changes: 1 };
+        }
+      };
+    }
+  };
+
+  const disabled = await trafficRepository.disableUserByExpired(db, 11, 'expired', 1700000000);
+
+  assert.equal(disabled, true);
+  assert.doesNotMatch(capturedSql, /\n\s+FROM plans\n/);
+  assert.match(capturedSql, /EXISTS \(/);
+  assert.deepEqual(capturedValues, ['expired', 11, 1700000000]);
+});
+
 test('traffic manager disables expired timed users locally and queues sync', async () => {
   const trafficManager = require('../services/shared/traffic-manager');
   const now = 1700000000;
