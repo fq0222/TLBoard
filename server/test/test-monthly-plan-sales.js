@@ -371,3 +371,71 @@ test('renew plan list filters by current user plan type', async () => {
   const plans = await renewService.listRenewPlans(db, 9);
   assert.equal(plans[0].plan_type, 'timed');
 });
+
+test('renew lifetime plan query includes legacy empty plan types', async () => {
+  const planRepository = require('../repositories/plan-repository');
+  let capturedSql = '';
+  const db = {
+    prepare(sql) {
+      capturedSql = sql;
+      return {
+        all() {
+          return [];
+        }
+      };
+    }
+  };
+
+  await planRepository.findEnabledPlansByType(db, 'lifetime');
+  assert.match(capturedSql, /plan_type = 'lifetime'/);
+  assert.match(capturedSql, /plan_type IS NULL/);
+  assert.match(capturedSql, /plan_type = ''/);
+});
+
+test('renew plan list includes same type plans hidden from home', async () => {
+  const renewService = require('../services/user/renew-service');
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users WHERE id')) {
+        return {
+          get() {
+            return { id: 10, email: 'hidden@example.com', plan_id: 6 };
+          }
+        };
+      }
+      if (sql.includes('FROM plans WHERE id')) {
+        return {
+          get() {
+            return { id: 6, plan_type: 'timed', duration_days: 30 };
+          }
+        };
+      }
+      if (sql.includes('plan_type = ?')) {
+        assert.doesNotMatch(sql, /show_on_home = 1/);
+        return {
+          all(planType) {
+            assert.equal(planType, 'timed');
+            return [{
+              id: 7,
+              name: '隐藏月卡',
+              description: '',
+              price: 1290,
+              duration_days: 30,
+              traffic_limit: 2048,
+              plan_type: 'timed',
+              show_on_home: 0,
+              sort_order: 0,
+              sales_limit: -1,
+              sales_count: 0
+            }];
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  const plans = await renewService.listRenewPlans(db, 10);
+  assert.equal(plans[0].plan_type, 'timed');
+  assert.equal(plans[0].show_on_home, 0);
+});
