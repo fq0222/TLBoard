@@ -45,6 +45,20 @@ function normalizeBooleanFlag(value) {
 }
 
 /**
+ * 推断创建套餐时的套餐类型。
+ *
+ * @param {Object} payload - 创建套餐参数，读取 plan_type 和 duration_days
+ * @returns {string} 显式 plan_type 优先；缺省时 0 天按不限时套餐，其他天数按限时套餐兼容旧管理端
+ */
+function resolveCreatePlanType(payload) {
+  if (payload.plan_type !== undefined) {
+    return normalizePlanType(payload.plan_type);
+  }
+
+  return Number(payload.duration_days) === 0 ? PLAN_TYPES.LIFETIME : PLAN_TYPES.TIMED;
+}
+
+/**
  * 格式化套餐输出，统一补齐价格与流量展示字段。
  *
  * @param {Object} plan - 原始套餐记录
@@ -88,7 +102,7 @@ async function listPlans(db) {
  * @returns {Promise<Object>} 新建套餐
  */
 async function createPlan(db, payload) {
-  const normalizedPlanType = normalizePlanType(payload.plan_type);
+  const normalizedPlanType = resolveCreatePlanType(payload);
   const durationCheck = validatePlanDuration({
     plan_type: normalizedPlanType,
     duration_days: payload.duration_days

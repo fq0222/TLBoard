@@ -211,3 +211,99 @@ test('admin plan service stores string 0 show on home as 0 on update', async () 
   assert.equal(updateValues[0], 0);
   assert.equal(result.show_on_home, 0);
 });
+
+test('admin plan service infers timed plan on create when plan type is missing and duration days is positive', async () => {
+  const plansService = require('../services/admin/plans-service');
+  let insertValues = [];
+  const db = {
+    prepare(sql) {
+      if (/INSERT INTO plans/.test(sql)) {
+        return {
+          run(...values) {
+            insertValues = values;
+            return { lastInsertRowid: 4 };
+          }
+        };
+      }
+
+      return {
+        get() {
+          return {
+            id: 4,
+            name: '月卡',
+            description: '',
+            price: 990,
+            duration_days: 30,
+            traffic_limit: 1024,
+            plan_type: insertValues[5],
+            show_on_home: 1,
+            sort_order: 0,
+            enabled: 1,
+            sales_limit: -1,
+            sales_count: 0,
+            updated_at: 1700000000,
+            created_at: 1700000000
+          };
+        }
+      };
+    }
+  };
+
+  const result = await plansService.createPlan(db, {
+    name: '月卡',
+    price: 990,
+    duration_days: 30,
+    traffic_limit: 1024
+  });
+
+  assert.equal(insertValues[5], 'timed');
+  assert.equal(result.plan_type, 'timed');
+});
+
+test('admin plan service infers lifetime plan on create when plan type is missing and duration days is zero', async () => {
+  const plansService = require('../services/admin/plans-service');
+  let insertValues = [];
+  const db = {
+    prepare(sql) {
+      if (/INSERT INTO plans/.test(sql)) {
+        return {
+          run(...values) {
+            insertValues = values;
+            return { lastInsertRowid: 5 };
+          }
+        };
+      }
+
+      return {
+        get() {
+          return {
+            id: 5,
+            name: '不限时套餐',
+            description: '',
+            price: 1000,
+            duration_days: 0,
+            traffic_limit: 1024,
+            plan_type: insertValues[5],
+            show_on_home: 1,
+            sort_order: 0,
+            enabled: 1,
+            sales_limit: -1,
+            sales_count: 0,
+            updated_at: 1700000000,
+            created_at: 1700000000
+          };
+        }
+      };
+    }
+  };
+
+  const result = await plansService.createPlan(db, {
+    name: '不限时套餐',
+    price: 1000,
+    duration_days: 0,
+    traffic_limit: 1024
+  });
+
+  assert.equal(insertValues[5], 'lifetime');
+  assert.equal(result.plan_type, 'lifetime');
+});
