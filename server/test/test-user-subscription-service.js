@@ -188,6 +188,35 @@ async function testClashSubscriptionShouldUseSystemSettingsHeaders() {
 }
 
 /**
+ * 验证订阅响应头只使用当前套餐流量，不再叠加历史推广流量字段。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSubscriptionHeaderShouldIgnoreReferralTrafficLimit() {
+  const subscription = {
+    sub_id: 'sub-token-referral-traffic',
+    email: 'user@example.com',
+    enabled: 1,
+    traffic_used: 1024,
+    traffic_limit: 2048,
+    referral_traffic_limit: 4096,
+    expire_at: 1700000000,
+    nodes_data: '[]'
+  };
+
+  const result = await subscriptionService.getSubscriptionContent(
+    createFakeDb(subscription),
+    'sub-token-referral-traffic',
+    {}
+  );
+
+  assert.strictEqual(
+    result.headers['Subscription-Userinfo'],
+    'upload=0; download=1024; total=2048; expire=1700000000'
+  );
+}
+
+/**
  * 验证订阅配置缺失时管理端设置接口返回默认值。
  *
  * @returns {Promise<void>}
@@ -327,6 +356,7 @@ async function run() {
   await testDefaultSubscriptionContentShouldReturnBase64AndUserinfo();
   await testClashSubscriptionShouldRenderYaml();
   await testClashSubscriptionShouldUseSystemSettingsHeaders();
+  await testSubscriptionHeaderShouldIgnoreReferralTrafficLimit();
   await testSystemSettingsSubscriptionDefaults();
   await testSystemSettingsSubscriptionSave();
   await testDisabledSubscriptionShouldThrowBusinessError();

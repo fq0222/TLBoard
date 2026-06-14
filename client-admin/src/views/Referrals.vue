@@ -2,7 +2,7 @@
   <div class="referrals-container">
     <div class="page-header">
       <h1 class="page-title">推广管理</h1>
-      <p class="page-subtitle">查看用户推广链接、点击量、奖励流量，并管理推广开关和重置链接。</p>
+      <p class="page-subtitle">查看用户推广链接、点击量、奖励余额，并管理推广开关和重置链接。</p>
     </div>
 
     <div class="content-card">
@@ -61,9 +61,9 @@
         </el-table-column>
         <el-table-column prop="click_count" label="点击量" width="100" />
         <el-table-column prop="reward_count" label="奖励订单" width="110" />
-        <el-table-column label="奖励总流量" min-width="140">
+        <el-table-column label="奖励总余额" min-width="140">
           <template #default="{ row }">
-            <span>{{ formatTraffic(row.reward_traffic) }}</span>
+            <span>{{ formatAmount(row.reward_amount) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="推广状态" width="120">
@@ -121,8 +121,8 @@
             <strong class="summary-value">{{ detailSummary?.reward_count || 0 }}</strong>
           </div>
           <div class="summary-card summary-card-wide">
-            <span class="summary-label">奖励总流量</span>
-            <strong class="summary-value">{{ formatTraffic(detailSummary?.reward_traffic) }}</strong>
+            <span class="summary-label">奖励总余额</span>
+            <strong class="summary-value">{{ formatAmount(detailSummary?.reward_amount) }}</strong>
           </div>
         </div>
 
@@ -152,9 +152,9 @@
               <span>{{ row.out_trade_no || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="奖励流量" min-width="120">
+          <el-table-column label="奖励金额" min-width="120">
             <template #default="{ row }">
-              <span>{{ formatTraffic(row.reward_traffic) }}</span>
+              <span>{{ formatAmount(row.reward_amount) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="付款金额" min-width="110">
@@ -236,7 +236,7 @@ function formatTraffic(bytes) {
 
 function formatAmount(amount) {
   if (amount === null || amount === undefined || amount === '') {
-    return '-'
+    return '¥0.00'
   }
 
   const numericValue = Number(amount)
@@ -244,7 +244,7 @@ function formatAmount(amount) {
     return String(amount)
   }
 
-  const normalizedAmount = numericValue >= 100 ? numericValue / 100 : numericValue
+  const normalizedAmount = numericValue / 100
   return `¥${normalizedAmount.toFixed(2)}`
 }
 

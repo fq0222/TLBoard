@@ -2,7 +2,7 @@
   <div class="settings-container">
     <div class="page-header">
       <h1 class="page-title">系统设置</h1>
-      <p class="page-subtitle">管理系统设置、管理员账号和推广奖励流量</p>
+      <p class="page-subtitle">管理系统设置、管理员账号和推广奖励系数</p>
     </div>
 
     <el-tabs v-model="activeTab" class="settings-tabs">
@@ -140,28 +140,16 @@
               />
               <span class="form-hint">默认 1.0，仅影响后续新增流量统计</span>
             </el-form-item>
-            <el-form-item label="推广奖励流量">
-              <div class="traffic-input-row">
-                <el-input-number
-                  v-model="trafficForm.referral_reward_traffic_value"
-                  :min="0"
-                  :precision="2"
-                  @change="syncReferralRewardBytes"
-                />
-                <el-select
-                  v-model="trafficForm.referral_reward_traffic_unit"
-                  style="width: 120px;"
-                  @change="handleRewardUnitChange"
-                >
-                  <el-option label="B" value="B" />
-                  <el-option label="KB" value="KB" />
-                  <el-option label="MB" value="MB" />
-                  <el-option label="GB" value="GB" />
-                  <el-option label="TB" value="TB" />
-                </el-select>
-              </div>
+            <el-form-item label="推广奖励系数">
+              <el-input-number
+                v-model="trafficForm.referral_reward_coefficient"
+                :min="0"
+                :max="1"
+                :step="0.01"
+                :precision="4"
+              />
               <div class="form-block-hint">
-                支付完成后给推广人的首单奖励流量，当前按字节保存到系统设置。
+                被推广者首单支付完成后，按实付金额乘以该系数发放余额；0.1 表示 10%。
               </div>
             </el-form-item>
             <el-form-item>
@@ -376,9 +364,7 @@ const resourceSaving = ref(false)
 
 const trafficForm = reactive({
   traffic_usage_multiplier: 1,
-  referral_reward_traffic_bytes: 0,
-  referral_reward_traffic_value: 0,
-  referral_reward_traffic_unit: 'GB'
+  referral_reward_coefficient: 0.1
 })
 const trafficSaving = ref(false)
 
@@ -431,52 +417,6 @@ const adminForm = reactive({
   password: '',
   is_super: false
 })
-
-const UNIT_MULTIPLIERS = {
-  B: 1,
-  KB: 1024,
-  MB: 1024 * 1024,
-  GB: 1024 * 1024 * 1024,
-  TB: 1024 * 1024 * 1024 * 1024
-}
-
-function bytesToDisplay(bytes) {
-  const safeBytes = Number(bytes) || 0
-  if (safeBytes <= 0) {
-    return { value: 0, unit: 'GB' }
-  }
-
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let currentUnitIndex = 0
-  let currentValue = safeBytes
-
-  while (currentValue >= 1024 && currentUnitIndex < units.length - 1) {
-    currentValue /= 1024
-    currentUnitIndex += 1
-  }
-
-  return {
-    value: Math.round(currentValue * 100) / 100,
-    unit: units[currentUnitIndex]
-  }
-}
-
-function syncReferralRewardBytes() {
-  trafficForm.referral_reward_traffic_bytes = Math.round(
-    Number(trafficForm.referral_reward_traffic_value || 0) *
-    UNIT_MULTIPLIERS[trafficForm.referral_reward_traffic_unit]
-  )
-}
-
-/**
- * 切换显示单位时，始终基于原始字节值重新换算，避免多次转换产生误差。
- */
-function handleRewardUnitChange(unit) {
-  const multiplier = UNIT_MULTIPLIERS[unit] || 1
-  trafficForm.referral_reward_traffic_value = Math.round(
-    ((Number(trafficForm.referral_reward_traffic_bytes) || 0) / multiplier) * 100
-  ) / 100
-}
 
 async function fetchAdmins() {
   try {
@@ -638,10 +578,7 @@ async function loadTrafficConfig() {
     const res = await api.admin.getTrafficConfig()
     if (res.code === 0) {
       trafficForm.traffic_usage_multiplier = Number(res.data.traffic_usage_multiplier || 1)
-      trafficForm.referral_reward_traffic_bytes = Number(res.data.referral_reward_traffic || 0)
-      const rewardDisplay = bytesToDisplay(trafficForm.referral_reward_traffic_bytes)
-      trafficForm.referral_reward_traffic_value = rewardDisplay.value
-      trafficForm.referral_reward_traffic_unit = rewardDisplay.unit
+      trafficForm.referral_reward_coefficient = Number(res.data.referral_reward_coefficient ?? 0.1)
     }
   } catch (error) {
     console.error('加载流量配置失败:', error)
@@ -651,13 +588,12 @@ async function loadTrafficConfig() {
 async function saveTrafficConfig() {
   try {
     trafficSaving.value = true
-    syncReferralRewardBytes()
     const res = await api.admin.saveTrafficConfig({
       traffic_usage_multiplier: trafficForm.traffic_usage_multiplier,
-      referral_reward_traffic: trafficForm.referral_reward_traffic_bytes
+      referral_reward_coefficient: trafficForm.referral_reward_coefficient
     })
     if (res.code === 0) {
-      trafficForm.referral_reward_traffic_bytes = Number(res.data.referral_reward_traffic || 0)
+      trafficForm.referral_reward_coefficient = Number(res.data.referral_reward_coefficient ?? trafficForm.referral_reward_coefficient)
       ElMessage.success('流量配置已保存')
     } else {
       ElMessage.error(res.message)

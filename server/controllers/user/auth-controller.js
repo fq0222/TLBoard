@@ -139,6 +139,8 @@ async function getProfile(req, res) {
         traffic_used_text: profile.traffic_used_text,
         traffic_limit_text: profile.traffic_limit_text,
         traffic_percent: profile.traffic_percent,
+        balance: profile.balance,
+        balance_text: profile.balance_text,
         expire_at: profile.expire_at,
         expire_text: profile.expire_text,
         enabled: profile.enabled,

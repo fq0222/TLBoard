@@ -72,11 +72,11 @@ function formatTrafficForLog(bytes) {
 /**
  * 统一计算流量同步与禁用判断使用的总流量额度。
  *
- * @param {Object} user - 用户快照，需包含 traffic_limit/referral_traffic_limit
- * @returns {number} 套餐流量与推广流量汇总后的总上限
+ * @param {Object} user - 用户快照，需包含 traffic_limit
+ * @returns {number} 用户当前总上限，历史推广流量已由迁移并入 traffic_limit
  */
 function getTotalTrafficLimit(user) {
-  return (Number(user?.traffic_limit) || 0) + (Number(user?.referral_traffic_limit) || 0);
+  return Number(user?.traffic_limit) || 0;
 }
 
 /**

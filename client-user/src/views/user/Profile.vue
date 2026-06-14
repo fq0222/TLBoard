@@ -463,9 +463,9 @@ const trafficSummaryText = computed(() => {
   const usedTrafficText = userInfo.value.traffic_used_text || '0 B'
   const totalTrafficText = userInfo.value.total_traffic_limit_text || userInfo.value.traffic_limit_text || '0 B'
   const planTrafficText = userInfo.value.plan_traffic_limit_text || '0 B'
-  const referralTrafficText = userInfo.value.referral_traffic_limit_text || '0 B'
+  const referralBalanceText = userInfo.value.balance_text || '0.00 元'
 
-  return `${usedTrafficText} / ${totalTrafficText}（套餐：${planTrafficText} + 推广：${referralTrafficText}）`
+  return `${usedTrafficText} / ${totalTrafficText}（套餐：${planTrafficText} + 推广：${referralBalanceText}）`
 })
 
 const accountStatusText = computed(() => {
@@ -1104,6 +1104,12 @@ async function handleRenew({ planId, payType }) {
 
     const response = await api.user.renew({ plan_id: planId, pay_type: payType })
     if (response.code === 0) {
+      if (response.data?.paid && response.data?.payment_method === 'balance') {
+        ElMessage.success('余额支付成功，续费已完成')
+        await fetchUserInfo()
+        return
+      }
+
       router.push({
         path: '/payment/callback',
         query: {
@@ -1119,8 +1125,21 @@ async function handleRenew({ planId, payType }) {
     }
   } catch (error) {
     console.error('续费失败:', error)
-    ElMessage.error('续费失败，请重试')
+    ElMessage.error(getRenewErrorMessage(error))
   }
+}
+
+/**
+ * 提取续费接口错误提示。
+ * 职责：优先展示后端业务错误，例如余额不足；缺失时回退通用提示。
+ * 关键参数：error 为 axios 拦截器抛出的错误对象，可能包含 userMessage 或 response.data.message。
+ * 核心分支：业务提示存在则透传，不存在才显示兜底文案。
+ *
+ * @param {Error|Object} error - 续费接口错误对象
+ * @returns {string} 用户可见错误提示
+ */
+function getRenewErrorMessage(error) {
+  return error?.userMessage || error?.response?.data?.message || '续费失败，请重试'
 }
 
 onMounted(() => {

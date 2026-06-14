@@ -128,7 +128,7 @@ async function countReferralClicks(db, userId) {
 /**
  * 汇总用户推广奖励。
  *
- * 职责：统计奖励笔数与奖励流量总和。
+ * 职责：统计奖励笔数与奖励金额总和。
  * 关键参数：userId 为推广人用户 ID。
  * 核心分支：无奖励时 COALESCE 保证 total 为 0。
  *
@@ -138,7 +138,7 @@ async function countReferralClicks(db, userId) {
  */
 async function sumReferralRewards(db, userId) {
   return db.prepare(`
-    SELECT COUNT(*) as count, COALESCE(SUM(reward_traffic), 0) as total
+    SELECT COUNT(*) as count, COALESCE(SUM(reward_amount), 0) as total
     FROM referral_rewards
     WHERE referrer_user_id = ?
   `).get(userId);
@@ -181,7 +181,7 @@ async function listReferralRewards(db, payload) {
  * 插入推广奖励。
  *
  * 职责：记录首单奖励，唯一约束冲突由 service 识别为重复回调。
- * 关键参数：payload.referrerUserId/referredUserId/orderId/rewardTraffic 描述奖励归属与额度。
+ * 关键参数：payload.referrerUserId/referredUserId/orderId/rewardAmount 描述奖励归属与金额。
  * 核心分支：不做去重判断，依赖数据库 UNIQUE(referred_user_id/order_id)。
  *
  * @param {Object} db - 数据库实例
@@ -193,39 +193,50 @@ async function insertReferralReward(db, payload) {
     referrerUserId,
     referredUserId,
     orderId,
-    rewardTraffic
+    rewardAmount
   } = payload;
 
   return db.prepare(`
-    INSERT INTO referral_rewards (referrer_user_id, referred_user_id, order_id, reward_traffic)
+    INSERT INTO referral_rewards (referrer_user_id, referred_user_id, order_id, reward_amount)
     VALUES (?, ?, ?, ?)
-  `).run(referrerUserId, referredUserId, orderId, rewardTraffic);
+  `).run(referrerUserId, referredUserId, orderId, rewardAmount);
 }
 
 /**
- * 增加用户推广奖励流量额度。
+ * 增加用户推广奖励余额。
  *
- * 职责：将奖励流量累加到 users.referral_traffic_limit。
- * 关键参数：userId 为推广人，rewardTraffic 为本次奖励字节数。
+ * 职责：将奖励金额累加到 users.balance。
+ * 关键参数：userId 为推广人，rewardAmount 为本次奖励金额，单位分。
  * 核心分支：COALESCE 兼容历史空值。
  *
  * @param {Object} db - 数据库实例
  * @param {number} userId - 推广人用户 ID
- * @param {number} rewardTraffic - 奖励字节数
+ * @param {number} rewardAmount - 奖励金额，单位分
  * @returns {Promise<Object>} 更新结果
  */
-async function incrementUserReferralTraffic(db, userId, rewardTraffic) {
+/**
+ * 增加用户推广奖励余额。
+ * 职责：把首单奖励金额累加到 users.balance，金额单位为分。
+ * 关键参数：userId 为推广人用户 ID，rewardAmount 为本次奖励金额。
+ * 核心分支：使用 COALESCE 兼容历史余额空值。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 推广人用户 ID
+ * @param {number} rewardAmount - 奖励金额，单位分
+ * @returns {Promise<Object>} 更新结果
+ */
+async function incrementUserBalance(db, userId, rewardAmount) {
   return db.prepare(`
     UPDATE users
-    SET referral_traffic_limit = COALESCE(referral_traffic_limit, 0) + ?
+    SET balance = COALESCE(balance, 0) + ?
     WHERE id = ?
-  `).run(rewardTraffic, userId);
+  `).run(rewardAmount, userId);
 }
 
 /**
- * 读取推广奖励流量配置。
+ * 读取推广奖励系数配置。
  *
- * 职责：从 system_settings 读取 referral_reward_traffic 配置。
+ * 职责：从 system_settings 读取 referral_reward_coefficient 配置。
  * 关键参数：无业务入参。
  * 核心分支：不存在时返回空，service 视为不发放奖励。
  *
@@ -236,7 +247,7 @@ async function findReferralRewardSetting(db) {
   return db.prepare(`
     SELECT value
     FROM system_settings
-    WHERE key = 'referral_reward_traffic'
+    WHERE key = 'referral_reward_coefficient'
   `).get();
 }
 
@@ -306,13 +317,13 @@ async function listAdminReferralSummaries(db, payload) {
     SELECT
       u.id as user_id,
       u.email,
-      COALESCE(u.referral_traffic_limit, 0) as referral_traffic_limit,
+      COALESCE(u.balance, 0) as balance,
       rc.code,
       rc.enabled,
       rc.created_at as code_created_at,
       COALESCE(click_stats.click_count, 0) as click_count,
       COALESCE(reward_stats.reward_count, 0) as reward_count,
-      COALESCE(reward_stats.reward_traffic, 0) as reward_traffic
+      COALESCE(reward_stats.reward_amount, 0) as reward_amount
     FROM users u
     LEFT JOIN referral_codes rc ON rc.user_id = u.id
     LEFT JOIN (
@@ -321,12 +332,12 @@ async function listAdminReferralSummaries(db, payload) {
       GROUP BY referrer_user_id
     ) click_stats ON click_stats.referrer_user_id = u.id
     LEFT JOIN (
-      SELECT referrer_user_id, COUNT(*) as reward_count, COALESCE(SUM(reward_traffic), 0) as reward_traffic
+      SELECT referrer_user_id, COUNT(*) as reward_count, COALESCE(SUM(reward_amount), 0) as reward_amount
       FROM referral_rewards
       GROUP BY referrer_user_id
     ) reward_stats ON reward_stats.referrer_user_id = u.id
     ${whereClause}
-    ORDER BY reward_traffic DESC, click_count DESC, u.id DESC
+    ORDER BY reward_amount DESC, click_count DESC, u.id DESC
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset);
 }
@@ -407,7 +418,7 @@ module.exports = {
   sumReferralRewards,
   listReferralRewards,
   insertReferralReward,
-  incrementUserReferralTraffic,
+  incrementUserBalance,
   findReferralRewardSetting,
   listAdminReferralSummaries,
   countAdminReferralSummaries,

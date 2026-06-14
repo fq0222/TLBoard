@@ -33,7 +33,7 @@
       <div class="section-head">
         <div>
           <h2 class="section-title">推广</h2>
-          <p class="section-subtitle">分享专属链接，查看点击和奖励流量</p>
+          <p class="section-subtitle">分享专属链接，查看点击和奖励余额</p>
         </div>
         <router-link to="/user/referral" class="section-link">
           <span>查看详情</span>
@@ -63,8 +63,8 @@
             <span class="metric-value">{{ referralSummary.click_count || 0 }}</span>
           </div>
           <div class="metric-card">
-            <span class="metric-label">奖励总流量</span>
-            <span class="metric-value">{{ rewardTrafficText }}</span>
+            <span class="metric-label">奖励总余额</span>
+            <span class="metric-value">{{ rewardAmountText }}</span>
           </div>
           <div class="metric-card">
             <span class="metric-label">奖励订单数</span>
@@ -165,13 +165,22 @@ const referralSummary = ref({})
 const userInfo = computed(() => userStore.userInfo || {})
 const subscriptionReady = computed(() => !!userStore.userInfo?.subscription_ready)
 const currentPlanText = computed(() => `当前套餐：${userInfo.value.plan_name || '未订阅'}`)
-const rewardTrafficText = computed(() => {
-  if (referralSummary.value.reward_traffic_text) {
-    return referralSummary.value.reward_traffic_text
+const rewardAmountText = computed(() => {
+  if (referralSummary.value.reward_amount_text) {
+    return referralSummary.value.reward_amount_text
   }
 
-  return formatTraffic(referralSummary.value.reward_traffic)
+  return formatAmount(referralSummary.value.reward_amount)
 })
+
+function formatAmount(amount) {
+  const cents = Number(amount)
+  if (!Number.isFinite(cents) || cents <= 0) {
+    return '0.00 元'
+  }
+
+  return `${(cents / 100).toFixed(2)} 元`
+}
 
 /**
  * 格式化流量显示，兼容空值和字符串数字。

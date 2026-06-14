@@ -72,7 +72,7 @@ function bytesToGB(bytes) {
 /**
  * 统一计算同步到 3X-UI 时应使用的总流量上限。
  *
- * @param {Object} user - 用户快照，可包含 traffic_limit/referral_traffic_limit/total_traffic_limit
+ * @param {Object} user - 用户快照，可包含 traffic_limit/total_traffic_limit
  * @param {Object} [plan={}] - 套餐快照，可包含 total_traffic_limit 或 traffic_limit
  * @returns {number} 传给 3X-UI 的总字节数
  */
@@ -86,9 +86,7 @@ function getXuiTotalTrafficLimit(user, plan = {}) {
     return Number(user.total_traffic_limit);
   }
 
-  const planTrafficLimit = Number(user?.traffic_limit ?? plan?.traffic_limit) || 0;
-  const referralTrafficLimit = Number(user?.referral_traffic_limit ?? plan?.referral_traffic_limit) || 0;
-  return planTrafficLimit + referralTrafficLimit;
+  return Number(user?.traffic_limit ?? plan?.traffic_limit) || 0;
 }
 
 /**
@@ -586,8 +584,7 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
     subscription_token: order.subscription_token,
     expire_at: expireAt,
     traffic_limit: newTrafficLimit,
-    referral_traffic_limit: Number(order.current_referral_traffic_limit || 0),
-    total_traffic_limit: newTrafficLimit + (Number(order.current_referral_traffic_limit) || 0)
+    total_traffic_limit: newTrafficLimit
   };
 
   const syncTaskType = isRenewOrder

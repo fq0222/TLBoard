@@ -2,7 +2,7 @@ const { getUnixTimestamp } = require('../../shared/utils/time');
 const systemSettingsRepository = require('../../repositories/system-settings-repository');
 
 const TRAFFIC_USAGE_MULTIPLIER_KEY = 'traffic_usage_multiplier';
-const REFERRAL_REWARD_TRAFFIC_KEY = 'referral_reward_traffic';
+const REFERRAL_REWARD_COEFFICIENT_KEY = 'referral_reward_coefficient';
 const CLASH_CONFIG_NAME_KEY = 'clash_config_name';
 const CLASH_PROFILE_UPDATE_INTERVAL_KEY = 'clash_profile_update_interval';
 const TELEGRAM_CHANNEL_URL_KEY = 'telegram_channel_url';
@@ -15,7 +15,7 @@ const BREVO_CAMPAIGN_DAILY_LIMIT_KEY = 'brevo_campaign_daily_limit';
 const RESOURCE_CONFIG_KEY = 'resource_config';
 
 const DEFAULT_TRAFFIC_USAGE_MULTIPLIER = 1.0;
-const DEFAULT_REFERRAL_REWARD_TRAFFIC = 0;
+const DEFAULT_REFERRAL_REWARD_COEFFICIENT = 0.1;
 const DEFAULT_CLASH_CONFIG_NAME = '天涯大陆';
 const DEFAULT_CLASH_PROFILE_UPDATE_INTERVAL = 2;
 const DEFAULT_EMAIL_CONFIG = {
@@ -103,23 +103,23 @@ function normalizeNonNegativeInteger(value, defaultValue) {
  * 读取流量配置。
  *
  * @param {Object} db - 数据库实例
- * @returns {Promise<{traffic_usage_multiplier:number,referral_reward_traffic:number}>} 流量配置
+ * @returns {Promise<{traffic_usage_multiplier:number,referral_reward_coefficient:number}>} 流量配置
  */
 async function getTrafficConfig(db) {
   const settings = await systemSettingsRepository.findSettingsByKeys(db, [
     TRAFFIC_USAGE_MULTIPLIER_KEY,
-    REFERRAL_REWARD_TRAFFIC_KEY
+    REFERRAL_REWARD_COEFFICIENT_KEY
   ]);
   const trafficUsageMultiplier = Number(settings[TRAFFIC_USAGE_MULTIPLIER_KEY]);
-  const referralRewardTraffic = Number(settings[REFERRAL_REWARD_TRAFFIC_KEY]);
+  const referralRewardCoefficient = Number(settings[REFERRAL_REWARD_COEFFICIENT_KEY]);
 
   return {
     traffic_usage_multiplier: Number.isFinite(trafficUsageMultiplier) && trafficUsageMultiplier >= 0
       ? trafficUsageMultiplier
       : DEFAULT_TRAFFIC_USAGE_MULTIPLIER,
-    referral_reward_traffic: Number.isFinite(referralRewardTraffic) && referralRewardTraffic >= 0
-      ? Math.floor(referralRewardTraffic)
-      : DEFAULT_REFERRAL_REWARD_TRAFFIC
+    referral_reward_coefficient: Number.isFinite(referralRewardCoefficient) && referralRewardCoefficient >= 0
+      ? referralRewardCoefficient
+      : DEFAULT_REFERRAL_REWARD_COEFFICIENT
   };
 }
 
@@ -129,18 +129,18 @@ async function getTrafficConfig(db) {
  * @param {Object} db - 数据库实例
  * @param {Object} payload - 流量配置
  * @param {number} payload.traffic_usage_multiplier - 流量统计倍率
- * @param {number} payload.referral_reward_traffic - 推广奖励流量字节数
+ * @param {number} payload.referral_reward_coefficient - 推广奖励系数，例如 0.1 表示 10%
  * @returns {Promise<Object>} 保存后的流量配置
  */
 async function saveTrafficConfig(db, payload) {
   const config = {
     traffic_usage_multiplier: Number(payload.traffic_usage_multiplier),
-    referral_reward_traffic: Math.floor(Number(payload.referral_reward_traffic))
+    referral_reward_coefficient: Number(payload.referral_reward_coefficient)
   };
 
   await Promise.all([
     saveSystemSettingValue(db, TRAFFIC_USAGE_MULTIPLIER_KEY, config.traffic_usage_multiplier),
-    saveSystemSettingValue(db, REFERRAL_REWARD_TRAFFIC_KEY, config.referral_reward_traffic)
+    saveSystemSettingValue(db, REFERRAL_REWARD_COEFFICIENT_KEY, config.referral_reward_coefficient)
   ]);
 
   return config;
@@ -321,7 +321,7 @@ async function getOnlineCustomerServiceUrl(db) {
 module.exports = {
   keys: {
     TRAFFIC_USAGE_MULTIPLIER_KEY,
-    REFERRAL_REWARD_TRAFFIC_KEY,
+    REFERRAL_REWARD_COEFFICIENT_KEY,
     CLASH_CONFIG_NAME_KEY,
     CLASH_PROFILE_UPDATE_INTERVAL_KEY,
     TELEGRAM_CHANNEL_URL_KEY,

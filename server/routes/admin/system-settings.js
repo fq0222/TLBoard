@@ -12,9 +12,9 @@ router.put('/traffic', authenticateAdmin, [
   body('traffic_usage_multiplier')
     .isFloat({ min: 0, max: 100 })
     .withMessage('流量统计倍率必须是 0 到 100 之间的数字'),
-  body('referral_reward_traffic')
-    .isInt({ min: 0 })
-    .withMessage('推广奖励流量必须是大于等于 0 的整数')
+  body('referral_reward_coefficient')
+    .isFloat({ min: 0, max: 1 })
+    .withMessage('推广奖励系数必须是 0 到 1 之间的数字')
 ], systemSettingsController.saveTrafficConfig);
 
 router.get('/email', authenticateAdmin, systemSettingsController.getEmailConfig);

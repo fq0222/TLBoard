@@ -2,7 +2,7 @@
  * 数据库迁移脚本：011-referral-system
  *
  * 变更内容：
- * 1. users 表新增 referral_traffic_limit 字段，记录推广奖励流量额度。
+ * 1. users 表新增 referral_traffic_limit 字段，兼容历史推广流量额度。
  * 2. orders 表新增 referrer_user_id 字段，记录订单归属的推荐人。
  * 3. 新增推广码、推广点击、推广奖励三张表及查询索引。
  *
@@ -92,7 +92,7 @@ async function up(pool) {
         referrer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         referred_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-        reward_traffic BIGINT NOT NULL,
+        reward_amount INTEGER NOT NULL DEFAULT 0,
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
         UNIQUE(referred_user_id),
         UNIQUE(order_id)

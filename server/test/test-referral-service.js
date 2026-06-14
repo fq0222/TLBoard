@@ -5,6 +5,7 @@ const referralService = require('../services/referral-service');
 const userRepository = require('../repositories/user-repository');
 const orderRepository = require('../repositories/order-repository');
 const authService = require('../services/user/auth-service');
+const renewService = require('../services/user/renew-service');
 const authRouter = require('../routes/user/auth');
 const orderService = require('../services/shared/order-service');
 const vmqService = require('../integrations/vmq/vmq-service');
@@ -314,28 +315,29 @@ async function testRecordClickSkipsInvalidCode() {
 }
 
 /**
- * 验证首单奖励会插入奖励并增加推广人奖励流量。
+ * 验证首单奖励会按订单金额和奖励系数插入奖励并增加推广人余额。
  *
  * @returns {Promise<void>}
  */
-async function testIssueFirstPaymentRewardGrantsTraffic() {
+async function testIssueFirstPaymentRewardGrantsBalance() {
   const calls = [];
 
   await withRepositoryMocks({
-    findReferralRewardSetting: async () => ({ value: String(2 * 1024 * 1024 * 1024) }),
+    findReferralRewardSetting: async () => ({ value: '0.1' }),
     insertReferralReward: async (db, payload) => {
       calls.push(['insert', payload]);
       return { lastInsertRowid: 7 };
     },
-    incrementUserReferralTraffic: async (db, userId, rewardTraffic) => {
-      calls.push(['increment', { userId, rewardTraffic }]);
+    incrementUserBalance: async (db, userId, rewardAmount) => {
+      calls.push(['increment', { userId, rewardAmount }]);
       return { changes: 1 };
     }
   }, async () => {
     const result = await referralService.issueFirstPaymentReward({}, {
       id: 55,
       user_id: 20,
-      referrer_user_id: 12
+      referrer_user_id: 12,
+      amount: 699
     });
 
     assert.strictEqual(result, true);
@@ -343,7 +345,8 @@ async function testIssueFirstPaymentRewardGrantsTraffic() {
     assert.strictEqual(calls[0][1].referrerUserId, 12);
     assert.strictEqual(calls[0][1].referredUserId, 20);
     assert.strictEqual(calls[0][1].orderId, 55);
-    assert.strictEqual(calls[1][1].rewardTraffic, 2 * 1024 * 1024 * 1024);
+    assert.strictEqual(calls[0][1].rewardAmount, 69);
+    assert.strictEqual(calls[1][1].rewardAmount, 69);
   });
 }
 
@@ -373,7 +376,7 @@ async function testIssueFirstPaymentRewardSkipsMissingReferrer() {
       calls.insertReward += 1;
       return { lastInsertRowid: 1 };
     },
-    incrementUserReferralTraffic: async () => {
+    incrementUserBalance: async () => {
       calls.incrementTraffic += 1;
       return { changes: 1 };
     }
@@ -424,18 +427,19 @@ async function testIssueFirstPaymentRewardHandlesDuplicateConflict() {
   duplicateError.constraint = 'referral_rewards_order_id_key';
 
   await withRepositoryMocks({
-    findReferralRewardSetting: async () => ({ value: '1024' }),
+    findReferralRewardSetting: async () => ({ value: '0.1' }),
     insertReferralReward: async () => {
       throw duplicateError;
     },
-    incrementUserReferralTraffic: async () => {
+    incrementUserBalance: async () => {
       incremented = true;
     }
   }, async () => {
     const result = await referralService.issueFirstPaymentReward({}, {
       id: 55,
       user_id: 20,
-      referrer_user_id: 12
+      referrer_user_id: 12,
+      amount: 1000
     });
 
     assert.strictEqual(result, false);
@@ -448,7 +452,7 @@ async function testIssueFirstPaymentRewardHandlesDuplicateConflict() {
  *
  * Responsibility: keep unrelated database uniqueness failures visible to callers.
  * Key params: mocked insertReferralReward throws a 23505 for another table.
- * Branches: non referral_rewards conflicts must be rethrown and must not increment traffic.
+ * Branches: non referral_rewards conflicts must be rethrown and must not increment balance.
  *
  * @returns {Promise<void>}
  */
@@ -459,11 +463,11 @@ async function testIssueFirstPaymentRewardRethrowsUnrelatedUniqueConflict() {
   duplicateError.constraint = 'users_email_key';
 
   await withRepositoryMocks({
-    findReferralRewardSetting: async () => ({ value: '1024' }),
+    findReferralRewardSetting: async () => ({ value: '0.1' }),
     insertReferralReward: async () => {
       throw duplicateError;
     },
-    incrementUserReferralTraffic: async () => {
+    incrementUserBalance: async () => {
       incremented = true;
     }
   }, async () => {
@@ -471,7 +475,8 @@ async function testIssueFirstPaymentRewardRethrowsUnrelatedUniqueConflict() {
       () => referralService.issueFirstPaymentReward({}, {
         id: 55,
         user_id: 20,
-        referrer_user_id: 12
+        referrer_user_id: 12,
+        amount: 1000
       }),
       duplicateError
     );
@@ -481,7 +486,7 @@ async function testIssueFirstPaymentRewardRethrowsUnrelatedUniqueConflict() {
 }
 
 /**
- * 验证用户汇总会创建缺失推广码，并格式化奖励流量。
+ * 验证用户汇总会创建缺失推广码，并格式化奖励金额。
  *
  * @returns {Promise<void>}
  */
@@ -502,7 +507,7 @@ async function testGetUserReferralSummaryCreatesCodeAndFormatsTraffic() {
     countReferralClicks: async () => ({ count: 3 }),
     sumReferralRewards: async () => ({
       count: 2,
-      total: String(3 * 1024 * 1024 * 1024)
+      total: 123
     })
   }, async () => {
     const result = await referralService.getUserReferralSummary(
@@ -519,8 +524,8 @@ async function testGetUserReferralSummaryCreatesCodeAndFormatsTraffic() {
     assert(result.referral_url.endsWith('/?ref=feedfacefeedface'));
     assert.strictEqual(result.click_count, 3);
     assert.strictEqual(result.reward_count, 2);
-    assert.strictEqual(result.reward_traffic, String(3 * 1024 * 1024 * 1024));
-    assert.strictEqual(result.reward_traffic_text, '3 GB');
+    assert.strictEqual(result.reward_amount, 123);
+    assert.strictEqual(result.reward_amount_text, '1.23 元');
   });
 }
 
@@ -1138,7 +1143,6 @@ async function testCompletePaidOrderIssuesRewardOnlyForFirstAttributedPurchase()
     plan_id: 3,
     current_expire_at: 0,
     current_traffic_limit: 0,
-    current_referral_traffic_limit: 512,
     current_plan_id: null,
     current_enabled: 1,
     current_disable_reason: null,
@@ -1200,10 +1204,126 @@ async function testCompletePaidOrderIssuesRewardOnlyForFirstAttributedPurchase()
         assert.strictEqual(rewardCalls[0].db, transactionDb);
         assert.strictEqual(rewardCalls[0].order.id, 55);
         assert.ok(enqueuedTasks.length >= 1);
-        assert.strictEqual(enqueuedTasks[0].payload.user.total_traffic_limit, 1536);
+        assert.strictEqual(enqueuedTasks[0].payload.user.total_traffic_limit, 1024);
       });
     });
   });
+}
+
+/**
+ * 验证余额支付续费会扣除余额并直接完成订单，不创建 VMQ 订单。
+ *
+ * 职责：覆盖 renewService 的余额支付分支，避免余额续费误走外部支付。
+ * 关键参数：pay_type=9 表示余额支付，用户余额大于套餐价格。
+ * 核心分支：事务内创建订单和扣余额，事务后调用统一订单完结逻辑。
+ *
+ * @returns {Promise<void>}
+ */
+async function testBalanceRenewCompletesWithoutVmq() {
+  const transactionDb = { name: 'balance-renew-transaction-db' };
+  const calls = [];
+
+  await withObjectMocks(orderRepository, {
+    findUserById: async () => ({
+      id: 8,
+      email: 'user@example.com',
+      plan_id: 1,
+      enabled: 1,
+      disable_reason: null,
+      traffic_limit: 1024,
+      balance: 2000
+    }),
+    findEnabledPlanById: async () => ({
+      id: 2,
+      price: 1500,
+      traffic_limit: 2048,
+      duration_days: 30,
+      sales_limit: -1,
+      sales_count: 0
+    }),
+    createPendingRenewOrder: async (db, payload) => {
+      calls.push(['createOrder', db, payload]);
+      return { lastInsertRowid: 66 };
+    },
+    decrementUserBalance: async (db, payload) => {
+      calls.push(['decrementBalance', db, payload]);
+      return { changes: 1 };
+    }
+  }, async () => {
+    await withObjectMocks(orderService, {
+      completePaidOrder: async (db, outTradeNo, tradeNo) => {
+        calls.push(['completeOrder', db, { outTradeNo, tradeNo }]);
+        return { handled: true };
+      }
+    }, async () => {
+      await withObjectMocks(vmqService, {
+        createOrder: async () => {
+          throw new Error('VMQ should not be called for balance payment');
+        }
+      }, async () => {
+        const result = await renewService.createRenewOrder(
+          createTransactionDb(transactionDb),
+          8,
+          { plan_id: 2, pay_type: 9 }
+        );
+
+        assert.strictEqual(result.order_id, 66);
+        assert.strictEqual(result.payment_method, 'balance');
+        assert.strictEqual(result.paid, true);
+        assert.strictEqual(calls[0][0], 'createOrder');
+        assert.strictEqual(calls[0][1], transactionDb);
+        assert.strictEqual(calls[0][2].amount, 1500);
+        assert.strictEqual(calls[1][0], 'decrementBalance');
+        assert.strictEqual(calls[1][1], transactionDb);
+        assert.deepStrictEqual(calls[1][2], { userId: 8, amount: 1500 });
+        assert.strictEqual(calls[2][0], 'completeOrder');
+        assert.ok(calls[2][2].tradeNo.startsWith('BALANCE-'));
+      });
+    });
+  });
+}
+
+/**
+ * 验证余额不足时续费会返回业务错误且不会创建订单。
+ *
+ * 职责：覆盖余额支付的失败分支，防止余额不足时生成待支付订单。
+ * 关键参数：pay_type=9 且 users.balance 小于套餐 price。
+ * 核心分支：服务层在事务前拒绝请求，错误码为 4001。
+ *
+ * @returns {Promise<void>}
+ */
+async function testBalanceRenewRejectsInsufficientBalance() {
+  let createdOrder = false;
+
+  await withObjectMocks(orderRepository, {
+    findUserById: async () => ({
+      id: 8,
+      email: 'user@example.com',
+      plan_id: 1,
+      enabled: 1,
+      disable_reason: null,
+      traffic_limit: 1024,
+      balance: 100
+    }),
+    findEnabledPlanById: async () => ({
+      id: 2,
+      price: 1500,
+      traffic_limit: 2048,
+      duration_days: 30,
+      sales_limit: -1,
+      sales_count: 0
+    }),
+    createPendingRenewOrder: async () => {
+      createdOrder = true;
+    }
+  }, async () => {
+    await assert.rejects(
+      () => renewService.createRenewOrder({}, 8, { plan_id: 2, pay_type: 9 }),
+      (error) => error.isLegacyBusinessError && error.code === 4001 && error.message.includes('余额不足')
+    );
+  });
+
+  assert.strictEqual(createdOrder, false);
 }
 
 async function main() {
@@ -1211,7 +1331,7 @@ async function main() {
   await testResolveReferrerRejectsInvalidOrSelfReferral();
   await testRecordClickPersistsEnabledCode();
   await testRecordClickSkipsInvalidCode();
-  await testIssueFirstPaymentRewardGrantsTraffic();
+  await testIssueFirstPaymentRewardGrantsBalance();
   await testIssueFirstPaymentRewardSkipsMissingReferrer();
   await testIssueFirstPaymentRewardSkipsZeroReward();
   await testIssueFirstPaymentRewardHandlesDuplicateConflict();
@@ -1232,6 +1352,8 @@ async function main() {
   await testRegisterAndPayKeepsOrderingWhenReferralCodeIsInvalid();
   await testRegisterAndPayValidatorAllowsMissingReferralCode();
   await testCompletePaidOrderIssuesRewardOnlyForFirstAttributedPurchase();
+  await testBalanceRenewCompletesWithoutVmq();
+  await testBalanceRenewRejectsInsufficientBalance();
   console.log('referral service tests passed');
 }
 

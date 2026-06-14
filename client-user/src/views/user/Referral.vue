@@ -3,8 +3,8 @@
     <section class="hero-card">
       <div class="hero-copy">
         <div class="hero-badge">推广中心</div>
-        <h1 class="hero-title">分享链接，赚取奖励流量</h1>
-        <p class="hero-desc">查看谁通过你的推广链接完成付款、累计获得多少奖励，以及每一笔奖励的到账时间。</p>
+        <h1 class="hero-title">分享链接，赚取奖励余额</h1>
+        <p class="hero-desc">查看谁通过你的推广链接完成付款、累计获得多少余额奖励，以及每一笔奖励的到账时间。</p>
       </div>
 
     </section>
@@ -14,7 +14,7 @@
         <div class="panel-head link-card-head">
           <div>
             <h2 class="panel-title">专属推广链接</h2>
-            <p class="panel-subtitle">复制后分享给新用户，对方完成首单支付后会给你发放奖励流量。</p>
+            <p class="panel-subtitle">复制后分享给新用户，对方完成首单支付后会给你发放奖励余额。</p>
           </div>
         </div>
 
@@ -51,8 +51,8 @@
             <span class="stat-value">{{ summary.reward_count || 0 }}</span>
           </div>
           <div class="stat-item stat-item-wide">
-            <span class="stat-label">奖励总流量</span>
-            <span class="stat-value">{{ rewardTrafficText }}</span>
+            <span class="stat-label">奖励总余额</span>
+            <span class="stat-value">{{ rewardAmountText }}</span>
           </div>
         </div>
       </article>
@@ -83,9 +83,9 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="奖励流量" min-width="120">
+        <el-table-column label="奖励金额" min-width="120">
           <template #default="{ row }">
-            <span>{{ formatTraffic(row.reward_traffic) }}</span>
+            <span>{{ formatAmount(row.reward_amount) }}</span>
           </template>
         </el-table-column>
 
@@ -129,12 +129,12 @@ const pagination = reactive({
   total: 0
 })
 
-const rewardTrafficText = computed(() => {
-  if (summary.value.reward_traffic_text) {
-    return summary.value.reward_traffic_text
+const rewardAmountText = computed(() => {
+  if (summary.value.reward_amount_text) {
+    return summary.value.reward_amount_text
   }
 
-  return formatTraffic(summary.value.reward_traffic)
+  return formatAmount(summary.value.reward_amount)
 })
 
 /**
@@ -167,7 +167,7 @@ function formatTraffic(bytes) {
  */
 function formatAmount(amount) {
   if (amount === null || amount === undefined || amount === '') {
-    return '-'
+    return '¥0.00'
   }
 
   const numericValue = Number(amount)
@@ -175,7 +175,7 @@ function formatAmount(amount) {
     return String(amount)
   }
 
-  const normalizedAmount = numericValue >= 100 ? numericValue / 100 : numericValue
+  const normalizedAmount = numericValue / 100
   return `¥${normalizedAmount.toFixed(2)}`
 }
 

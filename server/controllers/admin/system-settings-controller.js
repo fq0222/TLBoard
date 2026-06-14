@@ -63,11 +63,11 @@ async function saveTrafficConfig(req, res) {
   try {
     const data = await systemSettingsService.saveTrafficConfig(req.app.locals.db, {
       traffic_usage_multiplier: Number(req.body.traffic_usage_multiplier),
-      referral_reward_traffic: Math.floor(Number(req.body.referral_reward_traffic))
+      referral_reward_coefficient: Number(req.body.referral_reward_coefficient)
     });
 
     logger.info(
-      `保存流量配置成功: multiplier=${data.traffic_usage_multiplier}, referralRewardTraffic=${data.referral_reward_traffic}`
+      `保存流量配置成功: multiplier=${data.traffic_usage_multiplier}, referralRewardCoefficient=${data.referral_reward_coefficient}`
     );
     return legacySuccess(res, data);
   } catch (error) {

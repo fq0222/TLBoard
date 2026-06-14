@@ -264,19 +264,18 @@ function formatTraffic(bytes) {
 }
 
 /**
- * 统一计算用户的套餐流量、推广流量和总流量。
+ * 统一计算用户的套餐流量和总流量。
  *
- * @param {Object} user - 用户记录，需包含 traffic_limit 和 referral_traffic_limit
+ * @param {Object} user - 用户记录，需包含 traffic_limit
  * @returns {{planTrafficLimit:number,referralTrafficLimit:number,totalTrafficLimit:number}} 流量权益汇总
  */
 function getUserTrafficEntitlement(user) {
   const planTrafficLimit = Number(user?.traffic_limit) || 0;
-  const referralTrafficLimit = Number(user?.referral_traffic_limit) || 0;
 
   return {
     planTrafficLimit,
-    referralTrafficLimit,
-    totalTrafficLimit: planTrafficLimit + referralTrafficLimit
+    referralTrafficLimit: 0,
+    totalTrafficLimit: planTrafficLimit
   };
 }
 
@@ -586,6 +585,8 @@ async function getProfile(db, userId) {
     traffic_used_text: formatTraffic(user.traffic_used),
     traffic_limit_text: formatTraffic(totalTrafficLimit),
     traffic_percent: trafficPercent,
+    balance: Number(user.balance) || 0,
+    balance_text: `${((Number(user.balance) || 0) / 100).toFixed(2)} 元`,
     expire_at: user.expire_at,
     expire_text: formatTime(user.expire_at),
     enabled: user.enabled,

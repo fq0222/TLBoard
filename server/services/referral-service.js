@@ -36,6 +36,25 @@ function formatTraffic(bytes) {
 }
 
 /**
+ * 格式化金额。
+ *
+ * 职责：将分单位金额转换成元文本。
+ * 关键参数：amount 可为 null、undefined、数字或数字字符串。
+ * 核心分支：空值、非数字和小于等于 0 时显示 0.00 元。
+ *
+ * @param {*} amount - 金额，单位分
+ * @returns {string} 格式化后的金额文本
+ */
+function formatAmount(amount) {
+  const cents = Number(amount);
+  if (!Number.isFinite(cents) || cents <= 0) {
+    return '0.00 元';
+  }
+
+  return `${(cents / 100).toFixed(2)} 元`;
+}
+
+/**
  * 生成推广码。
  *
  * 职责：生成不可预测的十六进制推广码。
@@ -165,7 +184,7 @@ function buildReferralLink(req, code) {
 /**
  * 获取用户推广汇总。
  *
- * 职责：聚合推广码、推广链接、点击数、奖励笔数和奖励流量。
+ * 职责：聚合推广码、推广链接、点击数、奖励笔数和奖励余额。
  * 关键参数：req 用于生成 referral_url，userId 为当前用户 ID。
  * 核心分支：推广码缺失时自动创建；统计缺失时使用 0 兜底。
  *
@@ -179,7 +198,7 @@ async function getUserReferralSummary(db, req, userId, codeFactory = generateRef
   const referralCode = await getOrCreateReferralCode(db, userId, codeFactory);
   const clickRow = await referralRepository.countReferralClicks(db, userId);
   const rewardRow = await referralRepository.sumReferralRewards(db, userId);
-  const rewardTraffic = rewardRow && rewardRow.total !== undefined ? rewardRow.total : 0;
+  const rewardAmount = Number(rewardRow && rewardRow.total !== undefined ? rewardRow.total : 0);
 
   return {
     code: referralCode.code,
@@ -187,8 +206,8 @@ async function getUserReferralSummary(db, req, userId, codeFactory = generateRef
     referral_url: buildReferralLink(req, referralCode.code),
     click_count: Number((clickRow && clickRow.count) || 0),
     reward_count: Number((rewardRow && rewardRow.count) || 0),
-    reward_traffic: rewardTraffic,
-    reward_traffic_text: formatTraffic(rewardTraffic)
+    reward_amount: Number.isFinite(rewardAmount) ? rewardAmount : 0,
+    reward_amount_text: formatAmount(rewardAmount)
   };
 }
 
@@ -286,7 +305,7 @@ function isReferralRewardUniqueConstraintError(error) {
 /**
  * 发放首单推广奖励。
  *
- * 职责：支付成功后按配置给推广人增加奖励流量。
+ * 职责：支付成功后按配置给推广人增加奖励余额。
  * 关键参数：order.id 为订单 ID，order.user_id 为被推荐人，order.referrer_user_id 为推广人。
  * 核心分支：无推广人或奖励配置小于等于 0 返回 false；唯一约束冲突视为重复回调返回 false。
  *
@@ -300,10 +319,19 @@ async function issueFirstPaymentReward(db, order) {
   }
 
   const setting = await referralRepository.findReferralRewardSetting(db);
-  const rewardTraffic = Number(setting && setting.value);
-  if (!Number.isFinite(rewardTraffic) || rewardTraffic <= 0) {
+  const rewardCoefficient = Number(setting && setting.value);
+  if (!Number.isFinite(rewardCoefficient) || rewardCoefficient <= 0) {
     logger.warn(
       `跳过首单推广奖励: order=${order.id}, referrer=${order.referrer_user_id}, setting=${setting ? setting.value : 'missing'}`
+    );
+    return false;
+  }
+
+  const orderAmount = Number(order.amount);
+  const rewardAmount = Math.floor(orderAmount * rewardCoefficient);
+  if (!Number.isFinite(orderAmount) || orderAmount <= 0 || rewardAmount <= 0) {
+    logger.warn(
+      `跳过首单推广余额奖励: order=${order.id}, referrer=${order.referrer_user_id}, amount=${order.amount}, coefficient=${rewardCoefficient}`
     );
     return false;
   }
@@ -313,7 +341,7 @@ async function issueFirstPaymentReward(db, order) {
       referrerUserId: order.referrer_user_id,
       referredUserId: order.user_id,
       orderId: order.id,
-      rewardTraffic
+      rewardAmount
     });
   } catch (error) {
     if (isReferralRewardUniqueConstraintError(error)) {
@@ -324,7 +352,7 @@ async function issueFirstPaymentReward(db, order) {
     throw error;
   }
 
-  await referralRepository.incrementUserReferralTraffic(db, order.referrer_user_id, rewardTraffic);
+  await referralRepository.incrementUserBalance(db, order.referrer_user_id, rewardAmount);
   return true;
 }
 
@@ -473,6 +501,7 @@ async function resetUserReferralCode(db, userId, codeFactory = generateReferralC
 
 module.exports = {
   formatTraffic,
+  formatAmount,
   generateReferralCode,
   getOrCreateReferralCode,
   buildReferralLink,

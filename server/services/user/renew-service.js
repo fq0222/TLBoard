@@ -1,7 +1,10 @@
 const crypto = require('crypto');
 const vmqService = require('../../integrations/vmq/vmq-service');
 const orderRepository = require('../../repositories/order-repository');
+const orderService = require('../shared/order-service');
 const { evaluateRenewEligibility, DISABLE_REASONS } = require('../shared/renew-policy');
+
+const BALANCE_PAY_TYPE = 9;
 
 /**
  * 用户端续费服务。
@@ -32,6 +35,16 @@ function createLegacyBusinessError(message, options = {}) {
  */
 function getNowTimestamp() {
   return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * 判断是否使用余额支付。
+ *
+ * @param {number} payType - 前端提交的支付类型
+ * @returns {boolean} 是否为余额支付
+ */
+function isBalancePayType(payType) {
+  return Number(payType) === BALANCE_PAY_TYPE;
 }
 
 /**
@@ -74,6 +87,56 @@ async function createRenewOrder(db, userId, payload) {
   const outTradeNo = `REN${Date.now()}${crypto.randomBytes(3).toString('hex')}`;
   let orderId;
   const createdAt = getNowTimestamp();
+
+  if (isBalancePayType(payType)) {
+    const planPrice = Number(plan.price) || 0;
+    const userBalance = Number(user.balance) || 0;
+    if (userBalance < planPrice) {
+      throw createLegacyBusinessError('余额不足，请更换支付方式', {
+        code: 4001
+      });
+    }
+
+    const transaction = db.transaction(async (transactionDb) => {
+      const orderResult = await orderRepository.createPendingRenewOrder(transactionDb, {
+        userId,
+        email: user.email,
+        planId,
+        amount: plan.price,
+        outTradeNo,
+        createdAt
+      });
+
+      orderId = Number(orderResult.lastInsertRowid);
+      const balanceResult = await orderRepository.decrementUserBalance(transactionDb, {
+        userId,
+        amount: planPrice
+      });
+
+      if (!balanceResult || Number(balanceResult.changes) !== 1) {
+        throw createLegacyBusinessError('余额不足，请更换支付方式', {
+          code: 4001
+        });
+      }
+    });
+
+    await transaction();
+
+    const tradeNo = `BALANCE-${outTradeNo}`;
+    await orderService.completePaidOrder(db, outTradeNo, tradeNo);
+
+    return {
+      order_id: orderId,
+      out_trade_no: outTradeNo,
+      pay_type: BALANCE_PAY_TYPE,
+      payment_method: 'balance',
+      paid: true,
+      really_price: (planPrice / 100).toFixed(2),
+      payment_url: '',
+      expire_in: 0
+    };
+  }
+
   const transaction = db.transaction(async (transactionDb) => {
     const orderResult = await orderRepository.createPendingRenewOrder(transactionDb, {
       userId,

@@ -477,19 +477,18 @@ function assertActiveSubscriptionUser(user) {
 }
 
 /**
- * 统一计算订阅场景下的套餐流量、推广流量与总流量。
+ * 统一计算订阅场景下的套餐流量与总流量。
  *
- * @param {Object} user - 用户或订阅记录，需包含 traffic_limit/referral_traffic_limit
+ * @param {Object} user - 用户或订阅记录，需包含 traffic_limit
  * @returns {{planTrafficLimit:number,referralTrafficLimit:number,totalTrafficLimit:number}} 流量口径
  */
 function getUserTrafficEntitlement(user) {
   const planTrafficLimit = Number(user?.traffic_limit) || 0;
-  const referralTrafficLimit = Number(user?.referral_traffic_limit) || 0;
 
   return {
     planTrafficLimit,
-    referralTrafficLimit,
-    totalTrafficLimit: planTrafficLimit + referralTrafficLimit
+    referralTrafficLimit: 0,
+    totalTrafficLimit: planTrafficLimit
   };
 }
 

@@ -136,13 +136,36 @@ async function findPaidOrderContextByOutTradeNo(db, outTradeNo) {
   return db.prepare(`
     SELECT o.*, o.id, o.referrer_user_id,
            u.expire_at as current_expire_at, u.traffic_limit as current_traffic_limit,
-           u.referral_traffic_limit as current_referral_traffic_limit,
            u.email, u.subscription_token, u.plan_id as current_plan_id, u.enabled as current_enabled,
            u.disable_reason as current_disable_reason, u.payment_count as current_payment_count
     FROM orders o
     LEFT JOIN users u ON o.user_id = u.id
     WHERE o.out_trade_no = ?
   `).get(outTradeNo);
+}
+
+/**
+ * 扣减用户余额。
+ *
+ * 职责：在余额支付续费时按分扣减 users.balance。
+ * 关键参数：payload.userId 为付款用户，payload.amount 为扣减金额，单位分。
+ * 核心分支：SQL 条件要求余额充足，调用方通过 changes 判断是否扣款成功。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {{userId:number,amount:number}} payload - 扣款参数
+ * @returns {Promise<Object>} 更新结果
+ */
+async function decrementUserBalance(db, payload) {
+  const {
+    userId,
+    amount
+  } = payload;
+
+  return db.prepare(`
+    UPDATE users
+    SET balance = COALESCE(balance, 0) - ?
+    WHERE id = ? AND COALESCE(balance, 0) >= ?
+  `).run(amount, userId, amount);
 }
 
 /**
@@ -441,6 +464,7 @@ module.exports = {
   markOrderExpiredByOutTradeNo,
   clearUserSubscriptionSourceCache,
   updateOrderPaymentInfo,
+  decrementUserBalance,
   updateUserSyncStatus,
   findPaidOrderContextByOutTradeNo,
   markOrderPaid,

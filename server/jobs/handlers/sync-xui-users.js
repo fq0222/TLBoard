@@ -14,11 +14,11 @@ const logger = createLogger('JOBS');
 /**
  * 统一计算巡检补偿同步时写回 3X-UI 的总流量上限。
  *
- * @param {Object} user - 用户快照，需包含 traffic_limit/referral_traffic_limit
+ * @param {Object} user - 用户快照，需包含 traffic_limit
  * @returns {number} 总流量字节数
  */
 function getXuiTotalTrafficLimit(user) {
-  return (Number(user?.traffic_limit) || 0) + (Number(user?.referral_traffic_limit) || 0);
+  return Number(user?.traffic_limit) || 0;
 }
 
 /**

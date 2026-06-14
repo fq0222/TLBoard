@@ -85,6 +85,25 @@
           <div class="pay-type-options">
             <label
               class="pay-type-card"
+              :class="{ 'is-selected': payType === 9 }"
+            >
+              <input
+                v-model="payType"
+                type="radio"
+                class="pay-type-input"
+                :value="9"
+              >
+              <div class="pay-type-main">
+                <span class="pay-type-icon balance">余</span>
+                <span class="pay-type-copy">
+                  <strong>余额支付</strong>
+                </span>
+              </div>
+              <el-icon v-if="payType === 9" class="pay-type-check"><CircleCheck /></el-icon>
+            </label>
+
+            <label
+              class="pay-type-card"
               :class="{ 'is-selected': payType === 2 }"
             >
               <input
@@ -573,6 +592,10 @@ async function handleRenew() {
 
 .pay-type-icon.wechat {
   background: linear-gradient(135deg, #07c160, #06ad56);
+}
+
+.pay-type-icon.balance {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
 }
 
 .pay-type-copy {

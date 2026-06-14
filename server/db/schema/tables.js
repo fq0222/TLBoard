@@ -17,6 +17,7 @@ const tableDefinitions = [
         traffic_used BIGINT DEFAULT 0,
         traffic_limit BIGINT DEFAULT 0,
         referral_traffic_limit BIGINT DEFAULT 0,
+        balance INTEGER DEFAULT 0,
         traffic_used_at BIGINT,
         disable_reason VARCHAR(50),
         expire_at BIGINT,
@@ -126,7 +127,7 @@ const tableDefinitions = [
         referrer_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         referred_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-        reward_traffic BIGINT NOT NULL,
+        reward_amount INTEGER NOT NULL DEFAULT 0,
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
         UNIQUE(referred_user_id),
         UNIQUE(order_id)

@@ -263,9 +263,9 @@ async function lookupUserOverview(db, query) {
     enabled: user.enabled,
     plan_name: user.plan_name || '',
     traffic_used: Number(user.traffic_used) || 0,
-    traffic_limit: (Number(user.traffic_limit) || 0) + (Number(user.referral_traffic_limit) || 0),
+    traffic_limit: Number(user.traffic_limit) || 0,
     traffic_used_text: formatTraffic(user.traffic_used),
-    traffic_limit_text: formatTraffic((Number(user.traffic_limit) || 0) + (Number(user.referral_traffic_limit) || 0)),
+    traffic_limit_text: formatTraffic(user.traffic_limit),
     expire_at: user.expire_at,
     sync_status: user.sync_status
   };
@@ -281,4 +281,3 @@ module.exports = {
   requireBoundAdminByChatId,
   verifyAdminBindCode
 };
-

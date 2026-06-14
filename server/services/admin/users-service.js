@@ -310,8 +310,7 @@ async function syncUserToXuiServers(db, user) {
 
   const expireAt = Number(user.expire_at) || 0;
   const expiryTime = expireAt > 0 ? expireAt * 1000 : 0;
-  // 管理端手动同步也要写入总流量，避免覆盖掉推广奖励额度。
-  const trafficLimit = (Number(user.traffic_limit) || 0) + (Number(user.referral_traffic_limit) || 0);
+  const trafficLimit = Number(user.traffic_limit) || 0;
   const totalGB = trafficLimit > 0 ? trafficLimit / (1024 * 1024 * 1024) : 0;
 
   for (const server of servers) {
