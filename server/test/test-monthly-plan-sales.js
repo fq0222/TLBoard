@@ -307,3 +307,67 @@ test('admin plan service infers lifetime plan on create when plan type is missin
   assert.equal(insertValues[5], 'lifetime');
   assert.equal(result.plan_type, 'lifetime');
 });
+
+test('user home plans query filters show_on_home', async () => {
+  const planRepository = require('../repositories/plan-repository');
+  let capturedSql = '';
+  const db = {
+    prepare(sql) {
+      capturedSql = sql;
+      return {
+        all() {
+          return [];
+        }
+      };
+    }
+  };
+
+  await planRepository.findEnabledPlans(db);
+  assert.match(capturedSql, /show_on_home = 1/);
+});
+
+test('renew plan list filters by current user plan type', async () => {
+  const renewService = require('../services/user/renew-service');
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users WHERE id')) {
+        return {
+          get() {
+            return { id: 9, email: 'timed@example.com', plan_id: 2 };
+          }
+        };
+      }
+      if (sql.includes('FROM plans WHERE id')) {
+        return {
+          get() {
+            return { id: 2, plan_type: 'timed', duration_days: 30 };
+          }
+        };
+      }
+      if (sql.includes('plan_type = ?')) {
+        return {
+          all(planType) {
+            assert.equal(planType, 'timed');
+            return [{
+              id: 3,
+              name: '月卡',
+              description: '',
+              price: 990,
+              duration_days: 30,
+              traffic_limit: 1024,
+              plan_type: 'timed',
+              show_on_home: 1,
+              sort_order: 0,
+              sales_limit: -1,
+              sales_count: 0
+            }];
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  const plans = await renewService.listRenewPlans(db, 9);
+  assert.equal(plans[0].plan_type, 'timed');
+});

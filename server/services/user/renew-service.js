@@ -1,8 +1,11 @@
 const crypto = require('crypto');
 const vmqService = require('../../integrations/vmq/vmq-service');
 const orderRepository = require('../../repositories/order-repository');
+const planRepository = require('../../repositories/plan-repository');
 const orderService = require('../shared/order-service');
 const { evaluateRenewEligibility, DISABLE_REASONS } = require('../shared/renew-policy');
+const { normalizePlanType } = require('../shared/plan-type');
+const { formatTraffic } = require('../../shared/utils/format-traffic');
 
 const BALANCE_PAY_TYPE = 9;
 
@@ -45,6 +48,55 @@ function getNowTimestamp() {
  */
 function isBalancePayType(payType) {
   return Number(payType) === BALANCE_PAY_TYPE;
+}
+
+/**
+ * 格式化续费套餐列表项。
+ *
+ * @param {Object} plan - plans 表套餐记录，包含价格、流量、类型和销售限制字段
+ * @returns {Object} 面向用户端续费列表的展示结构，售罄分支按 sales_limit=-1 视为不限量
+ */
+function formatRenewPlan(plan) {
+  return {
+    id: plan.id,
+    name: plan.name,
+    description: plan.description,
+    price: plan.price,
+    price_text: (Number(plan.price) / 100).toFixed(2),
+    duration_days: plan.duration_days,
+    traffic_limit: plan.traffic_limit,
+    traffic_text: formatTraffic(plan.traffic_limit),
+    plan_type: normalizePlanType(plan.plan_type),
+    show_on_home: plan.show_on_home === undefined ? 1 : Number(plan.show_on_home),
+    sort_order: plan.sort_order,
+    sales_limit: plan.sales_limit,
+    sales_count: plan.sales_count,
+    is_soldout: plan.sales_limit !== -1 && Number(plan.sales_count) >= Number(plan.sales_limit)
+  };
+}
+
+/**
+ * 查询当前用户可续费套餐列表。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 当前用户 ID，用于定位当前套餐类型
+ * @returns {Promise<Array<Object>>} 与当前套餐类型一致的已上架套餐列表
+ */
+async function listRenewPlans(db, userId) {
+  const user = await orderRepository.findUserById(db, userId);
+  if (!user || !user.plan_id) {
+    throw createLegacyBusinessError('请先购买套餐后再续费', { code: 2004 });
+  }
+
+  const currentPlan = await orderRepository.findPlanById(db, user.plan_id);
+  if (!currentPlan) {
+    throw createLegacyBusinessError('当前套餐不存在，请联系管理员', { code: 2004 });
+  }
+
+  const currentPlanType = normalizePlanType(currentPlan.plan_type);
+  const plans = await planRepository.findEnabledPlansByType(db, currentPlanType);
+
+  return plans.map(formatRenewPlan);
 }
 
 /**
@@ -203,5 +255,6 @@ async function createRenewOrder(db, userId, payload) {
 }
 
 module.exports = {
+  listRenewPlans,
   createRenewOrder
 };

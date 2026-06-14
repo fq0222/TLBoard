@@ -10,6 +10,8 @@ const renewController = require('../../controllers/user/renew-controller');
 
 const router = express.Router();
 
+router.get('/plans', authenticateUser, renewController.listRenewPlans);
+
 router.post('/', authenticateUser, [
   body('plan_id')
     .isInt({ min: 1 })

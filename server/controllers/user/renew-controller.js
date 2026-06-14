@@ -45,6 +45,27 @@ function handleControllerError(res, action, error) {
 }
 
 /**
+ * 获取当前用户可续费套餐列表。
+ *
+ * @param {Object} req - Express 请求对象，使用 req.user.id 定位当前套餐类型
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果，成功时 data.plans 为续费套餐列表
+ */
+async function listRenewPlans(req, res) {
+  try {
+    const plans = await renewService.listRenewPlans(req.app.locals.db, req.user.id);
+    logger.info(`获取续费套餐列表成功: user=${req.user.id}, count=${plans.length}`);
+    return res.json({
+      code: 0,
+      message: 'ok',
+      data: { plans }
+    });
+  } catch (error) {
+    return handleControllerError(res, '续费套餐列表接口', error);
+  }
+}
+
+/**
  * 创建续费订单并返回支付信息。
  *
  * @param {Object} req - Express 请求对象
@@ -71,5 +92,6 @@ async function createRenewOrder(req, res) {
 }
 
 module.exports = {
+  listRenewPlans,
   createRenewOrder
 };
