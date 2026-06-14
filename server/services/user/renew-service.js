@@ -153,6 +153,13 @@ async function createRenewOrder(db, userId, payload) {
     });
   }
 
+  const renewEligibility = evaluateRenewEligibility(user, plan);
+  if (!renewEligibility.allowed) {
+    throw createLegacyBusinessError(renewEligibility.message, {
+      code: renewEligibility.code
+    });
+  }
+
   if (isTimedPlan(plan)) {
     const preview = buildTimedRenewResetPreview(user, plan);
     if (preview.requires_confirm && !normalizeResetConfirmation(payload.confirm_reset)) {
@@ -165,13 +172,6 @@ async function createRenewOrder(db, userId, payload) {
         }
       });
     }
-  }
-
-  const renewEligibility = evaluateRenewEligibility(user, plan);
-  if (!renewEligibility.allowed) {
-    throw createLegacyBusinessError(renewEligibility.message, {
-      code: renewEligibility.code
-    });
   }
 
   if (renewEligibility.skipSalesLimit && user.disable_reason === DISABLE_REASONS.TRAFFIC_LIMIT) {

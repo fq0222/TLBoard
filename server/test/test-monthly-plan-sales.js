@@ -571,3 +571,176 @@ test('timed active renew accepts string true reset confirmation', async () => {
     }
   );
 });
+
+test('admin disabled timed renew rejects before reset confirmation preview', async () => {
+  const renewService = require('../services/user/renew-service');
+  const now = Math.floor(Date.now() / 1000);
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users WHERE id')) {
+        return {
+          get: () => ({
+            id: 5,
+            email: 'admin-disabled@example.com',
+            plan_id: 3,
+            enabled: 0,
+            disable_reason: 'admin',
+            traffic_used: 1024,
+            traffic_limit: 4096,
+            expire_at: now + 86400,
+            balance: 0
+          })
+        };
+      }
+      if (sql.includes('SELECT * FROM plans WHERE id = ? AND enabled = 1')) {
+        return {
+          get: () => ({
+            id: 3,
+            price: 990,
+            traffic_limit: 4096,
+            duration_days: 30,
+            plan_type: 'timed',
+            sales_limit: -1,
+            sales_count: 0
+          })
+        };
+      }
+      if (sql.includes('SELECT * FROM plans WHERE id = ?')) {
+        return {
+          get: () => ({
+            id: 3,
+            plan_type: 'timed',
+            duration_days: 30
+          })
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  await assert.rejects(
+    () => renewService.createRenewOrder(db, 5, { plan_id: 3, pay_type: 9 }),
+    (error) => {
+      assert.equal(error.code, 2003);
+      assert.equal(error.message, '账号已被禁用，请联系管理员');
+      assert.notEqual(error.code, 4091);
+      return true;
+    }
+  );
+});
+
+test('expired disabled timed renew can reach reset confirmation gate', async () => {
+  const renewService = require('../services/user/renew-service');
+  const now = Math.floor(Date.now() / 1000);
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users WHERE id')) {
+        return {
+          get: () => ({
+            id: 6,
+            email: 'expired-disabled@example.com',
+            plan_id: 3,
+            enabled: 0,
+            disable_reason: 'expired',
+            traffic_used: 1024,
+            traffic_limit: 4096,
+            expire_at: now + 86400,
+            balance: 0
+          })
+        };
+      }
+      if (sql.includes('SELECT * FROM plans WHERE id = ? AND enabled = 1')) {
+        return {
+          get: () => ({
+            id: 3,
+            price: 990,
+            traffic_limit: 4096,
+            duration_days: 30,
+            plan_type: 'timed',
+            sales_limit: -1,
+            sales_count: 0
+          })
+        };
+      }
+      if (sql.includes('SELECT * FROM plans WHERE id = ?')) {
+        return {
+          get: () => ({
+            id: 3,
+            plan_type: 'timed',
+            duration_days: 30
+          })
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  await assert.rejects(
+    () => renewService.createRenewOrder(db, 6, { plan_id: 3, pay_type: 9 }),
+    (error) => {
+      assert.equal(error.code, 4091);
+      assert.notEqual(error.message, '账号已被禁用，请联系管理员');
+      assert.notEqual(error.message, '账号当前状态异常，请联系管理员');
+      return true;
+    }
+  );
+});
+
+test('traffic limit disabled renew keeps old allowance and is not abnormal', async () => {
+  const renewService = require('../services/user/renew-service');
+  const now = Math.floor(Date.now() / 1000);
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users WHERE id')) {
+        return {
+          get: () => ({
+            id: 7,
+            email: 'traffic-disabled@example.com',
+            plan_id: 3,
+            enabled: 0,
+            disable_reason: 'traffic_limit',
+            traffic_used_at: now,
+            traffic_used: 4096,
+            traffic_limit: 4096,
+            expire_at: now + 86400,
+            balance: 0
+          })
+        };
+      }
+      if (sql.includes('SELECT * FROM plans WHERE id = ? AND enabled = 1')) {
+        return {
+          get: () => ({
+            id: 3,
+            price: 990,
+            traffic_limit: 4096,
+            duration_days: 30,
+            plan_type: 'timed',
+            sales_limit: 1,
+            sales_count: 1
+          })
+        };
+      }
+      if (sql.includes('SELECT * FROM plans WHERE id = ?')) {
+        return {
+          get: () => ({
+            id: 3,
+            plan_type: 'timed',
+            duration_days: 30
+          })
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  await assert.rejects(
+    () => renewService.createRenewOrder(db, 7, { plan_id: 3, pay_type: 9 }),
+    (error) => {
+      assert.equal(error.code, 4001);
+      assert.notEqual(error.message, '账号已被禁用，请联系管理员');
+      assert.notEqual(error.message, '账号当前状态异常，请联系管理员');
+      assert.notEqual(error.message, '该套餐已售罄');
+      return /余额不足/.test(error.message);
+    }
+  );
+});
