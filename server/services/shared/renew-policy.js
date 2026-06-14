@@ -8,7 +8,8 @@
 
 const DISABLE_REASONS = {
   ADMIN: 'admin',
-  TRAFFIC_LIMIT: 'traffic_limit'
+  TRAFFIC_LIMIT: 'traffic_limit',
+  EXPIRED: 'expired'
 };
 
 const RENEW_WINDOW_SECONDS = 3 * 24 * 60 * 60;
@@ -28,15 +29,7 @@ function evaluateRenewEligibility(user, plan, now = Math.floor(Date.now() / 1000
   const inRenewWindow = trafficUsedAt > 0 && (now - trafficUsedAt) <= RENEW_WINDOW_SECONDS;
 
   if (isDisabled) {
-    if (disableReason === DISABLE_REASONS.ADMIN) {
-      return {
-        allowed: false,
-        code: 2003,
-        message: '账号已被禁用，请联系管理员'
-      };
-    }
-
-    if (disableReason !== DISABLE_REASONS.TRAFFIC_LIMIT) {
+    if (disableReason !== DISABLE_REASONS.TRAFFIC_LIMIT && disableReason !== DISABLE_REASONS.EXPIRED) {
       return {
         allowed: false,
         code: 2003,

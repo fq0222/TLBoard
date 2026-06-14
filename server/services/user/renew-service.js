@@ -4,7 +4,12 @@ const orderRepository = require('../../repositories/order-repository');
 const planRepository = require('../../repositories/plan-repository');
 const orderService = require('../shared/order-service');
 const { evaluateRenewEligibility, DISABLE_REASONS } = require('../shared/renew-policy');
-const { normalizePlanType } = require('../shared/plan-type');
+const {
+  PLAN_TYPES,
+  normalizePlanType,
+  isTimedPlan,
+  buildTimedRenewResetPreview
+} = require('../shared/plan-type');
 const { formatTraffic } = require('../../shared/utils/format-traffic');
 
 const BALANCE_PAY_TYPE = 9;
@@ -48,6 +53,16 @@ function getNowTimestamp() {
  */
 function isBalancePayType(payType) {
   return Number(payType) === BALANCE_PAY_TYPE;
+}
+
+/**
+ * 归一化续费重置确认值。
+ *
+ * @param {boolean|string|number|undefined} value - HTTP JSON 或表单提交的 confirm_reset 原始值
+ * @returns {boolean} 仅布尔 true、字符串 true 和数字 1 视为已确认，其他分支均保持未确认语义
+ */
+function normalizeResetConfirmation(value) {
+  return value === true || value === 'true' || value === 1 || value === '1';
 }
 
 /**
@@ -104,7 +119,7 @@ async function listRenewPlans(db, userId) {
  *
  * @param {Object} db - 数据库代理对象
  * @param {number} userId - 当前用户 ID
- * @param {{plan_id:number|string,pay_type?:number|string}} payload - 续费参数
+ * @param {{plan_id:number|string,pay_type?:number|string,confirm_reset?:boolean|string|number}} payload - 续费参数
  * @returns {Promise<Object>} 兼容旧接口的续费下单结果
  */
 async function createRenewOrder(db, userId, payload) {
@@ -123,6 +138,33 @@ async function createRenewOrder(db, userId, payload) {
   const plan = await orderRepository.findEnabledPlanById(db, planId);
   if (!plan) {
     throw createLegacyBusinessError('套餐不存在或未启用');
+  }
+
+  const currentPlan = await orderRepository.findPlanById(db, user.plan_id);
+  if (!currentPlan) {
+    throw createLegacyBusinessError('当前套餐不存在，请联系管理员', { code: 2004 });
+  }
+
+  const currentPlanType = normalizePlanType(currentPlan.plan_type);
+  const targetPlanType = normalizePlanType(plan.plan_type);
+  if (currentPlanType !== targetPlanType) {
+    throw createLegacyBusinessError('不能跨套餐类型续费，请选择当前套餐类型下的套餐', {
+      code: 1003
+    });
+  }
+
+  if (isTimedPlan(plan)) {
+    const preview = buildTimedRenewResetPreview(user, plan);
+    if (preview.requires_confirm && !normalizeResetConfirmation(payload.confirm_reset)) {
+      throw createLegacyBusinessError('续费会重置当前剩余流量和时间，请确认后再续费', {
+        statusCode: 409,
+        code: 4091,
+        data: {
+          plan_type: PLAN_TYPES.TIMED,
+          ...preview
+        }
+      });
+    }
   }
 
   const renewEligibility = evaluateRenewEligibility(user, plan);

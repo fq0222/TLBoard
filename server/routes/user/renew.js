@@ -19,7 +19,11 @@ router.post('/', authenticateUser, [
   body('pay_type')
     .optional()
     .isInt({ min: 1, max: 10 })
-    .withMessage('支付类型无效')
+    .withMessage('支付类型无效'),
+  body('confirm_reset')
+    .optional()
+    .isBoolean()
+    .withMessage('confirm_reset必须是布尔值')
 ], renewController.createRenewOrder);
 
 module.exports = router;

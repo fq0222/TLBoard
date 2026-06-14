@@ -439,3 +439,135 @@ test('renew plan list includes same type plans hidden from home', async () => {
   assert.equal(plans[0].plan_type, 'timed');
   assert.equal(plans[0].show_on_home, 0);
 });
+
+test('renew service rejects changing between lifetime and timed plans', async () => {
+  const renewService = require('../services/user/renew-service');
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users WHERE id')) {
+        return { get: () => ({ id: 1, email: 'a@example.com', plan_id: 1, enabled: 1 }) };
+      }
+      if (sql.includes('SELECT * FROM plans WHERE id = ? AND enabled = 1')) {
+        return { get: () => ({ id: 2, plan_type: 'timed', duration_days: 30, sales_limit: -1, sales_count: 0 }) };
+      }
+      if (sql.includes('SELECT * FROM plans WHERE id = ?')) {
+        return { get: () => ({ id: 1, plan_type: 'lifetime', duration_days: 0 }) };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  await assert.rejects(
+    () => renewService.createRenewOrder(db, 1, { plan_id: 2, pay_type: 9 }),
+    /不能跨套餐类型续费/
+  );
+});
+
+test('timed active renew requires reset confirmation', async () => {
+  const renewService = require('../services/user/renew-service');
+  const now = Math.floor(Date.now() / 1000);
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users WHERE id')) {
+        return {
+          get: () => ({
+            id: 2,
+            email: 'timed@example.com',
+            plan_id: 3,
+            enabled: 1,
+            traffic_used: 1024,
+            traffic_limit: 4096,
+            expire_at: now + 86400,
+            balance: 0
+          })
+        };
+      }
+      if (sql.includes('SELECT * FROM plans WHERE id = ? AND enabled = 1')) {
+        return {
+          get: () => ({
+            id: 3,
+            price: 990,
+            traffic_limit: 4096,
+            duration_days: 30,
+            plan_type: 'timed',
+            sales_limit: -1,
+            sales_count: 0
+          })
+        };
+      }
+      if (sql.includes('SELECT * FROM plans WHERE id = ?')) {
+        return {
+          get: () => ({
+            id: 3,
+            plan_type: 'timed',
+            duration_days: 30
+          })
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  await assert.rejects(
+    () => renewService.createRenewOrder(db, 2, { plan_id: 3, pay_type: 9 }),
+    (error) => {
+      assert.equal(error.code, 4091);
+      assert.equal(error.data.requires_confirm, true);
+      return /续费会重置当前剩余流量和时间/.test(error.message);
+    }
+  );
+});
+
+test('timed active renew accepts string true reset confirmation', async () => {
+  const renewService = require('../services/user/renew-service');
+  const now = Math.floor(Date.now() / 1000);
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users WHERE id')) {
+        return {
+          get: () => ({
+            id: 4,
+            email: 'string-confirm@example.com',
+            plan_id: 3,
+            enabled: 1,
+            traffic_used: 1024,
+            traffic_limit: 4096,
+            expire_at: now + 86400,
+            balance: 0
+          })
+        };
+      }
+      if (sql.includes('SELECT * FROM plans WHERE id = ? AND enabled = 1')) {
+        return {
+          get: () => ({
+            id: 3,
+            price: 990,
+            traffic_limit: 4096,
+            duration_days: 30,
+            plan_type: 'timed',
+            sales_limit: -1,
+            sales_count: 0
+          })
+        };
+      }
+      if (sql.includes('SELECT * FROM plans WHERE id = ?')) {
+        return {
+          get: () => ({
+            id: 3,
+            plan_type: 'timed',
+            duration_days: 30
+          })
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  await assert.rejects(
+    () => renewService.createRenewOrder(db, 4, { plan_id: 3, pay_type: 9, confirm_reset: 'true' }),
+    (error) => {
+      assert.equal(error.code, 4001);
+      return /余额不足/.test(error.message);
+    }
+  );
+});
