@@ -1178,3 +1178,62 @@ test('xui sync worker skips stale disable task when user is already enabled', as
     Object.assign(trafficManager, originalTrafficManager);
   }
 });
+
+test('xui sync worker skips stale enable task when user is still disabled', async () => {
+  const syncHandler = require('../jobs/handlers/sync-xui-tasks');
+  const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
+  const trafficManager = require('../services/shared/traffic-manager');
+  let statusSyncCount = 0;
+
+  const originalXuiSyncTaskService = {
+    processDueTasks: xuiSyncTaskService.processDueTasks
+  };
+  const originalTrafficManager = {
+    syncDisableStatusToXui: trafficManager.syncDisableStatusToXui
+  };
+
+  xuiSyncTaskService.processDueTasks = async (db, handler) => {
+    const result = await handler({
+      id: 202,
+      user_id: 31,
+      task_type: xuiSyncTaskService.TASK_TYPES.ENABLE_SYNC,
+      payload_data: { disable: false }
+    });
+
+    assert.equal(result.success, true);
+    assert.match(result.message, /已禁用/);
+    return { processed: 1, success: 1, failed: 0, finalFailed: 0 };
+  };
+  trafficManager.syncDisableStatusToXui = async () => {
+    statusSyncCount += 1;
+    return true;
+  };
+
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users')) {
+        return {
+          get(userId) {
+            assert.equal(userId, 31);
+            return {
+              id: 31,
+              email: 'still-disabled@example.com',
+              enabled: 0,
+              traffic_limit: 4096,
+              expire_at: 1700000000
+            };
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  try {
+    await syncHandler.runXuiSyncTasks(db);
+    assert.equal(statusSyncCount, 0);
+  } finally {
+    Object.assign(xuiSyncTaskService, originalXuiSyncTaskService);
+    Object.assign(trafficManager, originalTrafficManager);
+  }
+});
