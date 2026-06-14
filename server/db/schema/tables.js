@@ -65,6 +65,8 @@ const tableDefinitions = [
         price INTEGER NOT NULL,
         duration_days INTEGER NOT NULL,
         traffic_limit BIGINT NOT NULL,
+        plan_type VARCHAR(20) DEFAULT 'lifetime',
+        show_on_home INTEGER DEFAULT 1,
         sort_order INTEGER DEFAULT 0,
         enabled INTEGER DEFAULT 1,
         sales_limit INTEGER DEFAULT -1,
