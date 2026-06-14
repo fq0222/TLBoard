@@ -16,6 +16,13 @@
       <el-table :data="plans" style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="套餐名称" />
+        <el-table-column label="套餐类型" width="110">
+          <template #default="scope">
+            <el-tag :type="scope.row.plan_type === 'timed' ? 'warning' : 'info'">
+              {{ scope.row.plan_type_text || (scope.row.plan_type === 'timed' ? '限时套餐' : '不限时套餐') }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="price_text" label="价格">
           <template #default="scope">
             ¥{{ scope.row.price_text }}
@@ -34,6 +41,13 @@
           </template>
         </el-table-column>
         <el-table-column prop="sales_count" label="已售数量" width="100" />
+        <el-table-column label="首页展示" width="100">
+          <template #default="scope">
+            <el-tag :type="scope.row.show_on_home ? 'success' : 'info'">
+              {{ scope.row.show_on_home ? '展示' : '隐藏' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="最后更新时间" width="160">
           <template #default="scope">
             {{ scope.row.updated_at ? formatTime(scope.row.updated_at) : '-' }}
@@ -62,7 +76,7 @@
     <el-dialog 
       v-model="dialogVisible" 
       :title="isEditing ? '编辑套餐' : '添加套餐'"
-      width="500px"
+      width="560px"
     >
       <el-form ref="planFormRef" :model="planForm" :rules="planRules" label-width="100px">
         <el-form-item label="套餐名称" prop="name">
@@ -74,9 +88,19 @@
         <el-form-item label="价格(分)" prop="price">
           <el-input-number v-model="planForm.price" :min="0" />
         </el-form-item>
+        <el-form-item label="套餐类型" prop="plan_type">
+          <el-radio-group v-model="planForm.plan_type">
+            <el-radio-button label="timed">限时套餐</el-radio-button>
+            <el-radio-button label="lifetime">不限时套餐</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
         <el-form-item label="有效天数" prop="duration_days">
-          <el-input-number v-model="planForm.duration_days" :min="0" />
-          <span class="form-tip">0 表示无限期</span>
+          <el-input-number
+            v-model="planForm.duration_days"
+            :min="planForm.plan_type === 'timed' ? 1 : 0"
+            :disabled="planForm.plan_type === 'lifetime'"
+          />
+          <span class="form-tip">{{ planForm.plan_type === 'lifetime' ? '不限时套餐固定为 0' : '限时套餐需大于 0' }}</span>
         </el-form-item>
         <el-form-item label="流量上限" prop="traffic_limit">
           <div class="traffic-input">
@@ -95,6 +119,9 @@
         <el-form-item label="可销售总量" prop="sales_limit">
           <el-input-number v-model="planForm.sales_limit" :min="-1" />
           <span class="form-tip">-1 表示不限制可售数量</span>
+        </el-form-item>
+        <el-form-item label="首页展示" prop="show_on_home">
+          <el-switch v-model="planForm.show_on_home" />
         </el-form-item>
         <el-form-item label="是否上架" prop="enabled">
           <el-switch v-model="planForm.enabled" />
@@ -129,17 +156,39 @@ const planForm = reactive({
   name: '',
   description: '',
   price: 0,
+  plan_type: 'timed',
   duration_days: 30,
   traffic_limit: 0,
   sort_order: 0,
   enabled: true,
+  show_on_home: true,
   sales_limit: -1
 })
+
+// 校验套餐类型与有效天数的契约，避免管理端提交出破坏续费语义的数据。
+function validateDurationDays(rule, value, callback) {
+  const days = Number(value)
+  if (planForm.plan_type === 'lifetime') {
+    if (days !== 0) {
+      callback(new Error('不限时套餐的有效天数必须为 0'))
+      return
+    }
+    callback()
+    return
+  }
+
+  if (!Number.isFinite(days) || days <= 0) {
+    callback(new Error('限时套餐的有效天数必须大于 0'))
+    return
+  }
+  callback()
+}
 
 const planRules = {
   name: [{ required: true, message: '请输入套餐名称', trigger: 'blur' }],
   price: [{ required: true, message: '请输入价格', trigger: 'blur' }],
-  duration_days: [{ required: true, message: '请输入有效天数', trigger: 'blur' }]
+  plan_type: [{ required: true, message: '请选择套餐类型', trigger: 'change' }],
+  duration_days: [{ required: true, validator: validateDurationDays, trigger: 'change' }]
 }
 
 function formatTime(timestamp) {
@@ -157,6 +206,16 @@ function formatTime(timestamp) {
 // 监听流量值和单位变化，计算实际字节数
 watch([trafficValue, trafficUnit], () => {
   planForm.traffic_limit = Math.round(trafficValue.value * trafficUnit.value)
+})
+
+// 切换套餐类型时同步有效天数，保持不限时套餐固定为 duration_days=0。
+watch(() => planForm.plan_type, (planType) => {
+  if (planType === 'lifetime') {
+    planForm.duration_days = 0
+  } else if (Number(planForm.duration_days) <= 0) {
+    planForm.duration_days = 30
+  }
+  planFormRef.value?.clearValidate('duration_days')
 })
 
 async function fetchPlans() {
@@ -183,9 +242,11 @@ function showEditDialog(plan) {
   planForm.name = plan.name
   planForm.description = plan.description
   planForm.price = plan.price
+  planForm.plan_type = plan.plan_type || (Number(plan.duration_days) === 0 ? 'lifetime' : 'timed')
   planForm.duration_days = plan.duration_days
   planForm.sort_order = plan.sort_order
   planForm.enabled = !!plan.enabled  // 将数字转换为布尔值
+  planForm.show_on_home = !!plan.show_on_home
   planForm.sales_limit = plan.sales_limit
   
   // 计算流量值和单位
@@ -212,10 +273,12 @@ function resetForm() {
   planForm.name = ''
   planForm.description = ''
   planForm.price = 0
+  planForm.plan_type = 'timed'
   planForm.duration_days = 30
   planForm.traffic_limit = 0
   planForm.sort_order = 0
   planForm.enabled = true
+  planForm.show_on_home = true
   planForm.sales_limit = -1
   trafficValue.value = 0
   trafficUnit.value = 1073741824
@@ -228,6 +291,9 @@ async function handleSubmit() {
     
     // 确保traffic_limit是数字
     planForm.traffic_limit = Math.round(trafficValue.value * trafficUnit.value)
+    if (planForm.plan_type === 'lifetime') {
+      planForm.duration_days = 0
+    }
     
     if (isEditing.value) {
       const response = await api.admin.updatePlan(editingId.value, planForm)
