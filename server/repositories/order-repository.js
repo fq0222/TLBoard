@@ -136,10 +136,13 @@ async function findPaidOrderContextByOutTradeNo(db, outTradeNo) {
   return db.prepare(`
     SELECT o.*, o.id, o.referrer_user_id,
            u.expire_at as current_expire_at, u.traffic_limit as current_traffic_limit,
+           u.traffic_used as current_traffic_used,
            u.email, u.subscription_token, u.plan_id as current_plan_id, u.enabled as current_enabled,
-           u.disable_reason as current_disable_reason, u.payment_count as current_payment_count
+           u.disable_reason as current_disable_reason, u.payment_count as current_payment_count,
+           cp.plan_type as current_plan_type
     FROM orders o
     LEFT JOIN users u ON o.user_id = u.id
+    LEFT JOIN plans cp ON u.plan_id = cp.id
     WHERE o.out_trade_no = ?
   `).get(outTradeNo);
 }
@@ -204,21 +207,32 @@ async function updateUserAfterPaidOrder(db, payload) {
     planId,
     trafficLimit,
     expireAt,
+    resetTrafficUsed,
     updatedAt
   } = payload;
 
+  const updates = [
+    'enabled = 1',
+    'plan_id = ?',
+    'traffic_limit = ?',
+    'traffic_used_at = NULL',
+    'disable_reason = NULL',
+    'expire_at = ?',
+    'payment_count = payment_count + 1',
+    'updated_at = ?'
+  ];
+  const values = [planId, trafficLimit, expireAt, updatedAt];
+
+  if (resetTrafficUsed) {
+    updates.splice(3, 0, 'traffic_used = 0');
+  }
+
+  values.push(userId);
   await db.prepare(`
     UPDATE users SET
-      enabled = 1,
-      plan_id = ?,
-      traffic_limit = ?,
-      traffic_used_at = NULL,
-      disable_reason = NULL,
-      expire_at = ?,
-      payment_count = payment_count + 1,
-      updated_at = ?
+      ${updates.join(',\n      ')}
     WHERE id = ?
-  `).run(planId, trafficLimit, expireAt, updatedAt, userId);
+  `).run(...values);
 }
 
 /**

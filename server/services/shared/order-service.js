@@ -13,6 +13,7 @@ const XuiService = require('../../integrations/xui/xui-service');
 const trafficManager = require('./traffic-manager');
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const { DISABLE_REASONS } = require('./renew-policy');
+const { isTimedPlan } = require('./plan-type');
 const { createLogger } = require('../../utils/logger');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
 const orderRepository = require('../../repositories/order-repository');
@@ -468,6 +469,50 @@ async function enqueueAndTryUserSync(db, taskType, userInfo, plan) {
 }
 
 /**
+ * 计算支付成功后应写入用户的套餐权益。
+ *
+ * 职责：按订单类型和套餐类型统一生成 traffic_limit、expire_at 和是否清零已用流量。
+ * 关键参数：order 为支付订单及当前用户快照，plan 为目标套餐，now 为支付完成时间戳。
+ * 核心分支：限时套餐续费从支付时间重置流量和到期；其他续费沿用不限时套餐累加契约。
+ *
+ * @param {Object} order - 订单与当前用户权益快照
+ * @param {Object} plan - 套餐记录
+ * @param {number} [now=Math.floor(Date.now() / 1000)] - 支付完成时间戳
+ * @returns {{trafficLimit:number,expireAt:number,resetTrafficUsed:boolean}} 用户权益结果
+ */
+function calculatePaidOrderEntitlement(order, plan, now = Math.floor(Date.now() / 1000)) {
+  const isRenewOrder = order.out_trade_no.startsWith('REN');
+
+  if (isRenewOrder && isTimedPlan(plan)) {
+    return {
+      trafficLimit: Number(plan.traffic_limit || 0),
+      expireAt: now + (Number(plan.duration_days) * 24 * 60 * 60),
+      resetTrafficUsed: true
+    };
+  }
+
+  const currentExpireAt = Number(order.current_expire_at || 0);
+  const baseExpireAt = currentExpireAt > now ? currentExpireAt : now;
+  const expireAt = plan.duration_days === 0 ? 0 : baseExpireAt + (Number(plan.duration_days) * 24 * 60 * 60);
+
+  if (isRenewOrder) {
+    const currentTrafficLimit = Number(order.current_traffic_limit || 0);
+    const planTrafficLimit = Number(plan.traffic_limit || 0);
+    return {
+      trafficLimit: currentTrafficLimit + planTrafficLimit,
+      expireAt,
+      resetTrafficUsed: false
+    };
+  }
+
+  return {
+    trafficLimit: Number(plan.traffic_limit || 0),
+    expireAt,
+    resetTrafficUsed: false
+  };
+}
+
+/**
  * 完成已支付订单
  *
  * 统一更新订单状态、用户套餐、到期时间、流量上限和套餐销售数量。
@@ -497,21 +542,17 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const currentExpireAt = Number(order.current_expire_at || 0);
-  const baseExpireAt = currentExpireAt > now ? currentExpireAt : now;
-  const expireAt = plan.duration_days === 0 ? 0 : baseExpireAt + (Number(plan.duration_days) * 24 * 60 * 60);
+  const entitlement = calculatePaidOrderEntitlement(order, plan, now);
+  const expireAt = entitlement.expireAt;
+  const newTrafficLimit = entitlement.trafficLimit;
+  const resetTrafficUsed = entitlement.resetTrafficUsed;
   const finalTradeNo = tradeNo || order.trade_no;
   const isRenewOrder = order.out_trade_no.startsWith('REN');
 
-  let newTrafficLimit;
-  if (isRenewOrder) {
-    // 续费场景：当前流量上限 + 新套餐流量上限
-    const currentTrafficLimit = Number(order.current_traffic_limit || 0);
-    const planTrafficLimit = Number(plan.traffic_limit || 0);
-    newTrafficLimit = currentTrafficLimit + planTrafficLimit;
-    logger.info(`续费订单流量累加: ${currentTrafficLimit} + ${planTrafficLimit} = ${newTrafficLimit}`);
-  } else {
-    newTrafficLimit = Number(plan.traffic_limit || 0);
+  if (isRenewOrder && resetTrafficUsed) {
+    logger.info(`限时套餐续费重置权益: traffic_limit=${newTrafficLimit}, expire_at=${expireAt}`);
+  } else if (isRenewOrder) {
+    logger.info(`续费订单流量累加: traffic_limit=${newTrafficLimit}, expire_at=${expireAt}`);
   }
 
   const transaction = db.transaction(async (transactionDb) => {
@@ -526,6 +567,7 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
       planId: plan.id,
       trafficLimit: newTrafficLimit,
       expireAt,
+      resetTrafficUsed,
       updatedAt: now
     });
 
@@ -605,5 +647,6 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
 module.exports = {
   completePaidOrder,
   syncUserToXuiServers,
-  enqueueAndTryUserSync
+  enqueueAndTryUserSync,
+  calculatePaidOrderEntitlement
 };

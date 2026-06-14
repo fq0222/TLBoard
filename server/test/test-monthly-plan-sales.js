@@ -744,3 +744,41 @@ test('traffic limit disabled renew keeps old allowance and is not abnormal', asy
     }
   );
 });
+
+test('paid lifetime renew keeps existing traffic accumulation contract', async () => {
+  const { calculatePaidOrderEntitlement } = require('../services/shared/order-service');
+  const now = 1700000000;
+  const result = calculatePaidOrderEntitlement({
+    out_trade_no: 'REN123',
+    current_traffic_limit: 1024,
+    current_expire_at: 0
+  }, {
+    id: 1,
+    plan_type: 'lifetime',
+    duration_days: 0,
+    traffic_limit: 2048
+  }, now);
+
+  assert.equal(result.trafficLimit, 3072);
+  assert.equal(result.expireAt, 0);
+  assert.equal(result.resetTrafficUsed, false);
+});
+
+test('paid timed renew resets traffic and starts expiry from payment time', async () => {
+  const { calculatePaidOrderEntitlement } = require('../services/shared/order-service');
+  const now = 1700000000;
+  const result = calculatePaidOrderEntitlement({
+    out_trade_no: 'REN456',
+    current_traffic_limit: 8192,
+    current_expire_at: now + 86400
+  }, {
+    id: 2,
+    plan_type: 'timed',
+    duration_days: 30,
+    traffic_limit: 4096
+  }, now);
+
+  assert.equal(result.trafficLimit, 4096);
+  assert.equal(result.expireAt, 1702592000);
+  assert.equal(result.resetTrafficUsed, true);
+});
