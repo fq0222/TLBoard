@@ -384,7 +384,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   CopyDocument,
   InfoFilled,
@@ -1098,12 +1098,15 @@ function formatDate(timestamp) {
   })
 }
 
-async function handleRenew({ planId, payType }) {
+async function handleRenew({ planId, payType, confirmReset = false }) {
   try {
-    showRenewDialog.value = false
-
-    const response = await api.user.renew({ plan_id: planId, pay_type: payType })
+    const response = await api.user.renew({
+      plan_id: planId,
+      pay_type: payType,
+      confirm_reset: confirmReset
+    })
     if (response.code === 0) {
+      showRenewDialog.value = false
       if (response.data?.paid && response.data?.payment_method === 'balance') {
         ElMessage.success('余额支付成功，续费已完成')
         await fetchUserInfo()
@@ -1125,8 +1128,80 @@ async function handleRenew({ planId, payType }) {
     }
   } catch (error) {
     console.error('续费失败:', error)
+    if (isRenewResetConfirmError(error)) {
+      try {
+        await confirmTimedRenewReset(error.response.data.data)
+      } catch {
+        return
+      }
+      await handleRenew({ planId, payType, confirmReset: true })
+      return
+    }
     ElMessage.error(getRenewErrorMessage(error))
   }
+}
+
+/**
+ * 判断续费失败是否为限时套餐重置确认分支。
+ * 职责：只识别后端 4091 业务码，避免把普通错误误当成二次确认。
+ * 关键参数：error 为 axios 拦截器抛出的错误对象。
+ * 核心分支：HTTP 409 且业务 code=4091 时返回 true。
+ *
+ * @param {Error|Object} error - 续费接口错误对象
+ * @returns {boolean} 是否需要弹出重置确认
+ */
+function isRenewResetConfirmError(error) {
+  return Number(error?.response?.status) === 409 && Number(error?.response?.data?.code) === 4091
+}
+
+/**
+ * 弹出限时套餐续费重置确认框。
+ * 职责：展示剩余流量和剩余时间，让用户明确选择是否继续续费。
+ * 关键参数：preview 为后端返回的重置预览数据。
+ * 核心分支：用户确认后 resolve，取消时抛出 Element Plus cancel 异常。
+ *
+ * @param {Object} preview - 限时套餐重置预览
+ * @returns {Promise<void>}
+ */
+async function confirmTimedRenewReset(preview = {}) {
+  await ElMessageBox.confirm(
+    `当前仍有 ${formatBytes(preview.remaining_traffic)} 流量和 ${formatRemainingTime(preview.remaining_seconds)} 未使用，续费后将重置流量与到期时间。`,
+    '确认续费',
+    {
+      confirmButtonText: '确认续费',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  )
+}
+
+/**
+ * 格式化字节数用于续费确认提示。
+ * @param {number|string} bytes - 字节数
+ * @returns {string} 可读流量
+ */
+function formatBytes(bytes) {
+  const value = Number(bytes || 0)
+  if (!Number.isFinite(value) || value <= 0) return '0 B'
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
+  return `${parseFloat((value / (1024 ** index)).toFixed(2))} ${units[index]}`
+}
+
+/**
+ * 格式化剩余秒数用于续费确认提示。
+ * @param {number|string} seconds - 剩余秒数
+ * @returns {string} 可读时间
+ */
+function formatRemainingTime(seconds) {
+  const value = Math.max(0, Number(seconds || 0))
+  const days = Math.floor(value / 86400)
+  const hours = Math.floor((value % 86400) / 3600)
+  if (days > 0) return `${days} 天 ${hours} 小时`
+  if (hours > 0) return `${hours} 小时`
+  const minutes = Math.floor(value / 60)
+  return `${minutes} 分钟`
 }
 
 /**

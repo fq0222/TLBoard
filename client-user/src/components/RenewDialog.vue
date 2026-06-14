@@ -12,7 +12,7 @@
         </div>
         <div class="renew-tip-card">
           <span class="tip-title">续费说明</span>
-          <p>续费会在现有套餐基础上累加流量，流量用完后 3 天内仍可续费当前套餐。</p>
+          <p>{{ renewTipText }}</p>
         </div>
       </section>
 
@@ -193,6 +193,13 @@ const payType = ref(1)
 const windowWidth = ref(window.innerWidth)
 
 const dialogWidth = computed(() => (windowWidth.value <= 768 ? '94%' : '860px'))
+const renewTipText = computed(() => {
+  const selectedPlan = plans.value.find((plan) => plan.id === selectedPlanId.value)
+  if (selectedPlan?.plan_type === 'timed') {
+    return '限时套餐续费会从支付完成时重新计算流量和到期时间。'
+  }
+  return '不限时套餐续费会在现有套餐基础上累加流量。'
+})
 
 const recommendedPlanId = computed(() => {
   const preferred = plans.value.find((plan) => plan.is_recommended || plan.recommended)
@@ -236,7 +243,7 @@ watch(() => props.visible, (newVal) => {
 async function fetchPlans() {
   try {
     loading.value = true
-    const result = await api.user.getPlans()
+    const result = await api.user.getRenewPlans()
     if (result.code === 0) {
       plans.value = result.data.plans || []
     } else {

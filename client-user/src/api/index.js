@@ -43,6 +43,9 @@ apiClient.interceptors.response.use(
         case 400:
           // 400 多为表单校验错误，交给具体页面决定如何提示，避免重复弹窗
           break
+        case 409:
+          // 409 用于需要用户确认的业务分支，交给具体页面弹出确认内容。
+          break
         case 401:
           localStorage.removeItem('user_token')
           window.location.href = '/login'
@@ -149,6 +152,14 @@ const userApi = {
   },
 
   /**
+   * 获取当前账号可续费套餐列表
+   * @returns {Promise<Object>} 同类型续费套餐响应
+   */
+  getRenewPlans() {
+    return apiClient.get('/renew/plans')
+  },
+
+  /**
    * 获取公告列表
    * @param {Object} params - 查询参数
    * @returns {Promise<Object>} 响应数据
@@ -248,6 +259,7 @@ const userApi = {
    * 用户续费
    * @param {Object} data - 续费数据
    * @param {number} data.plan_id - 套餐ID
+   * @param {boolean} [data.confirm_reset] - 是否确认重置限时套餐权益
    * @returns {Promise<Object>} 响应数据
    */
   renew(data) {
