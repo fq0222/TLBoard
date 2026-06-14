@@ -238,6 +238,41 @@ test('user profile marks traffic limited disabled account as renew status', asyn
   }
 });
 
+test('user profile marks expired disabled account as renew status', async () => {
+  const restoreRepository = replaceMethods(userRepository, {
+    findUserProfileById: async () => ({
+      id: 10,
+      email: 'expired@example.com',
+      plan_id: 2,
+      plan_name: '月卡',
+      plan_type: 'timed',
+      sub_id: 'abcdef1234567892',
+      traffic_used: 1024,
+      traffic_limit: 4096,
+      referral_traffic_limit: 0,
+      expire_at: 1710000000,
+      enabled: 0,
+      disable_reason: 'expired',
+      created_at: 1700000000,
+      payment_count: 1,
+      sync_status: 2,
+      onboarding_completed: 0
+    }),
+    hasUserCfIps: async () => false,
+    hasUserSubscriptionCache: async () => false,
+    findSystemSettingByKey: async () => null
+  });
+
+  try {
+    const profile = await authService.getProfile({}, 10);
+    assert.equal(profile.status, 'renew');
+    assert.equal(profile.status_text, '续费');
+    assert.equal(profile.disable_reason, 'expired');
+  } finally {
+    restoreRepository();
+  }
+});
+
 test('user profile repository selects disable reason for status display', async () => {
   let profileSql = '';
   const db = {

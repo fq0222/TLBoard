@@ -309,7 +309,7 @@ async function findUserProfileById(db, userId) {
       u.id, u.email, u.plan_id, u.subscription_token, u.sub_id,
       u.traffic_used, u.traffic_limit, u.referral_traffic_limit, u.balance, u.expire_at, u.enabled, u.disable_reason, u.created_at,
       u.payment_count, u.sync_status, u.onboarding_completed,
-      p.name as plan_name
+      p.name as plan_name, p.plan_type as plan_type
     FROM users u
     LEFT JOIN plans p ON u.plan_id = p.id
     WHERE u.id = ?

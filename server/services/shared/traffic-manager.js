@@ -598,6 +598,55 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData, clientStatusSn
 }
 
 /**
+ * 检查并禁用已到期的限时套餐用户。
+ * 职责：只处理 plan_type=timed 且 expire_at<=now 的启用用户；禁用成功后补偿同步到 3X-UI。
+ * 核心分支：状态锁忙时等待下轮任务；本地禁用成功但同步失败时进入重试统计。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} now - 当前秒级时间戳，测试可传入固定值
+ * @returns {Promise<{disabledCount: number, retryCount: number}>} 本地禁用数量与待重试同步数量
+ */
+async function checkAndDisableExpiredUsers(db, now = Math.floor(Date.now() / 1000)) {
+  try {
+    const expiredUsers = await trafficRepository.listExpiredEnabledUsers(db, now);
+    if (expiredUsers.length === 0) {
+      logger.info('没有需要按时间到期禁用的用户');
+      return { disabledCount: 0, retryCount: 0 };
+    }
+
+    let disabledCount = 0;
+    let retryCount = 0;
+
+    for (const user of expiredUsers) {
+      const lockedResult = await withUserStatusLock(db, Number(user.id), async () => {
+        await trafficRepository.disableUserByExpired(db, user.id, DISABLE_REASONS.EXPIRED);
+        return { success: true, action: 'disabled' };
+      });
+
+      if (lockedResult.retryable) {
+        retryCount++;
+        logger.warn(`用户 ${user.email} 到期禁用状态锁忙，等待下轮检查`);
+        continue;
+      }
+
+      if (lockedResult.success && lockedResult.action === 'disabled') {
+        disabledCount++;
+        const syncResult = await enqueueUserStatusSync(db, user.id, true);
+        if (syncResult.retryable) {
+          retryCount++;
+        }
+        logger.info(`用户 ${user.email} 已因时间到期禁用`);
+      }
+    }
+
+    return { disabledCount, retryCount };
+  } catch (error) {
+    logger.error(`检查时间到期禁用错误: ${error.message}`);
+    return { disabledCount: 0, retryCount: 0 };
+  }
+}
+
+/**
  * 同步禁用状态到 3X-UI
  * @param {Object} db - 数据库实例
  * @param {number} userId - 用户 ID
@@ -722,7 +771,13 @@ async function syncDisableStatusToXui(db, userId, disable, options = {}) {
  * @returns {Promise<{success: boolean, retryable?: boolean, action: string}>}
  */
 async function enqueueUserStatusSync(db, userId, disable) {
-  const syncSuccess = await syncDisableStatusToXui(db, userId, disable);
+  let syncSuccess = false;
+  try {
+    syncSuccess = await syncDisableStatusToXui(db, userId, disable);
+  } catch (error) {
+    logger.warn(`用户状态立即同步失败，将尝试写入重试队列: user=${userId}, disable=${disable}, error=${error.message}`);
+  }
+
   if (syncSuccess) {
     logger.info(`用户状态已立即同步到 3X-UI: user=${userId}, disable=${disable}`);
     return {
@@ -735,11 +790,20 @@ async function enqueueUserStatusSync(db, userId, disable) {
     ? xuiSyncTaskService.TASK_TYPES.DISABLE_SYNC
     : xuiSyncTaskService.TASK_TYPES.ENABLE_SYNC;
 
-  await xuiSyncTaskService.enqueueTask(db, {
-    userId,
-    taskType,
-    payload: { disable }
-  });
+  try {
+    await xuiSyncTaskService.enqueueTask(db, {
+      userId,
+      taskType,
+      payload: { disable }
+    });
+  } catch (error) {
+    logger.error(`用户状态同步写入重试队列失败: user=${userId}, disable=${disable}, error=${error.message}`);
+    return {
+      success: false,
+      retryable: true,
+      action: 'queue-failed'
+    };
+  }
 
   logger.warn(`用户状态同步已降级进入重试队列: user=${userId}, disable=${disable}, taskType=${taskType}`);
 
@@ -775,6 +839,7 @@ async function syncTrafficAndHandleDisable(db) {
     await updateTrafficInDatabase(db, userTrafficData);
     await checkAndEnableUnderLimitUsers(db, userTrafficData);
     await checkAndDisableOverLimitUsers(db, userTrafficData, serverTrafficData);
+    await checkAndDisableExpiredUsers(db);
 
     logger.info('流量同步与禁用检查任务完成');
   } catch (error) {
@@ -789,6 +854,7 @@ module.exports = {
   updateTrafficInDatabase,
   checkAndEnableUnderLimitUsers,
   checkAndDisableOverLimitUsers,
+  checkAndDisableExpiredUsers,
   syncDisableStatusToXui,
   enqueueUserStatusSync,
   getLatestUserDisableState,

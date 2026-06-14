@@ -281,7 +281,7 @@ function getUserTrafficEntitlement(user) {
 
 /**
  * 判断禁用用户是否应被登录入口拦截。
- * 职责：区分管理员封禁账号和流量超限暂停节点，流量超限用户仍需登录后续费。
+ * 职责：区分管理员封禁账号和可续费暂停节点，流量超限/时间到期用户仍需登录后续费。
  *
  * @param {Object} user - 登录查询返回的用户记录
  * @returns {boolean} 是否需要拒绝登录
@@ -291,12 +291,13 @@ function shouldBlockDisabledUserLogin(user) {
     return false;
   }
 
-  return user.disable_reason !== DISABLE_REASONS.TRAFFIC_LIMIT;
+  return user.disable_reason !== DISABLE_REASONS.TRAFFIC_LIMIT
+    && user.disable_reason !== DISABLE_REASONS.EXPIRED;
 }
 
 /**
  * 推导用户端个人中心账号状态。
- * 职责：账号未禁用统一显示正常；禁用时按 disable_reason 区分管理员禁用和流量超限续费。
+ * 职责：账号未禁用统一显示正常；禁用时按 disable_reason 区分管理员禁用和可续费状态。
  *
  * @param {Object} user - 用户资料记录
  * @returns {{status:string,status_text:string}} 前端展示状态
@@ -309,7 +310,7 @@ function buildUserProfileStatus(user) {
     };
   }
 
-  if (user.disable_reason === DISABLE_REASONS.TRAFFIC_LIMIT) {
+  if (user.disable_reason === DISABLE_REASONS.TRAFFIC_LIMIT || user.disable_reason === DISABLE_REASONS.EXPIRED) {
     return {
       status: 'renew',
       status_text: '续费'
@@ -569,6 +570,7 @@ async function getProfile(db, userId) {
     email: user.email,
     plan_id: user.plan_id,
     plan_name: user.plan_name,
+    plan_type: user.plan_type,
     sub_id: user.sub_id,
     cf_optimized: cfOptimized,
     subscription_ready: subscriptionReady,

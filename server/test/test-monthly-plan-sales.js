@@ -879,3 +879,59 @@ test('repository paid user update can reset traffic used with valid params', asy
   assert.match(capturedSql, /traffic_used = 0/);
   assert.deepEqual(capturedValues, [2, 4096, 1702592000, 1700000000, 9]);
 });
+
+test('traffic manager disables expired timed users locally and queues sync', async () => {
+  const trafficManager = require('../services/shared/traffic-manager');
+  const now = 1700000000;
+  const updated = [];
+  const queuedTasks = [];
+  const db = {
+    prepare(sql) {
+      if (sql.includes('pg_try_advisory_lock')) {
+        return { get: () => ({ locked: true }) };
+      }
+      if (sql.includes('pg_advisory_unlock')) {
+        return { get: () => ({ unlocked: true }) };
+      }
+      if (sql.includes('FROM users u') && sql.includes('expire_at <= ?')) {
+        return {
+          all(receivedNow) {
+            assert.equal(receivedNow, now);
+            return [{ id: 7, email: 'expired@example.com', expire_at: now - 1 }];
+          }
+        };
+      }
+      if (sql.includes('UPDATE users SET enabled = 0')) {
+        return {
+          run(disableReason, userId) {
+            updated.push({ disableReason, userId });
+          }
+        };
+      }
+      if (sql.includes('SELECT email FROM users')) {
+        return { get: () => ({ email: 'expired@example.com' }) };
+      }
+      if (sql.includes('FROM xui_servers')) {
+        return { all: () => [] };
+      }
+      if (sql.includes('INSERT INTO xui_sync_tasks')) {
+        return {
+          run(userId, taskType, payloadText) {
+            queuedTasks.push({ userId, taskType, payload: JSON.parse(payloadText) });
+            return { lastInsertRowid: 99 };
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  const result = await trafficManager.checkAndDisableExpiredUsers(db, now);
+  assert.equal(result.disabledCount, 1);
+  assert.deepEqual(updated[0], { disableReason: 'expired', userId: 7 });
+  assert.deepEqual(queuedTasks[0], {
+    userId: 7,
+    taskType: 'disable_sync',
+    payload: { disable: true }
+  });
+});

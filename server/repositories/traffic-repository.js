@@ -171,6 +171,42 @@ async function disableUserByTrafficLimit(db, userId, trafficUsedAt, disableReaso
 }
 
 /**
+ * 查询已到期且仍启用的限时套餐用户。
+ * 职责：仅返回 plan_type=timed、expire_at 有效且不晚于当前时间的用户，避免不限时套餐被误禁用。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} now - 当前秒级时间戳
+ * @returns {Promise<Array>} 到期用户列表
+ */
+async function listExpiredEnabledUsers(db, now) {
+  return db.prepare(`
+    SELECT u.id, u.email, u.expire_at
+    FROM users u
+    JOIN plans p ON u.plan_id = p.id
+    WHERE u.enabled = 1
+      AND COALESCE(p.plan_type, 'lifetime') = 'timed'
+      AND u.expire_at IS NOT NULL
+      AND u.expire_at != 0
+      AND u.expire_at <= ?
+  `).all(now);
+}
+
+/**
+ * 按时间到期原因禁用用户。
+ * 职责：只修改用户启用状态与禁用原因；核心分支由调用方保证用户确属限时到期。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number|string} userId - 用户 ID
+ * @param {string} disableReason - 禁用原因，通常为 expired
+ * @returns {Promise<void>}
+ */
+async function disableUserByExpired(db, userId, disableReason) {
+  await db.prepare(`
+    UPDATE users SET enabled = 0, disable_reason = ? WHERE id = ?
+  `).run(disableReason, userId);
+}
+
+/**
  * 恢复因流量超限禁用、但当前流量已低于上限的用户。
  *
  * @param {Object} db - 数据库代理对象
@@ -205,6 +241,8 @@ module.exports = {
   updateUserTrafficUsed,
   findLatestUserDisableState,
   disableUserByTrafficLimit,
+  listExpiredEnabledUsers,
+  disableUserByExpired,
   enableUserAfterTrafficLimitRecovery,
   findUserEmailById
 };
