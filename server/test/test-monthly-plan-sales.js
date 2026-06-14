@@ -935,3 +935,67 @@ test('traffic manager disables expired timed users locally and queues sync', asy
     payload: { disable: true }
   });
 });
+
+test('traffic manager still checks expired users when server traffic is unavailable', async () => {
+  const trafficManager = require('../services/shared/traffic-manager');
+  const updated = [];
+  const queuedTasks = [];
+  let serverQueryCount = 0;
+  let expiredQueryCount = 0;
+  const db = {
+    prepare(sql) {
+      if (sql.includes('pg_try_advisory_lock')) {
+        return { get: () => ({ locked: true }) };
+      }
+      if (sql.includes('pg_advisory_unlock')) {
+        return { get: () => ({ unlocked: true }) };
+      }
+      if (sql.includes('FROM xui_servers')) {
+        return {
+          all() {
+            serverQueryCount += 1;
+            return [];
+          }
+        };
+      }
+      if (sql.includes('FROM users u') && sql.includes('expire_at <= ?')) {
+        return {
+          all() {
+            expiredQueryCount += 1;
+            return [{ id: 8, email: 'expired-no-traffic@example.com', expire_at: 1700000000 }];
+          }
+        };
+      }
+      if (sql.includes('UPDATE users SET enabled = 0')) {
+        return {
+          run(disableReason, userId) {
+            updated.push({ disableReason, userId });
+          }
+        };
+      }
+      if (sql.includes('SELECT email FROM users')) {
+        return { get: () => ({ email: 'expired-no-traffic@example.com' }) };
+      }
+      if (sql.includes('INSERT INTO xui_sync_tasks')) {
+        return {
+          run(userId, taskType, payloadText) {
+            queuedTasks.push({ userId, taskType, payload: JSON.parse(payloadText) });
+            return { lastInsertRowid: 100 };
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  await trafficManager.syncTrafficAndHandleDisable(db);
+
+  assert.equal(serverQueryCount >= 1, true);
+  assert.equal(expiredQueryCount, 1);
+  assert.deepEqual(updated[0], { disableReason: 'expired', userId: 8 });
+  assert.deepEqual(queuedTasks[0], {
+    userId: 8,
+    taskType: 'disable_sync',
+    payload: { disable: true }
+  });
+});

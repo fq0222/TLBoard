@@ -826,19 +826,18 @@ async function syncTrafficAndHandleDisable(db) {
 
     if (Object.keys(serverTrafficData).length === 0) {
       logger.info('没有获取到服务器流量数据，跳过后续步骤');
-      return;
+    } else {
+      const userTrafficData = await calculateUserTotalTraffic(db, serverTrafficData);
+
+      if (Object.keys(userTrafficData).length === 0) {
+        logger.info('没有计算到用户流量数据，跳过流量禁用步骤');
+      } else {
+        await updateTrafficInDatabase(db, userTrafficData);
+        await checkAndEnableUnderLimitUsers(db, userTrafficData);
+        await checkAndDisableOverLimitUsers(db, userTrafficData, serverTrafficData);
+      }
     }
 
-    const userTrafficData = await calculateUserTotalTraffic(db, serverTrafficData);
-
-    if (Object.keys(userTrafficData).length === 0) {
-      logger.info('没有计算到用户流量数据，跳过后续步骤');
-      return;
-    }
-
-    await updateTrafficInDatabase(db, userTrafficData);
-    await checkAndEnableUnderLimitUsers(db, userTrafficData);
-    await checkAndDisableOverLimitUsers(db, userTrafficData, serverTrafficData);
     await checkAndDisableExpiredUsers(db);
 
     logger.info('流量同步与禁用检查任务完成');
