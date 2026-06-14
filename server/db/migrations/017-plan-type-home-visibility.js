@@ -38,6 +38,10 @@ async function migrate() {
       ADD COLUMN IF NOT EXISTS plan_type VARCHAR(20) DEFAULT 'lifetime'
     `);
     await client.query(`
+      ALTER TABLE plans
+      ALTER COLUMN plan_type SET DEFAULT 'lifetime'
+    `);
+    await client.query(`
       UPDATE plans
       SET plan_type = 'lifetime'
       WHERE plan_type IS NULL OR plan_type = ''
@@ -48,6 +52,10 @@ async function migrate() {
     await client.query(`
       ALTER TABLE plans
       ADD COLUMN IF NOT EXISTS show_on_home INTEGER DEFAULT 1
+    `);
+    await client.query(`
+      ALTER TABLE plans
+      ALTER COLUMN show_on_home SET DEFAULT 1
     `);
     await client.query(`
       UPDATE plans

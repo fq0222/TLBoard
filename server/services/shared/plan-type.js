@@ -46,14 +46,14 @@ function validatePlanDuration(plan) {
   const planType = normalizePlanType(plan?.plan_type);
   const durationDays = Number(plan?.duration_days || 0);
 
-  if (planType === PLAN_TYPES.LIFETIME && durationDays !== 0) {
+  if (planType === PLAN_TYPES.LIFETIME && (!Number.isFinite(durationDays) || durationDays !== 0)) {
     return {
       valid: false,
       message: '不限时套餐的有效天数必须为 0'
     };
   }
 
-  if (planType === PLAN_TYPES.TIMED && durationDays <= 0) {
+  if (planType === PLAN_TYPES.TIMED && (!Number.isFinite(durationDays) || durationDays <= 0)) {
     return {
       valid: false,
       message: '限时套餐的有效天数必须大于 0'

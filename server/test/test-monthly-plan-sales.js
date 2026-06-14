@@ -33,6 +33,14 @@ test('plan duration validation protects lifetime and timed semantics', () => {
     valid: false,
     message: '限时套餐的有效天数必须大于 0'
   });
+  assert.deepEqual(validatePlanDuration({ plan_type: 'timed', duration_days: 'abc' }), {
+    valid: false,
+    message: '限时套餐的有效天数必须大于 0'
+  });
+  assert.deepEqual(validatePlanDuration({ plan_type: 'lifetime', duration_days: 'abc' }), {
+    valid: false,
+    message: '不限时套餐的有效天数必须为 0'
+  });
 });
 
 test('timed renew preview reports remaining traffic and time', () => {
