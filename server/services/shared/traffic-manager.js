@@ -619,7 +619,18 @@ async function checkAndDisableExpiredUsers(db, now = Math.floor(Date.now() / 100
 
     for (const user of expiredUsers) {
       const lockedResult = await withUserStatusLock(db, Number(user.id), async () => {
-        await trafficRepository.disableUserByExpired(db, user.id, DISABLE_REASONS.EXPIRED);
+        const disabled = await trafficRepository.disableUserByExpired(
+          db,
+          user.id,
+          DISABLE_REASONS.EXPIRED,
+          now
+        );
+
+        if (!disabled) {
+          logger.info(`用户 ${user.email} 到期禁用二次校验未命中，可能已续费或状态已变化`);
+          return { success: true, action: 'skip-rechecked' };
+        }
+
         return { success: true, action: 'disabled' };
       });
 

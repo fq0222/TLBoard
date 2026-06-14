@@ -594,10 +594,15 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
 
   await transaction();
 
-  // 流量用完被禁用的用户续费后，先恢复本地状态，再异步同步 3X-UI
+  const renewRestorableDisableReasons = new Set([
+    DISABLE_REASONS.TRAFFIC_LIMIT,
+    DISABLE_REASONS.EXPIRED
+  ]);
+
+  // 流量用完或时间到期被禁用的用户续费后，先恢复本地状态，再异步同步 3X-UI。
   if (isRenewOrder
     && Number(order.current_enabled) === 0
-    && order.current_disable_reason === DISABLE_REASONS.TRAFFIC_LIMIT) {
+    && renewRestorableDisableReasons.has(order.current_disable_reason)) {
     logger.info(`用户 ${order.email} 已禁用，开始解除禁用`);
 
     trafficManager.enqueueUserStatusSync(db, order.user_id, false)

@@ -65,6 +65,41 @@ async function getLatestUserForSyncTask(db, task, payload) {
 }
 
 /**
+ * 判断启用/禁用同步任务是否仍符合用户最新状态。
+ * 职责：避免旧的 disable_sync/enable_sync 在续费或管理员操作后覆盖 3X-UI 的新状态。
+ * 核心分支：本地状态已与任务目标相反时，任务按成功跳过；用户不存在时同样跳过。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} task - 同步任务
+ * @param {boolean} disable - 本次任务是否想禁用用户
+ * @returns {Promise<{skip:boolean,message:string}>} 是否跳过真实同步
+ */
+async function shouldSkipStaleStatusSyncTask(db, task, disable) {
+  const userId = task.user_id || task.payload_data?.user?.id;
+  if (!userId) {
+    return { skip: true, message: '任务缺少用户 ID，已跳过' };
+  }
+
+  const user = await xuiSyncRepository.findUserForSyncTask(db, userId);
+  if (!user) {
+    return { skip: true, message: '用户不存在，任务已跳过' };
+  }
+
+  const latestEnabled = Number(user.enabled) === 1;
+  if (disable && latestEnabled) {
+    logger.info(`跳过过期禁用同步任务: task=${task.id}, user=${user.email}, enabled=${user.enabled}`);
+    return { skip: true, message: '用户已启用，过期禁用任务已跳过' };
+  }
+
+  if (!disable && !latestEnabled) {
+    logger.info(`跳过过期启用同步任务: task=${task.id}, user=${user.email}, enabled=${user.enabled}`);
+    return { skip: true, message: '用户已禁用，过期启用任务已跳过' };
+  }
+
+  return { skip: false, message: '' };
+}
+
+/**
  * 执行 3X-UI 同步重试队列
  * 根据任务类型分发到用户同步或启用/禁用同步逻辑。
  * @param {Object} db - 数据库实例
@@ -100,11 +135,21 @@ async function runXuiSyncTasks(db) {
       }
 
       if (task.task_type === xuiSyncTaskService.TASK_TYPES.ENABLE_SYNC) {
+        const staleCheck = await shouldSkipStaleStatusSyncTask(db, task, false);
+        if (staleCheck.skip) {
+          return { success: true, message: staleCheck.message };
+        }
+
         const ok = await trafficManager.syncDisableStatusToXui(db, task.user_id, false);
         return { success: ok, message: ok ? 'ok' : '同步启用状态失败' };
       }
 
       if (task.task_type === xuiSyncTaskService.TASK_TYPES.DISABLE_SYNC) {
+        const staleCheck = await shouldSkipStaleStatusSyncTask(db, task, true);
+        if (staleCheck.skip) {
+          return { success: true, message: staleCheck.message };
+        }
+
         const ok = await trafficManager.syncDisableStatusToXui(db, task.user_id, true);
         return { success: ok, message: ok ? 'ok' : '同步禁用状态失败' };
       }
@@ -130,5 +175,7 @@ async function runXuiSyncTasks(db) {
 }
 
 module.exports = {
-  registerXuiSyncTaskJob
+  registerXuiSyncTaskJob,
+  runXuiSyncTasks,
+  shouldSkipStaleStatusSyncTask
 };

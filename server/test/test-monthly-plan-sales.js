@@ -852,6 +852,79 @@ test('paid lifetime renew enqueue payload uses final accumulated traffic limit',
   }
 });
 
+test('paid expired timed renew enqueues enable status sync', async () => {
+  const orderRepository = require('../repositories/order-repository');
+  const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
+  const trafficManager = require('../services/shared/traffic-manager');
+  const orderService = require('../services/shared/order-service');
+  const transactionDb = { name: 'transaction-db' };
+  const statusSyncCalls = [];
+
+  const originalRepository = {
+    findPaidOrderContextByOutTradeNo: orderRepository.findPaidOrderContextByOutTradeNo,
+    findPlanById: orderRepository.findPlanById,
+    markOrderPaid: orderRepository.markOrderPaid,
+    updateUserAfterPaidOrder: orderRepository.updateUserAfterPaidOrder,
+    incrementPlanSalesCount: orderRepository.incrementPlanSalesCount,
+    decrementPlanSalesCount: orderRepository.decrementPlanSalesCount
+  };
+  const originalXuiSyncTaskService = {
+    enqueueTask: xuiSyncTaskService.enqueueTask,
+    processTask: xuiSyncTaskService.processTask
+  };
+  const originalTrafficManager = {
+    enqueueUserStatusSync: trafficManager.enqueueUserStatusSync
+  };
+
+  orderRepository.findPaidOrderContextByOutTradeNo = async () => ({
+    id: 51,
+    out_trade_no: 'REN-EXPIRED',
+    status: 'pending',
+    user_id: 21,
+    email: 'expired-renew@example.com',
+    subscription_token: 'sub-token',
+    plan_id: 4,
+    current_plan_id: 4,
+    current_traffic_limit: 4096,
+    current_expire_at: 1699990000,
+    current_enabled: 0,
+    current_disable_reason: 'expired',
+    current_payment_count: 1,
+    trade_no: 'OLD-TRADE'
+  });
+  orderRepository.findPlanById = async () => ({
+    id: 4,
+    plan_type: 'timed',
+    duration_days: 30,
+    traffic_limit: 4096
+  });
+  orderRepository.markOrderPaid = async () => {};
+  orderRepository.updateUserAfterPaidOrder = async () => {};
+  orderRepository.incrementPlanSalesCount = async () => {};
+  orderRepository.decrementPlanSalesCount = async () => {};
+  trafficManager.enqueueUserStatusSync = async (db, userId, disable) => {
+    statusSyncCalls.push({ userId, disable });
+    return { success: true };
+  };
+  xuiSyncTaskService.enqueueTask = async () => 89;
+  xuiSyncTaskService.processTask = () => Promise.resolve();
+
+  const db = {
+    transaction(callback) {
+      return async () => callback(transactionDb);
+    }
+  };
+
+  try {
+    await orderService.completePaidOrder(db, 'REN-EXPIRED', 'TRADE-2');
+    assert.deepEqual(statusSyncCalls[0], { userId: 21, disable: false });
+  } finally {
+    Object.assign(orderRepository, originalRepository);
+    Object.assign(xuiSyncTaskService, originalXuiSyncTaskService);
+    Object.assign(trafficManager, originalTrafficManager);
+  }
+});
+
 test('repository paid user update can reset traffic used with valid params', async () => {
   const orderRepository = require('../repositories/order-repository');
   let capturedSql = '';
@@ -901,10 +974,11 @@ test('traffic manager disables expired timed users locally and queues sync', asy
           }
         };
       }
-      if (sql.includes('UPDATE users SET enabled = 0')) {
+      if (sql.includes('UPDATE users') && sql.includes('SET enabled = 0')) {
         return {
-          run(disableReason, userId) {
-            updated.push({ disableReason, userId });
+          run(disableReason, userId, receivedNow) {
+            updated.push({ disableReason, userId, now: receivedNow });
+            return { changes: 1 };
           }
         };
       }
@@ -928,12 +1002,55 @@ test('traffic manager disables expired timed users locally and queues sync', asy
 
   const result = await trafficManager.checkAndDisableExpiredUsers(db, now);
   assert.equal(result.disabledCount, 1);
-  assert.deepEqual(updated[0], { disableReason: 'expired', userId: 7 });
+  assert.deepEqual(updated[0], { disableReason: 'expired', userId: 7, now });
   assert.deepEqual(queuedTasks[0], {
     userId: 7,
     taskType: 'disable_sync',
     payload: { disable: true }
   });
+});
+
+test('traffic manager skips expired disable sync when conditional update misses', async () => {
+  const trafficManager = require('../services/shared/traffic-manager');
+  const now = 1700000000;
+  const queuedTasks = [];
+  const db = {
+    prepare(sql) {
+      if (sql.includes('pg_try_advisory_lock')) {
+        return { get: () => ({ locked: true }) };
+      }
+      if (sql.includes('pg_advisory_unlock')) {
+        return { get: () => ({ unlocked: true }) };
+      }
+      if (sql.includes('FROM users u') && sql.includes('expire_at <= ?')) {
+        return {
+          all() {
+            return [{ id: 9, email: 'renewed-before-disable@example.com', expire_at: now - 1 }];
+          }
+        };
+      }
+      if (sql.includes('UPDATE users')) {
+        return {
+          run() {
+            return { changes: 0 };
+          }
+        };
+      }
+      if (sql.includes('INSERT INTO xui_sync_tasks')) {
+        return {
+          run(userId, taskType, payloadText) {
+            queuedTasks.push({ userId, taskType, payload: JSON.parse(payloadText) });
+            return { lastInsertRowid: 101 };
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  const result = await trafficManager.checkAndDisableExpiredUsers(db, now);
+  assert.equal(result.disabledCount, 0);
+  assert.deepEqual(queuedTasks, []);
 });
 
 test('traffic manager still checks expired users when server traffic is unavailable', async () => {
@@ -966,10 +1083,11 @@ test('traffic manager still checks expired users when server traffic is unavaila
           }
         };
       }
-      if (sql.includes('UPDATE users SET enabled = 0')) {
+      if (sql.includes('UPDATE users') && sql.includes('SET enabled = 0')) {
         return {
-          run(disableReason, userId) {
-            updated.push({ disableReason, userId });
+          run(disableReason, userId, receivedNow) {
+            updated.push({ disableReason, userId, now: receivedNow });
+            return { changes: 1 };
           }
         };
       }
@@ -992,10 +1110,71 @@ test('traffic manager still checks expired users when server traffic is unavaila
 
   assert.equal(serverQueryCount >= 1, true);
   assert.equal(expiredQueryCount, 1);
-  assert.deepEqual(updated[0], { disableReason: 'expired', userId: 8 });
+  assert.equal(updated[0].disableReason, 'expired');
+  assert.equal(updated[0].userId, 8);
+  assert.equal(typeof updated[0].now, 'number');
   assert.deepEqual(queuedTasks[0], {
     userId: 8,
     taskType: 'disable_sync',
     payload: { disable: true }
   });
+});
+
+test('xui sync worker skips stale disable task when user is already enabled', async () => {
+  const syncHandler = require('../jobs/handlers/sync-xui-tasks');
+  const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
+  const trafficManager = require('../services/shared/traffic-manager');
+  let statusSyncCount = 0;
+
+  const originalXuiSyncTaskService = {
+    processDueTasks: xuiSyncTaskService.processDueTasks
+  };
+  const originalTrafficManager = {
+    syncDisableStatusToXui: trafficManager.syncDisableStatusToXui
+  };
+
+  xuiSyncTaskService.processDueTasks = async (db, handler) => {
+    const result = await handler({
+      id: 201,
+      user_id: 30,
+      task_type: xuiSyncTaskService.TASK_TYPES.DISABLE_SYNC,
+      payload_data: { disable: true }
+    });
+
+    assert.equal(result.success, true);
+    assert.match(result.message, /已启用/);
+    return { processed: 1, success: 1, failed: 0, finalFailed: 0 };
+  };
+  trafficManager.syncDisableStatusToXui = async () => {
+    statusSyncCount += 1;
+    return true;
+  };
+
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users')) {
+        return {
+          get(userId) {
+            assert.equal(userId, 30);
+            return {
+              id: 30,
+              email: 'already-enabled@example.com',
+              enabled: 1,
+              traffic_limit: 4096,
+              expire_at: 1700000000
+            };
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  try {
+    await syncHandler.runXuiSyncTasks(db);
+    assert.equal(statusSyncCount, 0);
+  } finally {
+    Object.assign(xuiSyncTaskService, originalXuiSyncTaskService);
+    Object.assign(trafficManager, originalTrafficManager);
+  }
 });

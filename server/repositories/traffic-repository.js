@@ -192,18 +192,31 @@ async function listExpiredEnabledUsers(db, now) {
 }
 
 /**
- * 按时间到期原因禁用用户。
- * 职责：只修改用户启用状态与禁用原因；核心分支由调用方保证用户确属限时到期。
+ * 按时间到期原因条件禁用用户。
+ * 职责：在写入前二次确认用户仍启用、仍属于限时套餐且到期时间未被续费改写。
+ * 核心分支：只有 UPDATE 命中 1 行才代表真正禁用，调用方据此决定是否同步到 3X-UI。
  *
  * @param {Object} db - 数据库代理对象
  * @param {number|string} userId - 用户 ID
  * @param {string} disableReason - 禁用原因，通常为 expired
- * @returns {Promise<void>}
+ * @param {number} now - 当前秒级时间戳
+ * @returns {Promise<boolean>} 是否真正禁用成功
  */
-async function disableUserByExpired(db, userId, disableReason) {
-  await db.prepare(`
-    UPDATE users SET enabled = 0, disable_reason = ? WHERE id = ?
-  `).run(disableReason, userId);
+async function disableUserByExpired(db, userId, disableReason, now) {
+  const result = await db.prepare(`
+    UPDATE users
+    SET enabled = 0, disable_reason = ?
+    FROM plans
+    WHERE users.id = ?
+      AND users.plan_id = plans.id
+      AND users.enabled = 1
+      AND COALESCE(plans.plan_type, 'lifetime') = 'timed'
+      AND users.expire_at IS NOT NULL
+      AND users.expire_at != 0
+      AND users.expire_at <= ?
+  `).run(disableReason, userId, now);
+
+  return Number(result?.changes || 0) > 0;
 }
 
 /**
