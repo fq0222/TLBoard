@@ -7,6 +7,7 @@ const {
   computeServerFingerprint,
   isSourceCacheUsable
 } = require('../shared/subscription-cache-service');
+const { isTimedPlan } = require('../shared/plan-type');
 const subscriptionRepository = require('../../repositories/subscription-repository');
 
 const SOURCE_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60;
@@ -459,6 +460,27 @@ function composeSubscriptionNodes(nodeConfigs, sourceMap, serversById, cfIps, lo
 }
 
 /**
+ * 断言限时套餐仍在有效期内。
+ * 职责：只对 plan_type=timed 且 expire_at 已到达的记录拦截订阅访问。
+ * 关键参数：record 可以是用户记录或订阅缓存记录，需包含 plan_type/expire_at。
+ * 核心分支：不限时套餐或 expire_at=0 直接放行，避免影响现有不限时订阅逻辑。
+ *
+ * @param {Object} record - 用户或订阅记录
+ * @returns {void}
+ */
+function assertSubscriptionNotExpired(record) {
+  if (!isTimedPlan(record)) {
+    return;
+  }
+
+  const expireAt = Number(record.expire_at || 0);
+  const now = Math.floor(Date.now() / 1000);
+  if (expireAt > 0 && expireAt <= now) {
+    throw createLegacyBusinessError(2003, '套餐已到期，请续费后使用订阅', 400, null);
+  }
+}
+
+/**
  * 校验订阅用户是否存在且账号启用。
  *
  * @param {Object|undefined} user - 用户信息
@@ -468,6 +490,8 @@ function assertActiveSubscriptionUser(user) {
   if (!user) {
     throw createLegacyBusinessError(2004, '用户不存在', 400, null);
   }
+
+  assertSubscriptionNotExpired(user);
 
   if (!user.enabled) {
     throw createLegacyBusinessError(2003, '账号已被禁用', 400, null);
@@ -782,6 +806,8 @@ async function getSubscriptionContent(db, token, query) {
   if (!subscription) {
     throw createLegacyBusinessError(2004, '订阅链接无效或尚未生成', 400, null);
   }
+
+  assertSubscriptionNotExpired(subscription);
 
   if (!subscription.enabled) {
     throw createLegacyBusinessError(2003, '账号已被禁用', 400, null);

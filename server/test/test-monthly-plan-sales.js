@@ -1179,6 +1179,137 @@ test('xui sync worker skips stale disable task when user is already enabled', as
   }
 });
 
+test('subscription user query includes plan type for expiry checks', async () => {
+  const subscriptionRepository = require('../repositories/subscription-repository');
+  let capturedSql = '';
+  const db = {
+    prepare(sql) {
+      capturedSql = sql;
+      return {
+        get() {
+          return undefined;
+        }
+      };
+    }
+  };
+
+  await subscriptionRepository.findSubscriptionUserById(db, 1);
+  assert.match(capturedSql, /p\.plan_type/);
+
+  await subscriptionRepository.findSubscriptionContentByToken(db, 'token');
+  assert.match(capturedSql, /LEFT JOIN plans p ON u\.plan_id = p\.id/);
+  assert.match(capturedSql, /p\.plan_type/);
+});
+
+test('subscription info rejects expired timed plan before listing nodes', async () => {
+  const subscriptionService = require('../services/user/subscription-service');
+  const now = Math.floor(Date.now() / 1000);
+  let cfQueryCount = 0;
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM users u') && sql.includes('LEFT JOIN plans')) {
+        return {
+          get() {
+            return {
+              id: 31,
+              email: 'expired-subscription@example.com',
+              enabled: 1,
+              plan_type: 'timed',
+              expire_at: now - 1,
+              traffic_used: 0,
+              traffic_limit: 4096
+            };
+          }
+        };
+      }
+      if (sql.includes('FROM user_cf_ips')) {
+        return {
+          all() {
+            cfQueryCount += 1;
+            return [];
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  await assert.rejects(
+    () => subscriptionService.getSubscriptionInfo(db, 31),
+    /套餐已到期/
+  );
+  assert.equal(cfQueryCount, 0);
+});
+
+test('subscription content rejects expired timed plan token', async () => {
+  const subscriptionService = require('../services/user/subscription-service');
+  const now = Math.floor(Date.now() / 1000);
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM user_subscriptions')) {
+        return {
+          get(token) {
+            assert.equal(token, 'expired-token');
+            return {
+              sub_id: 'expired-token',
+              email: 'expired-token@example.com',
+              enabled: 1,
+              plan_type: 'timed',
+              expire_at: now - 1,
+              traffic_used: 0,
+              traffic_limit: 4096,
+              nodes_data: '[]'
+            };
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  await assert.rejects(
+    () => subscriptionService.getSubscriptionContent(db, 'expired-token', {}),
+    /套餐已到期/
+  );
+});
+
+test('subscription content keeps lifetime plan token valid with expire at zero', async () => {
+  const subscriptionService = require('../services/user/subscription-service');
+  const db = {
+    prepare(sql) {
+      if (sql.includes('FROM user_subscriptions')) {
+        return {
+          get(token) {
+            assert.equal(token, 'lifetime-token');
+            return {
+              sub_id: 'lifetime-token',
+              email: 'lifetime-token@example.com',
+              enabled: 1,
+              plan_type: 'lifetime',
+              expire_at: 0,
+              traffic_used: 0,
+              traffic_limit: 4096,
+              nodes_data: '[]'
+            };
+          }
+        };
+      }
+      if (sql.includes('FROM announcements')) {
+        return {
+          all() {
+            return [];
+          }
+        };
+      }
+      throw new Error(`unexpected sql: ${sql}`);
+    }
+  };
+
+  const result = await subscriptionService.getSubscriptionContent(db, 'lifetime-token', {});
+  assert.equal(result.email, 'lifetime-token@example.com');
+  assert.equal(result.headers['Subscription-Userinfo'], 'upload=0; download=0; total=4096; expire=0');
+});
+
 test('xui sync worker skips stale enable task when user is still disabled', async () => {
   const syncHandler = require('../jobs/handlers/sync-xui-tasks');
   const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
