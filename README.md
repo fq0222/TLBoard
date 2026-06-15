@@ -2,326 +2,249 @@
 
 [English](./README_EN.md) | 简体中文
 
-一套面向 3X-UI 多节点场景的订阅管理系统，提供套餐购买、用户订阅生成、Cloudflare 优选、资源分发、邮件触达与 3X-UI 多服务器同步能力。
+面向 3X-UI 多服务器部署的机场面板订阅管理系统，包含用户端、管理端和统一 Node.js 后端。当前代码支持套餐购买、续费、订阅生成、Cloudflare 优选、工单、帮助中心、资源下载、邮件触达、推广余额奖励、Telegram 内部接口和 3X-UI 同步补偿。
 
-## 项目概览
+## 项目结构
 
-- 后端：`server/`，Node.js + Express + PostgreSQL
-- 用户端：`client-user/`，Vue 3 + Vite + Element Plus
-- 管理端：`client-admin/`，Vue 3 + Vite + Element Plus
-- 启动方式：三个包独立安装依赖，无根 `package.json`
-- 后端入口：`server/app.js` 统一启动用户端 API（30000）和管理端 API（30001）
+本仓库根目录没有 `package.json`，三个包独立安装依赖：
 
-## 当前能力
+| 目录 | 说明 | 技术栈 |
+| --- | --- | --- |
+| `server/` | 统一后端，同时启动用户端 API 和管理端 API | Node.js、Express、PostgreSQL |
+| `client-user/` | 用户端 SPA | Vue 3、Vite、Element Plus、Pinia |
+| `client-admin/` | 管理端 SPA | Vue 3、Vite、Element Plus、Pinia |
+
+主要目录职责：
+
+```text
+subscription-manager-v1.0.0/
+  server/
+    app.js                         # 后端统一启动入口，同时监听用户端和管理端 API
+    config.js                      # 本地开发配置，包含数据库、JWT、站点和支付配置
+    ecosystem.config.js            # PM2 生产部署模板，不能写入真实敏感信息
+    bootstrap/                     # Express 应用创建、路由注册、退出清理
+    routes/
+      user/                        # 用户端 API 路由，挂载到 /api/user
+      admin/                       # 管理端 API 路由，挂载到 /api/admin
+      internal/                    # Telegram 等内部 API
+    controllers/
+      user/                        # 用户端请求处理和响应格式兼容
+      admin/                       # 管理端请求处理和响应格式兼容
+    services/
+      user/                        # 用户端业务编排
+      admin/                       # 管理端业务编排
+      shared/                      # 订单、订阅、流量、工单等共享领域逻辑
+    repositories/                  # PostgreSQL 查询和数据访问封装
+    integrations/
+      xui/                         # 3X-UI API 客户端和同步任务
+      vmq/                         # VMQ 支付适配
+      email/                       # Brevo 邮件适配
+    db/
+      schema/                      # 当前表结构、索引、默认数据
+      migrations/                  # 已有环境升级迁移脚本
+    jobs/                          # 定时任务注册和任务处理器
+    websocket/                     # 管理端长任务进度推送
+    uploads/                       # 运行时上传文件目录，包含资源和博客图片
+    backupDB/                      # 运行时 3X-UI 数据库备份目录
+    test/                          # 后端验证脚本
+  client-user/
+    src/
+      api/                         # 用户端 API 封装
+      stores/                      # Pinia 用户状态
+      views/                       # 登录、首页、用户中心、工单、帮助中心等页面
+      components/                  # 用户端复用组件
+      utils/                       # 新手引导等工具
+  client-admin/
+    src/
+      api/                         # 管理端 API 封装
+      stores/                      # Pinia 管理员状态
+      views/                       # 仪表盘、用户、套餐、服务器、资源、邮件等页面
+  docs/                            # 需求、API、部署和专题设计文档
+```
+
+默认端口：
+
+- 用户端 API：`30000`
+- 管理端 API：`30001`
+- 用户端前端开发服务：Vite 默认端口
+- 管理端前端开发服务：Vite 默认端口
+
+## 主要功能
 
 ### 用户端
 
-- 套餐浏览、下单、续费、切换套餐
-- 通用订阅与 Clash 订阅生成
-- Cloudflare 优选 IP 管理
-- 下载资源领取与链接重置
-- 公告、帮助中心、客户端教程邮件获取
-- 响应式布局，支持移动端访问
+- 首页套餐展示、公告列表和公开在线客服链接。
+- 注册并支付、登录、忘记密码、重置密码。
+- 个人中心展示套餐、流量、余额、状态、Telegram 频道链接和新手引导状态。
+- 续费套餐，支持 VMQ 支付和余额支付。
+- Cloudflare 优选 IP，支持按 IP 池 ID 或 IP 地址应用。
+- 生成通用订阅、Clash 订阅和 V2Ray Base64 订阅。
+- 帮助中心文章、分类、图片展示。
+- 下载栏资源获取和用户独立下载链接。
+- 工单创建、回复、关闭和未读提醒。
+- 教程邮件和预设邮件触发。
+- 推广链接、点击统计和首单余额奖励明细。
+- 移动端响应式布局。
 
 ### 管理端
 
-- 3X-UI 服务器管理与一键同步
-- 套餐、订单、用户、公告管理
-- 资源分发、到期控制与令牌刷新
-- 邮件模板、群发、发送日志管理
-- 仪表盘统计与系统流量倍率设置
-- 每日 3X-UI 数据库备份
+- 管理员登录、改密和超级管理员账号管理。
+- 3X-UI 服务器管理、节点同步、用户更新/删除、数据库备份。
+- 套餐管理，支持 `lifetime` / `timed` 类型、销售数量、首页展示开关。
+- 用户管理、CF IP 配置、单用户和批量订阅生成。
+- 订单、公告、CF IP 池、工单管理。
+- 博客/帮助文章管理和图片上传。
+- Brevo 邮件配置、模板、单发、群发、日志管理。
+- 资源上传、分类、下载栏展示、用户分发、token 刷新和过期设置。
+- 系统设置：流量倍率、推广奖励系数、邮件、资源、订阅名称、Clash 更新间隔、Telegram 频道、在线客服。
+- 推广管理：推广码、点击、奖励余额、启用/禁用、重置推广码。
+- Telegram 管理绑定和内部监控接口配套。
 
-## 节点与订阅策略
+## 订阅路径
 
-系统目前支持三类入站处理策略，均通过 inbound `remark` 自动识别：
+当前代码实际生成的订阅路径是：
 
-- `cf`：备注包含 `cf`，订阅生成时替换地址、端口和 Host，并为多个优选 IP 生成独立节点
-- `direct`：默认策略，保留原始节点信息；同步到 3X-UI 时自动补 `flow: xtls-rprx-vision`
-- `hy2`：备注包含 `hy2`，对应 3X-UI 的 `protocol=hysteria`，订阅输出为 `hysteria2://`
+```text
+/api/user/subscription/sub/:subId
+/api/user/subscription/sub/:subId?clash=1
+/api/user/subscription/sub/:subId?v2ray=1
+```
 
-### hy2 处理细节
+当前后端没有注册 `/api/user/sub/:token`。
 
-- 3X-UI 客户端字段使用 `auth`，不使用 `id`
-- 客户端同步字段包含 `auth`、`email`、`subId`、`enable`、`expiryTime`、`totalGB`、`limitIp`、`tgId`
-- 通用订阅会补齐 `security=tls`、`mport=40000-50000`、`insecure=0`、`allowInsecure=0`
-- Clash 订阅会补齐 `ports: 40000-50000`、`tls: true`、`skip-cert-verify: false`
+## 节点策略
 
-### 原始订阅模板缓存
+订阅生成按 3X-UI inbound `remark` 自动识别策略：
 
-- 系统会把每个用户、每台服务器、每个 inbound 的原始订阅模板缓存到 `user_subscription_sources`
-- 生成订阅时优先复用缓存模板，缓存缺失时会按失效节点做增量修复
-- `hysteria` inbound 会自动匹配 `hysteria2://` 原始链接
+| 策略 | 识别方式 | 行为 |
+| --- | --- | --- |
+| `cf` | 备注包含 `cf` | 用用户优选 CF IP 改写地址，使用服务器 `client_port` 和 `host` |
+| `direct` | 默认策略 | 保留原始节点；同步 3X-UI 时自动写入 `flow: xtls-rprx-vision` |
+| `hy2` | 备注包含 `hy2` | 3X-UI 中通常是 `protocol=hysteria`，订阅输出为 `hysteria2://`，使用 `auth` |
 
-## 同步与后台任务
-
-### 3X-UI 用户同步
-
-- 购买、续费、启用、禁用都会触发 3X-UI 同步
-- 失败任务会写入 `xui_sync_tasks` 补偿队列
-- 补偿任务默认首轮延迟 30 秒，之后每分钟轮询一次
-- 退避间隔依次为 1 分钟、5 分钟、15 分钟、1 小时、4 小时
-
-### 定时任务
-
-- 流量同步与自动禁用：首轮延迟 10 分钟，之后每小时一次
-- 订单过期标记：每 10 分钟一次
-- 过期订单删除：首轮延迟 5 分钟，之后每小时一次
-- 僵尸用户清理：首轮延迟 2 分钟，之后每 30 分钟一次
-- 3X-UI 全量用户同步：首轮延迟 1 分钟，之后每 4 小时一次
-- 工单自动关闭检查：首轮延迟 3 分钟，之后每小时一次
-- 释放过期销售名额：每天 05:00
-- 邮件群发任务：每天 09:00
-- 邮件日志清理：每天 03:00
-- 3X-UI 数据库备份：每天 04:00
-
-## 技术特性
-
-- 多台 3X-UI 服务器统一管理
-- PostgreSQL 连接池与失败自动重试
-- 用户登录/注册速率限制
-- 用户流量聚合、倍率换算、超限自动禁用
-- 基于 `sub_id` / `auth` / `flow` 的节点配置一致性维护
-- 支持使用 3X-UI API Token 下载并覆盖保存最新 `x-ui.db`
+每个用户在每台服务器的每个 inbound 上都有独立 `uuid/auth/sub_id`。原始订阅模板会缓存到 `user_subscription_sources`，后续只修复失效节点。
 
 ## 快速开始
 
 ### 环境要求
 
-- Node.js 18.x LTS
+- Node.js 18+
 - PostgreSQL 12+
-- OpenResty 或 Nginx
+- Nginx 或 OpenResty（生产反向代理建议）
 
-### 安装步骤
+### 安装依赖
 
 ```bash
-# 克隆仓库
-git clone https://github.com/fq0222/TLBoard.git
-cd TLBoard
-
-# 安装后端依赖
 cd server
 npm install
 
-# 安装用户端依赖
 cd ../client-user
 npm install
 
-# 安装管理端依赖
 cd ../client-admin
 npm install
-
-# 初始化数据库
-cd ../server
-npm run init-db
-
-# 仅启动后端
-npm run dev
-
-# 生产方式启动后端
-npm run start
-
-# 当前 dev:all 为统一后端入口兼容脚本，等价于 npm run dev
-npm run dev:all
-
-# 用户端前端开发
-cd ../client-user
-npm run dev
-
-# 管理端前端开发
-cd ../client-admin
-npm run dev
 ```
 
-### 默认管理账号
-
-| 用途 | 账号 | 密码 |
-|------|------|------|
-| 管理端 | `admin` | `admin123` |
-
-首次登录后请立即修改默认密码。
-
-## 配置说明
-
-### 核心配置文件
-
-- 开发配置：`server/config.js`
-- 生产配置：`server/ecosystem.config.js`
-- 站点 URL 工具：`server/utils/site-url.js`
-
-### 站点配置
-
-订阅链接、邮件链接等需要完整 URL 的功能依赖站点配置：
-
-```javascript
-site: {
-  protocol: process.env.SITE_PROTOCOL || 'http',
-  host: process.env.SITE_HOST || '',
-}
-```
-
-生产环境建议设置：
+### 初始化数据库
 
 ```bash
+cd server
+npm run init-db
+```
+
+### 启动后端
+
+```bash
+cd server
+npm run dev
+```
+
+`npm run dev:all` 当前也是启动统一后端入口的兼容脚本。
+
+### 启动前端
+
+```bash
+cd client-user
+npm run dev
+
+cd ../client-admin
+npm run dev
+```
+
+### 构建前端
+
+```bash
+cd client-user
+npm run build
+
+cd ../client-admin
+npm run build
+```
+
+如果环境缺少 terser，可使用：
+
+```bash
+npx vite build --minify esbuild
+```
+
+## 关键配置
+
+开发配置在 `server/config.js`，生产 PM2 模板在 `server/ecosystem.config.js`。
+
+生产环境建议至少配置：
+
+```bash
+USER_PORT=30000
+ADMIN_PORT=30001
 SITE_PROTOCOL=https
 SITE_HOST=yourdomain.com
+USER_APP_URL=https://yourdomain.com
+
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_USER=subscription_manager
+DB_PASSWORD=change-me
+DB_NAME=subscription_manager
+
+USER_JWT_SECRET=change-me
+ADMIN_JWT_SECRET=change-me
+
+VMQ_API_URL=https://pay.example.com
+VMQ_KEY=change-me
+PAY_NOTIFY_URL=https://yourdomain.com/api/user/payment/notify
+PAY_RETURN_URL=https://yourdomain.com/api/user/payment/return
 ```
 
-### 3X-UI 服务器配置
+注意：
 
-后台添加 3X-UI 服务器时需配置：
+- VMQ 回调地址必须能被 VMQ 服务访问，不能使用只对后端本机有效的 `127.0.0.1`。
+- `server/config.js` 可用于本地真实配置，但不要提交到公开远程仓库。
+- `server/ecosystem.config.js` 禁止写真实敏感信息。
 
-- 名称：服务器显示名
-- API 地址：3X-UI 面板地址
-- API Token：3X-UI 的 API Token
-- Host / 端口：用于 `cf` 策略节点输出
-- 订阅地址：3X-UI 原始订阅地址
+## 默认账号
 
-## 主要目录
+数据库初始化会创建默认管理账号：
 
-```text
-server/
-  app.js
-  routes/
-  controllers/
-  repositories/
-  services/
-    admin/
-    user/
-    shared/
-  integrations/
-    xui/
-    vmq/
-    email/
-  jobs/
-  db/
-client-user/
-  src/
-client-admin/
-  src/
-docs/
-```
+| 用途 | 账号 | 密码 |
+| --- | --- | --- |
+| 管理端 | `admin` | `admin123` |
 
-重点服务文件：
+首次登录后请立即修改密码。
 
-- `server/services/shared/order-service.js`：购买、续费与 3X-UI 同步
-- `server/integrations/xui/xui-service.js`：3X-UI API 交互
-- `server/services/shared/subscription-strategy.js`：订阅策略解析与链接改写
-- `server/services/shared/subscription-service.js`：原始订阅模板缓存与修复
-- `server/integrations/xui/xui-sync-task-service.js`：3X-UI 同步补偿队列
-- `server/services/shared/traffic-manager.js`：流量统计、超限禁用与恢复
-- `server/integrations/vmq/vmq-service.js`：VMQ 支付适配
-- `server/integrations/email/email-service.js`：Brevo 邮件发送适配
+## 后台任务
 
-## 文档入口
+后端启动后会注册订单过期、僵尸用户清理、3X-UI 同步、同步重试、流量同步、工单自动关闭、销售名额释放、邮件群发、邮件日志清理、3X-UI 数据库备份、批量订阅任务恢复和 Telegram 健康巡检。
+
+任务时间表以 [需求文档](./docs/requirements.md) 中“后台任务”章节和 `server/jobs/index.js` 为准。
+
+## 文档
 
 - [需求文档](./docs/requirements.md)
 - [API 文档](./docs/api.md)
 - [部署文档](./docs/deploy-subscription-manager.md)
+- [VMQ 服务 API](./docs/vmq-server-api.md)
+- [3X-UI API 参考](./docs/3x-ui-api-3.2.5.md)
 
-## 更新日志
-
-### V1.7.1 (2026-05-30)
-
-- 后端完成按 `routes / controllers / repositories / services / integrations` 的目录重构
-- 新增 `services/user`、`services/admin`、`services/shared` 三层职责划分
-- 新增 `integrations/xui`、`integrations/vmq`、`integrations/email` 外部系统适配目录
-- 统一后端启动入口为 `server/app.js`，移除旧的 `app-user.js` 与 `app-admin.js`
-- README、需求文档与 API 文档更新为当前实现结构
-
-### V1.7.0 (2026-05-29)
-
-- 新增 `hy2` 节点策略，支持 `hysteria2://` 通用订阅与 Clash 输出
-- `hy2` 与 3X-UI 联调完成，客户端认证字段统一使用 `auth`
-- 新增原始订阅模板缓存与增量修复机制，修复 `hysteria` / `hysteria2` 匹配问题
-- 新增 `xui_sync_tasks` 同步补偿队列，统一处理购买、续费、启停等失败重试
-- 帮助中心、资源分发、系统流量倍率等现有能力补齐文档
-
-### V1.6.0 (2026-05-22)
-
-- 3X-UI 认证适配新版本 API Token 方式
-- 管理端支持配置流量统计倍率
-- 每天凌晨 4 点自动备份所有服务器的 `x-ui.db`
-- 资源分发按用户唯一记录复用下载链接
-- 用户端支持自动创建、重置或复用下载链接
-
-### V1.5.0 (2026-05-15)
-
-- 管理端支持维护用户的 Cloudflare 优选 IP
-- 管理端支持为用户生成订阅链接
-- 修复过期名额释放逻辑，只释放已支付且流量耗尽超 3 天未续费的用户
-- 过期名额释放任务改为每天 05:00 执行
-
-### V1.4.0 (2026-05-13)
-
-- 用户端完成移动端适配
-- 新增新手引导与客户端教程邮件
-- 支持站点协议配置，适配 HTTPS 生产环境
-- 同步按钮增加 loading，相关超时延长到 60 秒
-
-### V1.3.0 (2026-05-12)
-
-- 接入 Brevo 邮件发送能力
-- 支持邮件模板、群发、日志与配额管理
-
-### V1.2.0 (2026-05-11)
-
-- 引入 `cf` 与 `direct` 两种节点订阅策略
-- 用户在每个节点拥有独立 UUID 与 `sub_id`
-- direct 节点自动设置 `xtls-rprx-vision`
-
-### V1.1.0 (2026-05-09)
-
-- 新增跨服务器流量聚合与自动禁用
-- 用户续费后自动解除禁用
-
-### V1.0.0 (2026-05-09)
-
-- 首个正式版本
-- 支持多台 3X-UI、在线支付、公告与基础订阅管理
-
-## 许可证
+## 许可
 
 MIT License
-
-## 支持与反馈
-
-- 提交 [Issue](https://github.com/fq0222/TLBoard/issues)
-- 查看 [Wiki](https://github.com/fq0222/TLBoard/wiki)
-
-## 推广系统补充（2026-06-01）
-
-### 用户端能力
-
-- 在“我的”页面新增推广入口，可查看推广概览并进入推广详情页
-- 用户可以获取自己的专属推广链接
-- 推广详情页可查看点击量、奖励订单数、奖励总流量和每笔奖励明细
-- 用户首页流量展示按“已用 / 总量（套餐 + 推广）”展示
-
-### 奖励规则
-
-- 新用户点击推广链接后会记录点击
-- 只有被推广用户完成首单付款时，推广者才会获得奖励流量
-- 同一被推广用户只奖励一次，后续续费不会重复发奖
-- 推广奖励流量由管理端系统设置统一配置
-
-### 流量口径
-
-- 总流量 = 套餐流量 `traffic_limit` + 推广流量 `referral_traffic_limit`
-- 流量统计、超量判断和 3X-UI 同步都使用总流量口径
-- 推广奖励入库后不会立刻单独触发一次推广者 3X-UI 同步，而是等待后续同步链路或巡检任务补偿
-
-### 管理端能力
-
-- 新增“推广管理”页面
-- 可查看每个用户的推广链接、点击量、奖励订单数和奖励总流量
-- 可查看指定用户的推广奖励明细
-- 可启用/禁用推广功能
-- 可重置用户推广链接
-
-### 相关配置与迁移
-
-- 推广奖励流量配置保存在系统设置 `referral_reward_traffic`
-- 推广链接生成依赖 `USER_APP_URL` 或开发配置中的 `userAppUrl`
-- 新环境初始化数据库时会创建推广相关表结构
-- 已有环境需要执行迁移脚本：`node server/db/migrations/011-referral-system.js`

@@ -1,1595 +1,473 @@
-# 机场面板系统需求文档
+# 机场面板订阅管理系统需求文档
 
-> 版本：V1.13
-> 更新日期：2026-06-05
+> 版本：V1.14
+> 更新日期：2026-06-15
+> 依据：当前仓库实际代码，重点参考 `server/routes`、`server/controllers`、`server/services`、`server/db/schema`、`client-user/src/api/index.js`、`client-admin/src/api/index.js`
 
----
+## 1. 项目定位
 
-## 1. 项目概述
+本项目是一套面向 3X-UI 多服务器场景的订阅管理系统。系统提供用户购买、续费、订阅生成、Cloudflare 优选、资源下载、帮助中心、工单、邮件触达、推广余额奖励和后台运维能力。
 
-本项目是一套订阅管理系统，分为用户端和管理端两个独立子系统：
+项目由三个独立包组成，仓库根目录没有 `package.json`：
 
-- 用户端：套餐展示、注册登录、在线支付、订阅管理、Cloudflare IP 优选、工单支持
-- 管理端：套餐管理、订单管理、用户管理、公告管理、3X-UI 服务端管理、工单管理、邮件管理
+| 包 | 说明 | 技术栈 |
+| --- | --- | --- |
+| `server/` | 统一后端入口，同时启动用户端 API 和管理端 API | Node.js、Express、PostgreSQL |
+| `client-user/` | 用户端单页应用 | Vue 3、Vite、Element Plus、Pinia |
+| `client-admin/` | 管理端单页应用 | Vue 3、Vite、Element Plus、Pinia |
 
-系统采用前后端分离架构，用户端和管理端分别运行在不同端口，通过 Nginx 统一代理对外提供服务。
+## 2. 系统架构
 
----
+### 2.1 启动与端口
 
-## 2. 技术栈
+`server/app.js` 是唯一后端启动入口。启动后会：
 
-| 层级 | 技术 | 说明 |
-|------|------|------|
-| 后端 | Node.js + Express | RESTful API |
-| 前端 | Vue 3 + Vite | 用户端与管理端分别为独立 SPA |
-| 数据库 | PostgreSQL | 核心业务数据存储 |
-| 3X-UI 对接 | API Token 认证的 3X-UI API 客户端 | 服务端同步、用户下发与数据库备份 |
-| 支付 | VMQ | 创建订单、支付通知、订单状态查询 |
-| 邮件 | Brevo (@getbrevo/brevo) | 邮件发送服务 |
-| 部署 | Nginx + PM2 | 前后端反向代理与进程托管 |
+- 初始化 PostgreSQL 数据库结构和默认数据。
+- 注册全部后台定时任务。
+- 创建用户端 Express 应用，默认监听 `30000`。
+- 创建管理端 Express 应用，默认监听 `30001`。
+- 在管理端 HTTP 服务上注册批量订阅生成和 3X-UI 数据库备份 WebSocket 进度通道。
 
----
+默认 API 前缀：
 
-## 3. 系统架构
+| 子系统 | 前缀 | 默认端口 |
+| --- | --- | --- |
+| 用户端 API | `/api/user` | `30000` |
+| 管理端 API | `/api/admin` | `30001` |
+| Telegram 内部 API | `/api/internal/telegram` | `30001` |
 
-### 3.1 端口划分
+### 2.2 后端分层
 
-| 子系统 | 默认端口 | 说明 |
-|--------|----------|------|
-| 用户端 | 30000 | 对外服务 |
-| 管理端 | 30001 | 管理后台 |
-
-### 3.2 路由代理建议
-
-- `/` -> 用户端前端
-- `/api/user/*` -> 用户端后端
-- `/admin/*` -> 管理端前端
-- `/api/admin/*` -> 管理端后端
-
-### 3.3 站点配置
-
-系统支持通过环境变量配置站点协议和域名，用于生成订阅链接等需要完整 URL 的场景：
-
-| 环境变量 | 说明 | 默认值 |
-|----------|------|--------|
-| `SITE_PROTOCOL` | 站点协议 | `http` |
-| `SITE_HOST` | 站点域名或 IP | 空（从请求推断） |
-
-**生产环境配置示例**：
-
-```bash
-SITE_PROTOCOL=https
-SITE_HOST=yourdomain.com
-```
-
-**PM2 配置示例**：
-
-```javascript
-env_production: {
-  SITE_PROTOCOL: 'https',
-  SITE_HOST: 'yourdomain.com'
-}
-```
-
-### 3.4 支付回调地址
-
-VMQ 后台需要配置以下两个地址：
-
-- 异步回调地址：`https://你的域名/api/user/payment/notify`
-- 同步回调地址：`https://你的域名/api/user/payment/return`
-
-说明：
-
-- 异步回调用于支付结果落单、验签、激活订阅
-- 同步回调用于浏览器支付完成后的回跳，再由后端重定向到前端支付结果页
-
-### 3.5 后端目录与分层结构（2026-05 重构后）
-
-当前后端已经完成按职责拆分，核心目录结构如下：
+后端当前按职责分层：
 
 ```text
 server/
   app.js
-  routes/
-  controllers/
-  repositories/
-  services/
-    user/
-    admin/
-    shared/
-  integrations/
-    xui/
-    vmq/
-    email/
-  jobs/
-  db/
+  bootstrap/       # Express 应用创建、路由注册、退出清理
+  routes/          # 路由、中间件、参数校验
+  controllers/     # 请求解析、响应兼容、日志
+  services/        # 用户端、管理端、共享业务编排
+  repositories/    # SQL 与数据访问
+  integrations/    # 3X-UI、VMQ、Brevo 等外部系统适配
+  jobs/            # 后台任务注册和具体 handler
+  db/              # 初始化、迁移、表结构、默认数据
+  websocket/       # 管理端长任务进度推送
 ```
 
-当前约束如下：
+典型共享服务：
+
+- `services/shared/order-service.js`：订单支付成功后的权益激活、销售数量维护、3X-UI 同步任务创建。
+- `services/shared/traffic-manager.js`：流量同步、超限禁用、续费解禁同步。
+- `services/shared/subscription-strategy.js`：节点策略识别和订阅链接改写。
+- `services/shared/subscription-service.js`：原始订阅模板抓取、解析与匹配。
+- `services/shared/ticket-service.js`：工单状态、回复、已读、自动关闭规则。
+- `services/referral-service.js`：推广码、点击、首单余额奖励。
+
+外部集成：
+
+- `integrations/xui/`：3X-UI API 客户端，支持不同面板版本适配、API Token、用户 upsert、流量重置、数据库备份。
+- `integrations/vmq/vmq-service.js`：VMQ 下单、查单、关单和回调验签。
+- `integrations/email/email-service.js`：Brevo 邮件发送、模板变量替换和发送日志。
+
+## 3. 核心业务能力
+
+### 3.1 用户端
+
+用户端当前实现以下功能：
 
-- `app.js` 为统一启动入口，同时启动用户端 API（30000）和管理端 API（30001）
-- `routes/` 仅负责声明路由、中间件挂载和参数校验
-- `controllers/` 负责请求参数提取、调用 service 和响应格式兼容
-- `services/user/` 与 `services/admin/` 分别承载端别相关业务编排
-- `services/shared/` 承载跨端共享领域逻辑，例如订单处理、订阅生成、流量管理、工单等
-- `repositories/` 承接数据库访问与 SQL 下沉
-- `integrations/xui/`、`integrations/vmq/`、`integrations/email/` 分别承接 3X-UI、VMQ、Brevo 等外部系统适配
-- 原先独立的 `app-user.js` 与 `app-admin.js` 已移除，不再作为运行入口
+- 首页套餐展示，支持套餐排序、上架/下架、首页可见开关、售罄标识。
+- 公告列表，支持 Markdown、置顶、分页。
+- 注册并支付一体化流程，注册时直接创建 `ORD` 新购订单。
+- 登录、退出、个人资料展示。
+- 忘记密码和重置密码邮件流程。
+- 新手引导完成状态记录。
+- 续费流程，支持 VMQ 支付和余额支付。
+- 订阅生成、订阅详情、通用 Base64 订阅、Clash YAML 订阅、V2Ray Base64 输出。
+- Cloudflare 优选 IP 池读取、按 IP ID 应用、按 IP 地址应用。
+- 帮助中心文章列表、分类、详情和图片访问。
+- 下载资源列表、按资源生成用户独立下载链接、token 文件下载。
+- 工单列表、创建、详情、回复、关闭和未读数量。
+- 教程邮件和预设动作邮件发送。
+- 推广概览、推广点击记录、奖励明细。
+- 匿名公开设置读取，目前暴露在线客服链接。
+- 移动端响应式布局。
 
-当前共享服务与集成目录中的典型职责如下：
+### 3.2 管理端
 
-- `services/shared/order-service.js`：购买、续费激活、3X-UI 同步编排
-- `services/shared/traffic-manager.js`：流量汇总、超限禁用与恢复
-- `services/shared/subscription-service.js`：原始订阅模板缓存与修复
-- `services/shared/subscription-strategy.js`：节点策略识别与订阅改写
-- `services/shared/ticket-service.js`：工单共享领域动作
-- `integrations/xui/xui-service.js`：3X-UI 客户端增删改查适配
-- `integrations/xui/xui-sync-task-service.js`：3X-UI 同步补偿队列编排
-- `integrations/xui/xui-sync.js`：节点快照同步工具
-- `integrations/vmq/vmq-service.js`：VMQ 下单、查单与验签适配
-- `integrations/email/email-service.js`：Brevo 邮件发送与模板变量替换
+管理端当前实现以下功能：
 
----
+- 管理员登录、修改密码。
+- 超级管理员管理其他管理员账号。
+- 3X-UI 服务器管理：新增、编辑、删除、详情、节点同步、用户更新/删除、手动数据库备份。
+- 套餐管理：创建、编辑、删除、启用、排序、销售数量、套餐类型、首页展示开关。
+- 用户管理：列表筛选、详情、编辑、启用/禁用、修改套餐/流量/到期时间、维护用户 CF IP、为用户生成订阅链接。
+- 批量生成订阅链接任务，支持只处理已优选 CF IP 的用户，并可查询任务状态。
+- 订单列表和筛选。
+- 公告管理：普通公告、弹窗次数、订阅虚拟公告节点。
+- CF IP 池管理：增删改查和批量导入。
+- 工单管理：统计、列表、详情、管理员回复、关闭、删除。
+- 博客/帮助文章管理：文章 CRUD、分类、图片上传，用户端帮助中心读取已发布文章。
+- 邮件管理：Brevo 配置、模板、预览、单发、群发任务、暂停/恢复、日志清理、用户搜索。
+- 资源管理：上传、列表、编辑、删除、刷新 token、资源过期时间、用户分发、分发过期批量设置。
+- 系统设置：流量统计倍率、推广奖励系数、邮件配置、资源配置、订阅配置、Telegram 频道、在线客服链接。
+- 推广管理：查看用户推广码、点击、奖励余额、奖励明细、启用/禁用、重置推广码。
+- Telegram 管理绑定：配置查看、生成管理员绑定码、查看绑定列表。
 
-## 4. 核心数据模型
+## 4. 套餐、订单与支付
 
-### 4.1 `users`
+### 4.1 套餐类型
 
-用于保存用户账号、套餐、流量、到期时间、是否启用等信息。
+`plans.plan_type` 当前支持：
 
-关键字段：
+| 类型 | 说明 | 约束 |
+| --- | --- | --- |
+| `lifetime` | 不限时套餐 | `duration_days` 必须为 `0` |
+| `timed` | 限时套餐 | `duration_days` 必须大于 `0` |
 
-- `email`
-- `password_hash`
-- `plan_id`
-- `subscription_token`
-- `traffic_used`
-- `traffic_limit`
-- `expire_at`：到期时间，`0` 或 `NULL` 表示无限期
-- `enabled`：账号启用状态，`0` 禁用、`1` 启用
-- `payment_count`：支付成功次数，用于判断僵尸用户
-- `traffic_used_at`：流量用完的时间戳，用于判断是否超过 3 天未续费
+套餐字段中还包含：
 
-### 4.2 `orders`
+- `show_on_home`：是否在用户首页展示。
+- `sales_limit`：可销售总量，`-1` 表示不限量。
+- `sales_count`：已售数量。
 
-用于保存支付订单信息。
+用户端套餐列表只读取启用套餐；前端可根据 `show_on_home` 控制首页展示。
 
-关键字段：
-
-- `user_id`
-- `email`
-- `plan_id`
-- `amount`：订单金额（分），记录 VMQ 实际支付金额
-- `trade_no`：VMQ 订单号
-- `out_trade_no`：商户订单号（`ORD` 前缀为新购订单，`REN` 前缀为续费订单）
-- `status`：`pending` / `paid` / `expired`
-- `payment_url`
-- `paid_at`
+### 4.2 新购流程
 
-### 4.3 `plans`
-
-用于保存套餐信息。
+新购采用“注册并支付”：
 
-关键字段：
+1. 用户选择套餐并提交邮箱、密码、支付方式和可选推广码。
+2. 后端创建或复用待支付用户，生成 `subscription_token`、全局 `sub_id` 和 `ORD` 订单。
+3. 后端调用 VMQ 创建订单。
+4. 如果 VMQ 返回 `isAuto=1`，系统会关闭本地订单并拒绝继续，避免用户手动输入金额导致少付。
+5. VMQ 异步通知或前端轮询确认支付后，`order-service` 在本地事务中激活订单、启用用户、写入套餐权益、累加套餐销售数量。
+6. 首单如带有效推广人，会按推广奖励系数发放余额奖励。
+7. 3X-UI 同步不阻塞支付落账，失败会进入 `xui_sync_tasks` 补偿队列。
 
-- `name`
-- `description`
-- `price`：价格（分）
-- `duration_days`：有效天数，`0` 表示无限期
-- `traffic_limit`：流量上限（字节）
-- `sort_order`：排序权重
-- `enabled`：启用状态
-- `sales_limit`：可销售总量，`-1` 表示不限制
-- `sales_count`：已售数量
-- `updated_at`：最后更新时间
+### 4.3 续费流程
 
-### 4.4 `traffic_sync_log`
+续费订单号以 `REN` 开头。当前续费规则：
 
-用于记录每个服务器上次同步的流量值，实现增量更新。
+- 续费套餐必须与当前套餐类型一致，不能跨 `lifetime` 和 `timed` 类型续费。
+- `lifetime` 或历史不限时续费按旧契约累加流量。
+- `timed` 续费会从支付时间重新计算有效期，并重置套餐流量；如果用户仍有剩余流量和剩余时间，接口先返回 `409` / `4091` 要求前端确认。
+- 余额支付使用 `pay_type=9`，余额足够时直接扣减并完成订单，不跳转 VMQ。
+- VMQ 支付仍校验 `isAuto=1` 风险通道。
+- 流量超限或到期导致禁用的用户，续费成功后会触发本地恢复和 3X-UI 解禁同步。
 
-关键字段：
+### 4.4 推广奖励
 
-- `user_id`：用户ID
-- `server_id`：服务器ID
-- `last_sync_traffic`：上次同步时的流量值（字节）
-- `last_sync_at`：上次同步时间戳
-
-索引：
-
-- `idx_traffic_sync_log_user_server`：复合索引 (user_id, server_id)
-- `idx_traffic_sync_log_last_sync_at`：时间戳索引
+当前代码中的推广奖励是“余额奖励”，不是流量奖励：
 
-### 4.5 `xui_servers`
+- 用户拥有 32 位十六进制推广码。
+- 新访客可通过 `?ref=<code>` 进入用户端，前端调用接口记录点击。
+- 注册并支付时提交 `referral_code`，后端只记录有效且非自推的推广人。
+- 仅新购首单、支付前 `payment_count=0`、订单有推广人时发奖。
+- 奖励金额 = 订单金额（分） × `referral_reward_coefficient`，向下取整。
+- 奖励写入 `referral_rewards.reward_amount`，同时累加到推广人的 `users.balance`。
+- `referral_rewards` 对 `referred_user_id` 和 `order_id` 有唯一约束，避免重复回调重复发奖。
 
-用于保存 3X-UI 服务器连接信息与订阅生成所需配置。
-
-关键字段：
-
-- `name`：服务器名称，也用于数据库备份文件名前缀
-- `api_url`：3X-UI 面板 API 地址
-- `api_token`：新版 3X-UI API Token，用于替代旧的账号密码登录方式
-- `host`：CF 端口转发规则中的主机名
-- `client_port`：客户端连接端口
-- `sub_url`：3X-UI 原始订阅地址
-- `status`：服务器在线状态
-
-### 4.6 `resource_distributions`
-
-用于保存用户独立下载链接。
-
-当前规则：
-
-- 以 `user_id` 为唯一维度，一个用户只保留一条有效分发记录
-- 重新分发资源时更新该用户已有记录，而不是创建重复记录
-- 下载时优先匹配 `resource_distributions.download_token`，找不到时再匹配资源全局 token
-- 迁移脚本 `005-resource-distributions-unique-user.js` 会清理历史重复记录，并创建 `user_id` 唯一索引
-
----
-
-## 5. 用户端需求
-
-### 5.1 注册、登录与支付
+## 5. 订阅与 3X-UI 同步
 
-当前实现采用“注册并支付”一体化流程，而不是单独注册后再购买。
+### 5.1 订阅 URL
 
-流程如下：
+当前代码生成的订阅地址为：
 
-1. 用户在首页选择套餐
-2. 前端跳转到登录页，并携带 `plan_id`
-3. 页面进入“注册并支付”模式
-4. 用户填写邮箱、密码、确认密码，并选择支付方式
-5. 前端先执行本地校验：
-   - 邮箱格式正确
-   - 密码至少 8 位
-   - 密码必须同时包含字母和数字
-   - 两次密码输入一致
-6. 后端创建本地用户与本地订单：
-   - 新用户：创建为未启用状态
-   - 已注册且仍有有效套餐的用户：直接拒绝注册支付，请先登录
-   - 订单初始状态为 `pending`
-7. 后端调用 VMQ 创建支付订单
-8. 如果 VMQ 返回可自动带金额的支付链接，则将支付链接返回前端
-9. 前端进入支付等待页，展示二维码供用户扫码
-10. 前端通过公共查单接口轮询订单状态
-11. VMQ 异步回调成功后，后端完成订单激活逻辑：
-   - 更新订单状态为 `paid`
-   - 激活用户账号
-   - 设置套餐、流量和到期时间
-   - 同步到 3X-UI
-12. 支付成功后前端尝试自动登录并跳转到用户中心
+- 通用订阅：`/api/user/subscription/sub/:subId`
+- Clash 订阅：`/api/user/subscription/sub/:subId?clash=1`
+- V2Ray Base64：`/api/user/subscription/sub/:subId?v2ray=1`
 
-### 5.2 登录安全要求
+注意：当前路由并未注册 `/api/user/sub/:token`。
 
-用户端登录和注册接口已实现暴力破解防护：
+### 5.2 订阅生成条件
 
-- **速率限制**：基于 IP+邮箱组合的固定窗口限制
-- **窗口时间**：15 分钟
-- **最大尝试次数**：3 次失败尝试
-- **响应格式**：HTTP 429 状态码 + `Retry-After` 头
-- **触发条件**：仅在登录/注册失败时计数，成功请求不计入
-- **前端处理**：收到 429 响应时显示"请求过于频繁，请稍后再试"
+用户生成订阅前必须：
 
-### 5.3 支付安全要求
+- 账号存在且可用。
+- 限时套餐未过期。
+- 已配置至少一个 CF 优选 IP。
+- 至少存在一台在线 3X-UI 服务器。
 
-在线支付部分必须满足以下要求：
+首次生成订阅会触发全量服务器节点同步；后续生成会优先复用本地快照和原始订阅模板缓存，只修复缺失或失效的节点。
 
-- 所有 VMQ 回调必须验签
-- 必须同时校验订单金额 `price` 和实付金额 `reallyPrice`
-- 用户少付金额时不得激活订单
-- 如果 VMQ 返回 `isAuto=1`，表示用户需要手动输入金额，该通道不得下发给用户，需直接拒绝并关闭订单
-- 订单状态支持通过异步通知和主动轮询双通道确认
+### 5.3 节点凭据
 
-### 5.4 首页
+每个用户在每台服务器每个 inbound 上有独立配置，存储于 `user_node_configs`：
 
-首页包含两个主要区域：
-
-- 套餐展示
-  - 展示已启用套餐
-  - 显示名称、价格、有效期、流量、描述
-  - 售罄套餐显示"已售罄"标签，购买按钮禁用
-  - 点击购买后跳转到带 `plan_id` 的登录页
-- 公告展示
-  - 按时间倒序显示
-  - 支持置顶
-  - 支持 Markdown 语法渲染
-  - 每页显示 3 条，支持分页
+- `uuid`：VLESS、VMess、Trojan 等 UUID 型协议使用。
+- `auth`：Hysteria2 使用。
+- `sub_id`：16 位十六进制，用于从 3X-UI 原始订阅拉取单节点模板。
+- 唯一键：`user_id + server_id + inbound_id`。
 
-### 5.5 用户中心
+### 5.4 节点策略
 
-展示内容：
+节点策略由 inbound `remark` 识别：
 
-- 邮箱
-- 当前套餐
-- 订阅链接（需先完成 CF IP 优选且生成订阅链接后显示）
-- 到期时间
-- 已用流量 / 总流量
-- 账号状态
+| 策略 | 识别方式 | 行为 |
+| --- | --- | --- |
+| `cf` | `remark` 包含 `cf` | 用用户 CF 优选 IP 改写地址，用服务器 `client_port` 和 `host` 改写端口/Host；多个 IP 生成多个节点 |
+| `direct` | 默认策略 | 尽量保留原始订阅链接；同步到 3X-UI 时自动写入 `flow: xtls-rprx-vision` |
+| `hy2` | `remark` 包含 `hy2` | 3X-UI inbound 通常为 `protocol=hysteria`，订阅输出为 `hysteria2://`，使用 `auth` 凭据 |
 
-支持操作：
+Clash 输出支持 `vless`、`vmess`、`trojan`、`hysteria2`。IPv6 地址输出到 Clash 时会去掉方括号。
 
-- 一键优选 IP（在浏览器后台自动测试延迟，选择最优 5 个 IP）
-- 生成订阅链接（优选完成后可用，会自动同步节点信息到所有 3X-UI 服务器）
-- 复制订阅链接
-- 查看订阅详情
-- 续费套餐（在现有套餐基础上累加流量）
-- 重新购买套餐
-- Cloudflare IP 优选（手动选择 IP）
-- 获取客户端配置教程（Android/Windows）
+### 5.5 原始订阅模板缓存
 
-#### 导航栏条件显示
+`user_subscription_sources` 以 `user_id + server_id + inbound_id` 缓存原始订阅模板，包含：
 
-用户端左侧导航栏中的"订阅信息"和"CF IP优选"选项默认不显示，只有用户同时满足以下条件后才显示：
+- `sub_id`
+- `remark`
+- `protocol`
+- `original_link`
+- `node_fingerprint`
+- `server_fingerprint`
+- `fetched_at`
 
-1. 完成 CF IP 优选（`cf_optimized` 为 `true`）
-2. 生成订阅链接（`user_subscriptions` 表中存在该用户的 `sub_id`）
+缓存有效期为 24 小时。节点或服务器指纹变化时，仅对失效节点增量刷新。
 
-后端通过 `subscription_ready` 字段标识用户是否满足条件，前端根据该字段控制导航栏显示。
+### 5.6 订阅虚拟公告节点
 
-**同步更新**：用户点击"生成订阅链接"按钮后，导航栏、订阅链接卡片、快速开始提示会立即更新状态，无需刷新页面。
+公告支持 `node_show` 字段。订阅输出阶段会把启用且 `node_show=1` 的公告标题插入为虚拟节点，用于在客户端节点列表中展示简短公告。虚拟节点只使用标题，不携带公告正文。
 
-#### 移动端适配
+## 6. 流量、禁用与同步状态
 
-用户端支持移动端访问，采用响应式设计：
+### 6.1 流量同步
 
-- **桌面端（> 1024px）**：左侧固定侧边栏导航
-- **平板端（768-1024px）**：侧边栏缩小
-- **移动端（< 768px）**：
-  - 顶部固定导航栏
-  - 汉堡菜单展开/收起侧边栏
-  - 点击遮罩层自动关闭
-  - 内容区域全宽显示
+系统从所有在线 3X-UI 服务器获取用户流量，使用 `traffic_sync_log` 记录上次同步值，并按增量累加到本地 `users.traffic_used`。
 
-#### 首次使用引导
+管理端系统设置中的 `traffic_usage_multiplier` 会影响本地统计口径。
 
-个人中心页面提供首次使用引导：
+### 6.2 自动禁用和恢复
 
-1. **快速开始步骤引导**：显示"优选IP → 生成链接"两步操作流程
-2. **教程引导**：提供 Android 和 Windows 客户端配置教程
-3. **订阅链接提示**：已生成的链接持久化显示，提供重新生成提示
+- 用户流量达到套餐上限后，系统会禁用本地用户并同步到 3X-UI。
+- 限时套餐到期会按到期状态处理。
+- 管理员禁用、流量超限禁用和到期禁用通过 `disable_reason` 区分。
+- 登录入口允许流量超限或到期用户登录以便续费，但会拒绝管理员禁用用户。
+- 续费成功后会恢复流量超限或到期导致的禁用，并异步同步到 3X-UI。
 
-生成订阅链接流程：
+### 6.3 3X-UI 同步补偿
 
-1. 用户点击"生成订阅链接"按钮
-2. 后端同步所有在线 3X-UI 服务器的节点信息（更新 `xui_nodes` 表）
-3. 返回订阅链接（通用订阅、Clash 订阅）
-4. 前端显示订阅链接
+同步失败会写入 `xui_sync_tasks`：
 
-**说明**：同步操作放在生成订阅链接时执行，而不是每次访问订阅接口时执行，避免影响订阅链接的访问速度。
+- 任务类型：`initial_user_sync`、`renew_sync`、`user_sync`、`enable_sync`、`disable_sync`。
+- 状态：`pending`、`processing`、`success`、`failed`。
+- 默认最多重试 10 次。
+- 退避间隔：1 分钟、5 分钟、15 分钟、1 小时、4 小时。
+- 同一用户的新同步任务会取代旧的 pending 用户同步任务，避免旧快照覆盖新权益。
 
-续费流程：
+`users.sync_status` 用于用户端等待流程展示，不等同于所有 3X-UI 节点最终同步成功。
 
-1. 用户在个人中心点击"续费套餐"按钮
-2. 弹出续费弹窗，展示所有启用套餐
-3. 默认选中当前套餐，用户可选择其他套餐
-4. 用户选择支付方式（支付宝/微信）
-5. 点击"立即续费"，调用续费接口
-6. 创建订单并跳转到支付等待页
-7. 支付成功后，流量累加到当前套餐（当前流量 + 新套餐流量）
-8. 同步更新到所有 3X-UI 服务器
+## 7. 公告、帮助中心和资源
 
-续费规则：
+### 7.1 公告
 
-- **续费当前套餐**：流量用完后 3 天内可续费，不管套餐是否售罄
-- **切换其他套餐**：需要检查新套餐是否售罄
-- **超过 3 天**：需等待名额释放后重新购买
-- 前端在续费对话框和个人中心页面显示续费规则说明
+公告字段：
 
-一键优选流程：
+- `pinned`：列表置顶。
+- `enabled`：是否展示。
+- `popup_show_limit`：每个用户最多弹窗次数，`0` 表示不弹窗。
+- `node_show`：是否加入订阅虚拟公告节点。
 
-1. 用户点击"一键优选 IP"按钮
-2. 前端从后端获取 IP 池（最多 20 个，包含 IPv6）
-3. 前端并发测试各 IP 到用户浏览器的延迟（3 次取平均）
-4. 按延迟排序，优先选 1 个 IPv6，其余从 IPv4 中选，共 5 个
-5. 调用后端接口保存优选结果
-6. 显示"生成订阅链接"按钮，用户点击后显示订阅链接
+用户端弹窗只在用户关闭后写入 `user_announcement_popup_stats`，刷新页面但未关闭不会计数。
 
-### 5.6 支付等待页
+### 7.2 帮助中心
 
-当前实现要求：
+帮助中心读取后台博客文章：
 
-- 展示 VMQ 返回的支付链接二维码
-- 提供“打开支付链接”和“复制支付链接”按钮
-- 不直接在二维码下方展示长链接文本
-- 自动轮询间隔为 5 秒
-- 手动“重新检查支付状态”可立即触发查单
-- 自动轮询时不应切回整页 loading，避免页面闪烁
+- 后台管理 `blog_articles`。
+- 用户端只读取已发布文章。
+- 支持分类、关键词、详情。
+- 图片上传到 `server/uploads/blog-images`，用户端通过帮助图片接口读取。
 
-### 5.7 Cloudflare IP 优选
+### 7.3 资源下载
 
-功能目标：
+资源管理使用两个表：
 
-- 登录用户可获取可选的 CF IP 池
-- 系统随机返回最多 20 个 IP，并尽量包含 IPv6
-- 用户可选择 IP 并应用到自己的订阅配置
+- `resources`：资源文件、全局 token、过期时间、下载分类、是否展示到用户端。
+- `resource_distributions`：用户独立下载 token。
 
-安全说明：
+当前分发规则：
 
-- **未优选时默认使用 `8.8.8.8` 作为占位 IP，避免暴露真实服务器 IP**
-- 用户必须完成 CF IP 优选后才能生成有效的订阅链接
+- 用户端下载栏只展示 `is_download_resource=1`、启用且未过期的资源。
+- 用户按资源 ID 申请下载链接。
+- 同一用户只保留一条分发记录；切换资源或过期后会重置 token。
+- 下载时优先匹配用户独立 token，其次匹配资源全局 token。
+- 资源上传大小由系统设置控制；部署在 Nginx/OpenResty 后方时，反向代理 `client_max_body_size` 也必须足够大。
 
-当前后端接口只包含：
+## 8. 工单
 
-- 获取 IP 池
-- 应用选中的 IP
+工单状态：
 
-前端延迟测试如果存在，应视为前端本地能力，而不是强依赖后端 `/test` 接口。
+| 状态 | 说明 |
+| --- | --- |
+| `open` | 用户创建，等待处理 |
+| `pending` | 管理员已回复，等待用户 |
+| `closed` | 用户或管理员关闭，或自动关闭 |
 
-### 5.8 工单支持
+规则：
 
-用户在遇到问题时可通过工单系统联系管理员。
+- 用户可创建、查看、回复、关闭自己的工单。
+- 管理员可查看全部工单、回复、关闭、删除。
+- 删除工单会同时删除回复和已读记录。
+- 已读通过 `ticket_reads` 和 `tickets.last_read_at` 记录。
+- 管理员回复且用户已读后 24 小时无新回复，定时任务会自动关闭。
 
-功能要求：
+## 9. 邮件
 
-- 创建工单：填写标题（50字以内）和问题描述（500字以内）
-- 工单列表：查看历史工单，显示状态和未读标记
-- 工单详情：查看对话记录，回复管理员
-- 关闭工单：用户可手动关闭自己的工单
-- 未读提示：导航栏显示未读工单数量红点
+邮件使用 Brevo：
 
-状态说明：
+- 系统设置维护 API Key、发件邮箱、发件名称、每日总配额、每日群发配额。
+- 支持邮件模板变量替换。
+- 管理员可单发、群发、预览模板、查看日志。
+- 群发任务支持暂停、恢复、每日配额和日志。
+- 用户端可请求教程邮件和预设动作邮件。
+- 忘记密码邮件也计入每日总邮件配额。
 
-- `open`：待处理（用户创建后）
-- `pending`：处理中（管理员回复后）
-- `closed`：已关闭
+常见模板变量：
 
----
-
-## 6. 管理端需求
-
-### 6.1 管理员认证
-
-- 管理员登录
-- 修改密码
-- 超级管理员管理管理员账号
-
-### 6.2 套餐管理
-
-- 新增套餐
-- 编辑套餐
-- 删除套餐
-- 设置启用状态与排序
-- 设置可销售总量（-1 表示不限制）
-- 查看已售数量和最后更新时间
-
-#### 可销售总量功能
-
-每个套餐可设置最大销售数量，超过后用户端显示"已售罄"：
-
-- `sales_limit`：可销售总量，`-1` 表示不限制
-- `sales_count`：当前已售数量
-- 售罄后用户端首页显示"已售罄"标签，购买按钮禁用
-- 注册时检查套餐是否售罄，售罄则拒绝购买
-
-#### 名额释放机制
-
-- 用户流量用完后 3 天内未续费，占用的名额自动释放
-- 定时任务每小时检查并释放过期名额
-- 流量用完时间记录在 `users.traffic_used_at` 字段
-
-### 6.3 用户管理
-
-- 查看用户列表
-- 查看用户详情
-- 调整套餐、流量、到期时间
-- 启用 / 禁用账号
-- 管理用户 CF 优选 IP（最多 5 个）
-- 为用户生成订阅链接（与用户自己生成的 URL 一致）
-
-#### 用户 CF 优选 IP 管理
-
-管理员可以在编辑用户弹窗中管理用户的 CF 优选 IP：
-
-- 从 CF IP 池中选择 IP（带搜索功能）
-- 最多选择 5 个 IP
-- 删除已选择的 IP
-- 保存时同时更新用户基本信息和 CF IP
-
-#### 为用户生成订阅链接
-
-管理员可以为用户生成订阅链接：
-
-- 需要先配置 CF 优选 IP
-- 生成时会同步所有 3X-UI 服务器节点信息
-- 生成的订阅链接 URL 与用户自己生成的一致
-- 支持通用订阅和 Clash 订阅两种格式
-
-### 6.4 订单管理
-
-- 查看订单列表
-- 按状态、邮箱、时间筛选
-- 查看订单的用户、套餐、金额和状态信息
-
-### 6.5 公告管理
-
-- 新增公告
-- 编辑公告（支持 Markdown 语法，带实时预览）
-- 删除公告
-- 设置是否启用、是否置顶
-
-### 6.6 3X-UI 服务端管理
-
-- 服务端新增、编辑、删除
-- 查看服务端详情
-- 同步节点与用户信息
-- 手动更新 3X-UI 用户
-
-服务端字段说明：
-
-- `name`：服务器名称
-- `api_url`：3X-UI 面板地址
-- `api_token`：3X-UI API Token，新版认证方式；编辑服务器时留空表示不修改
-- `host`：CF 端口转发规则中的主机名，用于生成订阅节点的 `host` 参数
-- `client_port`：客户端连接端口，用于生成订阅节点的端口号（如 v2rayN 中配置的端口）
-
-### 6.7 Cloudflare IP 池管理
-
-- IP 池增删改查
-- 批量导入
-
-### 6.8 工单管理
-
-管理员可处理用户提交的工单。
-
-功能要求：
-
-- 工单列表：查看所有工单，支持按状态筛选和关键词搜索
-- 工单统计：显示待处理、处理中、今日新增数量
-- 工单详情：查看对话记录，回复工单
-- 关闭工单：管理员可关闭工单
-- 删除工单：管理员可删除工单（同时删除回复和已读记录）
-- 已读状态：显示用户是否已读管理员的回复
-
-### 6.9 邮件管理
-
-管理员可通过 Brevo 平台发送邮件，支持群发和单发。
-
-#### 6.9.1 Brevo 配置
-
-在系统设置页面配置 Brevo 邮件服务：
-
-- API Key：Brevo API 密钥
-- 发件人邮箱：显示的发件人地址
-- 发件人名称：显示的发件人名称
-- 每日发送配额：所有邮件发送的总上限（默认 200）
-- 每日群发配额：群发任务专用配额（默认 100）
-
-#### 6.9.2 邮件模板管理
-
-支持创建和管理邮件模板：
-
-- 模板名称
-- 邮件主题（支持变量）
-- HTML 邮件内容（支持变量）
-- 可用变量列表
-
-模板变量：
-
-| 变量名 | 说明 | 示例值 |
-|--------|------|--------|
-| `{{username}}` | 用户邮箱前缀 | `fuqiang` |
-| `{{email}}` | 用户邮箱 | `fuqiang@example.com` |
-| `{{user_id}}` | 用户 ID | `123` |
-| `{{plan_name}}` | 套餐名称 | `基础套餐` |
-| `{{expire_date}}` | 到期时间 | `2026/6/12` |
-| `{{traffic_used}}` | 已用流量 | `1.5 GB` |
-| `{{traffic_limit}}` | 流量上限 | `100 GB` |
-| `{{download_url}}` | 下载链接 | `https://example.com/api/user/download/xxx` |
-
-#### 6.9.3 邮件发送
-
-支持多种发送方式：
-
-- 单发：选择用户发送邮件
-- 群发所有用户
-- 群发禁用用户
-- 自定义收件人列表
-
-**收件人支持**：
-
-- 系统内用户：通过搜索框选择
-- 系统外邮箱：手动输入任意邮箱地址
-- 两种方式可混合使用
-- 系统外邮箱显示"外部"标签
-
-发送特性：
-
-- HTML 邮件支持
-- 邮件预览
-- 模板变量自动替换
-- 发送日志记录
-
-#### 6.9.4 群发任务管理
-
-群发任务采用队列机制：
-
-- 每日群发配额限制（默认 100 封/天）
-- 断点续发：未完成的任务第二天继续发送
-- 任务状态：待发送、发送中、已完成、已暂停
-- 支持暂停/恢复任务
-- 查看发送日志
-
-#### 6.9.5 发送日志
-
-记录每封邮件的发送状态：
-
-- 收件人邮箱
-- 邮件主题
-- 发送状态（成功/失败）
-- 错误信息
-- 发送时间
-- 支持删除过期日志（默认 30 天）
-- 分页显示，每页 10 条
-
-#### 6.9.6 用户端邮件触发
-
-用户可通过预设场景触发邮件发送：
-
-- 发送教程邮件
-- 发送账单邮件
-
-使用白名单机制，只能调用预设的模板。
-
-#### 6.9.7 用户端教程邮件
-
-用户可在个人中心请求教程邮件：
-
-- Android-App 教程：匹配模板名称包含 `v2rayNg-App` 的模板
-- Windows 教程：匹配模板名称包含 `v2rayN-windows` 的模板
-- 每个用户每天只能收到 1 封教程邮件
-- 点击"获得"按钮后，教程邮件会发送到用户注册邮箱
-
-### 6.10 系统设置
-
-管理端系统设置支持配置流量统计倍率：
-
-- 配置项：`traffic_usage_multiplier`
-- 默认值：`1.0`
-- 范围：`0` 到 `100`
-- 用途：流量同步时对本次新增流量应用倍率后再累加到用户已用流量
-- 说明：3X-UI 服务器上的原始同步记录仍保存未倍率处理的当前流量值，倍率只影响本地用户流量累加结果
-
----
-
-## 7. 当前接口总览
-
-### 7.1 用户端
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/user/register-and-pay` | 注册并创建支付订单 |
-| POST | `/api/user/login` | 用户登录 |
-| GET | `/api/user/profile` | 获取个人信息（包含 `cf_optimized` 状态） |
-| POST | `/api/user/subscription/generate` | 生成订阅链接（同步节点信息） |
-| GET | `/api/user/plans` | 获取套餐列表 |
-| GET | `/api/user/announcements` | 获取公告列表 |
-| GET | `/api/user/orders` | 获取当前用户订单列表 |
-| GET | `/api/user/orders/status/:id` | 公共查单 |
-| GET | `/api/user/orders/:id/status` | 登录态查单 |
-| POST | `/api/user/renew` | 用户续费（累加流量） |
-| GET | `/api/user/subscription` | 获取订阅信息 |
-| GET | `/api/user/sub/:token` | 获取订阅内容 |
-| GET | `/api/user/cf-ips` | 获取 CF IP 池 |
-| POST | `/api/user/cf-ips/apply` | 应用 CF IP（通过 IP ID） |
-| GET | `/api/user/payment/notify` | VMQ 异步通知 |
-| POST | `/api/user/payment/notify` | VMQ 异步通知 |
-| GET | `/api/user/payment/return` | VMQ 同步回跳 |
-| GET | `/api/user/tickets/unread-count` | 获取未读工单数量 |
-| GET | `/api/user/tickets` | 获取工单列表 |
-| POST | `/api/user/tickets` | 创建工单 |
-| GET | `/api/user/tickets/:id` | 获取工单详情 |
-| POST | `/api/user/tickets/:id/replies` | 回复工单 |
-| PUT | `/api/user/tickets/:id/close` | 关闭工单 |
-| POST | `/api/user/email/tutorial` | 请求教程邮件 |
-| GET | `/api/user/download/resources` | 获取帮助中心下载资源列表 |
-| POST | `/api/user/download/link/:resourceId` | 按资源 ID 获取下载链接 |
-| GET | `/api/user/download/:token` | 下载文件 |
-
-### 7.2 管理端
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/admin/login` | 管理员登录 |
-| PUT | `/api/admin/password` | 修改密码 |
-| GET | `/api/admin/admins` | 管理员列表 |
-| POST | `/api/admin/admins` | 新增管理员 |
-| DELETE | `/api/admin/admins/:id` | 删除管理员 |
-| GET | `/api/admin/servers` | 服务端列表 |
-| POST | `/api/admin/servers` | 新增服务端（支持 `host`、`client_port`） |
-| PUT | `/api/admin/servers/:id` | 编辑服务端（支持 `host`、`client_port`） |
-| DELETE | `/api/admin/servers/:id` | 删除服务端 |
-| GET | `/api/admin/servers/:id/detail` | 服务端详情 |
-| POST | `/api/admin/servers/:id/sync` | 同步服务端 |
-| PUT | `/api/admin/servers/:id/users` | 更新 3X-UI 用户 |
-| DELETE | `/api/admin/servers/:id/users` | 删除 3X-UI 用户 |
-| GET | `/api/admin/users` | 用户列表 |
-| GET | `/api/admin/users/:id` | 用户详情 |
-| PUT | `/api/admin/users/:id` | 更新用户 |
-| GET | `/api/admin/plans` | 套餐列表 |
-| POST | `/api/admin/plans` | 新增套餐 |
-| PUT | `/api/admin/plans/:id` | 编辑套餐 |
-| DELETE | `/api/admin/plans/:id` | 删除套餐 |
-| GET | `/api/admin/announcements` | 公告列表 |
-| POST | `/api/admin/announcements` | 新增公告 |
-| PUT | `/api/admin/announcements/:id` | 编辑公告 |
-| DELETE | `/api/admin/announcements/:id` | 删除公告 |
-| GET | `/api/admin/orders` | 订单列表 |
-| GET | `/api/admin/cf-ips` | CF IP 池列表 |
-| POST | `/api/admin/cf-ips` | 新增 IP |
-| PUT | `/api/admin/cf-ips/:id` | 编辑 IP |
-| DELETE | `/api/admin/cf-ips/:id` | 删除 IP |
-| POST | `/api/admin/cf-ips/import` | 批量导入 IP |
-| GET | `/api/admin/dashboard/stats` | 仪表盘统计数据 |
-| GET | `/api/admin/tickets/stats` | 工单统计 |
-| GET | `/api/admin/tickets` | 工单列表 |
-| GET | `/api/admin/tickets/:id` | 工单详情 |
-| POST | `/api/admin/tickets/:id/replies` | 回复工单 |
-| PUT | `/api/admin/tickets/:id/close` | 关闭工单 |
-| DELETE | `/api/admin/tickets/:id` | 删除工单 |
-| GET | `/api/admin/email/config` | 获取 Brevo 配置 |
-| PUT | `/api/admin/email/config` | 更新 Brevo 配置 |
-| POST | `/api/admin/email/test` | 发送测试邮件 |
-| GET | `/api/admin/email/templates` | 邮件模板列表 |
-| POST | `/api/admin/email/templates` | 创建邮件模板 |
-| PUT | `/api/admin/email/templates/:id` | 编辑邮件模板 |
-| DELETE | `/api/admin/email/templates/:id` | 删除邮件模板 |
-| GET | `/api/admin/email/templates/:id/preview` | 预览邮件模板 |
-| POST | `/api/admin/email/send` | 发送单封邮件 |
-| GET | `/api/admin/email/campaigns` | 群发任务列表 |
-| POST | `/api/admin/email/campaigns` | 创建群发任务 |
-| GET | `/api/admin/email/campaigns/:id` | 群发任务详情 |
-| POST | `/api/admin/email/campaigns/:id/pause` | 暂停群发任务 |
-| POST | `/api/admin/email/campaigns/:id/resume` | 恢复群发任务 |
-| DELETE | `/api/admin/email/campaigns/:id` | 删除群发任务 |
-| GET | `/api/admin/email/campaigns/:id/logs` | 群发任务日志 |
-| DELETE | `/api/admin/email/logs/:id` | 删除单条日志 |
-| DELETE | `/api/admin/email/logs/batch` | 批量删除日志 |
-| DELETE | `/api/admin/email/logs/clear` | 清空过期日志 |
-| GET | `/api/admin/email/users/search` | 搜索用户 |
-| POST | `/api/user/email/:action` | 用户端触发邮件发送 |
-| GET | `/api/admin/resources/config` | 获取资源配置 |
-| PUT | `/api/admin/resources/config` | 保存资源配置 |
-| GET | `/api/admin/resources` | 资源列表 |
-| POST | `/api/admin/resources/upload` | 上传文件 |
-| PUT | `/api/admin/resources/:id` | 更新资源 |
-| DELETE | `/api/admin/resources/:id` | 删除资源 |
-| POST | `/api/admin/resources/:id/distribute` | 分发资源给用户 |
-| GET | `/api/admin/resources/:id/distributions` | 获取分发列表 |
-| PUT | `/api/admin/resources/distributions/batch-expire` | 批量设置过期时间 |
-| DELETE | `/api/admin/resources/distributions/:id` | 删除分发记录 |
-| GET | `/api/admin/system-settings/traffic` | 获取流量统计配置 |
-| PUT | `/api/admin/system-settings/traffic` | 更新流量统计倍率 |
-
----
-
-## 8. 项目目录
-
-```text
-project/
-├─ server/
-│  ├─ app.js
-│  ├─ app-user.js
-│  ├─ app-admin.js
-│  ├─ routes/
-│  │  ├─ user/
-│  │  │  ├─ auth.js
-│  │  │  ├─ plans.js
-│  │  │  ├─ orders.js
-│  │  │  ├─ payment.js
-│  │  │  ├─ subscription.js
-│  │  │  ├─ announcements.js
-│  │  │  ├─ cf-optimize.js
-│  │  │  ├─ renew.js
-│  │  │  ├─ tickets.js
-│  │  │  ├─ email.js
-│  │  │  └─ download.js
-│  │  └─ admin/
-│  │     ├─ tickets.js
-│  │     ├─ email.js
-│  │     ├─ resources.js
-│  │     └─ ...
-│  ├─ services/
-│  │  ├─ vmq-service.js
-│  │  ├─ order-service.js
-│  │  ├─ xui-service.js
-│  │  ├─ xui-sync.js
-│  │  ├─ traffic-manager.js
-│  │  ├─ ticket-service.js
-│  │  └─ email-service.js
-│  ├─ jobs/
-│  │  ├─ index.js
-│  │  ├─ email-campaign.js
-│  │  └─ backupDB.js
-│  ├─ backupDB/
-│  │  └─ *.db
-│  ├─ db/
-│  │  ├─ init.js
-│  │  └─ migrations/
-│  │     ├─ 001-node-subscription-strategy.js
-│  │     ├─ 002-resources-table.js
-│  │     └─ 003-resource-distributions.js
-│  └─ config.js
-├─ client-user/
-│  └─ src/
-│     ├─ views/
-│     │  ├─ Home.vue
-│     │  ├─ Login.vue
-│     │  ├─ PaymentCallback.vue
-│     │  └─ user/
-│     │     ├─ Tickets.vue
-│     │     ├─ TicketDetail.vue
-│     │     └─ CreateTicket.vue
-│     ├─ api/
-│     └─ stores/
-├─ client-admin/
-│  └─ src/
-│     ├─ views/
-│     │  ├─ Tickets.vue
-│     │  ├─ TicketDetail.vue
-│     │  ├─ Email.vue
-│     │  ├─ Resources.vue
-│     │  └─ ...
-│     ├─ api/
-│     └─ stores/
-└─ docs/
-   ├─ requirements.md
-   └─ api.md
-```
-
-说明：
-
-- `vmq-service.js`：VMQ 下单、查单、关单、回调验签
-- `order-service.js`：订单完成后的统一激活逻辑（含同步到 3X-UI）
-- `backupDB.js`：每天凌晨 4 点备份所有 3X-UI 服务器的 `x-ui.db`
-- 不再使用旧的 `payment-service.js`
-
----
-
-## 10. 定时任务
-
-系统包含以下定时任务（`server/jobs/index.js`）：
-
-| 任务名称 | 启动时执行 | 首次延迟 | 执行间隔 | 说明 |
-|---------|-----------|---------|---------|------|
-| 标记过期订单 | 是 | 无 | 10 分钟 | 将超时订单标记为 expired |
-| 删除过期订单 | 是 | 5 分钟 | 1 小时 | 删除超过 1 小时的 expired 订单 |
-| 清理僵尸用户 | 是 | 2 分钟 | 30 分钟 | 删除未支付的超时用户 |
-| 3X-UI 用户同步 | 是 | 7 分钟 | 4 小时 | 同步用户到 3X-UI 节点 |
-| 流量同步与禁用检查 | 是 | 10 分钟 | 1 小时 | 同步用户流量数据并自动禁用超量用户 |
-| 工单自动关闭 | 是 | 3 分钟 | 1 小时 | 关闭超时未回复的工单 |
-| 释放过期名额 | 是 | 15 分钟 | 1 小时 | 释放流量用完超3天的用户名额 |
-| 邮件群发任务 | 是 | 5 分钟 | 每天 9:00 | 处理待发送的群发任务 |
-| 清理邮件日志 | 是 | 20 分钟 | 每天 3:00 | 删除 30 天前的邮件日志 |
-| 3X-UI 数据库备份 | 否 | 无 | 每天 4:00 | 备份所有 3X-UI 服务器数据库 |
-
-### 10.1 标记过期订单
-
-- 执行频率：每 10 分钟（启动时立即执行）
-- 逻辑：将超过 30 分钟未支付的 `pending` 订单标记为 `expired`
-
-### 10.2 删除过期订单
-
-- 执行频率：每 1 小时（首次延迟 5 分钟）
-- 逻辑：删除超过 1 小时的 `expired` 订单
-
-### 10.3 清理僵尸用户
-
-- 执行频率：每 30 分钟（首次延迟 2 分钟）
-- 逻辑：删除满足以下条件的用户
-  - `enabled = 0`（未启用）
-  - `payment_count = 0`（从未支付）
-  - 创建时间超过 30 分钟
-
-### 10.4 3X-UI 用户同步
-
-- 执行频率：每 4 小时（首次延迟 7 分钟）
-- 逻辑：
-  1. 查询所有已启用且未过期的用户
-  2. 遍历所有在线的 3X-UI 服务器
-  3. 检查用户是否在每个 inbound 的客户端列表中
-  4. 如果不存在，则添加用户到 3X-UI 节点
-
-### 10.5 流量同步与禁用检查
-
-- 执行频率：每 1 小时（首次延迟 10 分钟）
-- 逻辑：
-  1. 获取所有在线 3X-UI 服务器的流量数据
-  2. 使用增量更新计算用户总流量（汇总所有服务器）
-  3. 更新本地数据库中的 `traffic_used` 字段
-  4. 检查流量超限用户并自动禁用：
-     - 先同步禁用状态到所有 3X-UI 服务器
-     - 再更新本地数据库 `enabled = 0`
-     - 记录 `traffic_used_at` 时间戳
-
-- 增量更新机制：
-  - 使用 `traffic_sync_log` 表记录每个服务器上次同步的流量值
-  - 本次流量 - 上次流量 = 增量
-  - 用户总流量 = 原有流量 + 增量
-  - 服务器流量重置时，增量 = 当前流量
-
-- 续费后自动解除禁用：
-  - 用户续费后，检查是否需要解除禁用
-  - 更新本地数据库 `enabled = 1, traffic_used_at = NULL`
-  - 异步同步到所有 3X-UI 服务器
-
-### 10.6 工单自动关闭
-
-- 执行频率：每 1 小时（首次延迟 3 分钟）
-- 逻辑：关闭满足以下条件的工单
-  - 状态为 `pending`（管理员已回复）
-  - 用户已读最后一条管理员回复
-  - 用户已读后超过 24 小时无新回复
-
-### 10.7 释放过期名额
-
-- 执行频率：每 1 小时（首次延迟 15 分钟）
-- 逻辑：释放满足以下条件的用户名额
-  - 用户有套餐且流量已用完
-  - 流量用完时间 (`traffic_used_at`) 超过 3 天
-  - 3 天内没有续费订单
-- 效果：对应套餐的 `sales_count` 减少
-
-### 10.8 邮件群发任务
-
-- 执行频率：每天 9:00（首次延迟 5 分钟）
-- 逻辑：
-  1. 查询状态为 `pending` 或 `sending` 的群发任务
-  2. 从数据库读取每日群发配额（默认 100）
-  3. 检查今日已发送数量
-  4. 计算剩余配额（取总配额和群发配额的较小值）
-  5. 获取待发送用户列表（排除已发送的用户）
-  6. 逐个发送邮件，替换模板变量
-  7. 记录发送日志
-  8. 更新任务状态（完成或等待明天继续）
-
-### 10.9 清理邮件日志
-
-- 执行频率：每天 3:00（首次延迟 20 分钟）
-- 逻辑：删除 30 天前的邮件发送日志
-
-### 10.10 3X-UI 数据库备份
-
-- 执行频率：每天 4:00（启动时不立即执行）
-- 逻辑：
-  1. 查询 `xui_servers` 表中的所有服务器
-  2. 跳过 `api_token` 为空的服务器
-  3. 使用 API Token 调用 3X-UI `/panel/api/server/getDb`
-  4. 将返回的 `x-ui.db` 保存到 `server/backupDB`
-  5. 文件名使用服务器 `name` 作为前缀：`<name>-x-ui.db`
-  6. 同名文件存在时直接覆盖，保证保留最新备份
-- 安全说明：`server/backupDB/` 已加入 `.gitignore`，避免真实数据库备份被提交
-
----
-
-## 11. 订阅策略功能
-
-### 11.1 功能概述
-
-系统支持为每个节点配置订阅信息处理策略，支持两种策略类型：
-
-- **cf 策略**：替换地址为 CF 优选 IP，端口为 `client_port`，host 为 `host`
-- **direct 策略**：完全不修改，直接使用 3X-UI 返回的原始节点信息
-
-### 11.2 策略判断规则
-
-通过节点备注（remark）判断策略类型：
-- 备注包含 "cf"：使用 cf 策略
-- 其他格式：使用 direct 策略
-
-### 11.3 数据库设计
-
-- `user_node_configs` 表：存储每个用户在每个节点上的独立配置（UUID 和 sub_id）
-  - 使用 `server_id` + `inbound_id` 关联节点，不依赖 `xui_nodes` 表的外键
-  - `UNIQUE(user_id, server_id, inbound_id)` 唯一约束
-- `user_subscriptions` 表：存储聚合后的订阅信息，用于快速响应订阅请求
-- `xui_servers.sub_url` 字段：存储服务器的订阅链接地址
-
-### 11.4 工作流程
-
-1. 用户支付成功后，系统为每个节点生成独立的 UUID 和 sub_id（16 位十六进制）
-2. 同步用户到 3X-UI 时，为 direct 节点设置 `flow: 'xtls-rprx-vision'`
-3. 用户点击"生成订阅链接"时，系统：
-   - 同步所有服务器节点信息
-   - 为每个节点独立从 3X-UI 获取原始订阅（使用各自的 sub_id）
-   - CF 节点为每个优选 IP 生成独立节点
-   - 根据策略处理节点信息（CF 策略无条件替换 host）
-   - 聚合所有节点并缓存
-4. 用户访问订阅链接时，直接返回缓存的节点信息
-5. 定时任务每 4 小时检查并同步 sub_id 和 flow 到 3X-UI
-
-### 11.5 sub_id 同步机制
-
-- **数据库为主**：`user_node_configs` 表中的 sub_id 是权威数据
-- **同步方向**：数据库 → 3X-UI（用数据库值覆盖 3X-UI）
-- **触发时机**：
-  - 用户购买/续费时生成并同步
-  - 定时任务检查一致性并补充缺失值
-  - 生成订阅链接时确保数据一致
-
-### 11.6 CF 优选 IP 处理
-
-- 用户选择多个 CF 优选 IP 时，每个 IP 生成独立的节点
-- 节点名添加序号后缀（如 `cf-1`、`cf-2`）
-- 替换内容：地址 → CF IP，端口 → `client_port`，host → `host`
-
----
-
-## 12. 数据库迁移
-
-### 迁移脚本
-
-数据库结构变更通过迁移脚本执行，支持幂等运行：
-
-```bash
-node server/db/migrations/001-node-subscription-strategy.js
-node server/db/migrations/006-resource-download-classification.js
-```
-
-迁移内容：
-- `xui_servers` 表添加 `sub_url` 字段
-- `user_node_configs` 表从 `node_id` 改为 `server_id` + `inbound_id`
-- `users` 和 `user_node_configs` 表的 `sub_id` 更新为 16 位
-- `resources` 表补充 `is_download_resource` 和 `download_category`，用于用户端下载栏显式展示与分类
-
----
-
-## 13. 资源下载功能
-
-### 13.1 功能概述
-
-系统支持管理员上传文件资源，并为不同用户分配独立的下载链接，支持设置有效期。管理员可以显式标记哪些资源展示在用户端下载栏，并设置下载分类；用户端只展示已标记为下载资源且启用、未过期的资源。
-
-### 13.2 数据库设计
-
-**`resources` 表**：存储资源文件信息
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | SERIAL | 主键 |
-| name | VARCHAR(255) | 资源显示名称 |
-| filename | VARCHAR(255) | 存储文件名（UUID） |
-| original_name | VARCHAR(255) | 原始文件名 |
-| size | BIGINT | 文件大小（字节） |
-| mimetype | VARCHAR(100) | MIME 类型 |
-| path | VARCHAR(500) | 存储路径 |
-| download_token | VARCHAR(32) | 全局下载 token |
-| expire_at | BIGINT | 过期时间戳 |
-| download_count | INTEGER | 下载次数 |
-| enabled | INTEGER | 是否启用 |
-| is_download_resource | INTEGER | 是否展示到用户端下载栏 |
-| download_category | VARCHAR(50) | 用户端下载栏分类，空值归入“其他” |
-| created_at | BIGINT | 创建时间 |
-| updated_at | BIGINT | 更新时间 |
-
-**`resource_distributions` 表**：存储用户独立下载链接
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | SERIAL | 主键 |
-| resource_id | INTEGER | 关联资源 ID |
-| user_id | INTEGER | 关联用户 ID |
-| download_token | VARCHAR(32) | 独立下载 token |
-| expire_at | BIGINT | 过期时间戳 |
-| download_count | INTEGER | 下载次数 |
-| enabled | INTEGER | 是否启用 |
-| created_at | BIGINT | 创建时间 |
-
-### 13.3 资源配置
-
-在系统设置页面可配置：
-
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| 最大文件大小 | 单个文件最大允许上传大小 | 100MB |
-| 总下载流量限制 | 所有用户共享的总下载速度 | 0（不限速） |
-
-配置存储在 `system_settings` 表，key 为 `resource_config`。
-
-部署在 OpenResty/Nginx 后方时，反向代理的 `client_max_body_size` 必须不小于资源管理设置中的最大文件大小，否则请求会在进入后端前返回 HTTP 413。
-
-### 13.4 管理端功能
-
-**资源管理页面**：
-- 上传文件（支持拖拽，最多 5 个文件）
-- 资源列表展示（名称、大小、下载次数、状态、过期时间）
-- 重命名资源
-- 删除资源（同时删除文件）
-- 分发资源给用户（支持批量选择用户、设置有效期）
-- 查看分发列表
-- 批量设置分发有效期
-- 设置是否展示到用户端下载栏
-- 设置下载资源分类（例如 Android、Windows、其他）
-- 用户端下载栏显示名称使用资源管理中配置的资源名称
-
-### 13.5 用户端功能
-
-**帮助中心下载栏**：
-- 下载栏从管理端显式标记的下载资源生成，不再通过文件名或模板名模糊匹配。
-- 资源按管理端设置的下载分类分组展示，用户可按分类快速区分资源。
-- 文件名称使用管理端设置的资源名称，名称过长时在按钮左侧可用空间内尽量显示，溢出部分使用省略号。
-- 点击“获取”后系统按资源 ID 获取或创建当前用户的独立下载链接。
-- 移动端下载栏高度受限，每页只显示 2 个资源，并提供上一页/下一页按钮。
-
-**下载文件**：
-- 通过分发链接下载（用户独立 token，优先验证）
-- 通过全局链接下载（资源全局 token）
-- 全局限速：所有用户共享总下载速度限制
-
-### 13.6 邮件模板变量
-
-邮件模板支持以下变量：
-
-| 变量名 | 说明 |
-|--------|------|
-| `{{username}}` | 用户邮箱前缀 |
-| `{{email}}` | 用户邮箱 |
+| 变量 | 说明 |
+| --- | --- |
+| `{{username}}` | 邮箱前缀 |
+| `{{email}}` | 邮箱 |
 | `{{user_id}}` | 用户 ID |
 | `{{plan_name}}` | 套餐名称 |
 | `{{expire_date}}` | 到期时间 |
 | `{{traffic_used}}` | 已用流量 |
 | `{{traffic_limit}}` | 流量上限 |
-| `{{download_url}}` | 下载链接（根据用户自动匹配） |
-
-### 13.7 工作流程
-
-1. 管理员上传资源文件
-2. 管理员可选择分发给指定用户（设置有效期）
-3. 用户在帮助弹窗中点击"获取"
-4. 系统自动创建分发记录（如果没有）
-5. 系统发送包含下载链接的邮件
-6. 用户点击链接下载文件
-
----
-
-## 14. 与旧文档相比的关键修正
-
-本次已按当前代码实现修正文档中的以下不一致项：
-
-- 支付网关从旧描述调整为 VMQ
-- 用户购买流程调整为"注册并支付"一体化流程
-- 新增公共查单接口 `/api/user/orders/status/:id`
-- 增加 VMQ 回调接口 `/api/user/payment/notify`
-- 增加同步回跳接口 `/api/user/payment/return`
-- 支付结果页调整为二维码支付等待页
-- 删除用户端不存在的 `/api/user/cf-ips/test` 接口描述
-- 服务层说明调整为 `vmq-service.js` 与 `order-service.js`
-- 增加对 `isAuto=1` 风险通道的拒绝规则
-- 增加少付金额不得激活订单的要求
-- 新增工单系统功能（用户端和管理端）
-- 新增工单自动关闭定时任务
-- 3X-UI 服务端认证更新为 API Token 模式
-- 新增管理端流量统计倍率设置
-- 资源下载分发改为按用户唯一分发，避免同一用户重复分发记录
-- 新增 3X-UI 数据库每日自动备份任务
----
-
-## 15. 当前实现补充（2026-05-29）
-
-以下内容已在代码中落地，但旧版需求文档尚未完整覆盖，现补充说明。
-
-### 15.1 新增 `hy2` 节点策略
-
-系统当前支持三种订阅策略：
-
-| 策略类型 | 备注识别规则 | 当前用途 |
-|------|------|------|
-| `cf` | `remark` 包含 `cf` | Cloudflare 优选改写 |
-| `direct` | `remark` 不包含 `cf` / `hy2` | 直连透传 |
-| `hy2` | `remark` 包含 `hy2` | Hysteria2 节点专用处理 |
-
-补充说明：
-- `hy2` 在订阅聚合阶段归类为独立策略，不再与 `direct` 混写在同一语义下。
-- `hy2` 的原始协议链接为 `hysteria2://...`，但 3X-UI inbound 协议名实际为 `hysteria`，系统内部已做协议别名兼容。
-
-### 15.2 `user_node_configs` 数据结构补充
-
-当前 `user_node_configs` 已从“仅存储 UUID”扩展为“按协议存储凭据”：
-
-| 字段 | 说明 |
-|------|------|
-| `uuid` | 供 `vless` / `trojan` 等 UUID 型协议使用 |
-| `auth` | 供 `hy2` 节点使用的认证凭据 |
-| `sub_id` | 每个用户在每个节点上的独立订阅 ID |
-
-当前实现约束：
-- `UNIQUE(user_id, server_id, inbound_id)` 仍保持不变。
-- `uuid` 与 `auth` 不是二选一字段，而是按协议分别生效。
-- `sub_id` 仍以数据库为准，再同步到 3X-UI。
-
-### 15.3 3X-UI 同步规则补充
-
-#### 15.3.1 `direct` 节点
-
-- 同步时继续写入 `id(uuid)`。
-- 自动附带 `flow: xtls-rprx-vision`。
-
-#### 15.3.2 `hy2` 节点
-
-`hy2` 在 3X-UI 中实际按 `protocol=hysteria` 处理，客户端对象使用以下字段：
-
-- `auth`
-- `email`
-- `subId`
-- `enable`
-- `expiryTime`
-- `totalGB`
-- `limitIp`
-- `tgId`
-
-补充说明：
-- `hy2` 不写 `id`。
-- `hy2` 不写 `flow`。
-- 代码内部命名已统一使用 `auth`，不再使用旧的 `password` 语义。
-
-### 15.4 原始订阅模板缓存机制补充
-
-订阅生成链路当前不再简单依赖实时抓取，而是引入了“原始订阅模板缓存 + 增量修复”机制：
-
-- 新增缓存表：`user_subscription_sources`
-- 每条缓存按 `user_id + server_id + inbound_id` 唯一定位
-- 缓存内容包括：
-  - `sub_id`
-  - `remark`
-  - `protocol`
-  - `original_link`
-  - `node_fingerprint`
-  - `server_fingerprint`
-  - `fetched_at`
-
-生成订阅时的当前流程：
-1. 优先复用本地 `user_subscription_sources`
-2. 如果缓存缺失、过期或节点/服务器指纹不一致，则只对失效节点做增量修复
-3. 修复时按每个节点自己的 `sub_id` 向 3X-UI 拉取原始订阅
-4. 修复完成后再聚合输出最终订阅
-
-### 15.5 `hy2` 订阅输出规则补充
-
-#### 15.5.1 通用订阅（`/api/user/sub/:token` 默认输出）
-
-`hy2` 节点当前输出为 `hysteria2://` 链接，并在保留原始认证、地址、`fp`、`alpn`、`sni` 等参数的基础上，统一补齐：
-
-- `security=tls`
-- `mport=40000-50000`
-- `insecure=0`
-- `allowInsecure=0`
-
-说明：
-- 该规则用于兼容 V2RayN 等客户端的当前导入行为。
-- 这一步只作用于 `hy2` 节点，不影响 `cf` / `direct` 的既有逻辑。
-
-#### 15.5.2 Clash 订阅（`?clash=1`）
-
-`hy2` 的 Clash YAML 当前输出字段补充为：
-
-- `type: hysteria2`
-- `ports: 40000-50000`
-- `tls: true`
-- `skip-cert-verify: false`
-
-同时保留：
-- `password`
-- `sni`
-- `alpn`
-- `client-fingerprint`
-
-### 15.6 协议匹配兼容补充
-
-当前代码已兼容以下协议映射：
-
-| inbound 协议 | 原始订阅链接协议 | 说明 |
-|------|------|------|
-| `hysteria` | `hysteria2://` | 用于 `hy2` 节点模板匹配 |
-
-这意味着：
-- 当 3X-UI 节点快照中记录的是 `protocol=hysteria` 时
-- 系统仍能从原始订阅内容中正确匹配 `hysteria2://` 节点链接
-
-### 15.7 数据库迁移补充
-
-当前与订阅/节点策略相关的迁移脚本包括：
-
-- `001-node-subscription-strategy.js`
-- `008-user-node-config-password.js`
-
-其中 `008-user-node-config-password.js` 的当前职责已经调整为：
-- 新增 `user_node_configs.auth`
-- 兼容历史 `password` 列
-- 将历史 `password` 数据迁移到 `auth`
-
-说明：
-- 脚本文件名仍沿用原编号命名，便于兼容已有环境。
-- 代码运行时已统一使用 `auth` 字段。
-
-### 15.8 定时任务实际执行时间补充
-
-当前代码中的部分定时任务时间表与旧文档描述存在差异，现以实现为准：
-
-| 任务 | 当前实际首次延迟 | 当前实际周期 |
-|------|------|------|
-| 3X-UI 用户巡检同步 | 1 分钟 | 4 小时 |
-| 3X-UI 同步重试队列 worker | 30 秒 | 1 分钟 |
-| 流量同步与自动禁用 | 10 分钟 | 1 小时 |
-| 工单自动关闭 | 3 分钟 | 1 小时 |
-| 释放过期名额 | 不在启动时立即执行 | 每天 5:00 |
-| 邮件群发任务 | 不在启动时立即执行 | 每天 9:00 |
-| 清理邮件日志 | 不在启动时立即执行 | 每天 3:00 |
-| 3X-UI 数据库备份 | 不在启动时立即执行 | 每天 4:00 |
-
-补充说明：
-- `3X-UI 同步重试队列 worker` 是当前实现中的独立任务，用于补偿注册、续费、启用、禁用等同步失败后的重试。
-- 释放过期名额并不是每小时执行，而是每天 5:00 执行一次。
-
-### 15.9 3X-UI 同步重试队列补充
-
-当前系统已落地 `xui_sync_tasks` 队列表，用于持久化以下类型的补偿任务：
-
-- `initial_user_sync`
-- `renew_sync`
-- `user_sync`
-- `enable_sync`
-- `disable_sync`
-
-重试特性：
-- 状态：`pending` / `processing` / `success` / `failed`
-- 退避时间：`60 秒`、`5 分钟`、`15 分钟`、`1 小时`、`4 小时`
-- 默认最多重试 `10` 次
-- 同一用户的新同步任务入队前，会将旧的 `pending` 用户同步任务标记为已被取代
-
-### 15.10 资源管理能力补充
-
-管理端资源管理当前除原有上传、分发、批量设置过期外，还支持：
-
-- 刷新资源全局下载 token
-- 单独设置资源过期时间
-
-对应能力：
-- `POST /api/admin/resources/:id/refresh-token`
-- `PUT /api/admin/resources/:id/expire`
-
-### 15.11 帮助中心补充
-
-用户端当前已存在帮助中心接口与文章图片读取能力：
-
-- 帮助文章列表
-- 帮助分类列表
-- 帮助文章详情
-- 帮助中心图片直链访问
-
-实现入口：
-- `/api/user/help/articles`
-- `/api/user/help/categories`
-- `/api/user/help/articles/:id`
-- `/api/user/help/images/:filename`
-
-说明：
-- 帮助中心内容来源于后台博客文章的已发布内容。
-- 帮助文章接口当前要求用户已登录后访问。
-
----
-
-## 16. 推广系统补充（2026-06-01）
-
-### 16.1 功能概述
-
-系统新增推广模块，支持用户分享专属推广链接，新用户点击并完成首单支付后为推广者发放推广奖励流量。推广流量与套餐流量分开存储、分开展示，但在流量校验与 3X-UI 同步时统一按总流量口径处理。
-
-### 16.2 数据模型补充
-
-#### `users`
-
-新增关键字段：
-
-- `referral_traffic_limit`：推广奖励流量上限（字节）
-
-流量口径说明：
-
-- 套餐流量：`traffic_limit`
-- 推广流量：`referral_traffic_limit`
-- 总流量：`traffic_limit + referral_traffic_limit`
-
-#### `orders`
-
-新增关键字段：
-
-- `referrer_user_id`：推广人用户 ID，用于订单归因
-
-#### `referral_codes`
-
-用于保存用户专属推广码和启用状态。
-
-关键字段：
-
-- `user_id`
-- `code`
-- `enabled`
-- `created_at`
-- `updated_at`
-
-#### `referral_clicks`
-
-用于记录推广链接点击行为。
-
-关键字段：
-
-- `referrer_user_id`
-- `code`
-- `ip`
-- `user_agent`
-- `created_at`
-
-#### `referral_rewards`
-
-用于记录推广奖励明细。
-
-关键字段：
-
-- `referrer_user_id`
-- `referred_user_id`
-- `order_id`
-- `reward_traffic`
-- `created_at`
-
-唯一约束说明：
-
-- `referred_user_id` 唯一，保证同一被推广用户只首奖一次
-- `order_id` 唯一，避免支付回调重复发奖
-
-### 16.3 用户端需求补充
-
-#### 推广入口
-
-- “我的”页面新增“推广”卡片，与“我的服务”同级
-- 桌面端和移动端均可进入推广详情页
-
-#### 推广详情页
-
-展示内容：
-
-- 专属推广链接
-- 点击量
-- 奖励订单数
-- 奖励总流量
-- 奖励明细列表（付款用户、订单号、奖励流量、付款金额、奖励时间）
-
-#### 首页流量展示
-
-首页流量展示调整为拆分口径，例如：
-
-`17.45 GB / 550 GB（套餐：550 GB + 推广：0 B）`
-
-要求：
-
-- 用户可以直观看到套餐流量和推广流量
-- 总量展示使用套餐流量与推广流量之和
-
-### 16.4 管理端需求补充
-
-#### 系统设置
-
-新增推广奖励流量配置项：
-
-- `referral_reward_traffic`
-
-管理员可以设置首单成功后赠送给推广人的奖励流量字节数。
-
-#### 推广管理
-
-左侧导航新增“推广管理”页面，支持：
-
-- 查看用户推广链接
-- 查看点击量
-- 查看奖励订单数
-- 查看奖励总流量
-- 查看指定用户的推广奖励明细
-- 启用或禁用用户推广功能
-- 重置用户推广链接
-
-### 16.5 奖励规则补充
-
-- 推广点击仅用于统计和后续归因，不直接发放奖励
-- 只有新用户完成首单支付成功时才发放奖励
-- 续费订单不参与推广奖励
-- 自己不能推广自己
-- 当推广奖励配置缺失或为 0 时，不发放奖励
-
-### 16.6 3X-UI 同步口径补充
-
-- 3X-UI 写入的流量上限使用“套餐流量 + 推广流量”的总流量
-- 被推广用户支付成功后，会立即同步的是“付款用户”的套餐激活结果
-- 推广者拿到奖励流量后，不会在发奖瞬间额外立即触发一次单独的 3X-UI 同步
-- 推广者的新总流量会在后续用户同步链路或 3X-UI 定时巡检任务中写回 3X-UI
-
-### 16.7 配置与部署补充
-
-推广链接生成依赖用户端地址配置：
-
-- 开发环境：`server/config.js` 中的 `site.userAppUrl`
-- 生产环境：环境变量 `USER_APP_URL`
-
-已有环境部署推广系统前，需要执行迁移脚本：
-
-```bash
-node server/db/migrations/011-referral-system.js
+| `{{download_url}}` | 当前用户下载链接 |
+
+## 10. Telegram 内部能力
+
+当前代码包含 Telegram 内部 API 和管理端绑定能力：
+
+- 管理端可查看 Telegram 配置、生成管理员绑定码、查看绑定列表。
+- 内部接口通过 `authenticateInternalTelegram` 鉴权。
+- 内部接口可验证绑定码、按 chat_id 查询管理员、查询服务器健康状态、列出告警、标记告警发送结果、按邮箱或用户 ID 查询用户。
+- 后台任务会定期巡检服务器健康并写入告警记录。
+
+## 11. 数据模型概览
+
+核心表包括：
+
+| 表 | 说明 |
+| --- | --- |
+| `users` | 用户账号、套餐、流量、余额、状态、同步状态 |
+| `plans` | 套餐配置、类型、展示、销售限制 |
+| `orders` | 新购和续费订单，`ORD` / `REN` 区分业务类型 |
+| `admins` | 管理员账号 |
+| `xui_servers` | 3X-UI 服务器配置、API Token、订阅地址、面板版本 |
+| `xui_nodes` | 3X-UI inbound 快照 |
+| `user_node_configs` | 用户在每个节点上的 UUID/auth/sub_id |
+| `user_subscriptions` | 聚合订阅缓存 |
+| `user_subscription_sources` | 原始订阅模板缓存 |
+| `xui_sync_tasks` | 3X-UI 同步补偿队列 |
+| `traffic_sync_log` | 跨服务器流量增量同步日志 |
+| `cf_ip_pool` / `user_cf_ips` | CF IP 池和用户优选记录 |
+| `announcements` / `user_announcement_popup_stats` | 公告和弹窗计数 |
+| `blog_articles` | 帮助中心文章 |
+| `tickets` / `ticket_replies` / `ticket_reads` | 工单系统 |
+| `email_templates` / `email_campaigns` / `email_logs` | 邮件模板、群发、日志 |
+| `resources` / `resource_distributions` | 文件资源和用户下载链接 |
+| `referral_codes` / `referral_clicks` / `referral_rewards` | 推广码、点击、余额奖励 |
+| `telegram_*` | Telegram 绑定、健康检查、告警和命令日志 |
+| `password_reset_tokens` | 一次性密码重置 token |
+| `system_settings` | 系统设置 |
+
+## 12. 后台任务
+
+当前 `server/jobs/index.js` 注册任务如下：
+
+| 任务 | 启动时执行 | 首次延迟 | 周期 |
+| --- | --- | --- | --- |
+| 标记过期订单 | 是 | 无 | 10 分钟 |
+| 删除过期订单 | 是 | 5 分钟 | 1 小时 |
+| 清理僵尸用户 | 是 | 2 分钟 | 30 分钟 |
+| 3X-UI 用户同步 | 是 | 1 分钟 | 4 小时 |
+| 3X-UI 同步重试队列 | 是 | 30 秒 | 1 分钟 |
+| 流量同步 | 是 | 10 分钟 | 30 分钟 |
+| 工单自动关闭 | 是 | 3 分钟 | 1 小时 |
+| 释放过期名额 | 否 | 无 | 每天 05:00 |
+| 邮件群发 | 否 | 无 | 每天 09:00 |
+| 清理邮件日志 | 否 | 无 | 每天 03:00 |
+| 3X-UI 数据库备份 | 否 | 无 | 每天 04:00 |
+| 批量订阅任务恢复 | 否 | 15 秒 | 仅启动后一次 |
+| Telegram 健康巡检 | 否 | 13 分钟 | 40 分钟 |
+
+## 13. 安全与配置
+
+### 13.1 认证
+
+- 用户端使用用户 JWT，默认有效期 7 天。
+- 管理端使用管理 JWT，配置注释写 24 小时。
+- 管理端登录接口有 Express 全局限流。
+- 用户端登录和注册接口有基于 IP + 邮箱的失败次数限制。
+
+### 13.2 密码和重置
+
+- 密码要求至少 8 位且同时包含字母和数字。
+- 密码使用 bcrypt。
+- 重置密码 token 为 32 字节随机十六进制，有效期 15 分钟，只能使用一次。
+- 同一用户 24 小时内最多申请一次密码重置邮件。
+- 密码重置申请始终返回模糊提示，不暴露邮箱是否存在。
+
+### 13.3 站点 URL
+
+订阅链接、推广链接、密码重置链接依赖站点配置：
+
+```javascript
+site: {
+  protocol: process.env.SITE_PROTOCOL || 'http',
+  userAppUrl: process.env.USER_APP_URL || '...',
+  host: process.env.SITE_HOST || '...'
+}
 ```
 
----
-
-## 17. 用户公告弹窗补充（2026-06-05）
-
-### 17.1 功能概述
-
-用户端个人中心首页新增系统公告弹窗能力。管理员可以在公告管理中配置“弹窗次数”，用于控制指定公告对每个用户最多弹出的次数。
-
-当前弹窗只展示最新一条满足条件的公告：
-
-- 公告必须处于启用状态。
-- 公告的 `popup_show_limit` 必须大于 0。
-- 同一用户对同一公告的已关闭次数必须小于 `popup_show_limit`。
-- 如果最新启用公告未配置弹窗次数，不会阻挡较早的可弹窗公告。
-
-### 17.2 数据模型补充
-
-#### `announcements`
-
-新增字段：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `popup_show_limit` | INTEGER | 公告对每个用户最多弹出的次数，默认 `0` |
-
-字段语义：
-
-- `0` 表示该公告不作为弹窗展示。
-- 正整数表示每个用户最多弹出的次数。
-- 前端管理端提交时必须是大于等于 0 的整数。
-
-#### `user_announcement_popup_stats`
-
-用于记录每个用户对每条公告的弹窗关闭统计。
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | SERIAL | 主键 |
-| `user_id` | INTEGER | 用户 ID |
-| `announcement_id` | INTEGER | 公告 ID |
-| `shown_count` | INTEGER | 用户已关闭该公告弹窗的次数 |
-| `last_shown_at` | BIGINT | 最近一次关闭弹窗的时间戳 |
-| `created_at` | BIGINT | 创建时间 |
-| `updated_at` | BIGINT | 更新时间 |
-
-约束说明：
-
-- `UNIQUE(user_id, announcement_id)` 保证同一用户与同一公告只有一条统计记录。
-- 只有用户主动关闭弹窗后才写入或累加统计。
-- 获取待弹窗公告时不写统计表，避免刷新页面但未关闭弹窗时误计数。
-
-### 17.3 用户端行为
-
-个人中心首页加载后调用公告弹窗检查接口。接口返回 `should_popup=true` 且存在公告时，前端展示弹窗。
-
-弹窗展示规则：
-
-- 内容支持 Markdown 渲染。
-- 弹窗标题为“系统公告”。
-- 右上角关闭控件使用文字按钮“关闭”，替代 Element Plus 默认的 `X` 图标。
-- 移动端关闭按钮尺寸会缩小，避免挤占标题区域。
-- 用户关闭弹窗后调用关闭上报接口，后端再记录本次关闭次数。
-
-### 17.4 管理端行为
-
-公告管理页面新增“弹窗次数”配置：
-
-- 新增公告时默认值为 `0`。
-- 编辑公告时展示当前 `popup_show_limit`。
-- 公告列表展示弹窗次数，便于管理员判断公告是否会弹窗。
-- `0` 表示只在公告列表中展示，不弹出。
-- 正整数表示每个用户最多弹出的次数。
-
-### 17.5 迁移与部署
-
-本功能对应数据库迁移脚本：
+生产环境建议显式设置：
 
 ```bash
-node server/db/migrations/002-announcement-popup-settings.js
+SITE_PROTOCOL=https
+SITE_HOST=yourdomain.com
+USER_APP_URL=https://yourdomain.com
 ```
 
-部署到已有环境前需要先执行迁移脚本，确保 `announcements.popup_show_limit` 字段和 `user_announcement_popup_stats` 表已创建。
+### 13.4 支付配置
+
+VMQ 回调地址必须是 VMQ 服务可访问的地址，不能使用只对后端本机有效的 `127.0.0.1`。
+
+核心环境变量：
+
+- `VMQ_API_URL`
+- `VMQ_KEY`
+- `VMQ_DEFAULT_TYPE`
+- `PAY_NOTIFY_URL`
+- `PAY_RETURN_URL`
+
+### 13.5 生产敏感信息
+
+- `server/config.js` 是本地开发配置，可包含真实本地数据，但严禁提交到远程公开仓库。
+- `server/ecosystem.config.js` 是 PM2 生产配置模板，禁止写入真实敏感信息。
+
+## 14. 迁移与初始化
+
+新环境运行：
+
+```bash
+cd server
+npm install
+npm run init-db
+```
+
+`server/db/schema/tables.js` 已包含当前主要表结构。已有环境升级时，根据缺失功能执行 `server/db/migrations/` 下对应迁移脚本。迁移脚本设计为尽量幂等。
+
+## 15. 与旧文档相比的关键修正
+
+本版按当前代码修正以下易错点：
+
+- 订阅文本实际路径为 `/api/user/subscription/sub/:subId`。
+- 推广奖励当前是账户余额奖励，配置项为 `referral_reward_coefficient`，不是奖励流量。
+- 续费现在区分 `lifetime` 和 `timed` 套餐，限时套餐续费会重置权益并可能要求二次确认。
+- 用户端存在 `apply-by-ip`，但后端没有 `/api/user/cf-ips/test`。
+- 系统设置实际包含 `traffic`、`email`、`resource`、`subscription` 四组。
+- 后台任务中流量同步实际周期为 30 分钟。
+- 公告除弹窗外，还支持 `node_show` 订阅虚拟节点。
+- 管理端已包含 Telegram 绑定和内部接口配套能力。
