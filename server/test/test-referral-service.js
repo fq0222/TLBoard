@@ -1241,6 +1241,11 @@ async function testBalanceRenewCompletesWithoutVmq() {
       sales_limit: -1,
       sales_count: 0
     }),
+    findPlanById: async () => ({
+      id: 1,
+      plan_type: 'lifetime',
+      duration_days: 0
+    }),
     createPendingRenewOrder: async (db, payload) => {
       calls.push(['createOrder', db, payload]);
       return { lastInsertRowid: 66 };
@@ -1312,6 +1317,11 @@ async function testBalanceRenewRejectsInsufficientBalance() {
       duration_days: 30,
       sales_limit: -1,
       sales_count: 0
+    }),
+    findPlanById: async () => ({
+      id: 1,
+      plan_type: 'lifetime',
+      duration_days: 0
     }),
     createPendingRenewOrder: async () => {
       createdOrder = true;

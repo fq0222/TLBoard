@@ -1442,7 +1442,9 @@ class XuiService {
         await this.init();
       }
 
-      const result = await this.client.resetClientTraffic(inboundId, email);
+      const result = this.usesClientApi()
+        ? await this.client.resetClientTraffic(email)
+        : await this.client.resetClientTraffic(inboundId, email);
       
       if (result.success) {
         logger.info(`重置客户端流量成功: ${email}`);

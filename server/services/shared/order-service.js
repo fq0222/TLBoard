@@ -104,6 +104,19 @@ function normalizeUserEnabled(value) {
 }
 
 /**
+ * 判断本次用户同步是否需要在 3X-UI 重置客户端流量。
+ * 职责：读取支付完成阶段写入队列 payload 的重置标记。
+ * 关键参数：plan 为立即同步或重试队列中的套餐快照。
+ * 核心分支：只有显式 true 才重置，避免不限时续费和普通补偿任务误清流量。
+ *
+ * @param {Object} plan - 同步套餐快照
+ * @returns {boolean} 是否执行 resetClientTraffic
+ */
+function shouldResetClientTraffic(plan = {}) {
+  return plan.reset_client_traffic === true || plan.resetClientTraffic === true;
+}
+
+/**
  * 生成写入同步任务 payload 的套餐快照，避免把整条套餐记录写进队列。
  * @param {Object} plan - 套餐信息
  * @returns {Object} 精简后的套餐信息
@@ -111,8 +124,11 @@ function normalizeUserEnabled(value) {
 function buildPayloadPlan(plan) {
   return {
     id: plan.id,
+    plan_type: plan.plan_type,
+    duration_days: plan.duration_days,
     traffic_limit: plan.traffic_limit,
-    total_traffic_limit: Number(plan.traffic_limit || 0)
+    total_traffic_limit: Number(plan.total_traffic_limit ?? plan.traffic_limit ?? 0),
+    reset_client_traffic: shouldResetClientTraffic(plan)
   };
 }
 
@@ -404,6 +420,18 @@ async function syncUserToXuiServers(db, user, plan = {}) {
             });
 
             if (syncResult.success) {
+              if (shouldResetClientTraffic(plan)) {
+                const resetResult = await xuiService.resetClientTraffic(inbound.id, nodeEmail);
+                if (!resetResult.success) {
+                  failureCount++;
+                  lastError = resetResult.message || '重置 3X-UI 用户流量失败';
+                  logger.warn(`重置用户 ${user.email} 在服务器 ${server.name} 的 inbound ${inbound.id} 流量失败: ${lastError}`);
+                  continue;
+                }
+
+                logger.info(`重置用户 ${user.email} 在服务器 ${server.name} 的 inbound ${inbound.id} 流量成功`);
+              }
+
               successCount++;
               logger.info(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功: action=${syncResult.action}`);
             } else {
@@ -487,7 +515,8 @@ function calculatePaidOrderEntitlement(order, plan, now = Math.floor(Date.now() 
     return {
       trafficLimit: Number(plan.traffic_limit || 0),
       expireAt: now + (Number(plan.duration_days) * 24 * 60 * 60),
-      resetTrafficUsed: true
+      resetTrafficUsed: true,
+      resetClientTraffic: true
     };
   }
 
@@ -501,14 +530,16 @@ function calculatePaidOrderEntitlement(order, plan, now = Math.floor(Date.now() 
     return {
       trafficLimit: currentTrafficLimit + planTrafficLimit,
       expireAt,
-      resetTrafficUsed: false
+      resetTrafficUsed: false,
+      resetClientTraffic: false
     };
   }
 
   return {
     trafficLimit: Number(plan.traffic_limit || 0),
     expireAt,
-    resetTrafficUsed: false
+    resetTrafficUsed: false,
+    resetClientTraffic: false
   };
 }
 
@@ -636,7 +667,8 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   const syncPlan = {
     ...plan,
     traffic_limit: newTrafficLimit,
-    total_traffic_limit: newTrafficLimit
+    total_traffic_limit: newTrafficLimit,
+    reset_client_traffic: entitlement.resetClientTraffic === true
   };
 
   const syncTaskType = isRenewOrder

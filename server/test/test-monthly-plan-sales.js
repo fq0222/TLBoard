@@ -762,6 +762,7 @@ test('paid lifetime renew keeps existing traffic accumulation contract', async (
   assert.equal(result.trafficLimit, 3072);
   assert.equal(result.expireAt, 0);
   assert.equal(result.resetTrafficUsed, false);
+  assert.equal(result.resetClientTraffic, false);
 });
 
 test('paid timed renew resets traffic and starts expiry from payment time', async () => {
@@ -781,6 +782,7 @@ test('paid timed renew resets traffic and starts expiry from payment time', asyn
   assert.equal(result.trafficLimit, 4096);
   assert.equal(result.expireAt, 1702592000);
   assert.equal(result.resetTrafficUsed, true);
+  assert.equal(result.resetClientTraffic, true);
 });
 
 test('paid lifetime renew enqueue payload uses final accumulated traffic limit', async () => {
@@ -849,6 +851,252 @@ test('paid lifetime renew enqueue payload uses final accumulated traffic limit',
   } finally {
     Object.assign(orderRepository, originalRepository);
     Object.assign(xuiSyncTaskService, originalXuiSyncTaskService);
+  }
+});
+
+test('paid timed renew enqueue payload marks client traffic reset', async () => {
+  const orderRepository = require('../repositories/order-repository');
+  const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
+  const orderService = require('../services/shared/order-service');
+  const transactionDb = { name: 'transaction-db' };
+  let enqueuedPayload = null;
+
+  const originalDateNow = Date.now;
+  const originalRepository = {
+    findPaidOrderContextByOutTradeNo: orderRepository.findPaidOrderContextByOutTradeNo,
+    findPlanById: orderRepository.findPlanById,
+    markOrderPaid: orderRepository.markOrderPaid,
+    updateUserAfterPaidOrder: orderRepository.updateUserAfterPaidOrder,
+    incrementPlanSalesCount: orderRepository.incrementPlanSalesCount,
+    decrementPlanSalesCount: orderRepository.decrementPlanSalesCount
+  };
+  const originalXuiSyncTaskService = {
+    enqueueTask: xuiSyncTaskService.enqueueTask,
+    processTask: xuiSyncTaskService.processTask
+  };
+
+  orderRepository.findPaidOrderContextByOutTradeNo = async () => ({
+    id: 52,
+    out_trade_no: 'REN-TIMED',
+    status: 'pending',
+    user_id: 22,
+    email: 'timed-renew@example.com',
+    subscription_token: 'sub-token',
+    plan_id: 5,
+    current_plan_id: 5,
+    current_traffic_limit: 8192,
+    current_expire_at: 1700086400,
+    current_enabled: 1,
+    current_disable_reason: null,
+    current_payment_count: 1,
+    trade_no: 'OLD-TRADE'
+  });
+  orderRepository.findPlanById = async () => ({
+    id: 5,
+    plan_type: 'timed',
+    duration_days: 30,
+    traffic_limit: 4096
+  });
+  orderRepository.markOrderPaid = async () => {};
+  orderRepository.updateUserAfterPaidOrder = async () => {};
+  orderRepository.incrementPlanSalesCount = async () => {};
+  orderRepository.decrementPlanSalesCount = async () => {};
+  xuiSyncTaskService.enqueueTask = async (db, task) => {
+    enqueuedPayload = task.payload;
+    return 90;
+  };
+  xuiSyncTaskService.processTask = () => Promise.resolve();
+
+  const db = {
+    transaction(callback) {
+      return async () => callback(transactionDb);
+    }
+  };
+
+  try {
+    Date.now = () => 1700000000000;
+    await orderService.completePaidOrder(db, 'REN-TIMED', 'TRADE-3');
+    assert.equal(enqueuedPayload.user.total_traffic_limit, 4096);
+    assert.equal(enqueuedPayload.plan.total_traffic_limit, 4096);
+    assert.equal(enqueuedPayload.plan.traffic_limit, 4096);
+    assert.equal(enqueuedPayload.plan.reset_client_traffic, true);
+  } finally {
+    Date.now = originalDateNow;
+    Object.assign(orderRepository, originalRepository);
+    Object.assign(xuiSyncTaskService, originalXuiSyncTaskService);
+  }
+});
+
+test('v325 reset client traffic uses email reset route', async () => {
+  const XuiApiClientV325 = require('../integrations/xui/xui-api-client-v325');
+  const client = new XuiApiClientV325('https://xui.example.com', 'token');
+  const requests = [];
+
+  client.request = async (method, path) => {
+    requests.push({ method, path });
+    return { success: true, msg: 'Traffic has been reset.' };
+  };
+
+  const result = await client.resetClientTraffic('foo+bar@example.com');
+
+  assert.equal(result.success, true);
+  assert.deepEqual(requests, [{
+    method: 'post',
+    path: '/panel/api/clients/resetTraffic/foo%2Bbar%40example.com'
+  }]);
+});
+
+test('timed renew user sync resets xui client traffic per inbound', async () => {
+  const XuiService = require('../integrations/xui/xui-service');
+  const orderRepository = require('../repositories/order-repository');
+  const xuiSyncRepository = require('../repositories/xui-sync-repository');
+  const orderService = require('../services/shared/order-service');
+  const resetCalls = [];
+
+  const originalXuiService = {
+    getInstance: XuiService.getInstance
+  };
+  const originalOrderRepository = {
+    updateUserSyncStatus: orderRepository.updateUserSyncStatus
+  };
+  const originalXuiSyncRepository = {
+    listOnlineXuiServers: xuiSyncRepository.listOnlineXuiServers,
+    findUserNodeConfig: xuiSyncRepository.findUserNodeConfig
+  };
+
+  XuiService.getInstance = async () => ({
+    async getInbounds() {
+      return {
+        success: true,
+        data: [
+          { id: 1, protocol: 'vless', remark: 'cf' },
+          { id: 2, protocol: 'vless', remark: 'direct' }
+        ]
+      };
+    },
+    async getClientByEmail() {
+      return { success: false };
+    },
+    async upsertUniqueClient() {
+      return { success: true, action: 'update' };
+    },
+    async resetClientTraffic(inboundId, email) {
+      resetCalls.push({ inboundId, email });
+      return { success: true, message: 'Traffic has been reset.' };
+    }
+  });
+  orderRepository.updateUserSyncStatus = async () => {};
+  xuiSyncRepository.listOnlineXuiServers = async () => [{
+    id: 10,
+    name: 'v325-server',
+    api_url: 'https://xui.example.com',
+    api_token: 'token',
+    panel_version: '3.2.5'
+  }];
+  xuiSyncRepository.findUserNodeConfig = async (db, userId, serverId, inboundId) => ({
+    uuid: `uuid-${inboundId}`,
+    auth: '',
+    sub_id: `sub-${inboundId}`
+  });
+
+  try {
+    const result = await orderService.syncUserToXuiServers({}, {
+      id: 22,
+      email: 'timed-renew@example.com',
+      enabled: 1,
+      expire_at: 1702592000,
+      traffic_limit: 4096
+    }, {
+      id: 5,
+      plan_type: 'timed',
+      duration_days: 30,
+      traffic_limit: 4096,
+      total_traffic_limit: 4096,
+      reset_client_traffic: true
+    });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(resetCalls, [
+      { inboundId: 1, email: 'timed-renew@example.com-cf' },
+      { inboundId: 2, email: 'timed-renew@example.com-direct' }
+    ]);
+  } finally {
+    Object.assign(XuiService, originalXuiService);
+    Object.assign(orderRepository, originalOrderRepository);
+    Object.assign(xuiSyncRepository, originalXuiSyncRepository);
+  }
+});
+
+test('timed renew user sync fails when xui client traffic reset fails', async () => {
+  const XuiService = require('../integrations/xui/xui-service');
+  const orderRepository = require('../repositories/order-repository');
+  const xuiSyncRepository = require('../repositories/xui-sync-repository');
+  const orderService = require('../services/shared/order-service');
+
+  const originalXuiService = {
+    getInstance: XuiService.getInstance
+  };
+  const originalOrderRepository = {
+    updateUserSyncStatus: orderRepository.updateUserSyncStatus
+  };
+  const originalXuiSyncRepository = {
+    listOnlineXuiServers: xuiSyncRepository.listOnlineXuiServers,
+    findUserNodeConfig: xuiSyncRepository.findUserNodeConfig
+  };
+
+  XuiService.getInstance = async () => ({
+    async getInbounds() {
+      return {
+        success: true,
+        data: [{ id: 1, protocol: 'vless', remark: 'cf' }]
+      };
+    },
+    async getClientByEmail() {
+      return { success: false };
+    },
+    async upsertUniqueClient() {
+      return { success: true, action: 'update' };
+    },
+    async resetClientTraffic() {
+      return { success: false, message: 'reset failed' };
+    }
+  });
+  orderRepository.updateUserSyncStatus = async () => {};
+  xuiSyncRepository.listOnlineXuiServers = async () => [{
+    id: 10,
+    name: 'v325-server',
+    api_url: 'https://xui.example.com',
+    api_token: 'token',
+    panel_version: '3.2.5'
+  }];
+  xuiSyncRepository.findUserNodeConfig = async () => ({
+    uuid: 'uuid-1',
+    auth: '',
+    sub_id: 'sub-1'
+  });
+
+  try {
+    const result = await orderService.syncUserToXuiServers({}, {
+      id: 22,
+      email: 'timed-renew@example.com',
+      enabled: 1,
+      expire_at: 1702592000,
+      traffic_limit: 4096
+    }, {
+      id: 5,
+      plan_type: 'timed',
+      duration_days: 30,
+      traffic_limit: 4096,
+      total_traffic_limit: 4096,
+      reset_client_traffic: true
+    });
+
+    assert.equal(result.success, false);
+    assert.match(result.message, /reset failed/);
+  } finally {
+    Object.assign(XuiService, originalXuiService);
+    Object.assign(orderRepository, originalOrderRepository);
+    Object.assign(xuiSyncRepository, originalXuiSyncRepository);
   }
 });
 

@@ -210,7 +210,12 @@ class XuiApiClientV325 extends XuiApiClientV302 {
     return this.request('post', `${this.clientBasePath}/clearIps/${encodeURIComponent(email)}`);
   }
 
-  resetClientTraffic(_inboundId, email) {
+  /**
+   * 重置单个客户端在所有关联 inbound 上的流量计数。
+   * @param {string} email - 3X-UI 客户端邮箱标识。
+   * @returns {Promise<Object>} 3X-UI resetTraffic 响应。
+   */
+  resetClientTraffic(email) {
     return this.request('post', `${this.clientBasePath}/resetTraffic/${encodeURIComponent(email)}`);
   }
 
