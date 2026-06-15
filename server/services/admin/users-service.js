@@ -141,12 +141,12 @@ function buildUserStatus(user) {
   let statusText = '正常';
 
   if (!user.enabled) {
-    if (user.disable_reason === DISABLE_REASONS.TRAFFIC_LIMIT) {
+    if (user.disable_reason === DISABLE_REASONS.TRAFFIC_LIMIT || user.disable_reason === DISABLE_REASONS.EXPIRED) {
       status = 'renew';
       statusText = '续费';
     } else {
       status = 'disabled';
-      statusText = '已禁用';
+      statusText = '禁用';
     }
   } else if (expireAt !== 0 && expireAt <= now) {
     status = 'expired';

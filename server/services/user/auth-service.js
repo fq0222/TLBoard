@@ -8,6 +8,7 @@ const userRepository = require('../../repositories/user-repository');
 const emailRepository = require('../../repositories/email-repository');
 const referralService = require('../referral-service');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
+const { isTimedPlan } = require('../shared/plan-type');
 
 const TELEGRAM_CHANNEL_URL_KEY = 'telegram_channel_url';
 const PASSWORD_RESET_MESSAGE = '如果该邮箱已注册，重置密码邮件已发送，请查收。';
@@ -296,6 +297,25 @@ function shouldBlockDisabledUserLogin(user) {
 }
 
 /**
+ * 判断启用状态的限时套餐是否已经到期。
+ * 职责：个人中心状态展示不能依赖小时级禁用任务，需即时识别 expire_at 已过期的 timed 套餐。
+ * 关键参数：user 需包含 plan_type 和 expire_at。
+ * 核心分支：非 timed 套餐永不过期拦截；timed 套餐 expire_at 无效或不晚于当前时间视为到期。
+ *
+ * @param {Object} user - 用户资料记录
+ * @returns {boolean} 是否应按到期可续费状态展示
+ */
+function isEnabledTimedPlanExpired(user) {
+  if (!isTimedPlan(user)) {
+    return false;
+  }
+
+  const expireAt = Number(user.expire_at);
+  const now = getNowTimestamp();
+  return !Number.isFinite(expireAt) || expireAt <= now;
+}
+
+/**
  * 推导用户端个人中心账号状态。
  * 职责：账号未禁用统一显示正常；禁用时按 disable_reason 区分管理员禁用和可续费状态。
  *
@@ -304,6 +324,14 @@ function shouldBlockDisabledUserLogin(user) {
  */
 function buildUserProfileStatus(user) {
   if (user.enabled) {
+    if (isEnabledTimedPlanExpired(user)) {
+      return {
+        status: 'renew',
+        status_text: '续费',
+        disable_reason: DISABLE_REASONS.EXPIRED
+      };
+    }
+
     return {
       status: 'active',
       status_text: '正常'
@@ -592,7 +620,7 @@ async function getProfile(db, userId) {
     expire_at: user.expire_at,
     expire_text: formatTime(user.expire_at),
     enabled: user.enabled,
-    disable_reason: user.disable_reason,
+    disable_reason: profileStatus.disable_reason || user.disable_reason,
     status: profileStatus.status,
     status_text: profileStatus.status_text,
     created_at: user.created_at,

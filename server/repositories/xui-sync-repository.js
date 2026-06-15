@@ -236,7 +236,7 @@ async function markXuiSyncTaskFailed(db, payload) {
  */
 async function findUserForSyncTask(db, userId) {
   return db.prepare(`
-    SELECT id, email, subscription_token, enabled, traffic_limit, referral_traffic_limit, expire_at
+    SELECT id, email, subscription_token, enabled, traffic_used, traffic_limit, referral_traffic_limit, expire_at
     FROM users
     WHERE id = ?
   `).get(userId);

@@ -108,6 +108,18 @@ test('admin user list marks traffic limited disabled account as renew status', a
       enabled: 0,
       disable_reason: DISABLE_REASONS.TRAFFIC_LIMIT,
       created_at: 3
+    },
+    {
+      id: 4,
+      email: 'expired-disabled@example.com',
+      plan_id: 1,
+      plan_name: '月卡',
+      traffic_used: 0,
+      traffic_limit: 1024,
+      expire_at: 1700000000,
+      enabled: 0,
+      disable_reason: DISABLE_REASONS.EXPIRED,
+      created_at: 4
     }
   ]);
 
@@ -121,8 +133,9 @@ test('admin user list marks traffic limited disabled account as renew status', a
   assert.match(getListSql(), /u\.disable_reason/);
   assert.deepEqual(statuses, [
     { email: 'active@example.com', status: 'active', status_text: '正常' },
-    { email: 'admin-disabled@example.com', status: 'disabled', status_text: '已禁用' },
-    { email: 'traffic-limited@example.com', status: 'renew', status_text: '续费' }
+    { email: 'admin-disabled@example.com', status: 'disabled', status_text: '禁用' },
+    { email: 'traffic-limited@example.com', status: 'renew', status_text: '续费' },
+    { email: 'expired-disabled@example.com', status: 'renew', status_text: '续费' }
   ]);
 });
 
@@ -269,6 +282,44 @@ test('user profile marks expired disabled account as renew status', async () => 
     assert.equal(profile.status_text, '续费');
     assert.equal(profile.disable_reason, 'expired');
   } finally {
+    restoreRepository();
+  }
+});
+
+test('user profile marks enabled expired timed account as renew status before disable job runs', async () => {
+  const originalNow = Date.now;
+  const restoreRepository = replaceMethods(userRepository, {
+    findUserProfileById: async () => ({
+      id: 11,
+      email: 'enabled-expired@example.com',
+      plan_id: 2,
+      plan_name: '月卡',
+      plan_type: 'timed',
+      sub_id: 'abcdef1234567893',
+      traffic_used: 1024,
+      traffic_limit: 4096,
+      referral_traffic_limit: 0,
+      expire_at: 1700000000,
+      enabled: 1,
+      disable_reason: null,
+      created_at: 1699000000,
+      payment_count: 1,
+      sync_status: 2,
+      onboarding_completed: 0
+    }),
+    hasUserCfIps: async () => false,
+    hasUserSubscriptionCache: async () => false,
+    findSystemSettingByKey: async () => null
+  });
+
+  try {
+    Date.now = () => 1700000001000;
+    const profile = await authService.getProfile({}, 11);
+    assert.equal(profile.status, 'renew');
+    assert.equal(profile.status_text, '续费');
+    assert.equal(profile.disable_reason, 'expired');
+  } finally {
+    Date.now = originalNow;
     restoreRepository();
   }
 });

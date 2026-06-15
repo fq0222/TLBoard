@@ -65,6 +65,41 @@ async function getLatestUserForSyncTask(db, task, payload) {
 }
 
 /**
+ * 构建队列重试实际使用的套餐同步快照。
+ * 职责：3X-UI 流量重置只允许在续费落账后的同一权益快照上执行一次，避免延迟重试清掉用户新产生的流量。
+ * 关键参数：payload.user 是入队时的权益快照，currentUser 是重试前读取的最新用户状态。
+ * 核心分支：缺少基准已用流量，或最新流量/额度/到期时间已变化时，移除 reset_client_traffic。
+ *
+ * @param {Object} task - 同步任务
+ * @param {Object} payload - 队列 payload
+ * @param {Object} currentUser - 最新用户记录
+ * @returns {Object} 本次同步使用的 plan 快照
+ */
+function buildRetrySyncPlan(task, payload, currentUser) {
+  const plan = { ...(payload.plan || {}) };
+  const shouldReset = plan.reset_client_traffic === true || plan.resetClientTraffic === true;
+  if (!shouldReset || task.task_type !== xuiSyncTaskService.TASK_TYPES.RENEW_SYNC) {
+    return plan;
+  }
+
+  const payloadUser = payload.user || {};
+  const payloadTrafficUsed = Number(payloadUser.traffic_used);
+  const latestTrafficUsed = Number(currentUser.traffic_used || 0);
+  const snapshotStillCurrent = Number.isFinite(payloadTrafficUsed)
+    && payloadTrafficUsed === latestTrafficUsed
+    && Number(payloadUser.traffic_limit || 0) === Number(currentUser.traffic_limit || 0)
+    && Number(payloadUser.expire_at || 0) === Number(currentUser.expire_at || 0);
+
+  if (!snapshotStillCurrent) {
+    plan.reset_client_traffic = false;
+    plan.resetClientTraffic = false;
+    logger.warn(`跳过续费同步任务的流量重置: task=${task.id}, user=${currentUser.email}, payload_used=${payloadUser.traffic_used ?? 'missing'}, latest_used=${currentUser.traffic_used ?? 0}`);
+  }
+
+  return plan;
+}
+
+/**
  * 判断启用/禁用同步任务是否仍符合用户最新状态。
  * 职责：避免旧的 disable_sync/enable_sync 在续费或管理员操作后覆盖 3X-UI 的新状态。
  * 核心分支：本地状态已与任务目标相反时，任务按成功跳过；用户不存在时同样跳过。
@@ -131,7 +166,7 @@ async function runXuiSyncTasks(db) {
           return { success: true, message: '用户不存在，任务已跳过' };
         }
 
-        return orderService.syncUserToXuiServers(db, currentUser, payload.plan || {});
+        return orderService.syncUserToXuiServers(db, currentUser, buildRetrySyncPlan(task, payload, currentUser));
       }
 
       if (task.task_type === xuiSyncTaskService.TASK_TYPES.ENABLE_SYNC) {

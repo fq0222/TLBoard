@@ -660,7 +660,9 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
     id: order.user_id,
     email: order.email,
     subscription_token: order.subscription_token,
+    enabled: 1,
     expire_at: expireAt,
+    traffic_used: resetTrafficUsed ? 0 : Number(order.current_traffic_used || 0),
     traffic_limit: newTrafficLimit,
     total_traffic_limit: newTrafficLimit
   };

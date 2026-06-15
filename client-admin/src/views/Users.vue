@@ -17,7 +17,7 @@
         <el-select v-model="status" placeholder="状态筛选" clearable style="width: 150px; margin-right: 10px;" @change="fetchUsers">
           <el-option label="正常" value="active" />
           <el-option label="已过期" value="expired" />
-          <el-option label="已禁用" value="disabled" />
+          <el-option label="禁用" value="disabled" />
         </el-select>
         <el-button type="warning" @click="batchDialogVisible = true">
           批量生成订阅链接
