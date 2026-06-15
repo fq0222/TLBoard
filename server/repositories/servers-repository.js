@@ -93,17 +93,6 @@ async function updateServerStatus(db, serverId, status, lastCheckAt) {
 }
 
 /**
- * 删除服务器下的全部节点缓存。
- *
- * @param {Object} db - 数据库实例
- * @param {number} serverId - 服务器 ID
- * @returns {Promise<void>}
- */
-async function deleteServerNodes(db, serverId) {
-  await db.prepare('DELETE FROM xui_nodes WHERE server_id = ?').run(serverId);
-}
-
-/**
  * 删除服务器记录。
  *
  * @param {Object} db - 数据库实例
@@ -137,7 +126,6 @@ module.exports = {
   createServer,
   updateServerFields,
   updateServerStatus,
-  deleteServerNodes,
   deleteServer,
   listCachedServerNodes
 };

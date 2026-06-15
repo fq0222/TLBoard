@@ -244,7 +244,8 @@ async function updateServer(db, serverId, payload) {
 }
 
 /**
- * 删除服务器及其节点缓存。
+ * 删除服务器。
+ * 关联的节点、流量同步日志和用户节点配置由数据库级联外键自动清理。
  *
  * @param {Object} db - 数据库实例
  * @param {number} serverId - 服务器 ID
@@ -256,7 +257,6 @@ async function deleteServer(db, serverId) {
     throw createLegacyBusinessError('服务器不存在');
   }
 
-  await serversRepository.deleteServerNodes(db, serverId);
   await serversRepository.deleteServer(db, serverId);
 
   return {

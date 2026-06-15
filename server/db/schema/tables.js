@@ -31,19 +31,6 @@ const tableDefinitions = [
     `
   },
   {
-    logMessage: '流量同步日志表初始化完成',
-    sql: `
-      CREATE TABLE IF NOT EXISTS traffic_sync_log (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL,
-        server_id INTEGER NOT NULL,
-        last_sync_traffic BIGINT DEFAULT 0,
-        last_sync_at BIGINT,
-        UNIQUE(user_id, server_id)
-      )
-    `
-  },
-  {
     logMessage: '管理员表初始化完成',
     sql: `
       CREATE TABLE IF NOT EXISTS admins (
@@ -156,11 +143,24 @@ const tableDefinitions = [
     `
   },
   {
+    logMessage: '流量同步日志表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS traffic_sync_log (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        server_id INTEGER NOT NULL REFERENCES xui_servers(id) ON DELETE CASCADE,
+        last_sync_traffic BIGINT DEFAULT 0,
+        last_sync_at BIGINT,
+        UNIQUE(user_id, server_id)
+      )
+    `
+  },
+  {
     logMessage: '3X-UI节点快照表初始化完成',
     sql: `
       CREATE TABLE IF NOT EXISTS xui_nodes (
         id SERIAL PRIMARY KEY,
-        server_id INTEGER NOT NULL,
+        server_id INTEGER NOT NULL REFERENCES xui_servers(id) ON DELETE CASCADE,
         inbound_id INTEGER NOT NULL,
         remark VARCHAR(255),
         port INTEGER,
@@ -179,7 +179,7 @@ const tableDefinitions = [
       CREATE TABLE IF NOT EXISTS user_node_configs (
         id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        server_id INTEGER NOT NULL,
+        server_id INTEGER NOT NULL REFERENCES xui_servers(id) ON DELETE CASCADE,
         inbound_id INTEGER NOT NULL,
         uuid VARCHAR(100) NOT NULL,
         auth VARCHAR(100) NOT NULL DEFAULT '',
@@ -207,7 +207,7 @@ const tableDefinitions = [
       CREATE TABLE IF NOT EXISTS user_subscription_sources (
         id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        server_id INTEGER NOT NULL,
+        server_id INTEGER NOT NULL REFERENCES xui_servers(id) ON DELETE CASCADE,
         inbound_id INTEGER NOT NULL,
         sub_id VARCHAR(50) NOT NULL DEFAULT '',
         remark VARCHAR(255) NOT NULL DEFAULT '',

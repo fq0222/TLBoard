@@ -150,6 +150,7 @@ server/test/*
 !server/test/test-user-onboarding.js
 !server/test/test-referral-service.js
 !server/test/test-login-traffic-disabled.js
+!server/test/test-xui-server-cascade-cleanup.js
 server/config.js
 server/uploads/
 server/backupDB/
