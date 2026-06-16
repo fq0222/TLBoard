@@ -1,8 +1,8 @@
 /**
- * 3X-UI 3.2.5 API 客户端适配器。
+ * 3X-UI 3.2.5+ API 客户端适配器。
  * 职责：
  * 1. 复用 3.0.2 已验证的 inbounds/server 接口实现。
- * 2. 将 3.2.5 已迁移到 /panel/api/clients 的客户端接口改写为新路由。
+ * 2. 将 3.2.5 及 3.3.1 已迁移到 /panel/api/clients 的客户端接口改写为新路由。
  * 3. 尽量兼容当前项目基于 3.0.2 的旧调用形态，减少服务层改造范围。
  */
 
@@ -33,7 +33,7 @@ function normalizeClientEnabled(value) {
 
 class XuiApiClientV325 extends XuiApiClientV302 {
   /**
-   * 创建 3.2.5 版本客户端。
+   * 创建 3.2.5+ 版本客户端。
    * @param {string} baseURL - 3X-UI 面板地址。
    * @param {string} apiToken - 3X-UI API Token。
    * @param {Object} options - 客户端配置。
@@ -73,7 +73,7 @@ class XuiApiClientV325 extends XuiApiClientV302 {
   }
 
   /**
-   * 将旧版 settings.clients[0] 转换为 3.2.5 clients API 可接受的结构。
+   * 将旧版 settings.clients[0] 转换为 3.2.5+ clients API 可接受的结构。
    * @param {Object} client - 旧版单客户端配置。
    * @param {Object} [options] - 转换选项。
    * @param {number} [options.inboundId] - 需要附带的 inbound ID。
@@ -124,7 +124,7 @@ class XuiApiClientV325 extends XuiApiClientV302 {
   }
 
   /**
-   * 列出 3.2.5 clients API 下的所有客户端。
+   * 列出 3.2.5+ clients API 下的所有客户端。
    * @returns {Promise<Object>} 客户端列表响应。
    */
   listClients() {
@@ -192,7 +192,7 @@ class XuiApiClientV325 extends XuiApiClientV302 {
   updateClient(_clientId, clientConfig) {
     const { client } = this.parseLegacyClientConfig(clientConfig);
     if (!client.email) {
-      throw new Error('client email is required for 3.2.5 updateClient');
+      throw new Error('client email is required for 3.2.5+ updateClient');
     }
     const payload = this.buildClientApiPayload(client);
     return this.request('post', `${this.clientBasePath}/update/${encodeURIComponent(client.email)}`, payload);
