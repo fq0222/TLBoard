@@ -36,18 +36,36 @@
             <el-icon><Refresh /></el-icon>
             续费套餐
           </el-button>
-          <el-button
-            v-if="telegramChannelUrl"
-            tag="a"
-            :href="telegramChannelUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            size="large"
-            class="telegram-channel-button"
+          <div
+            v-if="telegramChannelUrl || onlineCustomerServiceUrl"
+            class="support-actions"
+            :class="{ 'support-actions-single': !(telegramChannelUrl && onlineCustomerServiceUrl) }"
           >
-            <el-icon><Promotion /></el-icon>
-            官方电报频道
-          </el-button>
+            <el-button
+              v-if="telegramChannelUrl"
+              tag="a"
+              :href="telegramChannelUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              size="large"
+              class="telegram-channel-button"
+            >
+              <el-icon><Promotion /></el-icon>
+              官方电报频道
+            </el-button>
+            <el-button
+              v-if="onlineCustomerServiceUrl"
+              tag="a"
+              :href="onlineCustomerServiceUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              size="large"
+              class="online-service-button"
+            >
+              <el-icon><Service /></el-icon>
+              在线客服
+            </el-button>
+          </div>
         </div>
       </section>
 
@@ -393,7 +411,8 @@ import {
   Loading,
   MagicStick,
   Promotion,
-  Refresh
+  Refresh,
+  Service
 } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { useUserStore } from '@/stores/user'
@@ -413,6 +432,7 @@ const announcements = ref([])
 const loading = ref(false)
 const cfOptimized = ref(false)
 const optimizing = ref(false)
+const onlineCustomerServiceUrl = ref('')
 const optimizeProgress = ref(0)
 const optimizeStatusText = ref('')
 const generatingSubscription = ref(false)
@@ -504,6 +524,21 @@ async function fetchAnnouncements() {
     }
   } catch (error) {
     console.error('获取公告列表失败:', error)
+  }
+}
+
+/**
+ * 加载用户首页需要展示的公开外链设置。
+ * 核心分支：管理端未配置在线客服链接时保持空字符串，模板会自动隐藏入口。
+ */
+async function loadPublicSettings() {
+  try {
+    const res = await api.user.getPublicSettings()
+    if (res.code === 0) {
+      onlineCustomerServiceUrl.value = String(res.data?.online_customer_service_url || '').trim()
+    }
+  } catch (error) {
+    console.error('加载公开设置失败:', error)
   }
 }
 
@@ -1246,6 +1281,7 @@ function getRenewErrorMessage(error) {
 onMounted(() => {
   window.addEventListener('resize', handleResize)
   fetchUserInfo()
+  loadPublicSettings()
   fetchAnnouncements()
   fetchAnnouncementPopup()
   checkSyncStatus()
@@ -1348,6 +1384,20 @@ onBeforeUnmount(() => {
   min-width: 140px;
 }
 
+.welcome-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.support-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
 .renew-button {
   border: none;
   border-radius: 16px;
@@ -1369,13 +1419,17 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
-.telegram-channel-button {
+.telegram-channel-button,
+.online-service-button {
   border: none;
   border-radius: 16px;
-  background: #0088cc;
-  box-shadow: 0 12px 24px rgba(0, 136, 204, 0.22);
   font-weight: 600;
   text-decoration: none;
+}
+
+.telegram-channel-button {
+  background: #0088cc;
+  box-shadow: 0 12px 24px rgba(0, 136, 204, 0.22);
 }
 
 .telegram-channel-button:hover,
@@ -1384,8 +1438,21 @@ onBeforeUnmount(() => {
   text-decoration: none;
 }
 
+.online-service-button {
+  background: #0f766e;
+  box-shadow: 0 12px 24px rgba(15, 118, 110, 0.22);
+}
+
+.online-service-button:hover,
+.online-service-button:focus {
+  background: #14a39a;
+  text-decoration: none;
+}
+
 .telegram-channel-button:deep(span),
-.telegram-channel-button:deep(.el-icon) {
+.telegram-channel-button:deep(.el-icon),
+.online-service-button:deep(span),
+.online-service-button:deep(.el-icon) {
   color: #fff;
   text-decoration: none;
 }
@@ -2234,6 +2301,21 @@ onBeforeUnmount(() => {
 
   .welcome-actions :deep(.el-button + .el-button) {
     margin-left: 0;
+  }
+
+  .support-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    width: 100%;
+  }
+
+  .support-actions-single {
+    grid-template-columns: 1fr;
+  }
+
+  .support-actions :deep(.el-button) {
+    min-width: 0;
   }
 
   .guide-button {
