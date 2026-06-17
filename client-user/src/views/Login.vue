@@ -24,7 +24,6 @@
             <el-input
               v-model="form.email"
               placeholder="请输入邮箱"
-              prefix-icon="Message"
               size="large"
             />
           </el-form-item>
@@ -34,7 +33,6 @@
               v-model="form.password"
               type="password"
               placeholder="请输入密码"
-              prefix-icon="Lock"
               size="large"
               show-password
               @keyup.enter="handleSubmit"
@@ -50,7 +48,6 @@
               v-model="form.confirmPassword"
               type="password"
               placeholder="请再次输入密码"
-              prefix-icon="Lock"
               size="large"
               show-password
               @keyup.enter="handleSubmit"
@@ -119,8 +116,11 @@
           <p v-else class="login-footer-row">
             <router-link to="/forgot-password" class="forgot-link">忘记密码？</router-link>
             <span class="footer-separator"></span>
-            还没有账户？
-            <router-link to="/" class="link">返回首页选择套餐</router-link>
+            <span class="footer-account-text">还没有账户？</span>
+            <router-link to="/" class="link">
+              <span class="footer-link-desktop">返回首页选择套餐</span>
+              <span class="footer-link-mobile">返回选择套餐</span>
+            </router-link>
             <template v-if="onlineCustomerServiceUrl">
               <span class="footer-separator"></span>
               <a
@@ -584,6 +584,10 @@ onMounted(() => {
   margin-bottom: 28px;
 }
 
+.login-form :deep(.el-input__wrapper) {
+  padding-left: 1em;
+}
+
 .password-tip {
   margin: -6px 0 16px;
   color: #76839f;
@@ -705,6 +709,10 @@ onMounted(() => {
   justify-content: center;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+.footer-link-mobile {
+  display: none;
 }
 
 .forgot-link {
@@ -879,7 +887,29 @@ onMounted(() => {
 
   .login-footer p {
     margin: 0;
-    font-size: 13px;
+    font-size: 12px;
+  }
+
+  .login-footer-row {
+    flex-wrap: nowrap;
+    gap: 6px;
+    white-space: nowrap;
+  }
+
+  .footer-link-desktop {
+    display: none;
+  }
+
+  .footer-account-text {
+    display: inline;
+  }
+
+  .footer-link-mobile {
+    display: inline;
+  }
+
+  .footer-separator {
+    height: 13px;
   }
 
   .register-aside .aside-badge {
