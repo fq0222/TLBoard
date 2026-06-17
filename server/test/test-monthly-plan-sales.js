@@ -10,6 +10,29 @@ const {
   buildTimedRenewResetPreview
 } = require('../services/shared/plan-type');
 
+/**
+ * 创建 XuiService 快照读取测试桩。
+ * 职责：让续费同步测试覆盖当前基于 inbound.settings 快照的客户端查找流程。
+ * 关键参数：clients 是模拟 inbound.settings.clients 的客户端列表。
+ * 核心分支：按 email 精确返回匹配客户端，没有匹配时返回空数组。
+ *
+ * @param {Array<Object>} [clients=[]] - 模拟的客户端快照。
+ * @returns {Object} XuiService 快照辅助方法。
+ */
+function createXuiSnapshotHelpers(clients = []) {
+  return {
+    extractClientsFromSettings() {
+      return clients;
+    },
+    getClientsByEmailFromSnapshot(snapshot, email) {
+      return {
+        success: true,
+        clients: snapshot.filter(item => item.email === email)
+      };
+    }
+  };
+}
+
 test('plan type helpers normalize old records to lifetime', () => {
   assert.equal(normalizePlanType(null), PLAN_TYPES.LIFETIME);
   assert.equal(normalizePlanType(''), PLAN_TYPES.LIFETIME);
@@ -1032,6 +1055,7 @@ test('timed renew user sync resets xui client traffic per inbound', async () => 
   };
 
   XuiService.getInstance = async () => ({
+    ...createXuiSnapshotHelpers(),
     async getInbounds() {
       return {
         success: true,
@@ -1112,6 +1136,7 @@ test('timed renew user sync fails when xui client traffic reset fails', async ()
   };
 
   XuiService.getInstance = async () => ({
+    ...createXuiSnapshotHelpers(),
     async getInbounds() {
       return {
         success: true,
@@ -1167,13 +1192,13 @@ test('timed renew user sync fails when xui client traffic reset fails', async ()
   }
 });
 
-test('paid expired timed renew enqueues enable status sync', async () => {
+test('paid expired timed renew enqueues renew sync with enabled user snapshot', async () => {
   const orderRepository = require('../repositories/order-repository');
   const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
-  const trafficManager = require('../services/shared/traffic-manager');
   const orderService = require('../services/shared/order-service');
   const transactionDb = { name: 'transaction-db' };
-  const statusSyncCalls = [];
+  const queuedTasks = [];
+  const processedTasks = [];
 
   const originalRepository = {
     findPaidOrderContextByOutTradeNo: orderRepository.findPaidOrderContextByOutTradeNo,
@@ -1186,9 +1211,6 @@ test('paid expired timed renew enqueues enable status sync', async () => {
   const originalXuiSyncTaskService = {
     enqueueTask: xuiSyncTaskService.enqueueTask,
     processTask: xuiSyncTaskService.processTask
-  };
-  const originalTrafficManager = {
-    enqueueUserStatusSync: trafficManager.enqueueUserStatusSync
   };
 
   orderRepository.findPaidOrderContextByOutTradeNo = async () => ({
@@ -1217,12 +1239,14 @@ test('paid expired timed renew enqueues enable status sync', async () => {
   orderRepository.updateUserAfterPaidOrder = async () => {};
   orderRepository.incrementPlanSalesCount = async () => {};
   orderRepository.decrementPlanSalesCount = async () => {};
-  trafficManager.enqueueUserStatusSync = async (db, userId, disable) => {
-    statusSyncCalls.push({ userId, disable });
-    return { success: true };
+  xuiSyncTaskService.enqueueTask = async (_db, task) => {
+    queuedTasks.push(task);
+    return 89;
   };
-  xuiSyncTaskService.enqueueTask = async () => 89;
-  xuiSyncTaskService.processTask = () => Promise.resolve();
+  xuiSyncTaskService.processTask = (_db, task) => {
+    processedTasks.push(task);
+    return Promise.resolve();
+  };
 
   const db = {
     transaction(callback) {
@@ -1232,11 +1256,16 @@ test('paid expired timed renew enqueues enable status sync', async () => {
 
   try {
     await orderService.completePaidOrder(db, 'REN-EXPIRED', 'TRADE-2');
-    assert.deepEqual(statusSyncCalls[0], { userId: 21, disable: false });
+    assert.equal(queuedTasks.length, 1);
+    assert.equal(queuedTasks[0].taskType, xuiSyncTaskService.TASK_TYPES.RENEW_SYNC);
+    assert.equal(queuedTasks[0].payload.user.id, 21);
+    assert.equal(queuedTasks[0].payload.user.enabled, 1);
+    assert.equal(queuedTasks[0].payload.user.traffic_limit, 4096);
+    assert.equal(queuedTasks[0].payload.plan.reset_client_traffic, true);
+    assert.equal(processedTasks.length, 1);
   } finally {
     Object.assign(orderRepository, originalRepository);
     Object.assign(xuiSyncTaskService, originalXuiSyncTaskService);
-    Object.assign(trafficManager, originalTrafficManager);
   }
 });
 

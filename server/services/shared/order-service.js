@@ -11,9 +11,7 @@
 const crypto = require('crypto');
 const XuiService = require('../../integrations/xui/xui-service');
 const { getServerInboundsSnapshot } = require('../../integrations/xui/xui-sync');
-const trafficManager = require('./traffic-manager');
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
-const { DISABLE_REASONS } = require('./renew-policy');
 const { isTimedPlan } = require('./plan-type');
 const { createLogger } = require('../../utils/logger');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
@@ -633,35 +631,6 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   });
 
   await transaction();
-
-  const renewRestorableDisableReasons = new Set([
-    DISABLE_REASONS.TRAFFIC_LIMIT,
-    DISABLE_REASONS.EXPIRED
-  ]);
-
-  // 流量用完或时间到期被禁用的用户续费后，先恢复本地状态，再异步同步 3X-UI。
-  if (isRenewOrder
-    && Number(order.current_enabled) === 0
-    && renewRestorableDisableReasons.has(order.current_disable_reason)) {
-    logger.info(`用户 ${order.email} 已禁用，开始解除禁用`);
-
-    trafficManager.enqueueUserStatusSync(db, order.user_id, false)
-      .then(result => {
-        if (result.success) {
-          logger.info(`用户 ${order.email} 解禁状态已立即同步到 3X-UI`);
-          return;
-        }
-
-        if (result.retryable) {
-          logger.warn(`用户 ${order.email} 解禁状态未立即同步，已进入重试队列`);
-        }
-      })
-      .catch(error => {
-        logger.error(`后台同步解除禁用到 3X-UI 失败: ${error.message}`);
-      });
-
-    logger.info(`用户 ${order.email} 解除禁用成功`);
-  }
 
   logger.info(`Order paid: ${outTradeNo}, user=${order.email}, expire_at=${expireAt}, traffic_limit=${newTrafficLimit}`);
 
