@@ -24,6 +24,7 @@
             <el-input
               v-model="form.email"
               placeholder="请输入邮箱"
+              :prefix-icon="Message"
               size="large"
             />
           </el-form-item>
@@ -33,6 +34,7 @@
               v-model="form.password"
               type="password"
               placeholder="请输入密码"
+              :prefix-icon="Lock"
               size="large"
               show-password
               @keyup.enter="handleSubmit"
@@ -48,6 +50,7 @@
               v-model="form.confirmPassword"
               type="password"
               placeholder="请再次输入密码"
+              :prefix-icon="Lock"
               size="large"
               show-password
               @keyup.enter="handleSubmit"
@@ -199,6 +202,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import api from '@/api'
 import { ElMessage } from 'element-plus'
+import { Lock, Message } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
