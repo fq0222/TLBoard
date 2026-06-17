@@ -184,6 +184,9 @@ class BatchSubscriptionService extends EventEmitter {
         return;
       }
 
+      // 同一批量任务内复用服务器 inbound 快照，避免每个用户重复访问 3X-UI。
+      const inboundSnapshotCache = new Map();
+
       while (true) {
         await this.waitForXuiIdle(taskId);
         const item = await batchRepository.findNextPendingItem(this.db, taskId);
@@ -206,7 +209,9 @@ class BatchSubscriptionService extends EventEmitter {
         this.emitStatus(await batchRepository.getTaskById(this.db, taskId));
 
         try {
-          await usersService.generateSubscription(this.db, item.user_id, logger);
+          await usersService.generateSubscription(this.db, item.user_id, logger, {
+            inboundSnapshotCache
+          });
           await batchRepository.markItemSuccess(this.db, item.id);
         } catch (error) {
           await batchRepository.markItemFailed(this.db, item.id, error.message);

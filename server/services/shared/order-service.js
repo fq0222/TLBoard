@@ -10,6 +10,7 @@
 
 const crypto = require('crypto');
 const XuiService = require('../../integrations/xui/xui-service');
+const { getServerInboundsSnapshot } = require('../../integrations/xui/xui-sync');
 const trafficManager = require('./traffic-manager');
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const { DISABLE_REASONS } = require('./renew-policy');
@@ -231,7 +232,9 @@ async function legacySyncUserToXuiServers(db, user, plan = {}) {
         const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
           apiVersion: server.panel_version || '3.0.2'
         });
-        const inboundsResult = await xuiService.getInbounds();
+        const inboundsResult = await getServerInboundsSnapshot(server, {
+          inboundSnapshotCache: plan.inboundSnapshotCache
+        });
 
         if (!inboundsResult.success) {
           failureCount++;
@@ -386,13 +389,18 @@ async function syncUserToXuiServers(db, user, plan = {}) {
             const strategy = inbound.remark && inbound.remark.toLowerCase().includes('hy2')
               ? 'hy2'
               : (inbound.remark && inbound.remark.toLowerCase().includes('direct') ? 'direct' : 'cf');
-            const existingClient = await xuiService.getClientByEmail(inbound.id, nodeEmail);
+            const existingClientsSnapshot = xuiService.extractClientsFromSettings(inbound.settings);
+            const canUseClientsSnapshot = existingClientsSnapshot.length > 0;
+            const existingClientsResult = canUseClientsSnapshot
+              ? xuiService.getClientsByEmailFromSnapshot(existingClientsSnapshot, nodeEmail)
+              : null;
+            const existingClient = existingClientsResult?.clients?.[0] || null;
             const config = await ensureNodeConfig(
               db,
               user,
               server,
               inbound,
-              existingClient.success ? existingClient : null,
+              existingClient,
               strategy
             );
             const desiredClient = {
@@ -416,6 +424,7 @@ async function syncUserToXuiServers(db, user, plan = {}) {
               serverId: server.id,
               inbound,
               email: nodeEmail,
+              existingClientsSnapshot: canUseClientsSnapshot ? existingClientsSnapshot : undefined,
               desiredClient
             });
 

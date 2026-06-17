@@ -209,9 +209,11 @@ function filterOnlineNodeConfigs(nodeConfigs, serversById) {
  * @param {Object} db - 数据库代理对象
  * @param {Array} servers - 在线服务器列表
  * @param {Object} logger - 日志实例
+ * @param {Object} [options={}] - 同步选项
+ * @param {Map<string,Object>} [options.inboundSnapshotCache] - 批量任务级 inbound 快照缓存
  * @returns {Promise<void>}
  */
-async function ensureNodeSnapshotsAvailable(db, servers, logger) {
+async function ensureNodeSnapshotsAvailable(db, servers, logger, options = {}) {
   if (servers.length === 0) {
     return;
   }
@@ -230,7 +232,9 @@ async function ensureNodeSnapshotsAvailable(db, servers, logger) {
 
   logger.info(`检测到 ${missingServers.length} 台在线服务器缺少 xui_nodes 快照，开始按服务器补齐`);
   for (const server of missingServers) {
-    const syncResult = await syncServerNodes(db, server);
+    const syncResult = await syncServerNodes(db, server, {
+      inboundSnapshotCache: options.inboundSnapshotCache
+    });
     logger.info(`补齐服务器节点快照: server=${server.name}, success=${syncResult.success}, nodeCount=${syncResult.nodeCount || 0}`);
   }
 }
@@ -242,9 +246,11 @@ async function ensureNodeSnapshotsAvailable(db, servers, logger) {
  * @param {Object} user - 用户信息
  * @param {Array} servers - 在线服务器列表
  * @param {Object} logger - 日志实例
+ * @param {Object} [options={}] - 生成选项
+ * @param {Map<string,Object>} [options.inboundSnapshotCache] - 批量任务级 inbound 快照缓存
  * @returns {Promise<Array>} 在线节点配置列表
  */
-async function ensureUserNodeConfigsComplete(db, user, servers, logger) {
+async function ensureUserNodeConfigsComplete(db, user, servers, logger, options = {}) {
   const serversById = mapServersById(servers);
   const onlineSnapshots = filterOnlineSnapshots(
     await subscriptionRepository.listNodeSnapshots(db),
@@ -272,7 +278,10 @@ async function ensureUserNodeConfigsComplete(db, user, servers, logger) {
 
   logger.info(`用户 ${user.email} 缺少 ${missingPairs.length} 个节点配置，尝试同步用户到 3X-UI`);
   const { totalTrafficLimit } = getUserTrafficEntitlement(user);
-  const syncResult = await syncUserToXuiServers(db, user, { traffic_limit: totalTrafficLimit });
+  const syncResult = await syncUserToXuiServers(db, user, {
+    traffic_limit: totalTrafficLimit,
+    inboundSnapshotCache: options.inboundSnapshotCache
+  });
   if (!syncResult.success) {
     logger.warn(`同步用户节点配置未完全成功: user=${user.email}, message=${syncResult.message || 'unknown'}`);
   }
@@ -633,9 +642,11 @@ async function appendAnnouncementVirtualNodes(db, nodes) {
  * @param {Object} db - 数据库代理对象
  * @param {number} userId - 用户 ID
  * @param {Object} logger - 日志实例
+ * @param {Object} [options={}] - 生成选项
+ * @param {Map<string,Object>} [options.inboundSnapshotCache] - 批量任务级 inbound 快照缓存
  * @returns {Promise<{subscription_url:string,clash_url:string,v2ray_url:string}>} 订阅链接集合
  */
-async function generateSubscription(db, userId, logger) {
+async function generateSubscription(db, userId, logger, options = {}) {
   const existingSubscription = await subscriptionRepository.findLatestUserSubscription(db, userId);
   const user = assertActiveSubscriptionUser(
     await subscriptionRepository.findSubscriptionUserById(db, userId)
@@ -656,13 +667,15 @@ async function generateSubscription(db, userId, logger) {
 
   if (isFirstGeneration) {
     logger.info(`用户 ${user.email} 首次生成订阅，先执行全量节点同步`);
-    const syncResult = await syncAllServers(db);
+    const syncResult = await syncAllServers(db, {
+      inboundSnapshotCache: options.inboundSnapshotCache
+    });
     logger.info(`首次生成前节点同步完成: ${syncResult.syncedCount || 0}/${syncResult.totalCount || servers.length} 台服务器`);
   } else {
-    await ensureNodeSnapshotsAvailable(db, servers, logger);
+    await ensureNodeSnapshotsAvailable(db, servers, logger, options);
   }
 
-  let nodeConfigs = await ensureUserNodeConfigsComplete(db, user, servers, logger);
+  let nodeConfigs = await ensureUserNodeConfigsComplete(db, user, servers, logger, options);
   if (nodeConfigs.length === 0) {
     throw createLegacyBusinessError(500, '当前没有可用节点，请稍后重试', 500, null);
   }
@@ -688,11 +701,13 @@ async function generateSubscription(db, userId, logger) {
             continue;
           }
 
-          const syncResult = await syncServerNodes(db, server);
+          const syncResult = await syncServerNodes(db, server, {
+            inboundSnapshotCache: options.inboundSnapshotCache
+          });
           logger.info(`增量同步服务器完成: server=${server.name}, success=${syncResult.success}, nodeCount=${syncResult.nodeCount || 0}`);
         }
 
-        nodeConfigs = await ensureUserNodeConfigsComplete(db, user, servers, logger);
+        nodeConfigs = await ensureUserNodeConfigsComplete(db, user, servers, logger, options);
       }
 
       const repairConfigs = nodeConfigs.filter((config) => {

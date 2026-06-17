@@ -10,22 +10,58 @@ const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const xuiNodeSnapshotService = require('../../services/shared/xui-node-snapshot-service');
 
 const logger = createLogger('XUI-SYNC');
+const INBOUND_SNAPSHOT_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * 获取单台服务器的 inbound 快照，允许批量任务复用同一轮已获取的数据。
+ *
+ * @param {Object} server - 服务器信息，必须包含 id/api_url/api_token。
+ * @param {Object} [options={}] - 获取选项。
+ * @param {Map<string,Object>} [options.inboundSnapshotCache] - 批量任务级缓存，key 为 server.id。
+ * @returns {Promise<Object>} 3X-UI getInbounds 的标准结果；仅成功结果会写入缓存。
+ */
+async function getServerInboundsSnapshot(server, options = {}) {
+  const cache = options.inboundSnapshotCache;
+  const cacheKey = String(server.id);
+  const now = Date.now();
+
+  if (cache && cache.has(cacheKey)) {
+    const cached = cache.get(cacheKey);
+    if (cached && now - cached.fetchedAt < INBOUND_SNAPSHOT_TTL_MS) {
+      return cached.result;
+    }
+    cache.delete(cacheKey);
+  }
+
+  const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+    apiVersion: server.panel_version || '3.0.2'
+  });
+  const inboundsResult = await xuiService.getInbounds();
+
+  if (cache && inboundsResult.success) {
+    cache.set(cacheKey, {
+      fetchedAt: now,
+      result: inboundsResult
+    });
+  }
+
+  return inboundsResult;
+}
 
 /**
  * 同步单台服务器的节点信息到 xui_nodes 表。
  *
  * @param {Object} db - 数据库实例
  * @param {Object} server - 服务器信息
+ * @param {Object} [options={}] - 同步选项。
+ * @param {Map<string,Object>} [options.inboundSnapshotCache] - 批量任务级 inbound 快照缓存。
  * @returns {Promise<Object>} 同步结果
  */
-async function syncServerNodes(db, server) {
+async function syncServerNodes(db, server, options = {}) {
   try {
     logger.info(`开始同步服务器 ${server.name} 的节点信息`);
 
-    const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
-      apiVersion: server.panel_version || '3.0.2'
-    });
-    const inboundsResult = await xuiService.getInbounds();
+    const inboundsResult = await getServerInboundsSnapshot(server, options);
 
     if (!inboundsResult.success) {
       logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${inboundsResult.message}`);
@@ -59,9 +95,11 @@ async function syncServerNodes(db, server) {
  * 同步所有在线服务器的节点信息。
  *
  * @param {Object} db - 数据库实例
+ * @param {Object} [options={}] - 同步选项。
+ * @param {Map<string,Object>} [options.inboundSnapshotCache] - 批量任务级 inbound 快照缓存。
  * @returns {Promise<Object>} 同步结果
  */
-async function syncAllServers(db) {
+async function syncAllServers(db, options = {}) {
   try {
     const servers = await xuiSyncRepository.listOnlineXuiServers(db);
 
@@ -74,7 +112,7 @@ async function syncAllServers(db) {
 
     let syncedCount = 0;
     for (const server of servers) {
-      const result = await syncServerNodes(db, server);
+      const result = await syncServerNodes(db, server, options);
       if (result.success) {
         syncedCount++;
       }
@@ -94,6 +132,8 @@ async function syncAllServers(db) {
 }
 
 module.exports = {
+  INBOUND_SNAPSHOT_TTL_MS,
+  getServerInboundsSnapshot,
   syncServerNodes,
   syncAllServers
 };

@@ -449,10 +449,12 @@ async function updateUserCfIps(db, userId, ipPoolIds) {
  * @param {Object} db - 数据库代理对象
  * @param {number} userId - 用户 ID
  * @param {Object} logger - 日志实例，用于透传用户端订阅生成过程
+ * @param {Object} [options={}] - 生成选项
+ * @param {Map<string,Object>} [options.inboundSnapshotCache] - 批量任务级 inbound 快照缓存
  * @returns {Promise<{sub_id:string,node_count:number}>} 生成结果
  */
-async function generateSubscription(db, userId, logger) {
-  const subId = await userSubscriptionService.generateSubscription(db, userId, logger);
+async function generateSubscription(db, userId, logger, options = {}) {
+  const subId = await userSubscriptionService.generateSubscription(db, userId, logger, options);
   const latestSubscription = await subscriptionRepository.findLatestUserSubscription(db, userId);
 
   return {
