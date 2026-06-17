@@ -28,8 +28,10 @@ async function getServerInboundsSnapshot(server, options = {}) {
   if (cache && cache.has(cacheKey)) {
     const cached = cache.get(cacheKey);
     if (cached && now - cached.fetchedAt < INBOUND_SNAPSHOT_TTL_MS) {
+      logger.info(`复用批量 inbound 快照: server=${server.name || server.id}, age=${Math.floor((now - cached.fetchedAt) / 1000)}s`);
       return cached.result;
     }
+    logger.info(`批量 inbound 快照已过期，重新获取: server=${server.name || server.id}`);
     cache.delete(cacheKey);
   }
 
@@ -43,6 +45,9 @@ async function getServerInboundsSnapshot(server, options = {}) {
       fetchedAt: now,
       result: inboundsResult
     });
+    logger.info(`写入批量 inbound 快照: server=${server.name || server.id}, nodeCount=${Array.isArray(inboundsResult.data) ? inboundsResult.data.length : 0}`);
+  } else if (cache && !inboundsResult.success) {
+    logger.warn(`获取 inbound 失败，未写入批量快照: server=${server.name || server.id}, message=${inboundsResult.message || 'unknown'}`);
   }
 
   return inboundsResult;
