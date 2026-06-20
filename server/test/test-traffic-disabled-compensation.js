@@ -220,6 +220,52 @@ async function testDisabledUserCompensatesWithContextUpdater() {
   }
 }
 
+async function testDisabledUserAlreadySyncedSkipsCompensationNoise() {
+  const db = createTrafficDb();
+  const updates = [];
+  const logs = [];
+  const restore = installMockXuiService({ updates });
+  const originalLog = console.log;
+
+  console.log = (...args) => {
+    logs.push(args.join(' '));
+    originalLog(...args);
+  };
+
+  try {
+    const serverTrafficData = await trafficManager.fetchAllServerTraffic(db);
+    const userTrafficData = await trafficManager.calculateUserTotalTraffic(db, serverTrafficData);
+
+    for (const serverSnapshot of Object.values(serverTrafficData)) {
+      for (const client of Object.values(serverSnapshot)) {
+        client.enabled = false;
+        client.enabledKnown = true;
+      }
+    }
+
+    const result = await trafficManager.checkAndDisableOverLimitUsers(db, userTrafficData, serverTrafficData);
+
+    assert.strictEqual(result.compensatedCount, 0);
+    assert.strictEqual(result.retryCount, 0);
+    assert.strictEqual(updates.length, 0, '3X-UI 已禁用时不应重复调用补偿更新');
+    assert(
+      logs.some(line => line.includes('没有需要按流量超限禁用或补偿同步的用户')),
+      '应输出流量超限无须禁用或补偿同步的汇总日志'
+    );
+    assert(
+      !logs.some(line => line.includes('本地已禁用，开始补偿同步 3X-UI 禁用状态')),
+      '3X-UI 已禁用时不应打印逐用户补偿开始日志'
+    );
+    assert(
+      !logs.some(line => line.includes('补偿同步用户 disabled@example.com 禁用状态成功')),
+      '3X-UI 已禁用时不应打印逐用户补偿成功日志'
+    );
+  } finally {
+    console.log = originalLog;
+    restore();
+  }
+}
+
 async function testPartialXuiFailureStillDisablesLocalUser() {
   const db = createTrafficDb({ enabled: 1 });
   const updates = [];
@@ -277,6 +323,7 @@ async function testTrafficLimitedUserRestoresWhenUsageFallsUnderLimit() {
 
 async function run() {
   await testDisabledUserCompensatesWithContextUpdater();
+  await testDisabledUserAlreadySyncedSkipsCompensationNoise();
   await testPartialXuiFailureStillDisablesLocalUser();
   await testTrafficLimitedUserRestoresWhenUsageFallsUnderLimit();
   console.log('test-traffic-disabled-compensation: PASS');

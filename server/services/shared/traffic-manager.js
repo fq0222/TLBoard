@@ -80,6 +80,38 @@ function getTotalTrafficLimit(user) {
 }
 
 /**
+ * 从本轮 3X-UI 快照中提取用户对应的节点客户端状态。
+ * @param {string} email - 本地用户邮箱
+ * @param {Object} clientStatusSnapshot - fetchAllServerTraffic 返回的服务器客户端快照
+ * @returns {Array<Object>} 匹配到的 3X-UI 客户端状态列表
+ */
+function getUserClientSnapshotEntries(email, clientStatusSnapshot = {}) {
+  const nodeEmailPrefix = `${email}-`;
+  const entries = [];
+
+  for (const serverSnapshot of Object.values(clientStatusSnapshot || {})) {
+    for (const [nodeEmail, snapshotClient] of Object.entries(serverSnapshot || {})) {
+      if (nodeEmail.startsWith(nodeEmailPrefix)) {
+        entries.push(snapshotClient);
+      }
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * 判断本地已禁用用户在当前 3X-UI 快照中是否也全部处于禁用状态。
+ * @param {string} email - 本地用户邮箱
+ * @param {Object} clientStatusSnapshot - fetchAllServerTraffic 返回的服务器客户端快照
+ * @returns {boolean} 有快照且所有匹配客户端明确禁用时返回 true；无快照或状态未知时返回 false
+ */
+function isUserDisabledInXuiSnapshot(email, clientStatusSnapshot = {}) {
+  const entries = getUserClientSnapshotEntries(email, clientStatusSnapshot);
+  return entries.length > 0 && entries.every(client => client.enabledKnown && client.enabled === false);
+}
+
+/**
  * 将 3X-UI 客户端启用字段统一转换为布尔值。
  *
  * @param {*} value - 3X-UI 返回的 enable/enabled 字段
@@ -496,6 +528,7 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData, clientStatusSn
 
     let disabledCount = 0;
     let compensatedCount = 0;
+    let alreadySyncedCount = 0;
     let retryCount = 0;
 
     for (const userId of userIds) {
@@ -524,6 +557,10 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData, clientStatusSn
         }
 
         if (latestUser.enabled === 0) {
+          if (isUserDisabledInXuiSnapshot(data.email, clientStatusSnapshot)) {
+            return { success: true, action: 'already-synced' };
+          }
+
           logger.info(`用户 ${data.email} 本地已禁用，开始补偿同步 3X-UI 禁用状态`);
           const syncSuccess = await syncDisableStatusToXui(db, userId, true, {
             skipLock: true,
@@ -584,16 +621,24 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData, clientStatusSn
         logger.info(`补偿同步用户 ${data.email} 禁用状态成功`);
       }
 
+      if (lockedResult.success && lockedResult.action === 'already-synced') {
+        alreadySyncedCount++;
+      }
+
       if (!lockedResult.success && lockedResult.message) {
         logger.error(`禁用用户 ${data.email} 错误: ${lockedResult.message}`);
       }
     }
 
+    if (disabledCount === 0 && compensatedCount === 0 && retryCount === 0) {
+      logger.info('没有需要按流量超限禁用或补偿同步的用户');
+    }
+
     logger.info(`检查用户流量限制完成，禁用 ${disabledCount} 个用户，补偿同步 ${compensatedCount} 个用户，待重试 ${retryCount} 个用户`);
-    return { disabledCount, compensatedCount, retryCount };
+    return { disabledCount, compensatedCount, alreadySyncedCount, retryCount };
   } catch (error) {
     logger.error(`检查用户流量限制错误: ${error.message}`);
-    return { disabledCount: 0, compensatedCount: 0, retryCount: 0 };
+    return { disabledCount: 0, compensatedCount: 0, alreadySyncedCount: 0, retryCount: 0 };
   }
 }
 
