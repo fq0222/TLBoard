@@ -1330,6 +1330,11 @@ test('traffic manager disables expired timed users locally and queues sync', asy
   const now = 1700000000;
   const updated = [];
   const queuedTasks = [];
+  const warnLogs = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => {
+    warnLogs.push(String(message));
+  };
   const db = {
     prepare(sql) {
       if (sql.includes('pg_try_advisory_lock')) {
@@ -1372,14 +1377,22 @@ test('traffic manager disables expired timed users locally and queues sync', asy
     }
   };
 
-  const result = await trafficManager.checkAndDisableExpiredUsers(db, now);
-  assert.equal(result.disabledCount, 1);
-  assert.deepEqual(updated[0], { disableReason: 'expired', userId: 7, now });
-  assert.deepEqual(queuedTasks[0], {
-    userId: 7,
-    taskType: 'disable_sync',
-    payload: { disable: true }
-  });
+  try {
+    const result = await trafficManager.checkAndDisableExpiredUsers(db, now);
+    assert.equal(result.disabledCount, 1);
+    assert.deepEqual(updated[0], { disableReason: 'expired', userId: 7, now });
+    assert.deepEqual(queuedTasks[0], {
+      userId: 7,
+      taskType: 'disable_sync',
+      payload: { disable: true }
+    });
+    assert.match(
+      warnLogs.join('\n'),
+      /用户状态同步已降级进入重试队列: user=7, email=expired@example\.com, disable=true/
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
 });
 
 test('traffic manager skips expired disable sync when conditional update misses', async () => {

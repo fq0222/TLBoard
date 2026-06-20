@@ -642,7 +642,10 @@ async function checkAndDisableExpiredUsers(db, now = Math.floor(Date.now() / 100
 
       if (lockedResult.success && lockedResult.action === 'disabled') {
         disabledCount++;
-        const syncResult = await enqueueUserStatusSync(db, user.id, true);
+        logger.info(`用户 ${user.email} 本地已因时间到期禁用，准备同步 3X-UI: user=${user.id}`);
+        const syncResult = await enqueueUserStatusSync(db, user.id, true, {
+          email: user.email
+        });
         if (syncResult.retryable) {
           retryCount++;
         }
@@ -779,18 +782,21 @@ async function syncDisableStatusToXui(db, userId, disable, options = {}) {
  * @param {Object} db - 数据库实例
  * @param {number} userId - 用户 ID
  * @param {boolean} disable - 是否禁用
+ * @param {Object} [options={}] - 同步日志上下文
+ * @param {string} [options.email] - 用户邮箱，用于生产日志检索
  * @returns {Promise<{success: boolean, retryable?: boolean, action: string}>}
  */
-async function enqueueUserStatusSync(db, userId, disable) {
+async function enqueueUserStatusSync(db, userId, disable, options = {}) {
+  const emailLog = options.email ? `, email=${options.email}` : '';
   let syncSuccess = false;
   try {
     syncSuccess = await syncDisableStatusToXui(db, userId, disable);
   } catch (error) {
-    logger.warn(`用户状态立即同步失败，将尝试写入重试队列: user=${userId}, disable=${disable}, error=${error.message}`);
+    logger.warn(`用户状态立即同步失败，将尝试写入重试队列: user=${userId}${emailLog}, disable=${disable}, error=${error.message}`);
   }
 
   if (syncSuccess) {
-    logger.info(`用户状态已立即同步到 3X-UI: user=${userId}, disable=${disable}`);
+    logger.info(`用户状态已立即同步到 3X-UI: user=${userId}${emailLog}, disable=${disable}`);
     return {
       success: true,
       action: disable ? 'disable' : 'enable'
@@ -808,7 +814,7 @@ async function enqueueUserStatusSync(db, userId, disable) {
       payload: { disable }
     });
   } catch (error) {
-    logger.error(`用户状态同步写入重试队列失败: user=${userId}, disable=${disable}, error=${error.message}`);
+    logger.error(`用户状态同步写入重试队列失败: user=${userId}${emailLog}, disable=${disable}, error=${error.message}`);
     return {
       success: false,
       retryable: true,
@@ -816,7 +822,7 @@ async function enqueueUserStatusSync(db, userId, disable) {
     };
   }
 
-  logger.warn(`用户状态同步已降级进入重试队列: user=${userId}, disable=${disable}, taskType=${taskType}`);
+  logger.warn(`用户状态同步已降级进入重试队列: user=${userId}${emailLog}, disable=${disable}, taskType=${taskType}`);
 
   return {
     success: false,
