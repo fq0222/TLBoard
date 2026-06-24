@@ -73,6 +73,12 @@ router.put('/:id', authenticateAdmin, [
     .withMessage('到期时间必须是非负整数或null')
 ], usersController.updateUser);
 
+router.delete('/:id', authenticateAdmin, [
+  param('id')
+    .isInt({ min: 1 })
+    .withMessage('ID必须是大于0的整数')
+], usersController.deleteUser);
+
 router.put('/:id/cf-ips', authenticateAdmin, [
   param('id')
     .isInt({ min: 1 })

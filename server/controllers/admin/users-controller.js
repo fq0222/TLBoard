@@ -157,6 +157,35 @@ async function updateUser(req, res) {
 }
 
 /**
+ * 删除用户本地数据库数据，不同步或删除 3X-UI 服务器用户。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function deleteUser(req, res) {
+  if (handleValidationFailure(req, res)) {
+    return;
+  }
+
+  try {
+    const data = await usersService.deleteUserLocalData(
+      req.app.locals.db,
+      parseInt(req.params.id, 10)
+    );
+
+    logger.info(`删除用户本地数据成功: ${data.email}`);
+    return res.json({
+      code: 0,
+      message: 'ok',
+      data
+    });
+  } catch (error) {
+    return handleControllerError(res, '删除用户本地数据', error);
+  }
+}
+
+/**
  * 更新用户绑定的 CF 优选 IP。
  *
  * @param {Object} req - Express 请求对象
@@ -274,6 +303,7 @@ module.exports = {
   listUsers,
   getUserDetail,
   updateUser,
+  deleteUser,
   updateUserCfIps,
   generateSubscription,
   startBatchGenerateSubscriptions,

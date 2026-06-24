@@ -187,6 +187,69 @@ test('admin user update preserves disable reason when enabled value is unchanged
   }
 });
 
+test('admin user delete clears local related records in one transaction', async () => {
+  const originalUser = {
+    id: 12,
+    email: 'delete-me@example.com'
+  };
+  const calls = [];
+  let transactionStarted = false;
+
+  const db = {
+    transaction(fn) {
+      return async () => {
+        transactionStarted = true;
+        return fn({
+          prepare(sql) {
+            return {
+              async run(...params) {
+                calls.push({ sql: sql.replace(/\s+/g, ' ').trim(), params });
+                return { changes: 1 };
+              }
+            };
+          }
+        });
+      };
+    }
+  };
+
+  const restoreRepository = replaceMethods(userRepository, {
+    findUserDetailById: async () => originalUser
+  });
+
+  try {
+    const result = await usersService.deleteUserLocalData(db, 12);
+
+    assert.equal(transactionStarted, true);
+    assert.equal(result.email, originalUser.email);
+    assert.ok(calls[0].sql.includes('DELETE FROM referral_rewards'));
+    assert.ok(calls.some(call => call.sql.includes('DELETE FROM traffic_sync_log')));
+    assert.ok(calls.some(call => call.sql.includes('DELETE FROM ticket_replies')));
+    assert.ok(calls.some(call => call.sql.includes('DELETE FROM email_logs')));
+    assert.ok(calls.some(call => call.sql.includes('UPDATE orders SET referrer_user_id = NULL')));
+    assert.ok(calls.some(call => call.sql.includes('DELETE FROM orders WHERE user_id = ? OR email = ?')));
+    assert.ok(calls[calls.length - 1].sql.includes('DELETE FROM users'));
+    assert.deepEqual(calls[calls.length - 1].params, [12]);
+  } finally {
+    restoreRepository();
+  }
+});
+
+test('admin user delete returns legacy error when user is missing', async () => {
+  const restoreRepository = replaceMethods(userRepository, {
+    findUserDetailById: async () => null
+  });
+
+  try {
+    await assert.rejects(
+      () => usersService.deleteUserLocalData({}, 404),
+      (error) => error.isLegacyBusinessError && error.code === 2004
+    );
+  } finally {
+    restoreRepository();
+  }
+});
+
 test('user profile exposes onboarding completed as boolean', async () => {
   const restoreRepository = replaceMethods(userRepository, {
     findUserProfileById: async () => ({

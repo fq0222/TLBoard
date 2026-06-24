@@ -289,6 +289,15 @@ const adminApi = {
   },
 
   /**
+   * 删除用户本地数据库数据
+   * @param {number} id - 用户ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  deleteUser(id) {
+    return apiClient.delete(`/users/${id}`)
+  },
+
+  /**
    * 更新用户 CF IP
    * @param {number} id - 用户ID
    * @param {Array} ipPoolIds - CF IP 池 ID 列表

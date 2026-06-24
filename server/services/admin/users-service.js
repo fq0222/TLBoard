@@ -410,6 +410,35 @@ async function updateUser(db, userId, payload) {
 }
 
 /**
+ * 删除用户在系统本地数据库中的全部关联数据。
+ * 核心分支语义：用户不存在时返回旧接口业务错误；存在时只执行本地事务清理，不触发 3X-UI 同步。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<Object>} 删除结果
+ */
+async function deleteUserLocalData(db, userId) {
+  const user = await userRepository.findUserDetailById(db, userId);
+  if (!user) {
+    throw createLegacyBusinessError('用户不存在', {
+      code: 2004
+    });
+  }
+
+  const transaction = db.transaction(async (transactionDb) => {
+    return userRepository.deleteUserLocalRelatedData(transactionDb, user);
+  });
+  const deletedRows = await transaction();
+
+  return {
+    id: user.id,
+    email: user.email,
+    deleted_rows: deletedRows,
+    message: '用户本地数据已删除'
+  };
+}
+
+/**
  * 更新用户绑定的 CF 优选 IP。
  *
  * @param {Object} db - 数据库代理对象
@@ -486,6 +515,7 @@ module.exports = {
   listUsers,
   getUserDetail,
   updateUser,
+  deleteUserLocalData,
   updateUserCfIps,
   generateSubscription
 };

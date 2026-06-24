@@ -44,6 +44,16 @@
         <el-table-column label="操作" width="200">
           <template #default="scope">
             <el-button size="small" type="primary" @click="showEditDialog(scope.row)">编辑</el-button>
+            <el-button
+              size="small"
+              type="danger"
+              :loading="deletingUserId === scope.row.id"
+              :disabled="deletingUserId !== null"
+              @click="deleteUser(scope.row)"
+            >
+              <el-icon><Delete /></el-icon>
+              删除
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -232,7 +242,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Search, Loading, Delete, CopyDocument, Link } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
 
 const users = ref([])
@@ -246,6 +256,7 @@ const basicSubmitting = ref(false)
 const cfIpsSubmitting = ref(false)
 const submitting = computed(() => basicSubmitting.value || cfIpsSubmitting.value)
 const editingId = ref(null)
+const deletingUserId = ref(null)
 
 // CF IP 相关
 const cfIps = ref([])
@@ -677,6 +688,48 @@ async function showEditDialog(user) {
   }
   
   dialogVisible.value = true
+}
+
+/**
+ * 删除用户本地数据库数据。
+ * 关键分支：二次确认后调用管理端本地删除接口；成功后关闭正在编辑的同一用户弹窗并刷新列表。
+ */
+async function deleteUser(user) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除用户“${user.email}”的本地数据吗？此操作会删除订单、订阅缓存、工单、邮件日志等本地关联记录，但不会删除 3X-UI 服务器上的用户。删除后无法恢复。`,
+      '确认删除用户',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        distinguishCancelAndClose: true
+      }
+    )
+
+    deletingUserId.value = user.id
+    const response = await api.admin.deleteUser(user.id)
+    if (response.code === 0) {
+      ElMessage.success('用户本地数据已删除')
+      if (editingId.value === user.id) {
+        dialogVisible.value = false
+        editingId.value = null
+      }
+      if (users.value.length === 1 && page.value > 1) {
+        page.value -= 1
+      }
+      await fetchUsers()
+    } else {
+      ElMessage.error(response.message || '删除用户失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      console.error('删除用户失败:', error)
+      ElMessage.error('删除用户失败')
+    }
+  } finally {
+    deletingUserId.value = null
+  }
 }
 
 /**

@@ -473,6 +473,140 @@ async function updateUserFields(db, userId, updates, values) {
 }
 
 /**
+ * 删除系统本地数据库中指定用户的全部关联记录。
+ * 职责：只清理本地表数据，不调用 3X-UI；由调用方负责包裹事务。
+ * 核心分支语义：先删可能被其它表引用的推广奖励、工单子表等明细，最后删除 users 主记录。
+ *
+ * @param {Object} db - 数据库代理对象，通常是事务态 transactionDb
+ * @param {Object} user - 待删除用户快照
+ * @param {number} user.id - 用户 ID
+ * @param {string} user.email - 用户邮箱，用于清理仅保存邮箱的本地日志/订单
+ * @returns {Promise<Object>} 各表删除行数统计
+ */
+async function deleteUserLocalRelatedData(db, user) {
+  const userId = Number(user.id);
+  const email = user.email;
+  const deletedRows = {};
+  const statements = [
+    {
+      key: 'referral_rewards',
+      sql: 'DELETE FROM referral_rewards WHERE referrer_user_id = ? OR referred_user_id = ?',
+      params: [userId, userId]
+    },
+    {
+      key: 'referral_clicks',
+      sql: 'DELETE FROM referral_clicks WHERE referrer_user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'referral_codes',
+      sql: 'DELETE FROM referral_codes WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'ticket_replies',
+      sql: `
+        DELETE FROM ticket_replies
+        WHERE ticket_id IN (SELECT id FROM tickets WHERE user_id = ?)
+           OR user_id = ?
+      `,
+      params: [userId, userId]
+    },
+    {
+      key: 'ticket_reads',
+      sql: `
+        DELETE FROM ticket_reads
+        WHERE ticket_id IN (SELECT id FROM tickets WHERE user_id = ?)
+           OR user_id = ?
+      `,
+      params: [userId, userId]
+    },
+    {
+      key: 'tickets',
+      sql: 'DELETE FROM tickets WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'password_reset_tokens',
+      sql: 'DELETE FROM password_reset_tokens WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'resource_distributions',
+      sql: 'DELETE FROM resource_distributions WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'email_logs',
+      sql: 'DELETE FROM email_logs WHERE user_id = ? OR email = ?',
+      params: [userId, email]
+    },
+    {
+      key: 'user_cf_ips',
+      sql: 'DELETE FROM user_cf_ips WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'user_announcement_popup_stats',
+      sql: 'DELETE FROM user_announcement_popup_stats WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'xui_sync_tasks',
+      sql: 'DELETE FROM xui_sync_tasks WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'batch_subscription_task_items',
+      sql: 'DELETE FROM batch_subscription_task_items WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'user_subscription_sources',
+      sql: 'DELETE FROM user_subscription_sources WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'user_subscriptions',
+      sql: 'DELETE FROM user_subscriptions WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'user_node_configs',
+      sql: 'DELETE FROM user_node_configs WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'traffic_sync_log',
+      sql: 'DELETE FROM traffic_sync_log WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'orders_referrer_links',
+      sql: 'UPDATE orders SET referrer_user_id = NULL WHERE referrer_user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'orders',
+      sql: 'DELETE FROM orders WHERE user_id = ? OR email = ?',
+      params: [userId, email]
+    },
+    {
+      key: 'users',
+      sql: 'DELETE FROM users WHERE id = ?',
+      params: [userId]
+    }
+  ];
+
+  for (const statement of statements) {
+    const result = await db.prepare(statement.sql).run(...statement.params);
+    deletedRows[statement.key] = Number(result.changes) || 0;
+  }
+
+  return deletedRows;
+}
+
+/**
  * 查询指定 ID 列表里仍启用的 CF IP。
  *
  * @param {Object} db - 数据库代理对象
@@ -650,6 +784,7 @@ module.exports = {
   listUserOrders,
   listUserCfIps,
   updateUserFields,
+  deleteUserLocalRelatedData,
   findEnabledCfIpsByIds,
   replaceUserCfIps,
   findActiveCfIpsForUser,
