@@ -10,6 +10,11 @@ const authRouter = require('../routes/user/auth');
 const orderService = require('../services/shared/order-service');
 const vmqService = require('../integrations/vmq/vmq-service');
 const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
+const sharedEmailService = require('../integrations/email/email-service');
+const emailRepository = require('../repositories/email-repository');
+const systemSettingsService = require('../services/admin/system-settings-service');
+const orderActivationEmailService = require('../services/shared/order-activation-email-service');
+const config = require('../config');
 
 /**
  * Builds a PostgreSQL-style referral_codes.code duplicate error for retry tests.
@@ -1194,17 +1199,307 @@ async function testCompletePaidOrderIssuesRewardOnlyForFirstAttributedPurchase()
         },
         processTask: () => Promise.resolve()
       }, async () => {
-        await orderService.completePaidOrder(createTransactionDb(transactionDb), 'ORD-55', 'VMQ-55');
-        await orderService.completePaidOrder(createTransactionDb(transactionDb), 'ORD-paid', 'VMQ-PAID');
-        await orderService.completePaidOrder(createTransactionDb(transactionDb), 'REN-55', 'VMQ-REN');
-        await orderService.completePaidOrder(createTransactionDb(transactionDb), 'ORD-second', 'VMQ-SECOND');
-        await orderService.completePaidOrder(createTransactionDb(transactionDb), 'ORD-no-referrer', 'VMQ-NO-REF');
+        await withObjectMocks(orderActivationEmailService, {
+          sendOrderActivationEmail: async () => ({ sent: true, status: 'mocked' })
+        }, async () => {
+          await orderService.completePaidOrder(createTransactionDb(transactionDb), 'ORD-55', 'VMQ-55');
+          await orderService.completePaidOrder(createTransactionDb(transactionDb), 'ORD-paid', 'VMQ-PAID');
+          await orderService.completePaidOrder(createTransactionDb(transactionDb), 'REN-55', 'VMQ-REN');
+          await orderService.completePaidOrder(createTransactionDb(transactionDb), 'ORD-second', 'VMQ-SECOND');
+          await orderService.completePaidOrder(createTransactionDb(transactionDb), 'ORD-no-referrer', 'VMQ-NO-REF');
 
-        assert.strictEqual(rewardCalls.length, 1);
-        assert.strictEqual(rewardCalls[0].db, transactionDb);
-        assert.strictEqual(rewardCalls[0].order.id, 55);
-        assert.ok(enqueuedTasks.length >= 1);
-        assert.strictEqual(enqueuedTasks[0].payload.user.total_traffic_limit, 1024);
+          assert.strictEqual(rewardCalls.length, 1);
+          assert.strictEqual(rewardCalls[0].db, transactionDb);
+          assert.strictEqual(rewardCalls[0].order.id, 55);
+          assert.ok(enqueuedTasks.length >= 1);
+          assert.strictEqual(enqueuedTasks[0].payload.user.total_traffic_limit, 1024);
+        });
+      });
+    });
+  });
+}
+
+/**
+ * 验证支付完成后会复用系统邮件能力发送账号开通提醒。
+ *
+ * 职责：覆盖 completePaidOrder 在本地落账后触发邮件通知的主路径。
+ * 关键参数：out_trade_no 区分新购和续费，plan 提供邮件中的套餐详情。
+ * 核心分支：配额充足时发送邮件并写入 email_logs，避免新系统邮件绕过统一配额口径。
+ *
+ * @returns {Promise<void>}
+ */
+async function testCompletePaidOrderSendsAccountActivationEmail() {
+  const transactionDb = { name: 'payment-transaction-db' };
+  const emailCalls = [];
+  const emailLogCalls = [];
+  const originalSiteConfig = { ...config.site };
+  const baseOrder = {
+    id: 56,
+    out_trade_no: 'ORD-56',
+    status: 'pending',
+    user_id: 21,
+    email: 'new-user@example.com',
+    plan_id: 4,
+    current_expire_at: 0,
+    current_traffic_limit: 0,
+    current_traffic_used: 0,
+    current_plan_id: null,
+    current_enabled: 1,
+    current_disable_reason: null,
+    subscription_token: 'sub-token',
+    trade_no: 'VMQ-OLD',
+    referrer_user_id: null,
+    current_payment_count: 0,
+    amount: 1299
+  };
+  const plan = {
+    id: 4,
+    name: '星河套餐',
+    traffic_limit: 10 * 1024 * 1024 * 1024,
+    duration_days: 30,
+    plan_type: 'limited'
+  };
+
+  config.site.protocol = 'https';
+  config.site.host = 'api.example.com';
+  config.site.userAppUrl = 'https://official.example.com/user';
+
+  try {
+    await withObjectMocks(orderRepository, {
+      findPaidOrderContextByOutTradeNo: async () => ({ ...baseOrder }),
+      findPlanById: async () => plan,
+      markOrderPaid: async () => {},
+      updateUserAfterPaidOrder: async () => {},
+      incrementPlanSalesCount: async () => {},
+      decrementPlanSalesCount: async () => {},
+      updateUserSyncStatus: async () => {}
+    }, async () => {
+      await withObjectMocks(xuiSyncTaskService, {
+        enqueueTask: async () => 1,
+        processTask: () => Promise.resolve()
+      }, async () => {
+        await withObjectMocks(emailRepository, {
+          countTodayEmailLogs: async () => ({ count: 0 }),
+          findBrevoDailyLimit: async () => ({ value: '200' }),
+          createEmailLog: async (db, payload) => {
+            emailLogCalls.push({ db, payload });
+          }
+        }, async () => {
+          await withObjectMocks(systemSettingsService, {
+            getSubscriptionConfig: async () => ({
+              telegram_channel_url: 'https://t.me/tianlan',
+              online_customer_service_url: ''
+            })
+          }, async () => {
+            await withObjectMocks(sharedEmailService, {
+              sendEmail: async (db, payload) => {
+                emailCalls.push({ db, payload });
+                return { success: true, messageId: 'email-56' };
+              }
+            }, async () => {
+              await orderService.completePaidOrder(createTransactionDb(transactionDb), 'ORD-56', 'VMQ-56');
+
+              assert.strictEqual(emailCalls.length, 1);
+              assert.strictEqual(emailCalls[0].payload.to, 'new-user@example.com');
+              assert.strictEqual(emailCalls[0].payload.subject, '【天澜大陆消息】账号new-user开通提醒');
+              const emailContent = emailCalls[0].payload.content;
+              assert.ok(emailCalls[0].payload.content.includes('订单号'));
+              assert.ok(emailCalls[0].payload.content.includes('ORD-56'));
+              assert.ok(emailCalls[0].payload.content.includes('星河套餐'));
+              assert.ok(emailContent.includes('访问官方网站'));
+              assert.ok(emailContent.includes('官方网站'));
+              assert.ok(emailContent.includes('官方网站：<a href="https://official.example.com/user"'));
+              assert.ok(emailContent.includes('https://official.example.com/user'));
+              assert.strictEqual(emailContent.includes('https://api.example.com'), false);
+              assert.ok(/<table role="presentation"[\s\S]*访问官方网站[\s\S]*加入官方电报频道[\s\S]*<\/table>/.test(emailContent));
+              assert.ok(emailContent.indexOf('官方网站：') < emailContent.indexOf('官方电报频道：'));
+              assert.strictEqual(
+                emailContent.includes('<td style="padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;">官方网站</td>'),
+                false
+              );
+              assert.ok(emailContent.includes('https://t.me/tianlan'));
+              assert.strictEqual(emailLogCalls.length, 1);
+              assert.strictEqual(emailLogCalls[0].payload.userId, 21);
+              assert.strictEqual(emailLogCalls[0].payload.status, 'sent');
+            });
+          });
+        });
+      });
+    });
+  } finally {
+    config.site = originalSiteConfig;
+  }
+}
+
+/**
+ * 验证续费邮件只展示本次续费套餐流量，不暴露续费后的账号总流量。
+ *
+ * 职责：覆盖续费订单流量累加时邮件模板的数据来源。
+ * 关键参数：current_traffic_limit 为原账号流量，plan.traffic_limit 为本次套餐流量。
+ * 核心分支：权益仍累加为总流量，但邮件“套餐流量”只能使用本次套餐流量。
+ *
+ * @returns {Promise<void>}
+ */
+async function testRenewActivationEmailUsesCurrentPlanTrafficOnly() {
+  const transactionDb = { name: 'payment-transaction-db' };
+  const emailCalls = [];
+  const baseOrder = {
+    id: 58,
+    out_trade_no: 'REN-58',
+    status: 'pending',
+    user_id: 23,
+    email: 'renew-user@example.com',
+    plan_id: 6,
+    current_expire_at: 0,
+    current_traffic_limit: 20 * 1024 * 1024 * 1024,
+    current_traffic_used: 0,
+    current_plan_id: 6,
+    current_enabled: 1,
+    current_disable_reason: null,
+    subscription_token: 'sub-token',
+    trade_no: 'VMQ-OLD',
+    referrer_user_id: null,
+    current_payment_count: 1,
+    amount: 700
+  };
+  const plan = {
+    id: 6,
+    name: '续费 7G 套餐',
+    traffic_limit: 7 * 1024 * 1024 * 1024,
+    duration_days: 30,
+    plan_type: 'limited'
+  };
+
+  await withObjectMocks(orderRepository, {
+    findPaidOrderContextByOutTradeNo: async () => ({ ...baseOrder }),
+    findPlanById: async () => plan,
+    markOrderPaid: async () => {},
+    updateUserAfterPaidOrder: async (db, payload) => {
+      assert.strictEqual(payload.trafficLimit, 27 * 1024 * 1024 * 1024);
+    },
+    incrementPlanSalesCount: async () => {},
+    decrementPlanSalesCount: async () => {},
+    updateUserSyncStatus: async () => {}
+  }, async () => {
+    await withObjectMocks(xuiSyncTaskService, {
+      enqueueTask: async () => 1,
+      processTask: () => Promise.resolve()
+    }, async () => {
+      await withObjectMocks(emailRepository, {
+        countTodayEmailLogs: async () => ({ count: 0 }),
+        findBrevoDailyLimit: async () => ({ value: '200' }),
+        createEmailLog: async () => {}
+      }, async () => {
+        await withObjectMocks(systemSettingsService, {
+          getSubscriptionConfig: async () => ({
+            telegram_channel_url: '',
+            online_customer_service_url: ''
+          })
+        }, async () => {
+          await withObjectMocks(sharedEmailService, {
+            sendEmail: async (db, payload) => {
+              emailCalls.push({ db, payload });
+              return { success: true, messageId: 'email-renew-58' };
+            }
+          }, async () => {
+            await orderService.completePaidOrder(createTransactionDb(transactionDb), 'REN-58', 'VMQ-58');
+
+            assert.strictEqual(emailCalls.length, 1);
+            assert.ok(emailCalls[0].payload.content.includes('7 GB'));
+            assert.strictEqual(emailCalls[0].payload.content.includes('27 GB'), false);
+          });
+        });
+      });
+    });
+  });
+}
+
+/**
+ * 验证邮件异常不会影响支付落账结果和 3X-UI 同步任务创建。
+ *
+ * 职责：覆盖 Brevo 未配置或发送失败时的降级行为。
+ * 关键参数：sendEmail 抛错模拟 Brevo 初始化失败，enqueueTask 记录同步任务。
+ * 核心分支：同步任务必须先入队，completePaidOrder 仍返回 handled=true。
+ *
+ * @returns {Promise<void>}
+ */
+async function testCompletePaidOrderKeepsEntitlementAndSyncWhenEmailFails() {
+  const transactionDb = { name: 'payment-transaction-db' };
+  const calls = [];
+  const baseOrder = {
+    id: 57,
+    out_trade_no: 'ORD-57',
+    status: 'pending',
+    user_id: 22,
+    email: 'mail-fail@example.com',
+    plan_id: 5,
+    current_expire_at: 0,
+    current_traffic_limit: 0,
+    current_traffic_used: 0,
+    current_plan_id: null,
+    current_enabled: 1,
+    current_disable_reason: null,
+    subscription_token: 'sub-token',
+    trade_no: 'VMQ-OLD',
+    referrer_user_id: null,
+    current_payment_count: 0,
+    amount: 990
+  };
+  const plan = {
+    id: 5,
+    name: '邮件失败套餐',
+    traffic_limit: 1024,
+    duration_days: 30,
+    plan_type: 'limited'
+  };
+
+  await withObjectMocks(orderRepository, {
+    findPaidOrderContextByOutTradeNo: async () => ({ ...baseOrder }),
+    findPlanById: async () => plan,
+    markOrderPaid: async () => calls.push('markOrderPaid'),
+    updateUserAfterPaidOrder: async () => calls.push('updateUserAfterPaidOrder'),
+    incrementPlanSalesCount: async () => calls.push('incrementPlanSalesCount'),
+    decrementPlanSalesCount: async () => {},
+    updateUserSyncStatus: async () => {}
+  }, async () => {
+    await withObjectMocks(xuiSyncTaskService, {
+      enqueueTask: async () => {
+        calls.push('enqueueTask');
+        return 1;
+      },
+      processTask: () => Promise.resolve()
+    }, async () => {
+      await withObjectMocks(emailRepository, {
+        countTodayEmailLogs: async () => ({ count: 0 }),
+        findBrevoDailyLimit: async () => ({ value: '200' }),
+        createEmailLog: async () => {
+          calls.push('createEmailLog');
+        }
+      }, async () => {
+        await withObjectMocks(systemSettingsService, {
+          getSubscriptionConfig: async () => ({
+            telegram_channel_url: '',
+            online_customer_service_url: ''
+          })
+        }, async () => {
+          await withObjectMocks(sharedEmailService, {
+            sendEmail: async () => {
+              calls.push('sendEmail');
+              throw new Error('Brevo API Key 未配置');
+            }
+          }, async () => {
+            const result = await orderService.completePaidOrder(createTransactionDb(transactionDb), 'ORD-57', 'VMQ-57');
+
+            assert.strictEqual(result.handled, true);
+            assert.strictEqual(result.alreadyPaid, false);
+            assert.ok(calls.includes('markOrderPaid'));
+            assert.ok(calls.includes('updateUserAfterPaidOrder'));
+            assert.ok(calls.includes('enqueueTask'));
+            assert.ok(calls.includes('sendEmail'));
+            assert.ok(calls.indexOf('enqueueTask') < calls.indexOf('sendEmail'));
+            assert.strictEqual(calls.includes('createEmailLog'), false);
+          });
+        });
       });
     });
   });
@@ -1362,6 +1657,9 @@ async function main() {
   await testRegisterAndPayKeepsOrderingWhenReferralCodeIsInvalid();
   await testRegisterAndPayValidatorAllowsMissingReferralCode();
   await testCompletePaidOrderIssuesRewardOnlyForFirstAttributedPurchase();
+  await testCompletePaidOrderSendsAccountActivationEmail();
+  await testRenewActivationEmailUsesCurrentPlanTrafficOnly();
+  await testCompletePaidOrderKeepsEntitlementAndSyncWhenEmailFails();
   await testBalanceRenewCompletesWithoutVmq();
   await testBalanceRenewRejectsInsufficientBalance();
   console.log('referral service tests passed');

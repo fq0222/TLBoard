@@ -18,6 +18,7 @@ const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
 const orderRepository = require('../../repositories/order-repository');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const referralService = require('../referral-service');
+const orderActivationEmailService = require('./order-activation-email-service');
 
 const logger = createLogger('ORDER-SERVICE');
 
@@ -662,6 +663,16 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
       logger.error(`后台同步用户到 3X-UI 失败: ${syncError.message}`);
     });
   });
+
+  const shouldSendActivationEmail = isRenewOrder || Number(order.current_payment_count || 0) === 0;
+  if (shouldSendActivationEmail) {
+    await orderActivationEmailService.sendOrderActivationEmail(db, {
+      order,
+      plan,
+      expireAt,
+      isRenewOrder
+    });
+  }
 
   return { handled: true, alreadyPaid: false, order, plan, expireAt };
 }
