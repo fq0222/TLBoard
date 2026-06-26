@@ -327,7 +327,7 @@ test('inbound snapshot cache does not cache failed result', async () => {
   }
 });
 
-test('inbound snapshot cache refreshes after one hour', async () => {
+test('inbound snapshot cache refreshes after fifteen minutes', async () => {
   const firstResult = {
     success: true,
     data: [{ id: 3, remark: 'old-node' }]
@@ -350,7 +350,7 @@ test('inbound snapshot cache refreshes after one hour', async () => {
     Date.now = () => 1000;
     const first = await getServerInboundsSnapshot(server, { inboundSnapshotCache: cache });
 
-    Date.now = () => 1000 + (60 * 60 * 1000) + 1;
+    Date.now = () => 1000 + (15 * 60 * 1000) + 1;
     const second = await getServerInboundsSnapshot(server, { inboundSnapshotCache: cache });
 
     assert.strictEqual(first, firstResult);

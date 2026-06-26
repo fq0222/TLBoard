@@ -10,7 +10,7 @@ const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const xuiNodeSnapshotService = require('../../services/shared/xui-node-snapshot-service');
 
 const logger = createLogger('XUI-SYNC');
-const INBOUND_SNAPSHOT_TTL_MS = 60 * 60 * 1000;
+const INBOUND_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
 
 /**
  * 获取单台服务器的 inbound 快照，允许批量任务复用同一轮已获取的数据。
