@@ -1033,8 +1033,12 @@ async function getSubscriptionInfo(db, userId) {
   const user = assertActiveSubscriptionUser(
     await subscriptionRepository.findSubscriptionUserById(db, userId)
   );
+  const existingSubscription = await subscriptionRepository.findLatestUserSubscription(db, userId);
   const cfIps = await subscriptionRepository.listEnabledUserCfIps(db, userId);
-  const servers = await subscriptionRepository.listOnlineServersForDisplay(db);
+  const subscriptionReady = cfIps.length > 0 && !!existingSubscription;
+  const servers = subscriptionReady
+    ? await subscriptionRepository.listOnlineServersForDisplay(db)
+    : [];
   const nodes = [];
 
   for (const server of servers) {
@@ -1094,6 +1098,7 @@ async function getSubscriptionInfo(db, userId) {
   return {
     subId: user.sub_id,
     cfOptimized: cfIps.length > 0,
+    subscriptionReady,
     expire_at: user.expire_at,
     expire_text: formatTime(user.expire_at),
     traffic_used: user.traffic_used,

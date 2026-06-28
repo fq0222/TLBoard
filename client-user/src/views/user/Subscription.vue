@@ -10,7 +10,7 @@
           @click="startOptimize"
         >
           <span class="step-action-index">1</span>
-          <span class="step-action-name">一键优选 CF IP</span>
+          <span class="step-action-name">{{ cfOptimized ? '重新优选极速通道' : '一键开启极速通道' }}</span>
         </button>
 
         <button
@@ -33,11 +33,11 @@
         <div class="section-head">
           <h2 class="card-title">结果区</h2>
           <el-tag size="small" :type="cfOptimized ? 'success' : 'warning'">
-            {{ cfOptimized ? '已完成 CF IP 优选' : '未完成 CF IP 优选' }}
+            {{ cfOptimized ? '极速通道已开启' : '极速通道未开启' }}
           </el-tag>
         </div>
 
-        <div class="subscription-links">
+        <div v-if="subscriptionReady" class="subscription-links">
           <div class="link-group">
             <span class="link-label">通用订阅链接</span>
             <el-input :model-value="subscription.subscription_url || ''" readonly size="large">
@@ -58,9 +58,10 @@
             <p class="link-tip">适用于 Clash、Clash Verge、ClashX、Clash for Windows 等客户端。</p>
           </div>
         </div>
+        <el-empty v-else description="请先点击“生成订阅链接”按钮" />
       </article>
 
-      <article class="panel-card nodes-card">
+      <article v-if="subscriptionReady" class="panel-card nodes-card">
         <div class="section-head">
           <h2 class="card-title">节点列表</h2>
         </div>
@@ -121,7 +122,7 @@
 
     <el-dialog
       v-model="optimizing"
-      title="CF IP 优选中"
+      title="极速通道优化中"
       :width="optimizeDialogWidth"
       :close-on-click-modal="false"
       :close-on-press-escape="false"
@@ -130,8 +131,8 @@
     >
       <div class="optimize-dialog-content">
         <el-alert
-          title="正在进行 CF IP 优选，请稍候..."
-          description="系统会自动测试多个 Cloudflare 节点的延迟并保存最优结果。"
+          title="正在为您选择更快的线路，请稍候..."
+          description="系统会自动检测网络质量，并应用更优的连接方案。"
           type="warning"
           :closable="false"
           show-icon
@@ -197,6 +198,7 @@ const optimizeStatusText = ref('')
 const windowWidth = ref(window.innerWidth)
 
 const hasNodes = computed(() => Array.isArray(subscription.value.nodes) && subscription.value.nodes.length > 0)
+const subscriptionReady = computed(() => !!subscription.value.subscription_ready)
 const actionBusy = computed(() => optimizing.value || generatingSubscription.value)
 const optimizeDialogWidth = computed(() => (windowWidth.value <= 768 ? '94%' : '420px'))
 
@@ -274,7 +276,7 @@ async function generateSubscription() {
   }
 
   if (!cfOptimized.value) {
-    ElMessage.warning('请先进行 CF IP 优选')
+    ElMessage.warning('请先开启极速通道')
     return
   }
 
@@ -309,16 +311,16 @@ async function startOptimize() {
   try {
     optimizing.value = true
     optimizeProgress.value = 0
-    optimizeStatusText.value = '正在获取 IP 列表...'
+    optimizeStatusText.value = '正在准备线路检测...'
 
     const response = await api.user.getCfIps()
     if (response.code !== 0) {
-      throw new Error('获取 IP 列表失败')
+      throw new Error('线路检测服务暂不可用')
     }
 
     const ipPool = response.data.ips
     if (!ipPool || ipPool.length === 0) {
-      throw new Error('IP 池为空，请联系管理员')
+      throw new Error('暂无可用线路，请联系管理员')
     }
 
     const totalIps = ipPool.length
@@ -337,7 +339,7 @@ async function startOptimize() {
       await testSingleIp(ipData)
       completedIps += 1
       optimizeProgress.value = 10 + Math.round((completedIps / totalIps) * 70)
-      optimizeStatusText.value = `正在测试第 ${completedIps}/${totalIps} 个 IP...`
+      optimizeStatusText.value = '正在检测线路质量...'
     }))
 
     ipTestData.forEach(ipData => {
@@ -352,7 +354,7 @@ async function startOptimize() {
     })
 
     optimizeProgress.value = 85
-    optimizeStatusText.value = '正在筛选最优 IP...'
+    optimizeStatusText.value = '正在匹配最佳线路...'
 
     const availableIps = ipTestData
       .filter(item => item.latency > 0)
@@ -385,23 +387,23 @@ async function startOptimize() {
     }
 
     optimizeProgress.value = 95
-    optimizeStatusText.value = '正在保存优选结果...'
+    optimizeStatusText.value = '正在应用优化结果...'
 
     const ipIds = selectedIps.map(item => item.id)
     const applyResponse = await api.user.applyCfIps(ipIds)
 
     if (applyResponse.code === 0) {
       optimizeProgress.value = 100
-      optimizeStatusText.value = '优选完成'
+      optimizeStatusText.value = '极速通道已开启'
       cfOptimized.value = true
       await fetchPageData()
-      ElMessage.success(`已成功优选 ${selectedIps.length} 个 IP`)
+      ElMessage.success('已成功开启极速通道')
     } else {
-      throw new Error(applyResponse.message || '保存优选结果失败')
+      throw new Error(applyResponse.message || '应用优化结果失败')
     }
   } catch (error) {
     console.error('一键优选失败:', error)
-    ElMessage.error(error.message || '优选失败，请重试')
+    ElMessage.error(error.message || '线路优化失败，请重试')
     optimizeProgress.value = 0
     optimizeStatusText.value = ''
   } finally {

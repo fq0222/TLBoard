@@ -97,10 +97,11 @@ async function getSubscriptionInfo(req, res) {
 
     logger.info(`获取订阅信息成功: userId=${req.user.id}`);
     return legacySuccess(res, {
-      subscription_url: data.cfOptimized ? urls.subscription_url : '',
-      clash_url: data.cfOptimized ? urls.clash_url : '',
-      v2ray_url: data.cfOptimized ? urls.v2ray_url : '',
+      subscription_url: data.subscriptionReady ? urls.subscription_url : '',
+      clash_url: data.subscriptionReady ? urls.clash_url : '',
+      v2ray_url: data.subscriptionReady ? urls.v2ray_url : '',
       cf_optimized: data.cfOptimized,
+      subscription_ready: data.subscriptionReady,
       expire_at: data.expire_at,
       expire_text: data.expire_text,
       traffic_used: data.traffic_used,

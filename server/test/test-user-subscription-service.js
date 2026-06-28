@@ -329,6 +329,46 @@ async function testAdminSubscriptionShouldReuseUserIncrementalGenerator() {
 }
 
 /**
+ * 验证仅完成 CF 优选但尚未生成订阅时，不会提前暴露节点结果。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSubscriptionInfoShouldHideNodesBeforeFirstGeneration() {
+  const originals = {
+    findSubscriptionUserById: subscriptionRepository.findSubscriptionUserById,
+    findLatestUserSubscription: subscriptionRepository.findLatestUserSubscription,
+    listEnabledUserCfIps: subscriptionRepository.listEnabledUserCfIps,
+    listOnlineServersForDisplay: subscriptionRepository.listOnlineServersForDisplay
+  };
+
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 1,
+    email: 'new-user@example.com',
+    sub_id: 'new-user-sub-id',
+    enabled: 1,
+    traffic_used: 0,
+    traffic_limit: 1024,
+    referral_traffic_limit: 0,
+    expire_at: 0
+  });
+  subscriptionRepository.findLatestUserSubscription = async () => undefined;
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServersForDisplay = async () => {
+    throw new Error('未生成订阅时不应查询节点');
+  };
+
+  try {
+    const result = await subscriptionService.getSubscriptionInfo({}, 1);
+
+    assert.strictEqual(result.cfOptimized, true);
+    assert.strictEqual(result.subscriptionReady, false);
+    assert.deepStrictEqual(result.nodes, []);
+  } finally {
+    Object.assign(subscriptionRepository, originals);
+  }
+}
+
+/**
  * 验证用户 CF IP 查询只读取当前 cf_ip_pool 表真实存在的字段。
  *
  * @returns {Promise<void>}
@@ -361,6 +401,7 @@ async function run() {
   await testSystemSettingsSubscriptionSave();
   await testDisabledSubscriptionShouldThrowBusinessError();
   await testAdminSubscriptionShouldReuseUserIncrementalGenerator();
+  await testSubscriptionInfoShouldHideNodesBeforeFirstGeneration();
   await testUserCfIpQueriesShouldMatchCurrentSchema();
   console.log('user subscription service tests passed');
 }
