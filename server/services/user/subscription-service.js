@@ -243,11 +243,12 @@ function findServersRequiringSync(servers, snapshots, nodeConfigs) {
  * @param {Object} logger - 日志实例
  * @param {Object} [options={}] - 同步选项
  * @param {Map<string,Object>} [options.inboundSnapshotCache] - 批量任务级 inbound 快照缓存
- * @returns {Promise<void>}
+ * @param {Object} [options.dependencies] - 测试或编排使用的同步依赖覆盖
+ * @returns {Promise<Array<{server:Object,result:Object}>>} 本次实际远程同步结果
  */
 async function ensureNodeSnapshotsAvailable(db, servers, logger, options = {}) {
   if (servers.length === 0) {
-    return;
+    return [];
   }
 
   const serversById = mapServersById(servers);
@@ -259,16 +260,20 @@ async function ensureNodeSnapshotsAvailable(db, servers, logger, options = {}) {
   const missingServers = servers.filter((server) => !snapshotServerIds.has(server.id));
 
   if (missingServers.length === 0) {
-    return;
+    return [];
   }
 
   logger.info(`检测到 ${missingServers.length} 台在线服务器缺少 xui_nodes 快照，开始按服务器补齐`);
+  const results = [];
+  const syncNode = options.dependencies?.syncServerNodes || syncServerNodes;
   for (const server of missingServers) {
-    const syncResult = await syncServerNodes(db, server, {
+    const syncResult = await syncNode(db, server, {
       inboundSnapshotCache: options.inboundSnapshotCache
     });
+    results.push({ server, result: syncResult });
     logger.info(`补齐服务器节点快照: server=${server.name}, success=${syncResult.success}, nodeCount=${syncResult.nodeCount || 0}`);
   }
+  return results;
 }
 
 /**
@@ -778,6 +783,12 @@ async function appendAnnouncementVirtualNodes(db, nodes) {
  */
 async function generateSubscription(db, userId, logger, options = {}) {
   const generationStartedAt = Date.now();
+  const remoteServerIds = new Set();
+  const inboundOutcomes = new Map();
+  const recordInboundResult = (server, result) => {
+    remoteServerIds.add(server.id);
+    inboundOutcomes.set(server.id, !!result?.success);
+  };
   const summary = {
     localServers: 0,
     remoteServers: 0,
@@ -818,14 +829,16 @@ async function generateSubscription(db, userId, logger, options = {}) {
       const syncResult = await syncServers(db, missingServers, {
         inboundSnapshotCache: options.inboundSnapshotCache
       });
-      summary.inboundSuccess += syncResult.syncedCount || 0;
-      summary.inboundFailed += syncResult.failedCount || 0;
+      missingServers.forEach((server, index) => {
+        recordInboundResult(server, syncResult.results?.[index]);
+      });
       logger.info(`首次生成前节点同步完成: ${syncResult.syncedCount || 0}/${syncResult.totalCount || missingServers.length} 台服务器`);
     } else {
       logger.info(`用户 ${user.email} 首次生成订阅，本地快照和节点配置完整，跳过远程节点同步`);
     }
   } else {
-    await ensureNodeSnapshotsAvailable(db, servers, logger, options);
+    const snapshotSyncResults = await ensureNodeSnapshotsAvailable(db, servers, logger, options);
+    snapshotSyncResults.forEach(({ server, result }) => recordInboundResult(server, result));
   }
 
   let nodeConfigs = await ensureUserNodeConfigsComplete(db, user, servers, logger, options);
@@ -865,13 +878,17 @@ async function generateSubscription(db, userId, logger, options = {}) {
         const repairSyncResult = await syncServers(db, repairServers, {
           inboundSnapshotCache: options.inboundSnapshotCache
         });
-        summary.inboundSuccess += repairSyncResult.syncedCount || 0;
-        summary.inboundFailed += repairSyncResult.failedCount || 0;
+        repairServers.forEach((server, index) => {
+          recordInboundResult(server, repairSyncResult.results?.[index]);
+        });
+        const successfulRepairServers = repairServers.filter(
+          (server, index) => repairSyncResult.results?.[index]?.success
+        );
 
         const latestRepairConfigs = await reloadRepairNodeConfigs(
           db,
           user,
-          repairServers,
+          successfulRepairServers,
           logger,
           options
         );
@@ -880,9 +897,16 @@ async function generateSubscription(db, userId, logger, options = {}) {
             (config) => buildSourceCacheKey(config.server_id, config.inbound_id)
           )
         );
-        const retryConfigs = latestRepairConfigs.filter(
-          (config) => failedKeys.has(buildSourceCacheKey(config.server_id, config.inbound_id))
+        const latestRepairConfigMap = new Map(
+          latestRepairConfigs.map((config) => [
+            buildSourceCacheKey(config.server_id, config.inbound_id),
+            config
+          ])
         );
+        const retryConfigs = firstRefreshResult.failedConfigs.map((config) => {
+          const key = buildSourceCacheKey(config.server_id, config.inbound_id);
+          return latestRepairConfigMap.get(key) || config;
+        });
         const repairIds = new Set(repairServers.map((server) => server.id));
         const originalRepairKeys = new Set(
           nodeConfigs
@@ -928,9 +952,11 @@ async function generateSubscription(db, userId, logger, options = {}) {
             continue;
           }
 
-          const syncResult = await syncServerNodes(db, server, {
+          const syncNode = options.dependencies?.syncServerNodes || syncServerNodes;
+          const syncResult = await syncNode(db, server, {
             inboundSnapshotCache: options.inboundSnapshotCache
           });
+          recordInboundResult(server, syncResult);
           logger.info(`增量同步服务器完成: server=${server.name}, success=${syncResult.success}, nodeCount=${syncResult.nodeCount || 0}`);
         }
 
@@ -967,6 +993,10 @@ async function generateSubscription(db, userId, logger, options = {}) {
     .filter((key) => latestSourceMap.has(key))
     .length;
   summary.sourceFailed = finalSourceKeys.size - summary.sourceSuccess;
+  summary.remoteServers = remoteServerIds.size;
+  summary.localServers = servers.length - summary.remoteServers;
+  summary.inboundSuccess = Array.from(inboundOutcomes.values()).filter(Boolean).length;
+  summary.inboundFailed = inboundOutcomes.size - summary.inboundSuccess;
   const allNodes = composeSubscriptionNodes(nodeConfigs, latestSourceMap, serversById, cfIps, logger);
   summary.nodes = allNodes.length;
   logger.info(

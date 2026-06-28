@@ -993,10 +993,10 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
           });
           return {
             success: true,
-            syncedCount: 0,
-            failedCount: selectedServers.length,
+            syncedCount: selectedServers.length,
+            failedCount: 0,
             totalCount: selectedServers.length,
-            results: selectedServers.map((server) => ({ success: false, serverId: server.id }))
+            results: selectedServers.map((server) => ({ success: true, serverId: server.id }))
           };
         },
         async syncUserToXuiServers(db, user, plan) {
@@ -1024,10 +1024,10 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
     assert(summary);
     for (const field of [
       'user=501',
-      'localServers=3',
-      'remoteServers=0',
-      'inboundSuccess=0',
-      'inboundFailed=1',
+      'localServers=2',
+      'remoteServers=1',
+      'inboundSuccess=1',
+      'inboundFailed=0',
       'sourceSuccess=3',
       'sourceFailed=0',
       'repairServers=1',
@@ -1092,6 +1092,7 @@ async function runPersistentSourceFailureScenario(failedServerIds) {
   const sources = new Map();
   const fetchCounts = new Map();
   const repairCalls = [];
+  const userSyncServerIds = [];
   let savedNodes;
   let businessError;
 
@@ -1137,13 +1138,14 @@ async function runPersistentSourceFailureScenario(failedServerIds) {
             repairCalls.push(selectedServers.map((server) => server.id));
             return {
               success: true,
-              syncedCount: selectedServers.length,
-              failedCount: 0,
+              syncedCount: 0,
+              failedCount: selectedServers.length,
               totalCount: selectedServers.length,
-              results: selectedServers.map((server) => ({ success: true, serverId: server.id }))
+              results: selectedServers.map((server) => ({ success: false, serverId: server.id }))
             };
           },
-          async syncUserToXuiServers() {
+          async syncUserToXuiServers(db, user, plan) {
+            userSyncServerIds.push(plan.serverIds);
             return { success: true, successCount: failedServerIds.length, failureCount: 0 };
           }
         }
@@ -1152,7 +1154,7 @@ async function runPersistentSourceFailureScenario(failedServerIds) {
       businessError = error;
     }
 
-    return { fetchCounts, repairCalls, savedNodes, businessError };
+    return { fetchCounts, repairCalls, userSyncServerIds, savedNodes, businessError };
   } finally {
     for (const method of repositoryMethods) {
       subscriptionRepository[method] = originals[method];
@@ -1170,6 +1172,7 @@ async function testPersistentSourceFailureShouldNotBlockSuccessfulNodes() {
 
   assert.deepStrictEqual(Object.fromEntries(scenario.fetchCounts), { 1: 1, 2: 2, 3: 1 });
   assert.deepStrictEqual(scenario.repairCalls, [[2]]);
+  assert.deepStrictEqual(scenario.userSyncServerIds, []);
   assert.strictEqual(scenario.businessError, undefined);
   assert.strictEqual(scenario.savedNodes.length, 2);
 }
@@ -1184,10 +1187,86 @@ async function testAllPersistentSourceFailuresShouldStopAfterSingleRepairRound()
 
   assert.deepStrictEqual(Object.fromEntries(scenario.fetchCounts), { 1: 2, 2: 2, 3: 2 });
   assert.deepStrictEqual(scenario.repairCalls, [[1, 2, 3]]);
+  assert.deepStrictEqual(scenario.userSyncServerIds, []);
   assert.strictEqual(scenario.savedNodes, undefined);
   assert(scenario.businessError);
   assert.strictEqual(scenario.businessError.code, 500);
   assert.strictEqual(scenario.businessError.message, '未生成任何可用节点，请稍后重试');
+}
+
+/**
+ * 验证非首次生成发生增量节点同步时，汇总按实际远程服务器去重统计。
+ *
+ * @returns {Promise<void>}
+ */
+async function testExistingSubscriptionIncrementalSyncShouldReportSummary() {
+  const methods = ['findLatestUserSubscription', 'findSubscriptionUserById', 'listEnabledUserCfIps',
+    'listOnlineServers', 'listNodeSnapshots', 'listUserNodeConfigs', 'listUserSubscriptionSources',
+    'upsertSubscriptionSource', 'saveUserSubscriptionCache'];
+  const originals = Object.fromEntries(methods.map((method) => [method, subscriptionRepository[method]]));
+  const servers = [1, 2, 3].map((id) => ({
+    id, name: `summary-${id}`, sub_url: `https://summary/${id}/`,
+    host: `summary-${id}.example.com`, client_port: 443
+  }));
+  const configs = servers.map((server) => ({
+    user_id: 701, server_id: server.id, inbound_id: server.id * 10,
+    sub_id: `summary-sub-${server.id}`, uuid: `summary-uuid-${server.id}`,
+    remark: `direct-${server.id}`, protocol: 'vless', port: 443,
+    settings: '{}', stream_settings: '{}'
+  }));
+  const now = Math.floor(Date.now() / 1000);
+  const sources = new Map(configs.map((config) => {
+    const server = servers[config.server_id - 1];
+    return [`${config.server_id}:${config.inbound_id}`, {
+      user_id: 701, server_id: config.server_id, inbound_id: config.inbound_id,
+      sub_id: config.sub_id, raw_link: `vless://old-${config.server_id}`,
+      node_fingerprint: computeNodeFingerprint(config),
+      server_fingerprint: config.server_id === 2 ? '损坏指纹' : computeServerFingerprint(server),
+      fetched_at: now
+    }];
+  }));
+  const logs = [];
+  const syncCalls = [];
+
+  subscriptionRepository.findLatestUserSubscription = async () => ({ id: 1 });
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 701, email: 'summary@example.com', sub_id: 'summary-token', enabled: 1, traffic_limit: 1024
+  });
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServers = async () => servers;
+  subscriptionRepository.listNodeSnapshots = async () => configs;
+  subscriptionRepository.listUserNodeConfigs = async () => configs;
+  subscriptionRepository.listUserSubscriptionSources = async () => Array.from(sources.values());
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => {
+    sources.set(`${source.server_id}:${source.inbound_id}`, { ...source });
+  };
+  subscriptionRepository.saveUserSubscriptionCache = async () => {};
+
+  try {
+    await userSubscriptionService.generateSubscription({}, 701, {
+      info(message) { logs.push(message); }, warn() {}, error() {}
+    }, {
+      dependencies: {
+        async syncServerNodes(db, server) {
+          syncCalls.push(server.id);
+          return { success: true, serverId: server.id, nodeCount: 1 };
+        },
+        async fetchOriginalSubscription(subUrl, subId) {
+          const id = Number(subId.split('-').pop());
+          return Buffer.from(`vless://00000000-0000-0000-0000-${String(id).padStart(12, '0')}@127.0.0.1:443?encryption=none#node`).toString('base64');
+        }
+      }
+    });
+
+    assert.deepStrictEqual(syncCalls, [2]);
+    const summary = logs.find((message) => message.includes('订阅生成汇总:'));
+    assert(summary.includes('localServers=2'));
+    assert(summary.includes('remoteServers=1'));
+    assert(summary.includes('inboundSuccess=1'));
+    assert(summary.includes('inboundFailed=0'));
+  } finally {
+    for (const method of methods) subscriptionRepository[method] = originals[method];
+  }
 }
 
 /**
@@ -1218,6 +1297,7 @@ async function run() {
   await testFirstGenerationShouldRepairFailedServerOnlyOnce();
   await testPersistentSourceFailureShouldNotBlockSuccessfulNodes();
   await testAllPersistentSourceFailuresShouldStopAfterSingleRepairRound();
+  await testExistingSubscriptionIncrementalSyncShouldReportSummary();
   console.log('subscription generation performance tests passed');
 }
 
