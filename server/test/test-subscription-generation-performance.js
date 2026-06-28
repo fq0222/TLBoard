@@ -1049,6 +1049,148 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
 }
 
 /**
+ * 执行原始订阅持续失败场景，并收集公共生成流程的重试与保存结果。
+ *
+ * @param {number[]} failedServerIds - 首轮与重试均失败的服务器 ID
+ * @returns {Promise<Object>} 拉取次数、修复批次、保存节点和业务错误
+ */
+async function runPersistentSourceFailureScenario(failedServerIds) {
+  const repositoryMethods = [
+    'findLatestUserSubscription',
+    'findSubscriptionUserById',
+    'listEnabledUserCfIps',
+    'listOnlineServers',
+    'listNodeSnapshots',
+    'listUserNodeConfigs',
+    'listUserSubscriptionSources',
+    'upsertSubscriptionSource',
+    'saveUserSubscriptionCache'
+  ];
+  const originals = Object.fromEntries(
+    repositoryMethods.map((method) => [method, subscriptionRepository[method]])
+  );
+  const servers = [1, 2, 3].map((id) => ({
+    id,
+    name: `persistent-server-${id}`,
+    sub_url: `https://persistent.example/${id}/`,
+    host: `persistent-${id}.example.com`,
+    client_port: 443
+  }));
+  const nodeConfigs = servers.map((server) => ({
+    user_id: 601,
+    server_id: server.id,
+    inbound_id: server.id * 10,
+    sub_id: `persistent-sub-${server.id}`,
+    uuid: `persistent-uuid-${server.id}`,
+    remark: `direct-${server.id}`,
+    protocol: 'vless',
+    port: 443,
+    settings: '{}',
+    stream_settings: '{}'
+  }));
+  const failedIds = new Set(failedServerIds);
+  const sources = new Map();
+  const fetchCounts = new Map();
+  const repairCalls = [];
+  let savedNodes;
+  let businessError;
+
+  subscriptionRepository.findLatestUserSubscription = async () => undefined;
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 601,
+    email: 'persistent@example.com',
+    sub_id: 'persistent-user-token',
+    enabled: 1,
+    traffic_limit: 1024
+  });
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServers = async () => servers;
+  subscriptionRepository.listNodeSnapshots = async () => nodeConfigs;
+  subscriptionRepository.listUserNodeConfigs = async () => nodeConfigs;
+  subscriptionRepository.listUserSubscriptionSources = async () => Array.from(sources.values());
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => {
+    sources.set(`${source.server_id}:${source.inbound_id}`, { ...source });
+  };
+  subscriptionRepository.saveUserSubscriptionCache = async (db, userId, subId, nodes) => {
+    savedNodes = nodes;
+  };
+
+  try {
+    try {
+      await userSubscriptionService.generateSubscription({}, 601, {
+        info() {},
+        warn() {},
+        error() {}
+      }, {
+        dependencies: {
+          async fetchOriginalSubscription(subUrl, subId) {
+            const serverId = Number(subId.split('-').pop());
+            fetchCounts.set(serverId, (fetchCounts.get(serverId) || 0) + 1);
+            if (failedIds.has(serverId)) {
+              throw new Error(`服务器 ${serverId} 持续失败`);
+            }
+            return Buffer.from(
+              `vless://00000000-0000-0000-0000-${String(serverId).padStart(12, '0')}@127.0.0.1:443?encryption=none#node`
+            ).toString('base64');
+          },
+          async syncSelectedServers(db, selectedServers) {
+            repairCalls.push(selectedServers.map((server) => server.id));
+            return {
+              success: true,
+              syncedCount: selectedServers.length,
+              failedCount: 0,
+              totalCount: selectedServers.length,
+              results: selectedServers.map((server) => ({ success: true, serverId: server.id }))
+            };
+          },
+          async syncUserToXuiServers() {
+            return { success: true, successCount: failedServerIds.length, failureCount: 0 };
+          }
+        }
+      });
+    } catch (error) {
+      businessError = error;
+    }
+
+    return { fetchCounts, repairCalls, savedNodes, businessError };
+  } finally {
+    for (const method of repositoryMethods) {
+      subscriptionRepository[method] = originals[method];
+    }
+  }
+}
+
+/**
+ * 验证单个目标节点持续失败时只重试一次，其他成功节点仍生成并保存。
+ *
+ * @returns {Promise<void>}
+ */
+async function testPersistentSourceFailureShouldNotBlockSuccessfulNodes() {
+  const scenario = await runPersistentSourceFailureScenario([2]);
+
+  assert.deepStrictEqual(Object.fromEntries(scenario.fetchCounts), { 1: 1, 2: 2, 3: 1 });
+  assert.deepStrictEqual(scenario.repairCalls, [[2]]);
+  assert.strictEqual(scenario.businessError, undefined);
+  assert.strictEqual(scenario.savedNodes.length, 2);
+}
+
+/**
+ * 验证全部目标节点持续失败时仅修复一轮，最终返回无可用节点业务错误。
+ *
+ * @returns {Promise<void>}
+ */
+async function testAllPersistentSourceFailuresShouldStopAfterSingleRepairRound() {
+  const scenario = await runPersistentSourceFailureScenario([1, 2, 3]);
+
+  assert.deepStrictEqual(Object.fromEntries(scenario.fetchCounts), { 1: 2, 2: 2, 3: 2 });
+  assert.deepStrictEqual(scenario.repairCalls, [[1, 2, 3]]);
+  assert.strictEqual(scenario.savedNodes, undefined);
+  assert(scenario.businessError);
+  assert.strictEqual(scenario.businessError.code, 500);
+  assert.strictEqual(scenario.businessError.message, '未生成任何可用节点，请稍后重试');
+}
+
+/**
  * 顺序执行订阅生成性能回归测试，任一失败都会让进程以非零状态退出。
  *
  * @returns {Promise<void>}
@@ -1074,6 +1216,8 @@ async function run() {
   await testSourceRefreshShouldWrapExternalFailuresWithoutMutation();
   await testMissingSourceUrlShouldLogItemDuration();
   await testFirstGenerationShouldRepairFailedServerOnlyOnce();
+  await testPersistentSourceFailureShouldNotBlockSuccessfulNodes();
+  await testAllPersistentSourceFailuresShouldStopAfterSingleRepairRound();
   console.log('subscription generation performance tests passed');
 }
 
