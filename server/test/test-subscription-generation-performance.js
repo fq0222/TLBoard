@@ -722,6 +722,79 @@ async function testSourceRefreshShouldRejectInvalidOldCache() {
 }
 
 /**
+ * 创建首个节点的标准服务器和节点配置，供无效缓存公共链测试独立构造输入。
+ *
+ * @returns {{server:Object,nodeConfig:Object}} 标准服务器与节点配置。
+ */
+function createFirstSourceFixture() {
+  const server = {
+    id: 1,
+    name: 'source-1',
+    sub_url: 'https://subscription.example/1/',
+    host: 'node-1.example.com',
+    client_port: 443
+  };
+  const nodeConfig = {
+    server_id: 1,
+    inbound_id: 101,
+    sub_id: 'node-sub-1',
+    remark: 'direct-1',
+    protocol: 'vless',
+    port: 443,
+    settings: '{}',
+    stream_settings: '{}'
+  };
+
+  return { server, nodeConfig };
+}
+
+/**
+ * 验证服务器指纹不匹配的旧模板，在全部刷新失败时不能兜底生成订阅。
+ * 核心分支：通过公共 generateSubscription 链路校验，最终必须返回零节点业务失败。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshShouldFailWithInvalidServerFingerprintCache() {
+  const { server, nodeConfig } = createFirstSourceFixture();
+  const allFailedIndexes = new Set(Array.from({ length: 25 }, (_, index) => index + 1));
+  const invalidSource = createSourceCache(
+    nodeConfig,
+    server,
+    { server_fingerprint: 'stale-server-fingerprint' }
+  );
+
+  await assert.rejects(
+    runSourceRefreshScenario({
+      failedIndexes: allFailedIndexes,
+      seedSources: [invalidSource]
+    }),
+    (error) => error.code === 500 && error.message.includes('未生成任何可用节点')
+  );
+}
+
+/**
+ * 验证超过 24 小时的旧模板，在全部刷新失败时不能兜底生成订阅。
+ * 核心分支：通过公共 generateSubscription 链路校验，最终必须返回零节点业务失败。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshShouldFailWithExpiredCache() {
+  const { server, nodeConfig } = createFirstSourceFixture();
+  const allFailedIndexes = new Set(Array.from({ length: 25 }, (_, index) => index + 1));
+  const invalidSource = createSourceCache(nodeConfig, server, {
+    fetched_at: Math.floor(Date.now() / 1000) - (24 * 60 * 60) - 1
+  });
+
+  await assert.rejects(
+    runSourceRefreshScenario({
+      failedIndexes: allFailedIndexes,
+      seedSources: [invalidSource]
+    }),
+    (error) => error.code === 500 && error.message.includes('未生成任何可用节点')
+  );
+}
+
+/**
  * 顺序执行订阅生成性能回归测试，任一失败都会让进程以非零状态退出。
  *
  * @returns {Promise<void>}
@@ -742,6 +815,8 @@ async function run() {
   await testSourceRefreshShouldFailWhenNoNodeCanBeComposed();
   await testSourceRefreshShouldReuseValidOldCache();
   await testSourceRefreshShouldRejectInvalidOldCache();
+  await testSourceRefreshShouldFailWithInvalidServerFingerprintCache();
+  await testSourceRefreshShouldFailWithExpiredCache();
   console.log('subscription generation performance tests passed');
 }
 
