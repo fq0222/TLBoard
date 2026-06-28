@@ -14,11 +14,11 @@
     <section class="content-card">
       <div class="section-head">
         <h2 class="card-title">IP 池列表</h2>
-        <p class="tip">每次随机展示 20 个 IP，点击开始测试后会在浏览器本地完成延迟测试。</p>
+        <p class="tip">每次随机展示 50 个 IP（包含 3 个 IPv6），点击开始测试后会在浏览器本地完成延迟测试。</p>
       </div>
 
       <div class="toolbar">
-        <el-button type="primary" size="large" class="toolbar-button primary-action" :loading="testing" @click="startTest">
+        <el-button type="primary" size="large" class="toolbar-button primary-action" :loading="testing" :disabled="poolLoading || ipList.length === 0" @click="startTest">
           <el-icon><Connection /></el-icon>
           开始测试
         </el-button>
@@ -28,7 +28,7 @@
           选前 5（含 IPv6）
         </el-button>
 
-        <el-button size="large" class="toolbar-button refresh-action" @click="refreshRandom">
+        <el-button size="large" class="toolbar-button refresh-action" :loading="poolLoading" :disabled="testing || poolLoading" @click="refreshRandom">
           <el-icon><Refresh /></el-icon>
           随机换一批
         </el-button>
@@ -136,10 +136,17 @@ import { Check, Connection, Refresh, Trophy } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import {
+  CF_IP_TEST_CONCURRENCY as TEST_CONCURRENCY,
   CF_IP_TEST_COUNT as TEST_COUNT,
   CF_IP_TEST_INTERVAL as TEST_INTERVAL,
   CF_IP_TEST_TIMEOUT as TEST_TIMEOUT
 } from '@/utils/cf-ip-test-config'
+import {
+  compareCfIpResults,
+  isIpv6,
+  runWithConcurrency,
+  selectRecommendedCfIps
+} from '@/utils/cf-ip-optimizer'
 
 const MAX_SELECTED = 5
 
@@ -149,24 +156,11 @@ const selectedIds = ref([])
 const testing = ref(false)
 const applying = ref(false)
 const tested = ref(false)
+const poolLoading = ref(false)
 
 const sortedIpList = computed(() => {
-  return [...ipList.value].sort((a, b) => {
-    if (a.testStatus !== 'done' && b.testStatus !== 'done') return 0
-    if (a.testStatus !== 'done') return 1
-    if (b.testStatus !== 'done') return -1
-
-    if (a.latency <= 0 && b.latency <= 0) return 0
-    if (a.latency <= 0) return 1
-    if (b.latency <= 0) return -1
-
-    return a.latency - b.latency
-  })
+  return [...ipList.value].sort(compareCfIpResults)
 })
-
-function isIpv6(ip) {
-  return ip.includes(':')
-}
 
 function isSelected(id) {
   return selectedIds.value.includes(id)
@@ -186,6 +180,9 @@ function buildIpState(ip) {
 }
 
 async function fetchIpPool() {
+  if (poolLoading.value) return false
+  poolLoading.value = true
+
   try {
     const response = await api.user.getCfIps()
     if (response.code === 0) {
@@ -193,19 +190,29 @@ async function fetchIpPool() {
       currentIps.value = response.data.current_ips || []
       selectedIds.value = []
       tested.value = false
+      return true
     }
+    return false
   } catch (error) {
     console.error('获取 IP 池列表失败:', error)
+    return false
+  } finally {
+    poolLoading.value = false
   }
 }
 
 async function refreshRandom() {
-  await fetchIpPool()
-  ElMessage.success('已刷新')
+  const refreshed = await fetchIpPool()
+  if (refreshed) {
+    ElMessage.success('已刷新')
+    return
+  }
+  ElMessage.error('刷新失败，请重试')
 }
 
 async function startTest() {
   testing.value = true
+  tested.value = false
 
   ipList.value.forEach(ip => {
     ip.latency = -1
@@ -219,11 +226,25 @@ async function startTest() {
 
   selectedIds.value = []
 
-  await Promise.all(ipList.value.map(ip => testSingleIp(ip)))
-
-  testing.value = false
-  tested.value = true
-  ElMessage.success('测试完成，已按延迟排序')
+  try {
+    await runWithConcurrency(ipList.value, testSingleIp, TEST_CONCURRENCY)
+    tested.value = true
+    ElMessage.success('测试完成，已按延迟排序')
+  } catch (error) {
+    ipList.value.forEach(ip => {
+      if (ip.testStatus === 'testing') {
+        ip.latency = -1
+        ip.avgLatency = 0
+        ip.packetLoss = 100
+        ip.testStatus = 'done'
+      }
+    })
+    tested.value = false
+    console.error('测速失败:', error)
+    ElMessage.error('测速失败，请重试')
+  } finally {
+    testing.value = false
+  }
 }
 
 async function testSingleIp(ipData) {
@@ -305,32 +326,10 @@ function selectTop5() {
     return
   }
 
-  const availableIps = sortedIpList.value.filter(ip => ip.latency > 0)
-  if (availableIps.length === 0) {
+  const selected = selectRecommendedCfIps(sortedIpList.value, MAX_SELECTED)
+  if (selected.length === 0) {
     ElMessage.warning('没有可用的 IP')
     return
-  }
-
-  const ipv4List = availableIps.filter(ip => !isIpv6(ip.ip))
-  const ipv6List = availableIps.filter(ip => isIpv6(ip.ip))
-  const selected = []
-
-  if (ipv6List.length > 0) {
-    selected.push(ipv6List[0])
-  }
-
-  for (const ip of ipv4List) {
-    if (selected.length >= MAX_SELECTED) break
-    if (!selected.find(item => item.id === ip.id)) {
-      selected.push(ip)
-    }
-  }
-
-  for (const ip of ipv6List) {
-    if (selected.length >= MAX_SELECTED) break
-    if (!selected.find(item => item.id === ip.id)) {
-      selected.push(ip)
-    }
   }
 
   selectedIds.value = selected.map(ip => ip.id)
