@@ -10,6 +10,10 @@ const xuiNodeSnapshotService = require('../services/shared/xui-node-snapshot-ser
 const xuiSyncRepository = require('../repositories/xui-sync-repository');
 const orderRepository = require('../repositories/order-repository');
 const subscriptionRepository = require('../repositories/subscription-repository');
+const {
+  computeNodeFingerprint,
+  computeServerFingerprint
+} = require('../services/shared/subscription-cache-service');
 const { INBOUND_REQUEST_TIMEOUT_MS } = xuiSync;
 
 /**
@@ -476,6 +480,248 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
 }
 
 /**
+ * 通过公共生成链构造原始模板刷新场景，并确保仓储替身在测试结束后完整恢复。
+ *
+ * @param {Object} options - 场景选项。
+ * @param {Set<number>} [options.failedIndexes] - 模拟网络失败的节点序号集合。
+ * @param {Array<Object>} [options.seedSources] - 刷新前已存在的来源缓存。
+ * @returns {Promise<Object>} 生成结果、并发统计和最终写入节点。
+ */
+async function runSourceRefreshScenario({ failedIndexes = new Set(), seedSources = [] } = {}) {
+  const repositoryMethods = [
+    'findLatestUserSubscription',
+    'findSubscriptionUserById',
+    'listEnabledUserCfIps',
+    'listOnlineServers',
+    'listNodeSnapshots',
+    'listUserNodeConfigs',
+    'listUserSubscriptionSources',
+    'upsertSubscriptionSource',
+    'saveUserSubscriptionCache'
+  ];
+  const originals = Object.fromEntries(
+    repositoryMethods.map((method) => [method, subscriptionRepository[method]])
+  );
+  const user = {
+    id: 91,
+    email: 'concurrency@example.com',
+    sub_id: 'user-sub-token',
+    enabled: 1,
+    traffic_limit: 1024
+  };
+  const servers = Array.from({ length: 25 }, (_, index) => ({
+    id: index + 1,
+    name: `source-${index + 1}`,
+    sub_url: `https://subscription.example/${index + 1}/`,
+    host: `node-${index + 1}.example.com`,
+    client_port: 443
+  }));
+  const nodeConfigs = servers.map((server, index) => ({
+    server_id: server.id,
+    inbound_id: index + 101,
+    sub_id: `node-sub-${index + 1}`,
+    remark: `direct-${index + 1}`,
+    protocol: 'vless',
+    port: 443,
+    settings: '{}',
+    stream_settings: '{}'
+  }));
+  const sources = new Map(seedSources.map((source) => [
+    `${source.server_id}:${source.inbound_id}`,
+    { ...source }
+  ]));
+  const timeoutValues = [];
+  let activeCount = 0;
+  let maxActiveCount = 0;
+  let savedNodes;
+  const logMessages = [];
+
+  subscriptionRepository.findLatestUserSubscription = async () => undefined;
+  subscriptionRepository.findSubscriptionUserById = async () => user;
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServers = async () => servers;
+  subscriptionRepository.listNodeSnapshots = async () => nodeConfigs;
+  subscriptionRepository.listUserNodeConfigs = async () => nodeConfigs;
+  subscriptionRepository.listUserSubscriptionSources = async () => Array.from(sources.values());
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => {
+    sources.set(`${source.server_id}:${source.inbound_id}`, { ...source });
+  };
+  subscriptionRepository.saveUserSubscriptionCache = async (db, userId, subId, nodes) => {
+    savedNodes = nodes;
+  };
+
+  try {
+    const result = await userSubscriptionService.generateSubscription({}, user.id, {
+      info(message) { logMessages.push(message); },
+      warn(message) { logMessages.push(message); },
+      error(message) { logMessages.push(message); }
+    }, {
+      dependencies: {
+        async fetchOriginalSubscription(subUrl, subId, options) {
+          const index = Number(subId.replace('node-sub-', ''));
+          timeoutValues.push(options.timeout);
+          activeCount += 1;
+          maxActiveCount = Math.max(maxActiveCount, activeCount);
+          try {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            if (failedIndexes.has(index)) {
+              throw new Error('模拟网络失败：敏感内容 token-uuid');
+            }
+            const link = `vless://00000000-0000-0000-0000-${String(index).padStart(12, '0')}@127.0.0.1:443?encryption=none#node`;
+            return Buffer.from(link).toString('base64');
+          } finally {
+            activeCount -= 1;
+          }
+        }
+      }
+    });
+
+    return {
+      result,
+      maxActiveCount,
+      timeoutValues,
+      sources,
+      savedNodes,
+      servers,
+      nodeConfigs,
+      logMessages
+    };
+  } finally {
+    for (const method of repositoryMethods) {
+      subscriptionRepository[method] = originals[method];
+    }
+  }
+}
+
+/**
+ * 验证 25 个模板最多并发 10 个、统一使用 5 秒超时，且两个网络失败不阻断其余节点生成。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshShouldLimitConcurrencyAndKeepPartialSuccess() {
+  const scenario = await runSourceRefreshScenario({ failedIndexes: new Set([7, 19]) });
+
+  assert.strictEqual(scenario.result, 'user-sub-token');
+  assert.strictEqual(scenario.maxActiveCount, 10);
+  assert.deepStrictEqual(new Set(scenario.timeoutValues), new Set([5000]));
+  assert.strictEqual(scenario.sources.size, 23);
+  assert.strictEqual(scenario.savedNodes.length, 23);
+  const logs = scenario.logMessages.join('\n');
+  assert(logs.includes('success=23, failed=2'));
+  assert(logs.includes('user=91, server=7, inbound=107, duration='));
+  assert(!logs.includes('token-uuid'));
+}
+
+/**
+ * 验证所有远程刷新失败且没有旧缓存时，公共生成链返回业务失败。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshShouldFailWhenNoNodeCanBeComposed() {
+  await assert.rejects(
+    runSourceRefreshScenario({
+      failedIndexes: new Set(Array.from({ length: 25 }, (_, index) => index + 1))
+    }),
+    (error) => error.code === 500 && error.message.includes('未生成任何可用节点')
+  );
+}
+
+/**
+ * 创建与当前节点和服务器匹配的有效来源缓存。
+ *
+ * @param {Object} nodeConfig - 当前用户节点配置。
+ * @param {Object} server - 当前在线服务器。
+ * @param {Object} [overrides={}] - 用于构造失效分支的字段覆盖。
+ * @returns {Object} 来源缓存记录。
+ */
+function createSourceCache(nodeConfig, server, overrides = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    user_id: 91,
+    server_id: nodeConfig.server_id,
+    inbound_id: nodeConfig.inbound_id,
+    sub_id: nodeConfig.sub_id,
+    remark: nodeConfig.remark,
+    protocol: nodeConfig.protocol,
+    original_link: 'vless://00000000-0000-0000-0000-000000000099@127.0.0.1:443?encryption=none#cached',
+    node_fingerprint: computeNodeFingerprint(nodeConfig),
+    server_fingerprint: computeServerFingerprint(server),
+    fetched_at: now,
+    updated_at: now,
+    ...overrides
+  };
+}
+
+/**
+ * 验证刷新失败时仍可复用匹配当前 sub_id 和指纹的旧模板。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshShouldReuseValidOldCache() {
+  const server = {
+    id: 1,
+    name: 'source-1',
+    sub_url: 'https://subscription.example/1/',
+    host: 'node-1.example.com',
+    client_port: 443
+  };
+  const nodeConfig = {
+    server_id: 1,
+    inbound_id: 101,
+    sub_id: 'node-sub-1',
+    remark: 'direct-1',
+    protocol: 'vless',
+    port: 443,
+    settings: '{}',
+    stream_settings: '{}'
+  };
+  const scenario = await runSourceRefreshScenario({
+    failedIndexes: new Set([1]),
+    seedSources: [createSourceCache(nodeConfig, server)]
+  });
+
+  assert.strictEqual(scenario.savedNodes.length, 25);
+  assert(scenario.savedNodes.some((node) => node.original_link.includes('000000000099')));
+}
+
+/**
+ * 验证 sub_id 或节点指纹失效的旧模板不会在刷新失败后混入最终订阅。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshShouldRejectInvalidOldCache() {
+  const server = {
+    id: 1,
+    name: 'source-1',
+    sub_url: 'https://subscription.example/1/',
+    host: 'node-1.example.com',
+    client_port: 443
+  };
+  const nodeConfig = {
+    server_id: 1,
+    inbound_id: 101,
+    sub_id: 'node-sub-1',
+    remark: 'direct-1',
+    protocol: 'vless',
+    port: 443,
+    settings: '{}',
+    stream_settings: '{}'
+  };
+
+  for (const invalidSource of [
+    createSourceCache(nodeConfig, server, { sub_id: 'stale-sub-id' }),
+    createSourceCache(nodeConfig, server, { node_fingerprint: 'stale-fingerprint' })
+  ]) {
+    const scenario = await runSourceRefreshScenario({
+      failedIndexes: new Set([1]),
+      seedSources: [invalidSource]
+    });
+    assert.strictEqual(scenario.savedNodes.length, 24);
+    assert(!scenario.savedNodes.some((node) => node.original_link.includes('000000000099')));
+  }
+}
+
+/**
  * 顺序执行订阅生成性能回归测试，任一失败都会让进程以非零状态退出。
  *
  * @returns {Promise<void>}
@@ -492,6 +738,10 @@ async function run() {
   await testSelectedServerSyncShouldLimitConcurrencyAndIsolateFailures();
   await testTargetedUserSyncShouldReuseInboundSnapshotCache();
   await testGenerateSubscriptionShouldWireTargetedSyncDependencies();
+  await testSourceRefreshShouldLimitConcurrencyAndKeepPartialSuccess();
+  await testSourceRefreshShouldFailWhenNoNodeCanBeComposed();
+  await testSourceRefreshShouldReuseValidOldCache();
+  await testSourceRefreshShouldRejectInvalidOldCache();
   console.log('subscription generation performance tests passed');
 }
 

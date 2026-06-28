@@ -10,8 +10,11 @@ const {
 const { isTimedPlan } = require('../shared/plan-type');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
 const subscriptionRepository = require('../../repositories/subscription-repository');
+const { runWithConcurrency } = require('../../utils/concurrency');
 
 const SOURCE_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60;
+const SOURCE_FETCH_CONCURRENCY = 10;
+const SOURCE_FETCH_TIMEOUT_MS = 5000;
 const CLASH_CONFIG_NAME_KEY = 'clash_config_name';
 const CLASH_PROFILE_UPDATE_INTERVAL_KEY = 'clash_profile_update_interval';
 const DEFAULT_CLASH_CONFIG_NAME = '天澜大陆';
@@ -383,54 +386,98 @@ function collectSourceCacheStatus(nodeConfigs, sourceMap, serversById) {
 }
 
 /**
- * 逐节点刷新原始订阅模板缓存。
+ * 并发刷新原始订阅模板缓存，单节点失败仅记录结果，不中断其他节点。
  *
  * @param {Object} db - 数据库代理对象
  * @param {Object} user - 用户信息
  * @param {Array} nodeConfigs - 待刷新节点配置
  * @param {Map<number,Object>} serversById - 在线服务器映射
  * @param {Object} logger - 日志实例
- * @returns {Promise<void>}
+ * @param {Object} [dependencies={}] - 可替换的外部依赖，生产环境默认使用共享拉取实现
+ * @returns {Promise<{successfulConfigs:Array,failedConfigs:Array,results:Array}>} 与输入顺序关联的刷新结果
  */
-async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, logger) {
+async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, logger, dependencies = {}) {
   const now = Math.floor(Date.now() / 1000);
-
-  for (const config of nodeConfigs) {
-    const server = serversById.get(config.server_id);
-    if (!server || !server.sub_url) {
-      logger.warn(`跳过原始订阅拉取：server=${config.server_id}, inbound=${config.inbound_id} 缺少订阅地址`);
-      continue;
-    }
-
-    try {
-      const originalContent = await fetchOriginalSubscription(server.sub_url, config.sub_id);
-      const links = parseSubscriptionContent(originalContent);
-      const originalLink = pickSingleNodeLink(links, config.protocol);
-
-      if (!originalLink) {
-        logger.warn(`未找到匹配的原始节点链接: user=${user.email}, server=${server.name}, inbound=${config.inbound_id}`);
-        continue;
+  const startedAt = Date.now();
+  const fetchSource = dependencies.fetchOriginalSubscription || fetchOriginalSubscription;
+  const results = await runWithConcurrency(
+    nodeConfigs,
+    SOURCE_FETCH_CONCURRENCY,
+    async (config) => {
+      const itemStartedAt = Date.now();
+      const server = serversById.get(config.server_id);
+      if (!server || !server.sub_url) {
+        throw new Error('服务器不存在或缺少订阅地址');
       }
 
-      await subscriptionRepository.upsertSubscriptionSource(db, {
-        user_id: user.id,
-        server_id: config.server_id,
-        inbound_id: config.inbound_id,
-        sub_id: config.sub_id,
-        remark: config.remark || '',
-        protocol: config.protocol || '',
-        original_link: originalLink,
-        node_fingerprint: computeNodeFingerprint(config),
-        server_fingerprint: computeServerFingerprint(server),
-        fetched_at: now,
-        updated_at: now
-      });
+      try {
+        const originalContent = await fetchSource(
+          server.sub_url,
+          config.sub_id,
+          { timeout: SOURCE_FETCH_TIMEOUT_MS }
+        );
+        const links = parseSubscriptionContent(originalContent);
+        const originalLink = pickSingleNodeLink(links, config.protocol);
 
-      logger.info(`刷新原始订阅模板成功: user=${user.email}, server=${server.name}, inbound=${config.inbound_id}`);
-    } catch (error) {
-      logger.warn(`刷新原始订阅模板失败: user=${user.email}, server=${server.name}, inbound=${config.inbound_id}, error=${error.message}`);
+        if (!originalLink) {
+          throw new Error('未找到协议匹配的原始节点链接');
+        }
+
+        await subscriptionRepository.upsertSubscriptionSource(db, {
+          user_id: user.id,
+          server_id: config.server_id,
+          inbound_id: config.inbound_id,
+          sub_id: config.sub_id,
+          remark: config.remark || '',
+          protocol: config.protocol || '',
+          original_link: originalLink,
+          node_fingerprint: computeNodeFingerprint(config),
+          server_fingerprint: computeServerFingerprint(server),
+          fetched_at: now,
+          updated_at: now
+        });
+
+        logger.info(`刷新原始订阅模板成功: user=${user.id}, server=${server.id}, inbound=${config.inbound_id}, duration=${Date.now() - itemStartedAt}ms`);
+        return config;
+      } catch (error) {
+        error.sourceRefreshContext = {
+          userId: user.id,
+          serverId: server.id,
+          inboundId: config.inbound_id,
+          duration: Date.now() - itemStartedAt
+        };
+        throw error;
+      }
     }
-  }
+  );
+  const successfulConfigs = [];
+  const failedConfigs = [];
+
+  results.forEach((result, index) => {
+    const config = nodeConfigs[index];
+    if (result.status === 'fulfilled') {
+      successfulConfigs.push(config);
+      return;
+    }
+
+    failedConfigs.push(config);
+    const context = result.reason?.sourceRefreshContext || {};
+    logger.warn(
+      `刷新原始订阅模板失败: user=${context.userId || user.id}, `
+      + `server=${context.serverId || config.server_id}, inbound=${context.inboundId || config.inbound_id}, `
+      + `duration=${context.duration ?? Date.now() - startedAt}ms, error=${result.reason?.name || 'Error'}`
+    );
+  });
+  logger.info(
+    `原始订阅模板刷新完成: success=${successfulConfigs.length}, failed=${failedConfigs.length}, `
+    + `total=${nodeConfigs.length}, duration=${Date.now() - startedAt}ms`
+  );
+
+  return {
+    successfulConfigs,
+    failedConfigs,
+    results
+  };
 }
 
 /**
@@ -724,7 +771,15 @@ async function generateSubscription(db, userId, logger, options = {}) {
 
   if (isFirstGeneration) {
     logger.info(`用户 ${user.email} 首次生成订阅，开始拉取全部原始订阅模板`);
-    await refreshSubscriptionSources(db, user, nodeConfigs, serversById, logger);
+    const refreshResult = await refreshSubscriptionSources(
+      db,
+      user,
+      nodeConfigs,
+      serversById,
+      logger,
+      options.dependencies
+    );
+    logger.info(`用户 ${user.email} 首次模板刷新结果: success=${refreshResult.successfulConfigs.length}, failed=${refreshResult.failedConfigs.length}`);
   } else {
     const sourceMap = mapSourcesByKey(
       await subscriptionRepository.listUserSubscriptionSources(db, userId)
@@ -756,13 +811,25 @@ async function generateSubscription(db, userId, logger, options = {}) {
         const key = buildSourceCacheKey(config.server_id, config.inbound_id);
         return cacheStatus.invalidServerIds.has(config.server_id) || cacheStatus.invalidPairKeys.has(key);
       });
-      await refreshSubscriptionSources(db, user, repairConfigs, serversById, logger);
+      const refreshResult = await refreshSubscriptionSources(
+        db,
+        user,
+        repairConfigs,
+        serversById,
+        logger,
+        options.dependencies
+      );
+      logger.info(`用户 ${user.email} 增量模板刷新结果: success=${refreshResult.successfulConfigs.length}, failed=${refreshResult.failedConfigs.length}`);
     }
   }
 
   const latestSourceMap = mapSourcesByKey(
     await subscriptionRepository.listUserSubscriptionSources(db, userId)
   );
+  const latestCacheStatus = collectSourceCacheStatus(nodeConfigs, latestSourceMap, serversById);
+  for (const invalidPair of latestCacheStatus.invalidPairs) {
+    latestSourceMap.delete(invalidPair.key);
+  }
   const allNodes = composeSubscriptionNodes(nodeConfigs, latestSourceMap, serversById, cfIps, logger);
   if (allNodes.length === 0) {
     throw createLegacyBusinessError(500, '未生成任何可用节点，请稍后重试', 500, null);
