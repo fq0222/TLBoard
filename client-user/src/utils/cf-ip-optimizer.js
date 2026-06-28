@@ -26,6 +26,39 @@ function normalizeMetric(value) {
   return Number.isFinite(metric) ? metric : Number.POSITIVE_INFINITY
 }
 
+const MAX_RECOMMENDED_PACKET_LOSS = 20
+
+/**
+ * 判断测速结果是否满足公共 CF IP 自动推荐门槛。
+ * @param {Object} item - CF IP 测速结果。
+ * @returns {boolean} 测试完成、延迟可用、丢包率在 0~20 且平均延迟为正有限数时返回 true。
+ */
+function isRecommendationCandidate(item) {
+  const packetLoss = Number(item?.packetLoss)
+  const avgLatency = Number(item?.avgLatency)
+
+  return isAvailable(item) &&
+    item?.packetLoss !== null &&
+    item?.packetLoss !== '' &&
+    Number.isFinite(packetLoss) &&
+    packetLoss >= 0 &&
+    packetLoss <= MAX_RECOMMENDED_PACKET_LOSS &&
+    item?.avgLatency !== null &&
+    item?.avgLatency !== '' &&
+    Number.isFinite(avgLatency) &&
+    avgLatency > 0
+}
+
+/**
+ * 按平均延迟比较两个合格的自动推荐候选。
+ * @param {Object} a - 第一个合格候选。
+ * @param {Object} b - 第二个合格候选。
+ * @returns {number} 平均延迟较低的候选排在前面，丢包率不参与合格区间内排序。
+ */
+function compareRecommendationCandidates(a, b) {
+  return Number(a.avgLatency) - Number(b.avgLatency)
+}
+
 /**
  * 比较两个 CF IP 测速结果。
  * @param {Object} a - 第一个测速结果。
@@ -59,7 +92,9 @@ export function compareCfIpResults(a, b) {
 export function selectRecommendedCfIps(results, limit = 5) {
   if (limit <= 0) return []
 
-  const available = [...results].sort(compareCfIpResults).filter(isAvailable)
+  const available = results
+    .filter(isRecommendationCandidate)
+    .sort(compareRecommendationCandidates)
   const ipv4Results = available.filter(item => !isIpv6(item.ip))
   const ipv6Results = available.filter(item => isIpv6(item.ip))
   const selected = []

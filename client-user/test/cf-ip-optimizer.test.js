@@ -116,7 +116,27 @@ test('selectRecommendedCfIps 无 IPv6 时按排序选择 IPv4', () => {
     result(3, '8.8.8.8', { packetLoss: 0, avgLatency: 50 })
   ]
 
-  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [3, 2, 1])
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [3, 1, 2])
+})
+
+test('selectRecommendedCfIps 接受 20% 丢包率并排除 21% 丢包率', () => {
+  const items = [
+    result(1, '1.1.1.1', { packetLoss: 20, avgLatency: 100 }),
+    result(2, '1.0.0.1', { packetLoss: 21, avgLatency: 10 })
+  ]
+
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [1])
+})
+
+test('selectRecommendedCfIps 排除平均延迟无效的结果', () => {
+  const items = [
+    result(1, '1.1.1.1', { avgLatency: 0 }),
+    result(2, '1.0.0.1', { avgLatency: Infinity }),
+    result(3, '8.8.8.8', { avgLatency: undefined }),
+    result(4, '8.8.4.4', { avgLatency: 80 })
+  ]
+
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [4])
 })
 
 test('selectRecommendedCfIps 排除不可用项且不足五个时仅返回可用项', () => {

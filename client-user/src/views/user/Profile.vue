@@ -418,6 +418,7 @@ import {
   CF_IP_TEST_INTERVAL as TEST_INTERVAL,
   CF_IP_TEST_TIMEOUT as TEST_TIMEOUT
 } from '@/utils/cf-ip-test-config'
+import { selectRecommendedCfIps } from '@/utils/cf-ip-optimizer'
 
 const userStore = useUserStore()
 const router = useRouter()
@@ -987,7 +988,8 @@ async function startOptimize() {
       latency: -1,
       successTimes: 0,
       testedTimes: 0,
-      testResults: []
+      testResults: [],
+      testStatus: 'pending'
     }))
 
     await Promise.all(ipTestData.map(async (ipData) => {
@@ -1011,34 +1013,9 @@ async function startOptimize() {
     optimizeProgress.value = 85
     optimizeStatusText.value = '正在匹配最佳线路...'
 
-    const availableIps = ipTestData
-      .filter(item => item.latency > 0)
-      .sort((a, b) => a.latency - b.latency)
-
-    if (availableIps.length === 0) {
-      throw new Error('所有 IP 测试超时，请检查网络后重试')
-    }
-
-    const ipv4List = availableIps.filter(item => !item.ip.includes(':'))
-    const ipv6List = availableIps.filter(item => item.ip.includes(':'))
-    const selectedIps = []
-
-    if (ipv6List.length > 0) {
-      selectedIps.push(ipv6List[0])
-    }
-
-    for (const ip of ipv4List) {
-      if (selectedIps.length >= 5) break
-      if (!selectedIps.find(selected => selected.id === ip.id)) {
-        selectedIps.push(ip)
-      }
-    }
-
-    for (const ip of ipv6List) {
-      if (selectedIps.length >= 5) break
-      if (!selectedIps.find(selected => selected.id === ip.id)) {
-        selectedIps.push(ip)
-      }
+    const selectedIps = selectRecommendedCfIps(ipTestData)
+    if (selectedIps.length === 0) {
+      throw new Error('没有丢包率不高于 20% 的可用线路')
     }
 
     optimizeProgress.value = 95
@@ -1087,6 +1064,7 @@ async function testSingleIp(ipData) {
       ipData.testedTimes += 1
     }
   }
+  ipData.testStatus = 'done'
 }
 
 function pingIp(ip) {
