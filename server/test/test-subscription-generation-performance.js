@@ -3,10 +3,8 @@ const http = require('http');
 const sharedSubscriptionService = require('../services/shared/subscription-service');
 const XuiApiClientV302 = require('../integrations/xui/xui-api-client-v302');
 const XuiService = require('../integrations/xui/xui-service');
-const {
-  INBOUND_REQUEST_TIMEOUT_MS,
-  normalizePositiveTimeout
-} = require('../integrations/xui/xui-sync');
+const xuiSync = require('../integrations/xui/xui-sync');
+const { INBOUND_REQUEST_TIMEOUT_MS } = xuiSync;
 
 /**
  * 启动一个接受请求但永不响应的本地 HTTP 服务，用于验证请求超时会主动取消连接。
@@ -161,15 +159,41 @@ function testInboundRequestTimeoutConstant() {
 }
 
 /**
- * 验证 inbound 单次超时仅接受有限正数，其他类型和值均回退到默认值。
+ * 验证 inbound 快照公共接口仅透传有限正数，非法超时均回退到默认值。
  *
- * @returns {void}
+ * @returns {Promise<void>}
  */
-function testInboundRequestTimeoutNormalization() {
-  assert.strictEqual(normalizePositiveTimeout(2500), 2500);
-  assert.strictEqual(normalizePositiveTimeout(-1), 10000);
-  assert.strictEqual(normalizePositiveTimeout('2500'), 10000);
-  assert.strictEqual(normalizePositiveTimeout(Infinity), 10000);
+async function testInboundRequestTimeoutNormalization() {
+  const originalGetInstance = XuiService.getInstance;
+  const receivedTimeouts = [];
+  XuiService.getInstance = async () => ({
+    async getInbounds(options) {
+      receivedTimeouts.push(options.timeout);
+      return { success: true, data: [] };
+    }
+  });
+
+  try {
+    const server = {
+      id: 1,
+      api_url: 'http://127.0.0.1',
+      api_token: 'token',
+      panel_version: '3.0.2'
+    };
+    await xuiSync.getServerInboundsSnapshot(server, { timeout: 2500 });
+    await xuiSync.getServerInboundsSnapshot(server, { timeout: -1 });
+    await xuiSync.getServerInboundsSnapshot(server, { timeout: '2500' });
+    await xuiSync.getServerInboundsSnapshot(server, { timeout: Infinity });
+
+    assert.deepStrictEqual(receivedTimeouts, [2500, 10000, 10000, 10000]);
+    assert.strictEqual(
+      xuiSync.normalizePositiveTimeout,
+      undefined,
+      '超时归一化函数应保持模块私有'
+    );
+  } finally {
+    XuiService.getInstance = originalGetInstance;
+  }
 }
 
 /**
@@ -183,7 +207,7 @@ async function run() {
   await testApiClientShouldWriteTimeoutToAxiosConfig();
   await testXuiServiceShouldForwardInboundOptions();
   testInboundRequestTimeoutConstant();
-  testInboundRequestTimeoutNormalization();
+  await testInboundRequestTimeoutNormalization();
   console.log('subscription generation performance tests passed');
 }
 

@@ -17,11 +17,12 @@ const INBOUND_REQUEST_TIMEOUT_MS = 10000;
  * 归一化单次远程请求超时，仅允许有限正数，非法值回退到默认值。
  *
  * @param {*} timeout - 调用方传入的超时值。
- * @param {number} [fallback=INBOUND_REQUEST_TIMEOUT_MS] - 非法输入使用的默认超时。
  * @returns {number} 可安全传给 HTTP 客户端的毫秒数。
  */
-function normalizePositiveTimeout(timeout, fallback = INBOUND_REQUEST_TIMEOUT_MS) {
-  return Number.isFinite(timeout) && timeout > 0 ? timeout : fallback;
+function normalizePositiveTimeout(timeout) {
+  return Number.isFinite(timeout) && timeout > 0
+    ? timeout
+    : INBOUND_REQUEST_TIMEOUT_MS;
 }
 
 /**
@@ -154,7 +155,6 @@ async function syncAllServers(db, options = {}) {
 module.exports = {
   INBOUND_REQUEST_TIMEOUT_MS,
   INBOUND_SNAPSHOT_TTL_MS,
-  normalizePositiveTimeout,
   getServerInboundsSnapshot,
   syncServerNodes,
   syncAllServers
