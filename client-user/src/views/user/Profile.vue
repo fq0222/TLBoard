@@ -124,12 +124,8 @@
               :disabled="actionBusy"
               @click="startOptimize"
             >
-              <div class="step-action-index">1</div>
-              <div class="step-action-copy">
-                <div class="step-action-name">{{ cfOptimized ? '重新优选 CF IP' : '一键优选 CF IP' }}</div>
-                <div class="step-action-desc">自动测试并保存当前账号的更优 Cloudflare 节点组合。</div>
-              </div>
-              <el-icon class="step-action-icon"><MagicStick /></el-icon>
+              <span class="step-action-index">1</span>
+              <span class="step-action-name">{{ cfOptimized ? '重新优选 CF IP' : '一键优选 CF IP' }}</span>
             </button>
 
             <button
@@ -139,12 +135,8 @@
               :disabled="actionBusy"
               @click="generateSubscription"
             >
-              <div class="step-action-index">2</div>
-              <div class="step-action-copy">
-                <div class="step-action-name">{{ generatingSubscription ? '生成中...' : '生成订阅链接' }}</div>
-                <div class="step-action-desc">同步节点信息后生成通用订阅和 Clash 订阅链接。</div>
-              </div>
-              <el-icon class="step-action-icon"><Link /></el-icon>
+              <span class="step-action-index">2</span>
+              <span class="step-action-name">{{ generatingSubscription ? '生成中...' : '生成订阅链接' }}</span>
             </button>
           </div>
 
@@ -407,9 +399,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   CopyDocument,
   InfoFilled,
-  Link,
   Loading,
-  MagicStick,
   Promotion,
   Refresh,
   Service
@@ -1548,137 +1538,96 @@ onBeforeUnmount(() => {
 }
 
 .step-action-card {
+  position: relative;
   width: 100%;
+  min-height: 48px;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 20px 22px;
-  border-radius: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  text-align: left;
-  cursor: pointer;
-  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease, background 0.22s ease;
+  justify-content: center;
+  padding: 10px 52px;
+  border: 1px solid;
+  border-radius: 14px;
   appearance: none;
-  position: relative;
   overflow: hidden;
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
 }
 
-.step-action-card::before {
-  content: '';
-  position: absolute;
-  inset: 1px;
-  border-radius: 21px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.18));
-  pointer-events: none;
+.step-action-card:hover:not(:disabled) {
+  transform: translateY(-1px);
 }
 
-.step-action-card::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.72), transparent 34%);
-  opacity: 0.9;
-  pointer-events: none;
+.step-action-card:active:not(:disabled) {
+  transform: scale(0.985);
 }
 
-.step-action-card > * {
-  position: relative;
-  z-index: 1;
-}
-
-.step-action-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 20px 38px rgba(15, 23, 42, 0.14);
+.step-action-card:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.24);
+  outline-offset: 2px;
 }
 
 .step-action-card.disabled,
 .step-action-card:disabled {
-  opacity: 0.68;
+  opacity: 0.56;
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
 }
 
 .optimize-action {
-  background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), transparent 30%),
-    linear-gradient(135deg, rgba(232, 243, 255, 0.92) 0%, rgba(214, 231, 255, 0.78) 100%);
-  border-color: rgba(147, 197, 253, 0.72);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 12px 28px rgba(59, 130, 246, 0.14);
+  color: #155bd7;
+  border-color: #8bbcff;
+  border-bottom: 3px solid #2563eb;
+  background: linear-gradient(180deg, #f3f7ff 0%, #e8f1ff 100%);
+}
+
+.optimize-action:hover:not(:disabled) {
+  background: linear-gradient(180deg, #eaf2ff 0%, #dceaff 100%);
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.12);
 }
 
 .generate-action {
-  background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), transparent 30%),
-    linear-gradient(135deg, rgba(234, 255, 244, 0.92) 0%, rgba(214, 248, 226, 0.78) 100%);
-  border-color: rgba(134, 239, 172, 0.72);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 12px 28px rgba(34, 197, 94, 0.14);
+  color: #07833f;
+  border-color: #81dda4;
+  border-bottom: 3px solid #16a34a;
+  background: linear-gradient(180deg, #f2fff7 0%, #e7f9ee 100%);
+}
+
+.generate-action:hover:not(:disabled) {
+  background: linear-gradient(180deg, #e9fbf0 0%, #d9f4e4 100%);
+  box-shadow: 0 6px 14px rgba(22, 163, 74, 0.12);
 }
 
 .step-action-index {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  color: #fff;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.optimize-action .step-action-index {
-  background: #2563eb;
-}
-
-.generate-action .step-action-index {
-  background: #16a34a;
-}
-
-.step-action-copy {
-  flex: 1;
-  min-width: 0;
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  min-width: 24px;
+  padding-right: 14px;
+  border-right: 1px solid currentColor;
+  transform: translateY(-50%);
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 24px;
 }
 
 .step-action-name {
-  color: #0f172a;
+  color: currentColor;
+  font-size: 16px;
   font-weight: 700;
-  font-size: 18px;
+  line-height: 1.25;
+  text-align: center;
   letter-spacing: 0.01em;
 }
 
-.step-action-desc {
-  margin-top: 6px;
-  color: #475569;
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.step-action-icon {
-  width: 42px;
-  height: 42px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.58);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
-  font-size: 18px;
-  flex-shrink: 0;
-}
-
-.optimize-action .step-action-icon {
-  color: #2563eb;
-}
-
-.generate-action .step-action-icon {
-  color: #16a34a;
+@media (prefers-reduced-motion: reduce) {
+  .step-action-card {
+    transition: none;
+  }
 }
 
 .subscription-links {
@@ -2354,20 +2303,11 @@ onBeforeUnmount(() => {
   }
 
   .step-action-card {
-    padding: 18px;
-    border-radius: 20px;
-  }
-
-  .step-action-card::before {
-    border-radius: 19px;
+    padding: 10px 48px;
   }
 
   .step-action-name {
-    font-size: 17px;
-  }
-
-  .step-action-desc {
-    font-size: 13px;
+    font-size: 16px;
   }
 
   .announcement-head,
