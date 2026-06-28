@@ -889,7 +889,7 @@ async function testMissingSourceUrlShouldLogItemDuration() {
 
 /**
  * 验证首次模板失败仅按服务器做一轮定向修复，并复用同一 inbound 快照缓存。
- * 核心分支：服务器 2 的节点首次及重试均失败，成功节点不重复拉取，且不存在第三次拉取或第二轮修复。
+ * 核心分支：服务器 2 的失败节点重试成功；修复后新增 inbound 不在本轮失败键集合中，因此不得拉取。
  *
  * @returns {Promise<void>}
  */
@@ -928,12 +928,20 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
     settings: '{}',
     stream_settings: '{}'
   }));
+  const addedNodeConfig = {
+    ...nodeConfigs[1],
+    inbound_id: 21,
+    sub_id: 'private-sub-new-inbound',
+    uuid: 'private-uuid-new-inbound',
+    remark: 'direct-new-inbound'
+  };
   const sources = new Map();
   const fetchCounts = new Map();
   const repairCalls = [];
   const userSyncPlans = [];
   const logs = [];
   const inboundSnapshotCache = new Map();
+  let repairUserSynced = false;
   let savedNodes;
 
   subscriptionRepository.findLatestUserSubscription = async () => undefined;
@@ -947,7 +955,9 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
   subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
   subscriptionRepository.listOnlineServers = async () => servers;
   subscriptionRepository.listNodeSnapshots = async () => nodeConfigs;
-  subscriptionRepository.listUserNodeConfigs = async () => nodeConfigs;
+  subscriptionRepository.listUserNodeConfigs = async () => (
+    repairUserSynced ? [...nodeConfigs, addedNodeConfig] : nodeConfigs
+  );
   subscriptionRepository.listUserSubscriptionSources = async () => Array.from(sources.values());
   subscriptionRepository.upsertSubscriptionSource = async (db, source) => {
     sources.set(`${source.server_id}:${source.inbound_id}`, { ...source });
@@ -965,11 +975,13 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
       inboundSnapshotCache,
       dependencies: {
         async fetchOriginalSubscription(subUrl, subId) {
-          const serverId = Number(subId.split('-').pop());
-          fetchCounts.set(serverId, (fetchCounts.get(serverId) || 0) + 1);
-          if (serverId === 2) {
+          fetchCounts.set(subId, (fetchCounts.get(subId) || 0) + 1);
+          if (subId === 'private-sub-2' && fetchCounts.get(subId) === 1) {
             throw new Error('sensitive-error private-user-token private-uuid-2 api-token-2');
           }
+          const serverId = subId === 'private-sub-new-inbound'
+            ? 2
+            : Number(subId.split('-').pop());
           return Buffer.from(
             `vless://00000000-0000-0000-0000-${String(serverId).padStart(12, '0')}@127.0.0.1:443?encryption=none#node`
           ).toString('base64');
@@ -989,6 +1001,7 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
         },
         async syncUserToXuiServers(db, user, plan) {
           userSyncPlans.push(plan);
+          repairUserSynced = true;
           return { success: true, successCount: 1, failureCount: 0 };
         }
       }
@@ -999,8 +1012,13 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
     assert.strictEqual(repairCalls[0].cache, inboundSnapshotCache);
     assert.deepStrictEqual(userSyncPlans.map((plan) => plan.serverIds), [[2]]);
     assert.strictEqual(userSyncPlans[0].inboundSnapshotCache, inboundSnapshotCache);
-    assert.deepStrictEqual(Object.fromEntries(fetchCounts), { 1: 1, 2: 2, 3: 1 });
-    assert.strictEqual(savedNodes.length, 2);
+    assert.deepStrictEqual(Object.fromEntries(fetchCounts), {
+      'private-sub-1': 1,
+      'private-sub-2': 2,
+      'private-sub-3': 1
+    });
+    assert.strictEqual(fetchCounts.get('private-sub-new-inbound') || 0, 0);
+    assert.strictEqual(savedNodes.length, 3);
 
     const summary = logs.find((message) => message.includes('订阅生成汇总:'));
     assert(summary);
@@ -1010,10 +1028,10 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
       'remoteServers=0',
       'inboundSuccess=0',
       'inboundFailed=1',
-      'sourceSuccess=2',
-      'sourceFailed=2',
+      'sourceSuccess=3',
+      'sourceFailed=0',
       'repairServers=1',
-      'nodes=2',
+      'nodes=3',
       'duration='
     ]) {
       assert(summary.includes(field), `汇总日志缺少字段 ${field}`);

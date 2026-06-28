@@ -843,8 +843,6 @@ async function generateSubscription(db, userId, logger, options = {}) {
       logger,
       options.dependencies
     );
-    summary.sourceSuccess += firstRefreshResult.successfulConfigs.length;
-    summary.sourceFailed += firstRefreshResult.failedConfigs.length;
     logger.info(`用户 ${user.id} 首次模板刷新结果: success=${firstRefreshResult.successfulConfigs.length}, failed=${firstRefreshResult.failedConfigs.length}`);
 
     if (firstRefreshResult.failedConfigs.length > 0) {
@@ -877,18 +875,27 @@ async function generateSubscription(db, userId, logger, options = {}) {
           logger,
           options
         );
-        const successfulKeys = new Set(
-          firstRefreshResult.successfulConfigs.map(
+        const failedKeys = new Set(
+          firstRefreshResult.failedConfigs.map(
             (config) => buildSourceCacheKey(config.server_id, config.inbound_id)
           )
         );
         const retryConfigs = latestRepairConfigs.filter(
-          (config) => !successfulKeys.has(buildSourceCacheKey(config.server_id, config.inbound_id))
+          (config) => failedKeys.has(buildSourceCacheKey(config.server_id, config.inbound_id))
         );
         const repairIds = new Set(repairServers.map((server) => server.id));
+        const originalRepairKeys = new Set(
+          nodeConfigs
+            .filter((config) => repairIds.has(config.server_id))
+            .map((config) => buildSourceCacheKey(config.server_id, config.inbound_id))
+        );
         nodeConfigs = [
           ...nodeConfigs.filter((config) => !repairIds.has(config.server_id)),
-          ...latestRepairConfigs
+          ...latestRepairConfigs.filter(
+            (config) => originalRepairKeys.has(
+              buildSourceCacheKey(config.server_id, config.inbound_id)
+            )
+          )
         ];
 
         if (retryConfigs.length > 0) {
@@ -900,8 +907,6 @@ async function generateSubscription(db, userId, logger, options = {}) {
             logger,
             options.dependencies
           );
-          summary.sourceSuccess += retryResult.successfulConfigs.length;
-          summary.sourceFailed += retryResult.failedConfigs.length;
         }
       }
     }
@@ -955,6 +960,13 @@ async function generateSubscription(db, userId, logger, options = {}) {
   for (const invalidPair of latestCacheStatus.invalidPairs) {
     latestSourceMap.delete(invalidPair.key);
   }
+  const finalSourceKeys = new Set(
+    nodeConfigs.map((config) => buildSourceCacheKey(config.server_id, config.inbound_id))
+  );
+  summary.sourceSuccess = Array.from(finalSourceKeys)
+    .filter((key) => latestSourceMap.has(key))
+    .length;
+  summary.sourceFailed = finalSourceKeys.size - summary.sourceSuccess;
   const allNodes = composeSubscriptionNodes(nodeConfigs, latestSourceMap, serversById, cfIps, logger);
   summary.nodes = allNodes.length;
   logger.info(
