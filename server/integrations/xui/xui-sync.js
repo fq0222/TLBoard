@@ -14,6 +14,17 @@ const INBOUND_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
 const INBOUND_REQUEST_TIMEOUT_MS = 10000;
 
 /**
+ * 归一化单次远程请求超时，仅允许有限正数，非法值回退到默认值。
+ *
+ * @param {*} timeout - 调用方传入的超时值。
+ * @param {number} [fallback=INBOUND_REQUEST_TIMEOUT_MS] - 非法输入使用的默认超时。
+ * @returns {number} 可安全传给 HTTP 客户端的毫秒数。
+ */
+function normalizePositiveTimeout(timeout, fallback = INBOUND_REQUEST_TIMEOUT_MS) {
+  return Number.isFinite(timeout) && timeout > 0 ? timeout : fallback;
+}
+
+/**
  * 获取单台服务器的 inbound 快照，允许批量任务复用同一轮已获取的数据。
  *
  * @param {Object} server - 服务器信息，必须包含 id/api_url/api_token。
@@ -41,7 +52,7 @@ async function getServerInboundsSnapshot(server, options = {}) {
     apiVersion: server.panel_version || '3.0.2'
   });
   const inboundsResult = await xuiService.getInbounds({
-    timeout: options.timeout || INBOUND_REQUEST_TIMEOUT_MS
+    timeout: normalizePositiveTimeout(options.timeout)
   });
 
   if (cache && inboundsResult.success) {
@@ -143,6 +154,7 @@ async function syncAllServers(db, options = {}) {
 module.exports = {
   INBOUND_REQUEST_TIMEOUT_MS,
   INBOUND_SNAPSHOT_TTL_MS,
+  normalizePositiveTimeout,
   getServerInboundsSnapshot,
   syncServerNodes,
   syncAllServers

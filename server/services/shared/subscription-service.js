@@ -47,24 +47,110 @@ async function fetchOriginalSubscription(subUrl, subId, options = {}) {
     const timeout = Number.isFinite(options.timeout) && options.timeout > 0
       ? options.timeout
       : SUBSCRIPTION_FETCH_TIMEOUT;
+    let request;
+    let response;
+    let settled = false;
 
-    const request = client.get(fullUrl, (res) => {
+    /**
+     * 清理本次请求注册的事件，避免完成后残留监听器。
+     *
+     * @returns {void}
+     */
+    function cleanup() {
+      request?.removeListener('error', handleRequestError);
+      request?.removeListener('timeout', handleRequestTimeout);
+      if (response) {
+        response.removeListener('data', handleResponseData);
+        response.removeListener('end', handleResponseEnd);
+        response.removeListener('aborted', handleResponseAborted);
+        response.removeListener('error', handleResponseError);
+      }
+    }
+
+    /**
+     * 统一完成 Promise；重复事件到达时直接忽略。
+     *
+     * @param {Error|null} error - 失败原因，空值表示成功。
+     * @param {string} [value] - 成功时的响应正文。
+     * @returns {void}
+     */
+    function settle(error, value) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(value);
+    }
+
+    let data = '';
+
+    /**
+     * 累加响应正文片段。
+     *
+     * @param {Buffer|string} chunk - 本次收到的正文片段。
+     * @returns {void}
+     */
+    function handleResponseData(chunk) {
+      data += chunk;
+    }
+
+    /** @returns {void} 正常结束时返回完整正文。 */
+    function handleResponseEnd() {
+      settle(null, data);
+    }
+
+    /** @returns {void} 响应提前中断时拒绝请求。 */
+    function handleResponseAborted() {
+      settle(new Error('获取原始订阅失败：响应在完成前中断'));
+    }
+
+    /**
+     * 响应流错误时拒绝请求。
+     *
+     * @param {Error} error - 响应流错误。
+     * @returns {void}
+     */
+    function handleResponseError(error) {
+      settle(error);
+    }
+
+    /**
+     * 底层请求错误时拒绝请求。
+     *
+     * @param {Error} error - 请求错误。
+     * @returns {void}
+     */
+    function handleRequestError(error) {
+      settle(error);
+    }
+
+    /** @returns {void} 请求超时时销毁底层连接并携带明确的毫秒数。 */
+    function handleRequestTimeout() {
+      request.destroy(new Error(`获取原始订阅超时: ${timeout}ms`));
+    }
+
+    request = client.get(fullUrl, (res) => {
+      response = res;
       if (res.statusCode !== 200) {
         res.resume();
-        reject(new Error(`获取原始订阅失败，HTTP 状态码: ${res.statusCode}`));
+        settle(new Error(`获取原始订阅失败，HTTP 状态码: ${res.statusCode}`));
         return;
       }
 
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve(data));
+      res.on('data', handleResponseData);
+      res.on('end', handleResponseEnd);
+      res.on('aborted', handleResponseAborted);
+      res.on('error', handleResponseError);
     });
 
-    request.setTimeout(timeout, () => {
-      request.destroy(new Error(`获取原始订阅超时: ${timeout}ms`));
-    });
+    request.setTimeout(timeout, handleRequestTimeout);
 
-    request.on('error', reject);
+    request.on('error', handleRequestError);
   });
 }
 
