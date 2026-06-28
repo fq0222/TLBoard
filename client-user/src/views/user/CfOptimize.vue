@@ -135,10 +135,12 @@ import { computed, onMounted, ref } from 'vue'
 import { Check, Connection, Refresh, Trophy } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import {
+  CF_IP_TEST_COUNT as TEST_COUNT,
+  CF_IP_TEST_INTERVAL as TEST_INTERVAL,
+  CF_IP_TEST_TIMEOUT as TEST_TIMEOUT
+} from '@/utils/cf-ip-test-config'
 
-const TEST_COUNT = 3
-const TEST_TIMEOUT = 5000
-const TEST_INTERVAL = 200
 const MAX_SELECTED = 5
 
 const ipList = ref([])

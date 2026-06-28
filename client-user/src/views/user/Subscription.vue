@@ -187,6 +187,11 @@ import { ElMessage } from 'element-plus'
 import { Link, Loading, MagicStick } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import api from '@/api'
+import {
+  CF_IP_TEST_COUNT as TEST_COUNT,
+  CF_IP_TEST_INTERVAL as TEST_INTERVAL,
+  CF_IP_TEST_TIMEOUT as TEST_TIMEOUT
+} from '@/utils/cf-ip-test-config'
 
 const userStore = useUserStore()
 
@@ -198,10 +203,6 @@ const optimizing = ref(false)
 const optimizeProgress = ref(0)
 const optimizeStatusText = ref('')
 const windowWidth = ref(window.innerWidth)
-
-const TEST_COUNT = 3
-const TEST_TIMEOUT = 5000
-const TEST_INTERVAL = 200
 
 const hasNodes = computed(() => Array.isArray(subscription.value.nodes) && subscription.value.nodes.length > 0)
 const actionBusy = computed(() => optimizing.value || generatingSubscription.value)

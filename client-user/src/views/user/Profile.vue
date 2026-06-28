@@ -423,6 +423,11 @@ import {
   getOnboardingGuideSteps,
   shouldCompleteOnboardingOnRouteLeave
 } from '@/utils/onboarding-guide'
+import {
+  CF_IP_TEST_COUNT as TEST_COUNT,
+  CF_IP_TEST_INTERVAL as TEST_INTERVAL,
+  CF_IP_TEST_TIMEOUT as TEST_TIMEOUT
+} from '@/utils/cf-ip-test-config'
 
 const userStore = useUserStore()
 const router = useRouter()
@@ -448,9 +453,6 @@ const onboardingTourVisible = ref(false)
 const onboardingTourCurrent = ref(0)
 const onboardingCompletionSaving = ref(false)
 
-const TEST_COUNT = 3
-const TEST_TIMEOUT = 5000
-const TEST_INTERVAL = 200
 const MOBILE_ONBOARDING_TARGET_CLASS = 'mobile-onboarding-target'
 const MOBILE_ONBOARDING_TARGET_HOST_CLASS = 'mobile-onboarding-target-host'
 

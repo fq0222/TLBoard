@@ -37,6 +37,10 @@ npx vite build --minify esbuild  # 绕过 terser 的构建方式
 
 ## 工作流规范
 
+### Git 分支约束
+- 未经用户明确指示，禁止创建或切换新分支、禁止创建 Git worktree
+- 默认直接在用户指定的当前分支上修改；如果用户指定 `main`，必须在 `main` 上实施
+
 ### 需求处理
 用户提出的需求优先使用 superpowers 插件处理，包括：
 - 新功能开发：使用 `brainstorming` → `writing-plans` → `subagent-driven-development` 流程
