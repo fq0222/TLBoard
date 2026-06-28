@@ -36,12 +36,17 @@ function getProtocolAliases(protocol) {
  * 从 3X-UI 获取原始订阅内容
  * @param {string} subUrl - 订阅地址
  * @param {string} subId - 订阅 token
+ * @param {Object} [options={}] - 单次请求选项
+ * @param {number} [options.timeout=15000] - 有限正数时覆盖默认超时；超时会销毁请求并拒绝
  * @returns {Promise<string>} 原始订阅内容
  */
-async function fetchOriginalSubscription(subUrl, subId) {
+async function fetchOriginalSubscription(subUrl, subId, options = {}) {
   return new Promise((resolve, reject) => {
     const fullUrl = `${subUrl}${subId}`;
     const client = fullUrl.startsWith('https') ? https : http;
+    const timeout = Number.isFinite(options.timeout) && options.timeout > 0
+      ? options.timeout
+      : SUBSCRIPTION_FETCH_TIMEOUT;
 
     const request = client.get(fullUrl, (res) => {
       if (res.statusCode !== 200) {
@@ -55,8 +60,8 @@ async function fetchOriginalSubscription(subUrl, subId) {
       res.on('end', () => resolve(data));
     });
 
-    request.setTimeout(SUBSCRIPTION_FETCH_TIMEOUT, () => {
-      request.destroy(new Error(`获取原始订阅超时: ${SUBSCRIPTION_FETCH_TIMEOUT}ms`));
+    request.setTimeout(timeout, () => {
+      request.destroy(new Error(`获取原始订阅超时: ${timeout}ms`));
     });
 
     request.on('error', reject);

@@ -79,15 +79,18 @@ class XuiApiClientV302 {
    * @param {string} method - HTTP 方法。
    * @param {string} path - 请求路径。
    * @param {Object} [data] - 请求体。
+   * @param {Object} [options={}] - 单次请求选项。
+   * @param {number} [options.timeout] - Axios 单次请求超时；省略时沿用客户端默认值。
    * @returns {Promise<Object>} 接口响应数据。
    */
-  async request(method, path, data) {
+  async request(method, path, data, options = {}) {
     xuiActivityTracker.beginRequest();
     try {
       const response = await this.api.request({
         method,
         url: path,
-        ...(data !== undefined ? { data } : {})
+        ...(data !== undefined ? { data } : {}),
+        ...(options.timeout !== undefined ? { timeout: options.timeout } : {})
       });
       return response.data;
     } finally {
@@ -114,8 +117,14 @@ class XuiApiClientV302 {
     }
   }
 
-  getInbounds() {
-    return this.request('get', `${this.basePath}/list`);
+  /**
+   * 获取全部 inbound，并允许调用方覆盖本次请求超时。
+   *
+   * @param {Object} [options={}] - 单次请求选项，失败时由 Axios 异常链路处理。
+   * @returns {Promise<Object>} 面板原始响应。
+   */
+  getInbounds(options = {}) {
+    return this.request('get', `${this.basePath}/list`, undefined, options);
   }
 
   getInbound(id) {

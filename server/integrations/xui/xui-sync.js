@@ -11,6 +11,7 @@ const xuiNodeSnapshotService = require('../../services/shared/xui-node-snapshot-
 
 const logger = createLogger('XUI-SYNC');
 const INBOUND_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
+const INBOUND_REQUEST_TIMEOUT_MS = 10000;
 
 /**
  * 获取单台服务器的 inbound 快照，允许批量任务复用同一轮已获取的数据。
@@ -18,6 +19,7 @@ const INBOUND_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
  * @param {Object} server - 服务器信息，必须包含 id/api_url/api_token。
  * @param {Object} [options={}] - 获取选项。
  * @param {Map<string,Object>} [options.inboundSnapshotCache] - 批量任务级缓存，key 为 server.id。
+ * @param {number} [options.timeout=10000] - 单次 inbound 请求超时；未提供时使用 10 秒。
  * @returns {Promise<Object>} 3X-UI getInbounds 的标准结果；仅成功结果会写入缓存。
  */
 async function getServerInboundsSnapshot(server, options = {}) {
@@ -38,7 +40,9 @@ async function getServerInboundsSnapshot(server, options = {}) {
   const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
     apiVersion: server.panel_version || '3.0.2'
   });
-  const inboundsResult = await xuiService.getInbounds();
+  const inboundsResult = await xuiService.getInbounds({
+    timeout: options.timeout || INBOUND_REQUEST_TIMEOUT_MS
+  });
 
   if (cache && inboundsResult.success) {
     cache.set(cacheKey, {
@@ -137,6 +141,7 @@ async function syncAllServers(db, options = {}) {
 }
 
 module.exports = {
+  INBOUND_REQUEST_TIMEOUT_MS,
   INBOUND_SNAPSHOT_TTL_MS,
   getServerInboundsSnapshot,
   syncServerNodes,

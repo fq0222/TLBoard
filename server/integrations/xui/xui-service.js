@@ -202,15 +202,16 @@ class XuiService {
 
   /**
    * 获取所有 inbounds（节点）
-   * @returns {Promise<Object>} inbounds 列表
+   * @param {Object} [options={}] - 单次请求选项；失败时记录日志并返回标准失败结果
+   * @returns {Promise<Object>} 标准化的 inbounds 列表
    */
-  async getInbounds() {
+  async getInbounds(options = {}) {
     try {
       if (!this.client) {
         await this.init();
       }
 
-      const response = await this.client.getInbounds();
+      const response = await this.client.getInbounds(options);
       
       if (response.success) {
         logger.info(`获取 inbounds 成功，共 ${response.obj ? response.obj.length : 0} 个`);
