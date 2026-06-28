@@ -277,6 +277,7 @@ async function ensureNodeSnapshotsAvailable(db, servers, logger, options = {}) {
  * @param {Object} logger - 日志实例
  * @param {Object} [options={}] - 生成选项
  * @param {Map<string,Object>} [options.inboundSnapshotCache] - 批量任务级 inbound 快照缓存
+ * @param {Object} [options.dependencies] - 测试或特殊编排使用的同步依赖覆盖；省略时使用生产默认实现
  * @returns {Promise<Array>} 在线节点配置列表
  */
 async function ensureUserNodeConfigsComplete(db, user, servers, logger, options = {}) {
@@ -308,7 +309,8 @@ async function ensureUserNodeConfigsComplete(db, user, servers, logger, options 
   logger.info(`用户 ${user.email} 缺少 ${missingPairs.length} 个节点配置，尝试同步用户到 3X-UI`);
   const { totalTrafficLimit } = getUserTrafficEntitlement(user);
   const serverIds = [...new Set(missingPairs.map((snapshot) => snapshot.server_id))];
-  const syncResult = await syncUserToXuiServers(db, user, {
+  const syncUser = options.dependencies?.syncUserToXuiServers || syncUserToXuiServers;
+  const syncResult = await syncUser(db, user, {
     traffic_limit: totalTrafficLimit,
     serverIds,
     inboundSnapshotCache: options.inboundSnapshotCache
@@ -675,6 +677,7 @@ async function appendAnnouncementVirtualNodes(db, nodes) {
  * @param {Object} logger - 日志实例
  * @param {Object} [options={}] - 生成选项
  * @param {Map<string,Object>} [options.inboundSnapshotCache] - 批量任务级 inbound 快照缓存
+ * @param {Object} [options.dependencies] - 同步依赖覆盖；生产调用省略后保持默认行为
  * @returns {Promise<{subscription_url:string,clash_url:string,v2ray_url:string}>} 订阅链接集合
  */
 async function generateSubscription(db, userId, logger, options = {}) {
@@ -702,7 +705,8 @@ async function generateSubscription(db, userId, logger, options = {}) {
     const missingServers = findServersRequiringSync(servers, snapshots, nodeConfigs);
     if (missingServers.length > 0) {
       logger.info(`用户 ${user.email} 首次生成订阅，定向同步 ${missingServers.length} 台缺口服务器`);
-      const syncResult = await syncSelectedServers(db, missingServers, {
+      const syncServers = options.dependencies?.syncSelectedServers || syncSelectedServers;
+      const syncResult = await syncServers(db, missingServers, {
         inboundSnapshotCache: options.inboundSnapshotCache
       });
       logger.info(`首次生成前节点同步完成: ${syncResult.syncedCount || 0}/${syncResult.totalCount || missingServers.length} 台服务器`);

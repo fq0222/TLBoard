@@ -9,6 +9,7 @@ const orderService = require('../services/shared/order-service');
 const xuiNodeSnapshotService = require('../services/shared/xui-node-snapshot-service');
 const xuiSyncRepository = require('../repositories/xui-sync-repository');
 const orderRepository = require('../repositories/order-repository');
+const subscriptionRepository = require('../repositories/subscription-repository');
 const { INBOUND_REQUEST_TIMEOUT_MS } = xuiSync;
 
 /**
@@ -366,6 +367,115 @@ async function testTargetedUserSyncShouldReuseInboundSnapshotCache() {
 }
 
 /**
+ * 通过公共生成链验证完整本地数据跳过远程，缺口场景仅同步目标服务器并透传缓存。
+ *
+ * @returns {Promise<void>}
+ */
+async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
+  const repositoryMethods = [
+    'findLatestUserSubscription',
+    'findSubscriptionUserById',
+    'listEnabledUserCfIps',
+    'listOnlineServers',
+    'listNodeSnapshots',
+    'listUserNodeConfigs',
+    'listUserSubscriptionSources'
+  ];
+  const originals = Object.fromEntries(
+    repositoryMethods.map((method) => [method, subscriptionRepository[method]])
+  );
+  const originalGetInstance = XuiService.getInstance;
+  const servers = [
+    { id: 1, name: 'one', api_url: 'http://one', api_token: 'token' },
+    { id: 2, name: 'two', api_url: 'http://two', api_token: 'token' },
+    { id: 3, name: 'three', api_url: 'http://three', api_token: 'token' }
+  ];
+  const user = {
+    id: 9,
+    email: 'user@example.com',
+    sub_id: 'sub-token',
+    enabled: 1,
+    traffic_limit: 1024
+  };
+  const logger = { info() {}, warn() {}, error() {} };
+  let remoteCalls = 0;
+
+  subscriptionRepository.findLatestUserSubscription = async () => undefined;
+  subscriptionRepository.findSubscriptionUserById = async () => user;
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServers = async () => servers;
+  subscriptionRepository.listUserSubscriptionSources = async () => [];
+  XuiService.getInstance = async () => {
+    remoteCalls += 1;
+    throw new Error('完整本地数据不应访问远程');
+  };
+
+  try {
+    subscriptionRepository.listNodeSnapshots = async () => [
+      { server_id: 1, inbound_id: 11 },
+      { server_id: 2, inbound_id: 21 },
+      { server_id: 3, inbound_id: 31 }
+    ];
+    subscriptionRepository.listUserNodeConfigs = async () => [
+      { server_id: 1, inbound_id: 11, sub_id: 'sub-1' },
+      { server_id: 2, inbound_id: 21, sub_id: 'sub-2' },
+      { server_id: 3, inbound_id: 31, sub_id: 'sub-3' }
+    ];
+    let selectedSyncCalls = 0;
+    await assert.rejects(
+      userSubscriptionService.generateSubscription({}, user.id, logger, {
+        dependencies: {
+          async syncSelectedServers() {
+            selectedSyncCalls += 1;
+            return { success: true, syncedCount: 0, failedCount: 0, totalCount: 0, results: [] };
+          }
+        }
+      }),
+      (error) => error.code === 500
+    );
+    assert.strictEqual(selectedSyncCalls, 0);
+    assert.strictEqual(remoteCalls, 0);
+
+    const inboundSnapshotCache = new Map();
+    const selectedServerIds = [];
+    let receivedUserSyncPlan;
+    subscriptionRepository.listNodeSnapshots = async () => [
+      { server_id: 1, inbound_id: 11 },
+      { server_id: 2, inbound_id: 21 }
+    ];
+    subscriptionRepository.listUserNodeConfigs = async () => [
+      { server_id: 1, inbound_id: 11, sub_id: 'sub-1' }
+    ];
+    await assert.rejects(
+      userSubscriptionService.generateSubscription({}, user.id, logger, {
+        inboundSnapshotCache,
+        dependencies: {
+          async syncSelectedServers(db, selectedServers) {
+            selectedServerIds.push(...selectedServers.map((server) => server.id));
+            return { success: true, syncedCount: 2, failedCount: 0, totalCount: 2, results: [] };
+          },
+          async syncUserToXuiServers(db, syncedUser, plan) {
+            receivedUserSyncPlan = plan;
+            return { success: true, successCount: 1, failureCount: 0 };
+          }
+        }
+      }),
+      (error) => error.code === 500
+    );
+
+    assert.deepStrictEqual(selectedServerIds, [2, 3]);
+    assert.deepStrictEqual(receivedUserSyncPlan.serverIds, [2]);
+    assert.strictEqual(receivedUserSyncPlan.inboundSnapshotCache, inboundSnapshotCache);
+    assert.strictEqual(remoteCalls, 0);
+  } finally {
+    for (const method of repositoryMethods) {
+      subscriptionRepository[method] = originals[method];
+    }
+    XuiService.getInstance = originalGetInstance;
+  }
+}
+
+/**
  * 顺序执行订阅生成性能回归测试，任一失败都会让进程以非零状态退出。
  *
  * @returns {Promise<void>}
@@ -381,6 +491,7 @@ async function run() {
   testOnlyGapServersShouldBeSelected();
   await testSelectedServerSyncShouldLimitConcurrencyAndIsolateFailures();
   await testTargetedUserSyncShouldReuseInboundSnapshotCache();
+  await testGenerateSubscriptionShouldWireTargetedSyncDependencies();
   console.log('subscription generation performance tests passed');
 }
 
