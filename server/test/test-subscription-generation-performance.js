@@ -4,6 +4,11 @@ const sharedSubscriptionService = require('../services/shared/subscription-servi
 const XuiApiClientV302 = require('../integrations/xui/xui-api-client-v302');
 const XuiService = require('../integrations/xui/xui-service');
 const xuiSync = require('../integrations/xui/xui-sync');
+const userSubscriptionService = require('../services/user/subscription-service');
+const orderService = require('../services/shared/order-service');
+const xuiNodeSnapshotService = require('../services/shared/xui-node-snapshot-service');
+const xuiSyncRepository = require('../repositories/xui-sync-repository');
+const orderRepository = require('../repositories/order-repository');
 const { INBOUND_REQUEST_TIMEOUT_MS } = xuiSync;
 
 /**
@@ -197,6 +202,170 @@ async function testInboundRequestTimeoutNormalization() {
 }
 
 /**
+ * 验证本地快照和用户配置完整时无需同步任何远程服务器。
+ *
+ * @returns {void}
+ */
+function testCompleteLocalSnapshotShouldSkipRemoteSync() {
+  const servers = [{ id: 1 }, { id: 2 }];
+  const snapshots = [
+    { server_id: 1, inbound_id: 11 },
+    { server_id: 2, inbound_id: 21 }
+  ];
+  const nodeConfigs = [
+    { server_id: 1, inbound_id: 11 },
+    { server_id: 2, inbound_id: 21 }
+  ];
+
+  const missingServers = userSubscriptionService.__testables.findServersRequiringSync(
+    servers,
+    snapshots,
+    nodeConfigs
+  );
+
+  assert.deepStrictEqual(missingServers, []);
+}
+
+/**
+ * 验证三台服务器中仅无快照或缺用户配置的两台进入定向同步。
+ *
+ * @returns {void}
+ */
+function testOnlyGapServersShouldBeSelected() {
+  const servers = [{ id: 1 }, { id: 2 }, { id: 3 }];
+  const snapshots = [
+    { server_id: 1, inbound_id: 11 },
+    { server_id: 2, inbound_id: 21 }
+  ];
+  const nodeConfigs = [{ server_id: 1, inbound_id: 11 }];
+
+  const missingServers = userSubscriptionService.__testables.findServersRequiringSync(
+    servers,
+    snapshots,
+    nodeConfigs
+  );
+
+  assert.deepStrictEqual(missingServers.map((server) => server.id), [2, 3]);
+}
+
+/**
+ * 验证定向节点同步最多并发十台，且单台失败不会中断其他服务器。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSelectedServerSyncShouldLimitConcurrencyAndIsolateFailures() {
+  const originalGetInstance = XuiService.getInstance;
+  const originalRefresh = xuiNodeSnapshotService.refreshServerNodeSnapshots;
+  let activeCount = 0;
+  let maxActiveCount = 0;
+
+  XuiService.getInstance = async (apiUrl) => ({
+    async getInbounds() {
+      activeCount += 1;
+      maxActiveCount = Math.max(maxActiveCount, activeCount);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeCount -= 1;
+      if (apiUrl.endsWith('/7')) {
+        throw new Error('模拟单台失败');
+      }
+      return { success: true, data: [{ id: 1, remark: 'node' }] };
+    }
+  });
+  xuiNodeSnapshotService.refreshServerNodeSnapshots = async () => ({
+    success: true,
+    skipped: false,
+    nodeCount: 1
+  });
+
+  try {
+    const servers = Array.from({ length: 25 }, (_, index) => ({
+      id: index + 1,
+      name: `server-${index + 1}`,
+      api_url: `http://xui/${index + 1}`,
+      api_token: 'token'
+    }));
+    const result = await xuiSync.syncSelectedServers({}, servers);
+
+    assert.strictEqual(maxActiveCount, 10);
+    assert.strictEqual(result.totalCount, 25);
+    assert.strictEqual(result.syncedCount, 24);
+    assert.strictEqual(result.failedCount, 1);
+    assert.strictEqual(result.results.length, 25);
+  } finally {
+    XuiService.getInstance = originalGetInstance;
+    xuiNodeSnapshotService.refreshServerNodeSnapshots = originalRefresh;
+  }
+}
+
+/**
+ * 验证用户同步仅遍历指定服务器，并复用本轮已有 inbound 快照。
+ *
+ * @returns {Promise<void>}
+ */
+async function testTargetedUserSyncShouldReuseInboundSnapshotCache() {
+  const originalListServers = xuiSyncRepository.listOnlineXuiServers;
+  const originalFindConfig = xuiSyncRepository.findUserNodeConfig;
+  const originalUpdateStatus = orderRepository.updateUserSyncStatus;
+  const originalGetInstance = XuiService.getInstance;
+  const visitedServerIds = [];
+  let remoteInboundCalls = 0;
+
+  xuiSyncRepository.listOnlineXuiServers = async () => [
+    { id: 1, name: 'one', api_url: 'http://one', api_token: 'token' },
+    { id: 2, name: 'two', api_url: 'http://two', api_token: 'token' },
+    { id: 3, name: 'three', api_url: 'http://three', api_token: 'token' }
+  ];
+  xuiSyncRepository.findUserNodeConfig = async (db, userId, serverId) => ({
+    uuid: `uuid-${serverId}`,
+    auth: '',
+    sub_id: `sub-${serverId}`
+  });
+  orderRepository.updateUserSyncStatus = async () => {};
+  XuiService.getInstance = async (apiUrl) => {
+    const serverId = { 'http://one': 1, 'http://two': 2, 'http://three': 3 }[apiUrl];
+    visitedServerIds.push(serverId);
+    return {
+      async getInbounds() {
+        remoteInboundCalls += 1;
+        return { success: true, data: [] };
+      },
+      extractClientsFromSettings() {
+        return [];
+      },
+      async upsertUniqueClient() {
+        return { success: true, action: 'updated' };
+      }
+    };
+  };
+
+  try {
+    const inboundSnapshotCache = new Map([
+      ['2', {
+        fetchedAt: Date.now(),
+        result: {
+          success: true,
+          data: [{ id: 21, remark: 'direct', protocol: 'vless', settings: '{}' }]
+        }
+      }]
+    ]);
+    const result = await orderService.syncUserToXuiServers(
+      {},
+      { id: 9, email: 'user@example.com', enabled: 1, expire_at: 0 },
+      { serverIds: [2], inboundSnapshotCache }
+    );
+
+    assert.strictEqual(result.success, true);
+    assert.deepStrictEqual(visitedServerIds, [2]);
+    assert.strictEqual(remoteInboundCalls, 0);
+  } finally {
+    xuiSyncRepository.listOnlineXuiServers = originalListServers;
+    xuiSyncRepository.findUserNodeConfig = originalFindConfig;
+    orderRepository.updateUserSyncStatus = originalUpdateStatus;
+    XuiService.getInstance = originalGetInstance;
+  }
+}
+
+/**
  * 顺序执行订阅生成性能回归测试，任一失败都会让进程以非零状态退出。
  *
  * @returns {Promise<void>}
@@ -208,6 +377,10 @@ async function run() {
   await testXuiServiceShouldForwardInboundOptions();
   testInboundRequestTimeoutConstant();
   await testInboundRequestTimeoutNormalization();
+  testCompleteLocalSnapshotShouldSkipRemoteSync();
+  testOnlyGapServersShouldBeSelected();
+  await testSelectedServerSyncShouldLimitConcurrencyAndIsolateFailures();
+  await testTargetedUserSyncShouldReuseInboundSnapshotCache();
   console.log('subscription generation performance tests passed');
 }
 

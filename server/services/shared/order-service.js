@@ -340,15 +340,14 @@ async function legacySyncUserToXuiServers(db, user, plan = {}) {
 }
 
 /**
- * 创建 3X-UI 同步任务并立即尝试执行一次
+ * 将用户同步到在线 3X-UI 服务器，可按 serverIds 限定处理范围并复用 inbound 快照。
  *
- * 立即尝试成功时任务会标记 success；失败时任务会回到 pending 并按退避时间重试。
- *
- * @param {Object} db - 数据库实例
- * @param {string} taskType - xuiSyncTaskService.TASK_TYPES 中的任务类型
- * @param {Object} userInfo - 用户同步快照
- * @param {Object} plan - 套餐信息
- * @returns {Promise<number>} 同步任务 ID
+ * @param {Object} db - 数据库实例。
+ * @param {Object} user - 待同步用户快照。
+ * @param {Object} [plan={}] - 同步计划及套餐权益。
+ * @param {Array<number|string>} [plan.serverIds] - 仅处理的服务器 ID；省略时保持全量同步。
+ * @param {Map<string,Object>} [plan.inboundSnapshotCache] - 15 分钟 TTL 的 inbound 快照缓存。
+ * @returns {Promise<Object>} 同步汇总；目标为空或节点失败时返回失败语义。
  */
 async function syncUserToXuiServers(db, user, plan = {}) {
   let successCount = 0;
@@ -356,11 +355,20 @@ async function syncUserToXuiServers(db, user, plan = {}) {
   let lastError = '';
 
   try {
-    const servers = await xuiSyncRepository.listOnlineXuiServers(db);
+    const onlineServers = await xuiSyncRepository.listOnlineXuiServers(db);
+    const selectedServerIds = Array.isArray(plan.serverIds)
+      ? new Set(plan.serverIds.map((serverId) => String(serverId)))
+      : null;
+    const servers = selectedServerIds
+      ? onlineServers.filter((server) => selectedServerIds.has(String(server.id)))
+      : onlineServers;
 
     if (servers.length === 0) {
-      logger.warn('没有在线的 3X-UI 服务器，跳过同步');
-      return { success: false, message: '没有在线的 3X-UI 服务器' };
+      const message = selectedServerIds
+        ? '指定范围内没有在线的 3X-UI 服务器'
+        : '没有在线的 3X-UI 服务器';
+      logger.warn(`${message}，跳过同步`);
+      return { success: false, message };
     }
 
     logger.info(`开始同步用户 ${user.email} 到 ${servers.length} 个 3X-UI 服务器`);
@@ -371,7 +379,9 @@ async function syncUserToXuiServers(db, user, plan = {}) {
         const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
           apiVersion: server.panel_version || '3.0.2'
         });
-        const inboundsResult = await xuiService.getInbounds();
+        const inboundsResult = await getServerInboundsSnapshot(server, {
+          inboundSnapshotCache: plan.inboundSnapshotCache
+        });
 
         if (!inboundsResult.success) {
           failureCount++;
@@ -480,6 +490,15 @@ async function syncUserToXuiServers(db, user, plan = {}) {
   }
 }
 
+/**
+ * 创建 3X-UI 同步任务并立即尝试执行一次。
+ *
+ * @param {Object} db - 数据库实例。
+ * @param {string} taskType - xuiSyncTaskService.TASK_TYPES 中的任务类型。
+ * @param {Object} userInfo - 用户同步快照。
+ * @param {Object} plan - 套餐信息；立即尝试失败时任务回到 pending 等待重试。
+ * @returns {Promise<number>} 同步任务 ID；持久化失败时向调用方抛出异常。
+ */
 async function enqueueAndTryUserSync(db, taskType, userInfo, plan) {
   const payload = {
     user: userInfo,

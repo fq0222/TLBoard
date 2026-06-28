@@ -8,10 +8,12 @@ const XuiService = require('./xui-service');
 const { createLogger } = require('../../utils/logger');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const xuiNodeSnapshotService = require('../../services/shared/xui-node-snapshot-service');
+const { runWithConcurrency } = require('../../utils/concurrency');
 
 const logger = createLogger('XUI-SYNC');
 const INBOUND_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
 const INBOUND_REQUEST_TIMEOUT_MS = 10000;
+const INBOUND_SYNC_CONCURRENCY = 10;
 
 /**
  * 归一化单次远程请求超时，仅允许有限正数，非法值回退到默认值。
@@ -113,6 +115,39 @@ async function syncServerNodes(db, server, options = {}) {
 }
 
 /**
+ * 按并发上限同步指定服务器，单台失败仅记录结果，不中断其余服务器。
+ *
+ * @param {Object} db - 数据库实例。
+ * @param {Array<Object>} servers - 待同步服务器列表。
+ * @param {Object} [options={}] - 同步选项，会透传给单台同步。
+ * @returns {Promise<{success:boolean,syncedCount:number,failedCount:number,totalCount:number,results:Array<Object>}>} 汇总结果；单台失败通过 results 和 failedCount 表达。
+ */
+async function syncSelectedServers(db, servers, options = {}) {
+  const selectedServers = Array.isArray(servers) ? servers : [];
+  const settledResults = await runWithConcurrency(
+    selectedServers,
+    INBOUND_SYNC_CONCURRENCY,
+    (server) => syncServerNodes(db, server, options)
+  );
+  const results = settledResults.map((settled, index) => settled.status === 'fulfilled'
+    ? settled.value
+    : {
+        success: false,
+        serverId: selectedServers[index]?.id,
+        message: settled.reason?.message || String(settled.reason)
+      });
+  const syncedCount = results.filter((result) => result.success).length;
+
+  return {
+    success: true,
+    syncedCount,
+    failedCount: results.length - syncedCount,
+    totalCount: selectedServers.length,
+    results
+  };
+}
+
+/**
  * 同步所有在线服务器的节点信息。
  *
  * @param {Object} db - 数据库实例
@@ -131,21 +166,9 @@ async function syncAllServers(db, options = {}) {
 
     logger.info(`开始同步 ${servers.length} 台服务器`);
 
-    let syncedCount = 0;
-    for (const server of servers) {
-      const result = await syncServerNodes(db, server, options);
-      if (result.success) {
-        syncedCount++;
-      }
-    }
-
-    logger.info(`同步完成，成功 ${syncedCount}/${servers.length} 台`);
-
-    return {
-      success: true,
-      syncedCount,
-      totalCount: servers.length
-    };
+    const result = await syncSelectedServers(db, servers, options);
+    logger.info(`同步完成，成功 ${result.syncedCount}/${servers.length} 台`);
+    return result;
   } catch (error) {
     logger.error(`同步所有服务器错误: ${error.message}`);
     return { success: false, message: error.message };
@@ -153,9 +176,11 @@ async function syncAllServers(db, options = {}) {
 }
 
 module.exports = {
+  INBOUND_SYNC_CONCURRENCY,
   INBOUND_REQUEST_TIMEOUT_MS,
   INBOUND_SNAPSHOT_TTL_MS,
   getServerInboundsSnapshot,
   syncServerNodes,
+  syncSelectedServers,
   syncAllServers
 };

@@ -1,4 +1,4 @@
-const { syncAllServers, syncServerNodes } = require('../../integrations/xui/xui-sync');
+const { syncSelectedServers, syncServerNodes } = require('../../integrations/xui/xui-sync');
 const { syncUserToXuiServers } = require('../shared/order-service');
 const { getStrategyFromRemark, processNodeLink, parseNodeLink } = require('../shared/subscription-strategy');
 const { fetchOriginalSubscription, parseSubscriptionContent, pickSingleNodeLink } = require('../shared/subscription-service');
@@ -204,6 +204,35 @@ function filterOnlineNodeConfigs(nodeConfigs, serversById) {
 }
 
 /**
+ * 按 server_id + inbound_id 判断哪些在线服务器缺少快照或当前用户配置。
+ *
+ * @param {Array<Object>} servers - 在线服务器列表。
+ * @param {Array<Object>} snapshots - 本地 xui_nodes 快照。
+ * @param {Array<Object>} nodeConfigs - 当前用户的 user_node_configs。
+ * @returns {Array<Object>} 需要远程同步的服务器；无快照或任一快照缺配置都会入选。
+ */
+function findServersRequiringSync(servers, snapshots, nodeConfigs) {
+  const snapshotKeysByServer = new Map();
+  for (const snapshot of snapshots) {
+    const serverId = String(snapshot.server_id);
+    if (!snapshotKeysByServer.has(serverId)) {
+      snapshotKeysByServer.set(serverId, []);
+    }
+    snapshotKeysByServer.get(serverId).push(
+      buildSourceCacheKey(snapshot.server_id, snapshot.inbound_id)
+    );
+  }
+
+  const configKeys = new Set(
+    nodeConfigs.map((config) => buildSourceCacheKey(config.server_id, config.inbound_id))
+  );
+  return servers.filter((server) => {
+    const snapshotKeys = snapshotKeysByServer.get(String(server.id));
+    return !snapshotKeys || snapshotKeys.some((key) => !configKeys.has(key));
+  });
+}
+
+/**
  * 确保在线服务器存在节点快照，缺失时按服务器补齐。
  *
  * @param {Object} db - 数据库代理对象
@@ -278,8 +307,10 @@ async function ensureUserNodeConfigsComplete(db, user, servers, logger, options 
 
   logger.info(`用户 ${user.email} 缺少 ${missingPairs.length} 个节点配置，尝试同步用户到 3X-UI`);
   const { totalTrafficLimit } = getUserTrafficEntitlement(user);
+  const serverIds = [...new Set(missingPairs.map((snapshot) => snapshot.server_id))];
   const syncResult = await syncUserToXuiServers(db, user, {
     traffic_limit: totalTrafficLimit,
+    serverIds,
     inboundSnapshotCache: options.inboundSnapshotCache
   });
   if (!syncResult.success) {
@@ -666,11 +697,18 @@ async function generateSubscription(db, userId, logger, options = {}) {
   const isFirstGeneration = !existingSubscription;
 
   if (isFirstGeneration) {
-    logger.info(`用户 ${user.email} 首次生成订阅，先执行全量节点同步`);
-    const syncResult = await syncAllServers(db, {
-      inboundSnapshotCache: options.inboundSnapshotCache
-    });
-    logger.info(`首次生成前节点同步完成: ${syncResult.syncedCount || 0}/${syncResult.totalCount || servers.length} 台服务器`);
+    const snapshots = await subscriptionRepository.listNodeSnapshots(db);
+    const nodeConfigs = await subscriptionRepository.listUserNodeConfigs(db, user.id);
+    const missingServers = findServersRequiringSync(servers, snapshots, nodeConfigs);
+    if (missingServers.length > 0) {
+      logger.info(`用户 ${user.email} 首次生成订阅，定向同步 ${missingServers.length} 台缺口服务器`);
+      const syncResult = await syncSelectedServers(db, missingServers, {
+        inboundSnapshotCache: options.inboundSnapshotCache
+      });
+      logger.info(`首次生成前节点同步完成: ${syncResult.syncedCount || 0}/${syncResult.totalCount || missingServers.length} 台服务器`);
+    } else {
+      logger.info(`用户 ${user.email} 首次生成订阅，本地快照和节点配置完整，跳过远程节点同步`);
+    }
   } else {
     await ensureNodeSnapshotsAvailable(db, servers, logger, options);
   }
@@ -1096,5 +1134,8 @@ module.exports = {
   generateV2RayConfig,
   buildAnnouncementVirtualNodes,
   appendAnnouncementVirtualNodes,
-  createLegacyBusinessError
+  createLegacyBusinessError,
+  __testables: {
+    findServersRequiringSync
+  }
 };
