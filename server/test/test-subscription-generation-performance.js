@@ -485,9 +485,18 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
  * @param {Object} options - 场景选项。
  * @param {Set<number>} [options.failedIndexes] - 模拟网络失败的节点序号集合。
  * @param {Array<Object>} [options.seedSources] - 刷新前已存在的来源缓存。
+ * @param {Function} [options.createFailure] - 按节点序号创建失败原因，支持非 Error 拒绝值。
+ * @param {Function} [options.getDelayMs] - 按节点序号返回模拟网络耗时。
+ * @param {Object} [options.serverOverrides] - 按节点序号覆盖服务器字段。
  * @returns {Promise<Object>} 生成结果、并发统计和最终写入节点。
  */
-async function runSourceRefreshScenario({ failedIndexes = new Set(), seedSources = [] } = {}) {
+async function runSourceRefreshScenario({
+  failedIndexes = new Set(),
+  seedSources = [],
+  createFailure = () => new Error('模拟网络失败：敏感内容 token-uuid'),
+  getDelayMs = () => 5,
+  serverOverrides = {}
+} = {}) {
   const repositoryMethods = [
     'findLatestUserSubscription',
     'findSubscriptionUserById',
@@ -509,13 +518,17 @@ async function runSourceRefreshScenario({ failedIndexes = new Set(), seedSources
     enabled: 1,
     traffic_limit: 1024
   };
-  const servers = Array.from({ length: 25 }, (_, index) => ({
-    id: index + 1,
-    name: `source-${index + 1}`,
-    sub_url: `https://subscription.example/${index + 1}/`,
-    host: `node-${index + 1}.example.com`,
-    client_port: 443
-  }));
+  const servers = Array.from({ length: 25 }, (_, index) => {
+    const serverIndex = index + 1;
+    return {
+      id: serverIndex,
+      name: `source-${serverIndex}`,
+      sub_url: `https://subscription.example/${serverIndex}/`,
+      host: `node-${serverIndex}.example.com`,
+      client_port: 443,
+      ...(serverOverrides[serverIndex] || {})
+    };
+  });
   const nodeConfigs = servers.map((server, index) => ({
     server_id: server.id,
     inbound_id: index + 101,
@@ -563,9 +576,9 @@ async function runSourceRefreshScenario({ failedIndexes = new Set(), seedSources
           activeCount += 1;
           maxActiveCount = Math.max(maxActiveCount, activeCount);
           try {
-            await new Promise((resolve) => setTimeout(resolve, 5));
+            await new Promise((resolve) => setTimeout(resolve, getDelayMs(index)));
             if (failedIndexes.has(index)) {
-              throw new Error('模拟网络失败：敏感内容 token-uuid');
+              throw createFailure(index);
             }
             const link = `vless://00000000-0000-0000-0000-${String(index).padStart(12, '0')}@127.0.0.1:443?encryption=none#node`;
             return Buffer.from(link).toString('base64');
@@ -795,6 +808,60 @@ async function testSourceRefreshShouldFailWithExpiredCache() {
 }
 
 /**
+ * 验证冻结 Error 与字符串拒绝值均被单项隔离，且排队后的失败耗时不包含等待批次时间。
+ * 核心分支：前十项占满并发槽位，第 11、12 项随后快速失败，日志仍应携带单项短耗时。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshShouldWrapExternalFailuresWithoutMutation() {
+  const scenario = await runSourceRefreshScenario({
+    failedIndexes: new Set([11, 12]),
+    createFailure(index) {
+      return index === 11
+        ? Object.freeze(new Error('冻结错误正文 token-frozen'))
+        : '字符串错误正文 token-string';
+    },
+    getDelayMs(index) {
+      return index <= 10 ? 60 : 0;
+    }
+  });
+  const logs = scenario.logMessages.join('\n');
+  const frozenLog = scenario.logMessages.find((message) => message.includes('server=11, inbound=111'));
+  const stringLog = scenario.logMessages.find((message) => message.includes('server=12, inbound=112'));
+
+  assert.strictEqual(scenario.savedNodes.length, 23);
+  assert(frozenLog);
+  assert(stringLog);
+  assert(Number(frozenLog.match(/duration=(\d+)ms/)[1]) < 30);
+  assert(Number(stringLog.match(/duration=(\d+)ms/)[1]) < 30);
+  assert(!logs.includes('token-frozen'));
+  assert(!logs.includes('token-string'));
+}
+
+/**
+ * 验证排队后才执行的缺失订阅地址校验使用单项耗时，而不是批次启动时间。
+ *
+ * @returns {Promise<void>}
+ */
+async function testMissingSourceUrlShouldLogItemDuration() {
+  const scenario = await runSourceRefreshScenario({
+    getDelayMs(index) {
+      return index <= 10 ? 60 : 0;
+    },
+    serverOverrides: {
+      11: { sub_url: '' }
+    }
+  });
+  const missingUrlLog = scenario.logMessages.find(
+    (message) => message.includes('server=11, inbound=111')
+  );
+
+  assert.strictEqual(scenario.savedNodes.length, 24);
+  assert(missingUrlLog);
+  assert(Number(missingUrlLog.match(/duration=(\d+)ms/)[1]) < 30);
+}
+
+/**
  * 顺序执行订阅生成性能回归测试，任一失败都会让进程以非零状态退出。
  *
  * @returns {Promise<void>}
@@ -817,6 +884,8 @@ async function run() {
   await testSourceRefreshShouldRejectInvalidOldCache();
   await testSourceRefreshShouldFailWithInvalidServerFingerprintCache();
   await testSourceRefreshShouldFailWithExpiredCache();
+  await testSourceRefreshShouldWrapExternalFailuresWithoutMutation();
+  await testMissingSourceUrlShouldLogItemDuration();
   console.log('subscription generation performance tests passed');
 }
 

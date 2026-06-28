@@ -386,6 +386,20 @@ function collectSourceCacheStatus(nodeConfigs, sourceMap, serversById) {
 }
 
 /**
+ * 创建服务内部拥有的来源刷新失败对象，避免修改冻结 Error 或字符串等外部拒绝值。
+ *
+ * @param {*} cause - 原始失败原因，仅作为 cause 保留，不写入日志
+ * @param {Object} context - 已脱敏的用户、服务器、节点和单项耗时
+ * @returns {Error} 可安全携带刷新上下文的内部错误
+ */
+function createSourceRefreshError(cause, context) {
+  const error = new Error('原始订阅模板刷新失败', { cause });
+  error.name = 'SourceRefreshError';
+  error.sourceRefreshContext = context;
+  return error;
+}
+
+/**
  * 并发刷新原始订阅模板缓存，单节点失败仅记录结果，不中断其他节点。
  *
  * @param {Object} db - 数据库代理对象
@@ -406,11 +420,12 @@ async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, lo
     async (config) => {
       const itemStartedAt = Date.now();
       const server = serversById.get(config.server_id);
-      if (!server || !server.sub_url) {
-        throw new Error('服务器不存在或缺少订阅地址');
-      }
 
       try {
+        if (!server || !server.sub_url) {
+          throw new Error('服务器不存在或缺少订阅地址');
+        }
+
         const originalContent = await fetchSource(
           server.sub_url,
           config.sub_id,
@@ -439,14 +454,13 @@ async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, lo
 
         logger.info(`刷新原始订阅模板成功: user=${user.id}, server=${server.id}, inbound=${config.inbound_id}, duration=${Date.now() - itemStartedAt}ms`);
         return config;
-      } catch (error) {
-        error.sourceRefreshContext = {
+      } catch (cause) {
+        throw createSourceRefreshError(cause, {
           userId: user.id,
-          serverId: server.id,
+          serverId: server?.id || config.server_id,
           inboundId: config.inbound_id,
           duration: Date.now() - itemStartedAt
-        };
-        throw error;
+        });
       }
     }
   );
