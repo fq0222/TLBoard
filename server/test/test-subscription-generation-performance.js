@@ -487,6 +487,169 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
 }
 
 /**
+ * 验证公共生成入口未显式传入缓存时，会为整次请求创建并复用同一个 inbound 快照缓存。
+ *
+ * @returns {Promise<void>}
+ */
+async function testGenerateSubscriptionShouldCreateRequestScopedInboundCache() {
+  const methods = [
+    'findLatestUserSubscription', 'findSubscriptionUserById', 'listEnabledUserCfIps',
+    'listOnlineServers', 'listNodeSnapshots', 'listUserNodeConfigs',
+    'listUserSubscriptionSources', 'upsertSubscriptionSource', 'saveUserSubscriptionCache'
+  ];
+  const originals = Object.fromEntries(methods.map((method) => [method, subscriptionRepository[method]]));
+  const server = {
+    id: 1, name: 'cache-server', sub_url: 'https://cache.example/',
+    host: 'cache.example.com', client_port: 443
+  };
+  const config = {
+    user_id: 801, server_id: 1, inbound_id: 11, sub_id: 'cache-node-sub',
+    uuid: '00000000-0000-0000-0000-000000000801', remark: 'direct',
+    protocol: 'vless', port: 443, settings: '{}', stream_settings: '{}'
+  };
+  const caches = [];
+  let configReads = 0;
+  const sources = new Map();
+
+  subscriptionRepository.findLatestUserSubscription = async () => undefined;
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 801, email: 'cache@example.com', sub_id: 'cache-user-sub',
+    enabled: 1, traffic_limit: 1024
+  });
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServers = async () => [server];
+  subscriptionRepository.listNodeSnapshots = async () => [{ server_id: 1, inbound_id: 11 }];
+  subscriptionRepository.listUserNodeConfigs = async () => {
+    configReads += 1;
+    return configReads <= 2 ? [] : [config];
+  };
+  subscriptionRepository.listUserSubscriptionSources = async () => Array.from(sources.values());
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => {
+    sources.set(`${source.server_id}:${source.inbound_id}`, source);
+  };
+  subscriptionRepository.saveUserSubscriptionCache = async () => {};
+
+  try {
+    await userSubscriptionService.generateSubscription({}, 801, {
+      info() {}, warn() {}, error() {}
+    }, {
+      dependencies: {
+        async syncSelectedServers(db, servers, options) {
+          caches.push(options.inboundSnapshotCache);
+          return {
+            success: true, syncedCount: 1, failedCount: 0, totalCount: 1,
+            results: [{ success: true, serverId: 1 }]
+          };
+        },
+        async syncUserToXuiServers(db, user, plan) {
+          caches.push(plan.inboundSnapshotCache);
+          return { success: true, successCount: 1, failureCount: 0 };
+        },
+        async fetchOriginalSubscription() {
+          return Buffer.from(
+            'vless://00000000-0000-0000-0000-000000000801@127.0.0.1:443?encryption=none#node'
+          ).toString('base64');
+        }
+      }
+    });
+
+    assert(caches[0] instanceof Map);
+    assert.strictEqual(caches[1], caches[0]);
+  } finally {
+    for (const method of methods) subscriptionRepository[method] = originals[method];
+  }
+}
+
+/**
+ * 验证非首次生成补齐 25 台缺失快照时最多并发 10 台，且部分失败不会阻断其余服务器。
+ *
+ * @returns {Promise<void>}
+ */
+async function testExistingGenerationMissingSnapshotsShouldUseConcurrentBatchSync() {
+  const methods = [
+    'findLatestUserSubscription', 'findSubscriptionUserById', 'listEnabledUserCfIps',
+    'listOnlineServers', 'listNodeSnapshots', 'listUserNodeConfigs',
+    'listUserSubscriptionSources', 'upsertSubscriptionSource', 'saveUserSubscriptionCache'
+  ];
+  const originals = Object.fromEntries(methods.map((method) => [method, subscriptionRepository[method]]));
+  const servers = Array.from({ length: 25 }, (_, index) => ({
+    id: index + 1, name: `missing-${index + 1}`, sub_url: `https://missing/${index + 1}/`,
+    host: `missing-${index + 1}.example.com`, client_port: 443
+  }));
+  const configs = servers.map((server) => ({
+    user_id: 802, server_id: server.id, inbound_id: server.id * 10,
+    sub_id: `missing-sub-${server.id}`, uuid: `missing-uuid-${server.id}`,
+    remark: `direct-${server.id}`, protocol: 'vless', port: 443,
+    settings: '{}', stream_settings: '{}'
+  }));
+  const now = Math.floor(Date.now() / 1000);
+  const sources = configs.map((config) => ({
+    user_id: 802, server_id: config.server_id, inbound_id: config.inbound_id,
+    sub_id: config.sub_id, original_link: `vless://cached-${config.server_id}`,
+    node_fingerprint: computeNodeFingerprint(config),
+    server_fingerprint: computeServerFingerprint(servers[config.server_id - 1]),
+    fetched_at: now
+  }));
+  let active = 0;
+  let maxActive = 0;
+  const completed = [];
+
+  subscriptionRepository.findLatestUserSubscription = async () => ({ id: 1 });
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 802, email: 'missing@example.com', sub_id: 'missing-user-sub',
+    enabled: 1, traffic_limit: 1024
+  });
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServers = async () => servers;
+  subscriptionRepository.listNodeSnapshots = async () => [];
+  subscriptionRepository.listUserNodeConfigs = async () => configs;
+  subscriptionRepository.listUserSubscriptionSources = async () => sources;
+  subscriptionRepository.saveUserSubscriptionCache = async () => {};
+
+  try {
+    await userSubscriptionService.generateSubscription({}, 802, {
+      info() {}, warn() {}, error() {}
+    }, {
+      dependencies: {
+        async syncSelectedServers(db, selectedServers) {
+          const results = await require('../utils/concurrency').runWithConcurrency(
+            selectedServers,
+            10,
+            async (server) => {
+              active += 1;
+              maxActive = Math.max(maxActive, active);
+              await new Promise((resolve) => setTimeout(resolve, 2));
+              active -= 1;
+              completed.push(server.id);
+              return {
+                success: ![7, 19].includes(server.id),
+                serverId: server.id,
+                nodeCount: 1
+              };
+            }
+          );
+          const normalized = results.map((result) => result.value);
+          return {
+            success: true,
+            syncedCount: normalized.filter((result) => result.success).length,
+            failedCount: normalized.filter((result) => !result.success).length,
+            totalCount: normalized.length,
+            results: normalized
+          };
+        }
+      }
+    });
+
+    assert.strictEqual(maxActive, 10);
+    assert.strictEqual(completed.length, 25);
+    assert(completed.includes(7));
+    assert(completed.includes(19));
+  } finally {
+    for (const method of methods) subscriptionRepository[method] = originals[method];
+  }
+}
+
+/**
  * 通过公共生成链构造原始模板刷新场景，并确保仓储替身在测试结束后完整恢复。
  *
  * @param {Object} options - 场景选项。
@@ -721,6 +884,94 @@ async function testSourceRefreshShouldReuseValidOldCache() {
   assert.strictEqual(scenario.savedNodes.length, 25);
   assert(scenario.savedNodes.some((node) => node.original_link.includes('000000000099')));
   assert.deepStrictEqual(scenario.repairServerSelections, []);
+}
+
+/**
+ * 验证同一服务器存在混合缓存状态时，修复仅重试最终无效的失败节点。
+ *
+ * @returns {Promise<void>}
+ */
+async function testRepairShouldRetryOnlyFailedNodesWithoutValidCache() {
+  const methods = [
+    'findLatestUserSubscription', 'findSubscriptionUserById', 'listEnabledUserCfIps',
+    'listOnlineServers', 'listNodeSnapshots', 'listUserNodeConfigs',
+    'listUserSubscriptionSources', 'upsertSubscriptionSource', 'saveUserSubscriptionCache'
+  ];
+  const originals = Object.fromEntries(methods.map((method) => [method, subscriptionRepository[method]]));
+  const server = {
+    id: 1, name: 'mixed-cache', sub_url: 'https://mixed.example/',
+    host: 'mixed.example.com', client_port: 443
+  };
+  const configs = [101, 102].map((inboundId, index) => ({
+    user_id: 803, server_id: 1, inbound_id: inboundId,
+    sub_id: `mixed-sub-${index + 1}`,
+    uuid: `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
+    remark: `direct-${index + 1}`, protocol: 'vless', port: 443,
+    settings: '{}', stream_settings: '{}'
+  }));
+  const sources = new Map([[
+    '1:101',
+    createSourceCache(configs[0], server, {
+      user_id: 803,
+      original_link: 'vless://00000000-0000-0000-0000-000000000099@127.0.0.1:443?encryption=none#cached-a'
+    })
+  ]]);
+  const fetchCounts = new Map();
+  const repairCalls = [];
+  let savedNodes;
+
+  subscriptionRepository.findLatestUserSubscription = async () => undefined;
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 803, email: 'mixed@example.com', sub_id: 'mixed-user-sub',
+    enabled: 1, traffic_limit: 1024
+  });
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServers = async () => [server];
+  subscriptionRepository.listNodeSnapshots = async () => configs;
+  subscriptionRepository.listUserNodeConfigs = async () => configs;
+  subscriptionRepository.listUserSubscriptionSources = async () => Array.from(sources.values());
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => {
+    sources.set(`${source.server_id}:${source.inbound_id}`, source);
+  };
+  subscriptionRepository.saveUserSubscriptionCache = async (db, userId, subId, nodes) => {
+    savedNodes = nodes;
+  };
+
+  try {
+    await userSubscriptionService.generateSubscription({}, 803, {
+      info() {}, warn() {}, error() {}
+    }, {
+      dependencies: {
+        async syncSelectedServers(db, selectedServers) {
+          repairCalls.push(selectedServers.map((item) => item.id));
+          return {
+            success: true, syncedCount: 1, failedCount: 0, totalCount: 1,
+            results: [{ success: true, serverId: 1 }]
+          };
+        },
+        async syncUserToXuiServers() {
+          return { success: true, successCount: 1, failureCount: 0 };
+        },
+        async fetchOriginalSubscription(subUrl, subId) {
+          const index = Number(subId.split('-').pop());
+          const count = (fetchCounts.get(index) || 0) + 1;
+          fetchCounts.set(index, count);
+          if (index === 1 || count === 1) {
+            throw new Error('模拟首轮失败');
+          }
+          return Buffer.from(
+            'vless://00000000-0000-0000-0000-000000000002@127.0.0.1:443?encryption=none#node-b'
+          ).toString('base64');
+        }
+      }
+    });
+
+    assert.deepStrictEqual(Object.fromEntries(fetchCounts), { 1: 1, 2: 2 });
+    assert.deepStrictEqual(repairCalls, [[1]]);
+    assert.strictEqual(savedNodes.length, 2);
+  } finally {
+    for (const method of methods) subscriptionRepository[method] = originals[method];
+  }
 }
 
 /**
@@ -1286,9 +1537,12 @@ async function run() {
   await testSelectedServerSyncShouldLimitConcurrencyAndIsolateFailures();
   await testTargetedUserSyncShouldReuseInboundSnapshotCache();
   await testGenerateSubscriptionShouldWireTargetedSyncDependencies();
+  await testGenerateSubscriptionShouldCreateRequestScopedInboundCache();
+  await testExistingGenerationMissingSnapshotsShouldUseConcurrentBatchSync();
   await testSourceRefreshShouldLimitConcurrencyAndKeepPartialSuccess();
   await testSourceRefreshShouldFailWhenNoNodeCanBeComposed();
   await testSourceRefreshShouldReuseValidOldCache();
+  await testRepairShouldRetryOnlyFailedNodesWithoutValidCache();
   await testSourceRefreshShouldRejectInvalidOldCache();
   await testSourceRefreshShouldFailWithInvalidServerFingerprintCache();
   await testSourceRefreshShouldFailWithExpiredCache();

@@ -264,14 +264,20 @@ async function ensureNodeSnapshotsAvailable(db, servers, logger, options = {}) {
   }
 
   logger.info(`检测到 ${missingServers.length} 台在线服务器缺少 xui_nodes 快照，开始按服务器补齐`);
-  const results = [];
-  const syncNode = options.dependencies?.syncServerNodes || syncServerNodes;
-  for (const server of missingServers) {
-    const syncResult = await syncNode(db, server, {
-      inboundSnapshotCache: options.inboundSnapshotCache
-    });
-    results.push({ server, result: syncResult });
-    logger.info(`补齐服务器节点快照: server=${server.name}, success=${syncResult.success}, nodeCount=${syncResult.nodeCount || 0}`);
+  const syncServers = options.dependencies?.syncSelectedServers || syncSelectedServers;
+  const syncResult = await syncServers(db, missingServers, {
+    inboundSnapshotCache: options.inboundSnapshotCache
+  });
+  const results = missingServers.map((server, index) => ({
+    server,
+    result: syncResult.results?.[index] || {
+      success: false,
+      serverId: server.id,
+      message: '未返回服务器同步结果'
+    }
+  }));
+  for (const { server, result } of results) {
+    logger.info(`补齐服务器节点快照: server=${server.name}, success=${result.success}, nodeCount=${result.nodeCount || 0}`);
   }
   return results;
 }
@@ -782,6 +788,8 @@ async function appendAnnouncementVirtualNodes(db, nodes) {
  * @returns {Promise<{subscription_url:string,clash_url:string,v2ray_url:string}>} 订阅链接集合
  */
 async function generateSubscription(db, userId, logger, options = {}) {
+  const inboundSnapshotCache = options.inboundSnapshotCache || new Map();
+  options = { ...options, inboundSnapshotCache };
   const generationStartedAt = Date.now();
   const remoteServerIds = new Set();
   const inboundOutcomes = new Map();
@@ -892,21 +900,20 @@ async function generateSubscription(db, userId, logger, options = {}) {
           logger,
           options
         );
-        const failedKeys = new Set(
-          firstRefreshResult.failedConfigs.map(
-            (config) => buildSourceCacheKey(config.server_id, config.inbound_id)
-          )
-        );
         const latestRepairConfigMap = new Map(
           latestRepairConfigs.map((config) => [
             buildSourceCacheKey(config.server_id, config.inbound_id),
             config
           ])
         );
-        const retryConfigs = firstRefreshResult.failedConfigs.map((config) => {
-          const key = buildSourceCacheKey(config.server_id, config.inbound_id);
-          return latestRepairConfigMap.get(key) || config;
-        });
+        const retryConfigs = firstRefreshResult.failedConfigs
+          .filter((config) => failedCacheStatus.invalidPairKeys.has(
+            buildSourceCacheKey(config.server_id, config.inbound_id)
+          ))
+          .map((config) => {
+            const key = buildSourceCacheKey(config.server_id, config.inbound_id);
+            return latestRepairConfigMap.get(key) || config;
+          });
         const repairIds = new Set(repairServers.map((server) => server.id));
         const originalRepairKeys = new Set(
           nodeConfigs
