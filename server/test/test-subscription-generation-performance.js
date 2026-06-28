@@ -383,16 +383,18 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
     'listOnlineServers',
     'listNodeSnapshots',
     'listUserNodeConfigs',
-    'listUserSubscriptionSources'
+    'listUserSubscriptionSources',
+    'upsertSubscriptionSource',
+    'saveUserSubscriptionCache'
   ];
   const originals = Object.fromEntries(
     repositoryMethods.map((method) => [method, subscriptionRepository[method]])
   );
   const originalGetInstance = XuiService.getInstance;
   const servers = [
-    { id: 1, name: 'one', api_url: 'http://one', api_token: 'token' },
-    { id: 2, name: 'two', api_url: 'http://two', api_token: 'token' },
-    { id: 3, name: 'three', api_url: 'http://three', api_token: 'token' }
+    { id: 1, name: 'one', api_url: 'http://one', api_token: 'token', sub_url: 'http://sub-one/', host: 'one.example.com', client_port: 443 },
+    { id: 2, name: 'two', api_url: 'http://two', api_token: 'token', sub_url: 'http://sub-two/', host: 'two.example.com', client_port: 443 },
+    { id: 3, name: 'three', api_url: 'http://three', api_token: 'token', sub_url: 'http://sub-three/', host: 'three.example.com', client_port: 443 }
   ];
   const user = {
     id: 9,
@@ -402,13 +404,18 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
     traffic_limit: 1024
   };
   const logger = { info() {}, warn() {}, error() {} };
+  const sources = new Map();
   let remoteCalls = 0;
 
   subscriptionRepository.findLatestUserSubscription = async () => undefined;
   subscriptionRepository.findSubscriptionUserById = async () => user;
   subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
   subscriptionRepository.listOnlineServers = async () => servers;
-  subscriptionRepository.listUserSubscriptionSources = async () => [];
+  subscriptionRepository.listUserSubscriptionSources = async () => Array.from(sources.values());
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => {
+    sources.set(`${source.server_id}:${source.inbound_id}`, source);
+  };
+  subscriptionRepository.saveUserSubscriptionCache = async () => {};
   XuiService.getInstance = async () => {
     remoteCalls += 1;
     throw new Error('完整本地数据不应访问远程');
@@ -421,22 +428,22 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
       { server_id: 3, inbound_id: 31 }
     ];
     subscriptionRepository.listUserNodeConfigs = async () => [
-      { server_id: 1, inbound_id: 11, sub_id: 'sub-1' },
-      { server_id: 2, inbound_id: 21, sub_id: 'sub-2' },
-      { server_id: 3, inbound_id: 31, sub_id: 'sub-3' }
+      { server_id: 1, inbound_id: 11, sub_id: 'sub-1', remark: 'direct-1', protocol: 'vless', port: 443, settings: '{}', stream_settings: '{}' },
+      { server_id: 2, inbound_id: 21, sub_id: 'sub-2', remark: 'direct-2', protocol: 'vless', port: 443, settings: '{}', stream_settings: '{}' },
+      { server_id: 3, inbound_id: 31, sub_id: 'sub-3', remark: 'direct-3', protocol: 'vless', port: 443, settings: '{}', stream_settings: '{}' }
     ];
     let selectedSyncCalls = 0;
-    await assert.rejects(
-      userSubscriptionService.generateSubscription({}, user.id, logger, {
+    await userSubscriptionService.generateSubscription({}, user.id, logger, {
         dependencies: {
           async syncSelectedServers() {
             selectedSyncCalls += 1;
             return { success: true, syncedCount: 0, failedCount: 0, totalCount: 0, results: [] };
+          },
+          async fetchOriginalSubscription() {
+            return Buffer.from('vless://00000000-0000-0000-0000-000000000001@127.0.0.1:443?encryption=none#node').toString('base64');
           }
         }
-      }),
-      (error) => error.code === 500
-    );
+      });
     assert.strictEqual(selectedSyncCalls, 0);
     assert.strictEqual(remoteCalls, 0);
 
@@ -448,10 +455,9 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
       { server_id: 2, inbound_id: 21 }
     ];
     subscriptionRepository.listUserNodeConfigs = async () => [
-      { server_id: 1, inbound_id: 11, sub_id: 'sub-1' }
+      { server_id: 1, inbound_id: 11, sub_id: 'sub-1', remark: 'direct-1', protocol: 'vless', port: 443, settings: '{}', stream_settings: '{}' }
     ];
-    await assert.rejects(
-      userSubscriptionService.generateSubscription({}, user.id, logger, {
+    await userSubscriptionService.generateSubscription({}, user.id, logger, {
         inboundSnapshotCache,
         dependencies: {
           async syncSelectedServers(db, selectedServers) {
@@ -461,11 +467,12 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
           async syncUserToXuiServers(db, syncedUser, plan) {
             receivedUserSyncPlan = plan;
             return { success: true, successCount: 1, failureCount: 0 };
+          },
+          async fetchOriginalSubscription() {
+            return Buffer.from('vless://00000000-0000-0000-0000-000000000001@127.0.0.1:443?encryption=none#node').toString('base64');
           }
         }
-      }),
-      (error) => error.code === 500
-    );
+      });
 
     assert.deepStrictEqual(selectedServerIds, [2, 3]);
     assert.deepStrictEqual(receivedUserSyncPlan.serverIds, [2]);
@@ -544,6 +551,8 @@ async function runSourceRefreshScenario({
     { ...source }
   ]));
   const timeoutValues = [];
+  const fetchCounts = new Map();
+  const repairServerSelections = [];
   let activeCount = 0;
   let maxActiveCount = 0;
   let savedNodes;
@@ -570,8 +579,22 @@ async function runSourceRefreshScenario({
       error(message) { logMessages.push(message); }
     }, {
       dependencies: {
+        async syncSelectedServers(db, selectedServers) {
+          repairServerSelections.push(selectedServers.map((server) => server.id));
+          return {
+            success: true,
+            syncedCount: selectedServers.length,
+            failedCount: 0,
+            totalCount: selectedServers.length,
+            results: selectedServers.map((server) => ({ success: true, serverId: server.id }))
+          };
+        },
+        async syncUserToXuiServers() {
+          return { success: true, successCount: 1, failureCount: 0 };
+        },
         async fetchOriginalSubscription(subUrl, subId, options) {
           const index = Number(subId.replace('node-sub-', ''));
+          fetchCounts.set(index, (fetchCounts.get(index) || 0) + 1);
           timeoutValues.push(options.timeout);
           activeCount += 1;
           maxActiveCount = Math.max(maxActiveCount, activeCount);
@@ -597,7 +620,9 @@ async function runSourceRefreshScenario({
       savedNodes,
       servers,
       nodeConfigs,
-      logMessages
+      logMessages,
+      fetchCounts,
+      repairServerSelections
     };
   } finally {
     for (const method of repositoryMethods) {
@@ -695,6 +720,7 @@ async function testSourceRefreshShouldReuseValidOldCache() {
 
   assert.strictEqual(scenario.savedNodes.length, 25);
   assert(scenario.savedNodes.some((node) => node.original_link.includes('000000000099')));
+  assert.deepStrictEqual(scenario.repairServerSelections, []);
 }
 
 /**
@@ -862,6 +888,149 @@ async function testMissingSourceUrlShouldLogItemDuration() {
 }
 
 /**
+ * 验证首次模板失败仅按服务器做一轮定向修复，并复用同一 inbound 快照缓存。
+ * 核心分支：服务器 2 的节点首次及重试均失败，成功节点不重复拉取，且不存在第三次拉取或第二轮修复。
+ *
+ * @returns {Promise<void>}
+ */
+async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
+  const repositoryMethods = [
+    'findLatestUserSubscription',
+    'findSubscriptionUserById',
+    'listEnabledUserCfIps',
+    'listOnlineServers',
+    'listNodeSnapshots',
+    'listUserNodeConfigs',
+    'listUserSubscriptionSources',
+    'upsertSubscriptionSource',
+    'saveUserSubscriptionCache'
+  ];
+  const originals = Object.fromEntries(
+    repositoryMethods.map((method) => [method, subscriptionRepository[method]])
+  );
+  const servers = [1, 2, 3].map((id) => ({
+    id,
+    name: `server-${id}`,
+    sub_url: `https://subscription.example/${id}/`,
+    host: `server-${id}.example.com`,
+    client_port: 443,
+    api_token: `api-token-${id}`
+  }));
+  const nodeConfigs = servers.map((server) => ({
+    user_id: 501,
+    server_id: server.id,
+    inbound_id: server.id * 10,
+    sub_id: `private-sub-${server.id}`,
+    uuid: `private-uuid-${server.id}`,
+    remark: `direct-${server.id}`,
+    protocol: 'vless',
+    port: 443,
+    settings: '{}',
+    stream_settings: '{}'
+  }));
+  const sources = new Map();
+  const fetchCounts = new Map();
+  const repairCalls = [];
+  const userSyncPlans = [];
+  const logs = [];
+  const inboundSnapshotCache = new Map();
+  let savedNodes;
+
+  subscriptionRepository.findLatestUserSubscription = async () => undefined;
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 501,
+    email: 'secret-user@example.com',
+    sub_id: 'private-user-token',
+    enabled: 1,
+    traffic_limit: 1024
+  });
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServers = async () => servers;
+  subscriptionRepository.listNodeSnapshots = async () => nodeConfigs;
+  subscriptionRepository.listUserNodeConfigs = async () => nodeConfigs;
+  subscriptionRepository.listUserSubscriptionSources = async () => Array.from(sources.values());
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => {
+    sources.set(`${source.server_id}:${source.inbound_id}`, { ...source });
+  };
+  subscriptionRepository.saveUserSubscriptionCache = async (db, userId, subId, nodes) => {
+    savedNodes = nodes;
+  };
+
+  try {
+    const result = await userSubscriptionService.generateSubscription({}, 501, {
+      info(message) { logs.push(message); },
+      warn(message) { logs.push(message); },
+      error(message) { logs.push(message); }
+    }, {
+      inboundSnapshotCache,
+      dependencies: {
+        async fetchOriginalSubscription(subUrl, subId) {
+          const serverId = Number(subId.split('-').pop());
+          fetchCounts.set(serverId, (fetchCounts.get(serverId) || 0) + 1);
+          if (serverId === 2) {
+            throw new Error('sensitive-error private-user-token private-uuid-2 api-token-2');
+          }
+          return Buffer.from(
+            `vless://00000000-0000-0000-0000-${String(serverId).padStart(12, '0')}@127.0.0.1:443?encryption=none#node`
+          ).toString('base64');
+        },
+        async syncSelectedServers(db, selectedServers, options) {
+          repairCalls.push({
+            ids: selectedServers.map((server) => server.id),
+            cache: options.inboundSnapshotCache
+          });
+          return {
+            success: true,
+            syncedCount: 0,
+            failedCount: selectedServers.length,
+            totalCount: selectedServers.length,
+            results: selectedServers.map((server) => ({ success: false, serverId: server.id }))
+          };
+        },
+        async syncUserToXuiServers(db, user, plan) {
+          userSyncPlans.push(plan);
+          return { success: true, successCount: 1, failureCount: 0 };
+        }
+      }
+    });
+
+    assert.strictEqual(result, 'private-user-token');
+    assert.deepStrictEqual(repairCalls.map((call) => call.ids), [[2]]);
+    assert.strictEqual(repairCalls[0].cache, inboundSnapshotCache);
+    assert.deepStrictEqual(userSyncPlans.map((plan) => plan.serverIds), [[2]]);
+    assert.strictEqual(userSyncPlans[0].inboundSnapshotCache, inboundSnapshotCache);
+    assert.deepStrictEqual(Object.fromEntries(fetchCounts), { 1: 1, 2: 2, 3: 1 });
+    assert.strictEqual(savedNodes.length, 2);
+
+    const summary = logs.find((message) => message.includes('订阅生成汇总:'));
+    assert(summary);
+    for (const field of [
+      'user=501',
+      'localServers=3',
+      'remoteServers=0',
+      'inboundSuccess=0',
+      'inboundFailed=1',
+      'sourceSuccess=2',
+      'sourceFailed=2',
+      'repairServers=1',
+      'nodes=2',
+      'duration='
+    ]) {
+      assert(summary.includes(field), `汇总日志缺少字段 ${field}`);
+    }
+    const allLogs = logs.join('\n');
+    assert(!allLogs.includes('private-user-token'));
+    assert(!allLogs.includes('private-uuid'));
+    assert(!allLogs.includes('api-token'));
+    assert(!allLogs.includes('sensitive-error'));
+  } finally {
+    for (const method of repositoryMethods) {
+      subscriptionRepository[method] = originals[method];
+    }
+  }
+}
+
+/**
  * 顺序执行订阅生成性能回归测试，任一失败都会让进程以非零状态退出。
  *
  * @returns {Promise<void>}
@@ -886,6 +1055,7 @@ async function run() {
   await testSourceRefreshShouldFailWithExpiredCache();
   await testSourceRefreshShouldWrapExternalFailuresWithoutMutation();
   await testMissingSourceUrlShouldLogItemDuration();
+  await testFirstGenerationShouldRepairFailedServerOnlyOnce();
   console.log('subscription generation performance tests passed');
 }
 

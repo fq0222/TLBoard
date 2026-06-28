@@ -330,6 +330,41 @@ async function ensureUserNodeConfigsComplete(db, user, servers, logger, options 
 }
 
 /**
+ * 仅针对指定修复服务器重新同步用户，并重读这些服务器的节点配置。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} user - 当前订阅用户
+ * @param {Array<Object>} repairServers - 首轮模板失败且无有效缓存的服务器
+ * @param {Object} logger - 日志实例
+ * @param {Object} [options={}] - 生成选项与依赖覆盖
+ * @returns {Promise<Array<Object>>} 修复服务器上的最新用户节点配置
+ */
+async function reloadRepairNodeConfigs(db, user, repairServers, logger, options = {}) {
+  if (repairServers.length === 0) {
+    return [];
+  }
+
+  const repairServerIds = repairServers.map((server) => server.id);
+  const { totalTrafficLimit } = getUserTrafficEntitlement(user);
+  const syncUser = options.dependencies?.syncUserToXuiServers || syncUserToXuiServers;
+  const syncResult = await syncUser(db, user, {
+    traffic_limit: totalTrafficLimit,
+    serverIds: repairServerIds,
+    inboundSnapshotCache: options.inboundSnapshotCache
+  });
+  if (!syncResult.success) {
+    logger.warn(
+      `定向修复用户节点配置未完全成功: user=${user.id}, `
+      + `success=${syncResult.successCount || 0}, failed=${syncResult.failureCount || 0}`
+    );
+  }
+
+  const repairIds = new Set(repairServerIds);
+  return (await subscriptionRepository.listUserNodeConfigs(db, user.id))
+    .filter((config) => repairIds.has(config.server_id));
+}
+
+/**
  * 将来源缓存列表按 server_id + inbound_id 建立映射。
  *
  * @param {Array} sources - 缓存记录列表
@@ -742,6 +777,17 @@ async function appendAnnouncementVirtualNodes(db, nodes) {
  * @returns {Promise<{subscription_url:string,clash_url:string,v2ray_url:string}>} 订阅链接集合
  */
 async function generateSubscription(db, userId, logger, options = {}) {
+  const generationStartedAt = Date.now();
+  const summary = {
+    localServers: 0,
+    remoteServers: 0,
+    inboundSuccess: 0,
+    inboundFailed: 0,
+    sourceSuccess: 0,
+    sourceFailed: 0,
+    repairServers: 0,
+    nodes: 0
+  };
   const existingSubscription = await subscriptionRepository.findLatestUserSubscription(db, userId);
   const user = assertActiveSubscriptionUser(
     await subscriptionRepository.findSubscriptionUserById(db, userId)
@@ -764,12 +810,16 @@ async function generateSubscription(db, userId, logger, options = {}) {
     const snapshots = await subscriptionRepository.listNodeSnapshots(db);
     const nodeConfigs = await subscriptionRepository.listUserNodeConfigs(db, user.id);
     const missingServers = findServersRequiringSync(servers, snapshots, nodeConfigs);
+    summary.localServers = servers.length - missingServers.length;
+    summary.remoteServers = missingServers.length;
     if (missingServers.length > 0) {
       logger.info(`用户 ${user.email} 首次生成订阅，定向同步 ${missingServers.length} 台缺口服务器`);
       const syncServers = options.dependencies?.syncSelectedServers || syncSelectedServers;
       const syncResult = await syncServers(db, missingServers, {
         inboundSnapshotCache: options.inboundSnapshotCache
       });
+      summary.inboundSuccess += syncResult.syncedCount || 0;
+      summary.inboundFailed += syncResult.failedCount || 0;
       logger.info(`首次生成前节点同步完成: ${syncResult.syncedCount || 0}/${syncResult.totalCount || missingServers.length} 台服务器`);
     } else {
       logger.info(`用户 ${user.email} 首次生成订阅，本地快照和节点配置完整，跳过远程节点同步`);
@@ -784,8 +834,8 @@ async function generateSubscription(db, userId, logger, options = {}) {
   }
 
   if (isFirstGeneration) {
-    logger.info(`用户 ${user.email} 首次生成订阅，开始拉取全部原始订阅模板`);
-    const refreshResult = await refreshSubscriptionSources(
+    logger.info(`用户 ${user.id} 首次生成订阅，开始拉取全部原始订阅模板`);
+    const firstRefreshResult = await refreshSubscriptionSources(
       db,
       user,
       nodeConfigs,
@@ -793,7 +843,68 @@ async function generateSubscription(db, userId, logger, options = {}) {
       logger,
       options.dependencies
     );
-    logger.info(`用户 ${user.email} 首次模板刷新结果: success=${refreshResult.successfulConfigs.length}, failed=${refreshResult.failedConfigs.length}`);
+    summary.sourceSuccess += firstRefreshResult.successfulConfigs.length;
+    summary.sourceFailed += firstRefreshResult.failedConfigs.length;
+    logger.info(`用户 ${user.id} 首次模板刷新结果: success=${firstRefreshResult.successfulConfigs.length}, failed=${firstRefreshResult.failedConfigs.length}`);
+
+    if (firstRefreshResult.failedConfigs.length > 0) {
+      const sourceMap = mapSourcesByKey(
+        await subscriptionRepository.listUserSubscriptionSources(db, userId)
+      );
+      const failedCacheStatus = collectSourceCacheStatus(
+        firstRefreshResult.failedConfigs,
+        sourceMap,
+        serversById
+      );
+      const repairServerIds = new Set(
+        failedCacheStatus.invalidPairs.map((pair) => pair.config.server_id)
+      );
+      const repairServers = servers.filter((server) => repairServerIds.has(server.id));
+      summary.repairServers = repairServers.length;
+
+      if (repairServers.length > 0) {
+        const syncServers = options.dependencies?.syncSelectedServers || syncSelectedServers;
+        const repairSyncResult = await syncServers(db, repairServers, {
+          inboundSnapshotCache: options.inboundSnapshotCache
+        });
+        summary.inboundSuccess += repairSyncResult.syncedCount || 0;
+        summary.inboundFailed += repairSyncResult.failedCount || 0;
+
+        const latestRepairConfigs = await reloadRepairNodeConfigs(
+          db,
+          user,
+          repairServers,
+          logger,
+          options
+        );
+        const successfulKeys = new Set(
+          firstRefreshResult.successfulConfigs.map(
+            (config) => buildSourceCacheKey(config.server_id, config.inbound_id)
+          )
+        );
+        const retryConfigs = latestRepairConfigs.filter(
+          (config) => !successfulKeys.has(buildSourceCacheKey(config.server_id, config.inbound_id))
+        );
+        const repairIds = new Set(repairServers.map((server) => server.id));
+        nodeConfigs = [
+          ...nodeConfigs.filter((config) => !repairIds.has(config.server_id)),
+          ...latestRepairConfigs
+        ];
+
+        if (retryConfigs.length > 0) {
+          const retryResult = await refreshSubscriptionSources(
+            db,
+            user,
+            retryConfigs,
+            serversById,
+            logger,
+            options.dependencies
+          );
+          summary.sourceSuccess += retryResult.successfulConfigs.length;
+          summary.sourceFailed += retryResult.failedConfigs.length;
+        }
+      }
+    }
   } else {
     const sourceMap = mapSourcesByKey(
       await subscriptionRepository.listUserSubscriptionSources(db, userId)
@@ -845,6 +956,14 @@ async function generateSubscription(db, userId, logger, options = {}) {
     latestSourceMap.delete(invalidPair.key);
   }
   const allNodes = composeSubscriptionNodes(nodeConfigs, latestSourceMap, serversById, cfIps, logger);
+  summary.nodes = allNodes.length;
+  logger.info(
+    `订阅生成汇总: user=${user.id}, localServers=${summary.localServers}, `
+    + `remoteServers=${summary.remoteServers}, inboundSuccess=${summary.inboundSuccess}, `
+    + `inboundFailed=${summary.inboundFailed}, sourceSuccess=${summary.sourceSuccess}, `
+    + `sourceFailed=${summary.sourceFailed}, repairServers=${summary.repairServers}, `
+    + `nodes=${summary.nodes}, duration=${Date.now() - generationStartedAt}ms`
+  );
   if (allNodes.length === 0) {
     throw createLegacyBusinessError(500, '未生成任何可用节点，请稍后重试', 500, null);
   }
