@@ -255,7 +255,7 @@ const userApi = {
    * @returns {Promise<Object>} 响应数据
    */
   applyCfIps(ipIds) {
-    return apiClient.post('/cf-ips/apply', { ip_ids: ipIds })
+    return apiClient.post('/cf-ips/apply', { ip_ids: ipIds }, { timeout: 60000 })
   },
 
   /**
