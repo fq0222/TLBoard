@@ -63,29 +63,27 @@ test('compareCfIpResults 将指标缺失或非有限的可用项排在完整项�
   )
 })
 
-test('selectRecommendedCfIps 保留一个最优 IPv6 作为兜底', () => {
+test('selectRecommendedCfIps 不为较慢的 IPv6 强制保留名额', () => {
   const items = [
-    result(1, '2606:4700::1', { packetLoss: 5, avgLatency: 50 }),
-    result(2, '2606:4700::2', { packetLoss: 10, avgLatency: 60 }),
-    result(3, '1.1.1.1'),
-    result(4, '1.0.0.1'),
-    result(5, '8.8.8.8'),
-    result(6, '8.8.4.4'),
-    result(7, '9.9.9.9')
+    result(1, '2606:4700::1', { packetLoss: 0, avgLatency: 500 }),
+    result(2, '1.1.1.1', { packetLoss: 0, avgLatency: 10 }),
+    result(3, '1.0.0.1', { packetLoss: 0, avgLatency: 20 }),
+    result(4, '8.8.8.8', { packetLoss: 0, avgLatency: 30 }),
+    result(5, '8.8.4.4', { packetLoss: 0, avgLatency: 40 }),
+    result(6, '9.9.9.9', { packetLoss: 0, avgLatency: 50 })
   ]
 
-  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [1, 3, 4, 5, 6])
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [2, 3, 4, 5, 6])
 })
 
-test('selectRecommendedCfIps 支持自定义推荐数量并保留 IPv6 兜底', () => {
+test('selectRecommendedCfIps 先按丢包率再按平均延迟选择', () => {
   const items = [
-    result(1, '2606:4700::1', { packetLoss: 0, avgLatency: 10 }),
-    result(2, '1.1.1.1', { packetLoss: 0, avgLatency: 20 }),
-    result(3, '1.0.0.1', { packetLoss: 0, avgLatency: 30 }),
-    result(4, '8.8.8.8', { packetLoss: 0, avgLatency: 40 })
+    result(1, '2606:4700::1', { packetLoss: 10, avgLatency: 10 }),
+    result(2, '1.1.1.1', { packetLoss: 0, avgLatency: 200 }),
+    result(3, '1.0.0.1', { packetLoss: 0, avgLatency: 30 })
   ]
 
-  assert.deepEqual(selectRecommendedCfIps(items, 2).map(item => item.id), [1, 2])
+  assert.deepEqual(selectRecommendedCfIps(items, 2).map(item => item.id), [3, 2])
 })
 
 test('selectRecommendedCfIps 推荐数量非正数时返回空数组', () => {
@@ -97,7 +95,7 @@ test('selectRecommendedCfIps 推荐数量非正数时返回空数组', () => {
   assert.deepEqual(selectRecommendedCfIps(items, 0), [])
 })
 
-test('selectRecommendedCfIps 在 IPv4 不足时使用其余 IPv6 补位', () => {
+test('selectRecommendedCfIps 对不同协议族统一按质量排序', () => {
   const items = [
     result(1, '2606:4700::1', { avgLatency: 10 }),
     result(2, '2606:4700::2', { avgLatency: 20 }),
@@ -106,7 +104,7 @@ test('selectRecommendedCfIps 在 IPv4 不足时使用其余 IPv6 补位', () => 
     result(5, '1.0.0.1', { avgLatency: 50 })
   ]
 
-  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [1, 4, 5, 2, 3])
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [1, 2, 3, 4, 5])
 })
 
 test('selectRecommendedCfIps 无 IPv6 时按排序选择 IPv4', () => {
@@ -116,7 +114,7 @@ test('selectRecommendedCfIps 无 IPv6 时按排序选择 IPv4', () => {
     result(3, '8.8.8.8', { packetLoss: 0, avgLatency: 50 })
   ]
 
-  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [3, 1, 2])
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [3, 2, 1])
 })
 
 test('selectRecommendedCfIps 接受 20% 丢包率并排除 21% 丢包率', () => {
@@ -147,7 +145,7 @@ test('selectRecommendedCfIps 排除不可用项且不足五个时仅返回可用
     result(4, '2606:4700::1')
   ]
 
-  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [4, 1])
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [1, 4])
   assert.deepEqual(selectRecommendedCfIps(items.slice(1, 3)), [])
 })
 

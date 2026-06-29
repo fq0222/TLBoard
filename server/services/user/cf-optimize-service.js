@@ -4,8 +4,9 @@ const cfOptimizeRepository = require('../../repositories/cf-optimize-repository'
 
 const logger = createLogger('USER-CF');
 
-// 单次返回给用户的 CF 优选 IP 候选总数。
-const CF_IP_CANDIDATE_COUNT = 50;
+// 单次返回给用户的 CF 优选 IP 候选数量，固定包含 19 个 IPv4 和 1 个 IPv6。
+const CF_IPV4_CANDIDATE_COUNT = 19;
+const CF_IPV6_CANDIDATE_COUNT = 1;
 
 /**
  * 用户端 CF 优选服务。
@@ -115,9 +116,14 @@ async function getCfIps(db, user) {
   const ipv4List = allIps.filter((item) => !item.ip.includes(':'));
   const ipv6List = allIps.filter((item) => item.ip.includes(':'));
 
-  const selectedIpv6 = shuffle(ipv6List).slice(0, Math.min(3, ipv6List.length));
-  const remainingCount = CF_IP_CANDIDATE_COUNT - selectedIpv6.length;
-  const selectedIpv4 = shuffle(ipv4List).slice(0, Math.min(remainingCount, ipv4List.length));
+  const selectedIpv6 = shuffle(ipv6List).slice(
+    0,
+    Math.min(CF_IPV6_CANDIDATE_COUNT, ipv6List.length)
+  );
+  const selectedIpv4 = shuffle(ipv4List).slice(
+    0,
+    Math.min(CF_IPV4_CANDIDATE_COUNT, ipv4List.length)
+  );
   const ips = shuffle([...selectedIpv4, ...selectedIpv6]);
 
   const currentIps = await cfOptimizeRepository.listCurrentUserCfIps(db, user.id);

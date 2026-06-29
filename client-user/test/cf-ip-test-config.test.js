@@ -12,8 +12,8 @@ import {
 } from '../src/utils/cf-ip-test-config.js'
 
 test('CF IP 测速参数符合优选策略', () => {
-  assert.equal(CF_IP_TEST_COUNT, 5)
-  assert.equal(CF_IP_TEST_TIMEOUT, 3000)
+  assert.equal(CF_IP_TEST_COUNT, 2)
+  assert.equal(CF_IP_TEST_TIMEOUT, 5000)
   assert.equal(CF_IP_TEST_INTERVAL, 200)
   assert.equal(CF_IP_TEST_CONCURRENCY, 10)
 })

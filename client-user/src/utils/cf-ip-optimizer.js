@@ -50,16 +50,6 @@ function isRecommendationCandidate(item) {
 }
 
 /**
- * 按平均延迟比较两个合格的自动推荐候选。
- * @param {Object} a - 第一个合格候选。
- * @param {Object} b - 第二个合格候选。
- * @returns {number} 平均延迟较低的候选排在前面，丢包率不参与合格区间内排序。
- */
-function compareRecommendationCandidates(a, b) {
-  return Number(a.avgLatency) - Number(b.avgLatency)
-}
-
-/**
  * 比较两个 CF IP 测速结果。
  * @param {Object} a - 第一个测速结果。
  * @param {Object} b - 第二个测速结果。
@@ -87,24 +77,15 @@ export function compareCfIpResults(a, b) {
  * 从测速结果中选择指定数量的推荐 IP。
  * @param {Object[]} results - CF IP 测速结果列表。
  * @param {number} limit - 最大推荐数量，默认五个。
- * @returns {Object[]} 有 IPv6 时先保留最优一个，再以 IPv4 和其余 IPv6 补足。
+ * @returns {Object[]} 不区分协议族，按丢包率和平均延迟排序后的前若干项。
  */
 export function selectRecommendedCfIps(results, limit = 5) {
   if (limit <= 0) return []
 
-  const available = results
+  return results
     .filter(isRecommendationCandidate)
-    .sort(compareRecommendationCandidates)
-  const ipv4Results = available.filter(item => !isIpv6(item.ip))
-  const ipv6Results = available.filter(item => isIpv6(item.ip))
-  const selected = []
-
-  if (ipv6Results.length > 0) selected.push(ipv6Results[0])
-
-  selected.push(...ipv4Results.slice(0, limit - selected.length))
-  selected.push(...ipv6Results.slice(1, 1 + limit - selected.length))
-
-  return selected
+    .sort(compareCfIpResults)
+    .slice(0, limit)
 }
 
 /**
