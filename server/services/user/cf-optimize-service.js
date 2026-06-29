@@ -1,5 +1,6 @@
 const { generateSubscriptionUrls } = require('../../utils/site-url');
 const { createLogger } = require('../../utils/logger');
+const net = require('net');
 const cfOptimizeRepository = require('../../repositories/cf-optimize-repository');
 
 const logger = createLogger('USER-CF');
@@ -63,6 +64,10 @@ function normalizeIpIds(ipIds) {
     normalized.push(parsedId);
   }
 
+  if (normalized.length > 5) {
+    throw createLegacyBusinessError('最多只能选择5个IP');
+  }
+
   return normalized;
 }
 
@@ -92,7 +97,41 @@ function normalizeIpAddresses(ips) {
     normalized.push(value);
   }
 
+  if (normalized.length > 5) {
+    throw createLegacyBusinessError('最多只能选择5个IP');
+  }
+
   return normalized;
+}
+
+/**
+ * 判断用户输入是否为合法 IPv4 或 IPv6 地址。
+ *
+ * @param {string} ip - 用户输入 IP
+ * @returns {boolean} 合法返回 true
+ */
+function isValidIpAddress(ip) {
+  if (typeof ip !== 'string') {
+    return false;
+  }
+
+  return net.isIP(ip.trim()) !== 0;
+}
+
+/**
+ * 规整用户要替换的 CF IP 槽位序号。
+ *
+ * @param {number|string} slotIndex - 用户当前 IP 槽位，允许 1~5
+ * @returns {number} 规整后的槽位序号
+ */
+function normalizeSlotIndex(slotIndex) {
+  const normalizedSlot = Number(slotIndex);
+
+  if (!Number.isInteger(normalizedSlot) || normalizedSlot < 1 || normalizedSlot > 5) {
+    throw createLegacyBusinessError('槽位序号必须在 1 到 5 之间');
+  }
+
+  return normalizedSlot;
 }
 
 /**
@@ -212,8 +251,38 @@ async function applyCfIpsByAddress(db, req, user, ips) {
   };
 }
 
+/**
+ * 将当前用户的指定 CF IP 槽位替换为用户私有 IP。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} user - 当前登录用户
+ * @param {number|string} slotIndex - 1~5 的槽位序号
+ * @param {string} ip - 用户手动输入 IP
+ * @returns {Promise<Object>} 替换后的槽位记录
+ */
+async function replaceCfIpSlotByAddress(db, user, slotIndex, ip) {
+  const normalizedSlot = normalizeSlotIndex(slotIndex);
+  const normalizedIp = typeof ip === 'string' ? ip.trim() : '';
+
+  if (!isValidIpAddress(normalizedIp)) {
+    throw createLegacyBusinessError('请输入合法的 IPv4 或 IPv6 地址');
+  }
+
+  const slot = await cfOptimizeRepository.replaceUserCfIpSlotWithCustomIp(
+    db,
+    user.id,
+    normalizedSlot,
+    normalizedIp
+  );
+
+  logger.info(`用户 ${user.email} 替换 CF IP 槽位 ${normalizedSlot} 为私有 IP 成功`);
+
+  return slot;
+}
+
 module.exports = {
   getCfIps,
   applyCfIpsByIds,
-  applyCfIpsByAddress
+  applyCfIpsByAddress,
+  replaceCfIpSlotByAddress
 };

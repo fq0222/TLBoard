@@ -85,8 +85,27 @@ async function applyCfIpsByAddress(req, res) {
   }
 }
 
+async function replaceCfIpSlotByAddress(req, res) {
+  if (handleValidationFailure(req, res, '替换私有CF IP')) {
+    return;
+  }
+
+  try {
+    const result = await cfOptimizeService.replaceCfIpSlotByAddress(
+      req.app.locals.db,
+      req.user,
+      req.params.slotIndex,
+      req.body.ip
+    );
+    return legacySuccess(res, result);
+  } catch (error) {
+    return handleControllerError(res, '替换私有CF IP', error);
+  }
+}
+
 module.exports = {
   getCfIps,
   applyCfIps,
-  applyCfIpsByAddress
+  applyCfIpsByAddress,
+  replaceCfIpSlotByAddress
 };

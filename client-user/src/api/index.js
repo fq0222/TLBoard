@@ -259,6 +259,16 @@ const userApi = {
   },
 
   /**
+   * 替换当前使用的某个 CF IP 槽位
+   * @param {number} slotIndex - 当前 IP 槽位，范围 1~5
+   * @param {string} ip - 用户私有 IPv4/IPv6 地址
+   * @returns {Promise<Object>} 响应数据
+   */
+  replaceCfIpSlot(slotIndex, ip) {
+    return apiClient.patch(`/cf-ips/slots/${slotIndex}`, { ip })
+  },
+
+  /**
    * 用户续费
    * @param {Object} data - 续费数据
    * @param {number} data.plan_id - 套餐ID

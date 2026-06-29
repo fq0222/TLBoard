@@ -383,8 +383,20 @@ const tableDefinitions = [
       CREATE TABLE IF NOT EXISTS user_cf_ips (
         id SERIAL PRIMARY KEY,
         user_id INTEGER NOT NULL,
-        ip_pool_id INTEGER NOT NULL,
-        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+        ip_pool_id INTEGER,
+        custom_ip VARCHAR(45),
+        source VARCHAR(20) NOT NULL DEFAULT 'pool',
+        slot_index INTEGER NOT NULL DEFAULT 1,
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        CONSTRAINT user_cf_ips_source_check CHECK (source IN ('pool', 'custom')),
+        CONSTRAINT user_cf_ips_value_check CHECK (
+          (source = 'pool' AND ip_pool_id IS NOT NULL AND custom_ip IS NULL)
+          OR
+          (source = 'custom' AND ip_pool_id IS NULL AND custom_ip IS NOT NULL)
+        ),
+        CONSTRAINT user_cf_ips_slot_check CHECK (slot_index BETWEEN 1 AND 5),
+        CONSTRAINT user_cf_ips_user_slot_unique UNIQUE (user_id, slot_index)
       )
     `
   },

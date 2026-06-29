@@ -23,10 +23,22 @@ async function listEnabledCfIps(db) {
  */
 async function listCurrentUserCfIps(db, userId) {
   return db.prepare(`
-    SELECT cp.id, cp.ip, 'user_selected' as source
+    SELECT
+      uci.id,
+      uci.user_id,
+      uci.ip_pool_id,
+      uci.custom_ip,
+      COALESCE(uci.source, 'pool') AS source,
+      uci.slot_index,
+      COALESCE(cp.ip, uci.custom_ip) AS ip,
+      cp.enabled,
+      uci.created_at,
+      uci.updated_at
     FROM user_cf_ips uci
-    JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
-    WHERE uci.user_id = ? AND cp.enabled = 1
+    LEFT JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
+    WHERE uci.user_id = ?
+      AND (COALESCE(uci.source, 'pool') = 'custom' OR cp.enabled = 1)
+    ORDER BY COALESCE(uci.slot_index, uci.id) ASC, uci.id ASC
   `).all(userId);
 }
 
@@ -84,13 +96,50 @@ async function replaceUserCfIps(db, userId, ipIds) {
   await withTransaction(db, async (client) => {
     await client.query('DELETE FROM user_cf_ips WHERE user_id = $1', [userId]);
 
-    for (const ipId of ipIds) {
+    for (let index = 0; index < ipIds.length; index += 1) {
       await client.query(
-        'INSERT INTO user_cf_ips (user_id, ip_pool_id) VALUES ($1, $2)',
-        [userId, ipId]
+        `INSERT INTO user_cf_ips (
+          user_id, ip_pool_id, custom_ip, source, slot_index, created_at, updated_at
+        )
+        VALUES ($1, $2, NULL, 'pool', $3, EXTRACT(EPOCH FROM NOW()), EXTRACT(EPOCH FROM NOW()))`,
+        [userId, ipIds[index], index + 1]
       );
     }
   });
+}
+
+/**
+ * 将用户指定 CF IP 槽位替换为用户私有 IP。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} userId - 当前用户 ID
+ * @param {number} slotIndex - 1~5 的槽位序号
+ * @param {string} ip - 用户手动输入的 IPv4/IPv6 地址
+ * @returns {Promise<Object>} 替换后的槽位记录
+ */
+async function replaceUserCfIpSlotWithCustomIp(db, userId, slotIndex, ip) {
+  return db.prepare(`
+    INSERT INTO user_cf_ips (
+      user_id, ip_pool_id, custom_ip, source, slot_index, created_at, updated_at
+    )
+    VALUES (?, NULL, ?, 'custom', ?, EXTRACT(EPOCH FROM NOW()), EXTRACT(EPOCH FROM NOW()))
+    ON CONFLICT (user_id, slot_index)
+    DO UPDATE SET
+      ip_pool_id = NULL,
+      custom_ip = EXCLUDED.custom_ip,
+      source = 'custom',
+      updated_at = EXTRACT(EPOCH FROM NOW())
+    RETURNING
+      id,
+      user_id,
+      ip_pool_id,
+      custom_ip,
+      source,
+      slot_index,
+      custom_ip AS ip,
+      created_at,
+      updated_at
+  `).get(userId, ip, slotIndex);
 }
 
 module.exports = {
@@ -99,5 +148,6 @@ module.exports = {
   findEnabledCfIpsByIds,
   findEnabledCfIpsByAddresses,
   findUserSubscriptionIdentity,
-  replaceUserCfIps
+  replaceUserCfIps,
+  replaceUserCfIpSlotWithCustomIp
 };

@@ -452,10 +452,18 @@ async function listUserOrders(db, userId) {
  */
 async function listUserCfIps(db, userId) {
   return db.prepare(`
-    SELECT cp.id, cp.ip, cp.enabled
+    SELECT
+      uci.id,
+      uci.ip_pool_id,
+      uci.custom_ip,
+      COALESCE(uci.source, 'pool') AS source,
+      uci.slot_index,
+      COALESCE(cp.ip, uci.custom_ip) AS ip,
+      cp.enabled
     FROM user_cf_ips uci
-    JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
+    LEFT JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
     WHERE uci.user_id = ?
+    ORDER BY COALESCE(uci.slot_index, uci.id) ASC, uci.id ASC
   `).all(userId);
 }
 
@@ -631,10 +639,15 @@ async function findEnabledCfIpsByIds(db, ipPoolIds) {
  */
 async function replaceUserCfIps(db, userId, ipPoolIds) {
   await db.prepare('DELETE FROM user_cf_ips WHERE user_id = ?').run(userId);
-  const insertStatement = db.prepare('INSERT INTO user_cf_ips (user_id, ip_pool_id) VALUES (?, ?)');
+  const insertStatement = db.prepare(`
+    INSERT INTO user_cf_ips (
+      user_id, ip_pool_id, custom_ip, source, slot_index, created_at, updated_at
+    )
+    VALUES (?, ?, NULL, 'pool', ?, EXTRACT(EPOCH FROM NOW()), EXTRACT(EPOCH FROM NOW()))
+  `);
 
-  for (const ipPoolId of ipPoolIds) {
-    await insertStatement.run(userId, ipPoolId);
+  for (let index = 0; index < ipPoolIds.length; index += 1) {
+    await insertStatement.run(userId, ipPoolIds[index], index + 1);
   }
 }
 
@@ -647,10 +660,19 @@ async function replaceUserCfIps(db, userId, ipPoolIds) {
  */
 async function findActiveCfIpsForUser(db, userId) {
   return db.prepare(`
-    SELECT cp.id, cp.ip, cp.enabled
+    SELECT
+      uci.id,
+      uci.ip_pool_id,
+      uci.custom_ip,
+      COALESCE(uci.source, 'pool') AS source,
+      uci.slot_index,
+      COALESCE(cp.ip, uci.custom_ip) AS ip,
+      cp.enabled
     FROM user_cf_ips uci
-    JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
-    WHERE uci.user_id = ? AND cp.enabled = 1
+    LEFT JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
+    WHERE uci.user_id = ?
+      AND (COALESCE(uci.source, 'pool') = 'custom' OR cp.enabled = 1)
+    ORDER BY COALESCE(uci.slot_index, uci.id) ASC, uci.id ASC
   `).all(userId);
 }
 

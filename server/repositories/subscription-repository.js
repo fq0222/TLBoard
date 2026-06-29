@@ -49,10 +49,12 @@ async function findLatestUserSubscription(db, userId) {
  */
 async function listEnabledUserCfIps(db, userId) {
   return db.prepare(`
-    SELECT cp.ip
+    SELECT COALESCE(cp.ip, uci.custom_ip) AS ip
     FROM user_cf_ips uci
-    JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
-    WHERE uci.user_id = ? AND cp.enabled = 1
+    LEFT JOIN cf_ip_pool cp ON uci.ip_pool_id = cp.id
+    WHERE uci.user_id = ?
+      AND (COALESCE(uci.source, 'pool') = 'custom' OR cp.enabled = 1)
+    ORDER BY COALESCE(uci.slot_index, uci.id) ASC, uci.id ASC
   `).all(userId);
 }
 

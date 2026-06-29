@@ -22,4 +22,8 @@ router.post('/apply-by-ip', authenticateUser, [
   body('ips.*').isString().withMessage('IP地址必须是字符串')
 ], cfOptimizeController.applyCfIpsByAddress);
 
+router.patch('/slots/:slotIndex', authenticateUser, [
+  body('ip').isString().withMessage('IP地址必须是字符串')
+], cfOptimizeController.replaceCfIpSlotByAddress);
+
 module.exports = router;

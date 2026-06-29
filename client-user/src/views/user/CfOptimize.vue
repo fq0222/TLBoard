@@ -4,8 +4,19 @@
       <h2 class="card-title">当前使用的 IP</h2>
       <div class="current-ips">
         <div v-for="(ip, index) in currentIps" :key="index" class="ip-item">
-          <span class="ip-address">{{ ip.ip }}</span>
-          <el-tag size="small">{{ ip.source === 'default' ? '默认' : '自定义' }}</el-tag>
+          <div class="current-ip-main">
+            <span class="ip-address">{{ ip.ip }}</span>
+            <el-tag size="small">{{ getCurrentIpSourceLabel(ip) }}</el-tag>
+          </div>
+          <el-button
+            v-if="ip.source !== 'default'"
+            type="primary"
+            link
+            size="small"
+            @click="openReplaceDialog(ip.slot_index || index + 1, ip)"
+          >
+            替换
+          </el-button>
         </div>
         <div v-if="currentIps.length === 0" class="empty-tip">暂无自定义 IP，当前使用默认 IP。</div>
       </div>
@@ -127,11 +138,33 @@
         </article>
       </div>
     </section>
+
+    <el-dialog
+      v-model="replaceDialogVisible"
+      title="替换当前 IP"
+      width="420px"
+    >
+      <el-form label-position="top">
+        <el-form-item label="IP 地址">
+          <el-input
+            v-model="replaceForm.ip"
+            placeholder="请输入 IPv4 或 IPv6 地址"
+            clearable
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="replaceDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="replaceLoading" @click="submitReplaceIp">
+          确定替换
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { Check, Connection, Refresh, Trophy } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
@@ -157,6 +190,12 @@ const testing = ref(false)
 const applying = ref(false)
 const tested = ref(false)
 const poolLoading = ref(false)
+const replaceDialogVisible = ref(false)
+const replaceLoading = ref(false)
+const replaceForm = reactive({
+  slotIndex: 1,
+  ip: ''
+})
 
 const sortedIpList = computed(() => {
   return [...ipList.value].sort(compareCfIpResults)
@@ -164,6 +203,12 @@ const sortedIpList = computed(() => {
 
 function isSelected(id) {
   return selectedIds.value.includes(id)
+}
+
+function getCurrentIpSourceLabel(ip) {
+  if (ip.source === 'default') return '默认'
+  if (ip.source === 'custom') return '私有'
+  return '优选'
 }
 
 function buildIpState(ip) {
@@ -363,6 +408,43 @@ async function applyIps() {
   }
 }
 
+function openReplaceDialog(slotIndex, currentIp) {
+  replaceForm.slotIndex = slotIndex
+  replaceForm.ip = currentIp?.ip || ''
+  replaceDialogVisible.value = true
+}
+
+function isValidIpAddress(ip) {
+  const value = String(ip || '').trim()
+  const ipv4 =
+    /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
+  const ipv6 = /^[0-9a-fA-F:]+$/
+  return ipv4.test(value) || (value.includes(':') && ipv6.test(value))
+}
+
+async function submitReplaceIp() {
+  const ip = replaceForm.ip.trim()
+  if (!isValidIpAddress(ip)) {
+    ElMessage.warning('请输入合法的 IPv4 或 IPv6 地址')
+    return
+  }
+
+  replaceLoading.value = true
+  try {
+    const response = await api.user.replaceCfIpSlot(replaceForm.slotIndex, ip)
+    if (response.code === 0) {
+      ElMessage.success('IP 替换成功')
+      replaceDialogVisible.value = false
+      await fetchIpPool()
+    }
+  } catch (error) {
+    console.error('替换 IP 失败:', error)
+    ElMessage.error(error.response?.data?.message || 'IP 替换失败')
+  } finally {
+    replaceLoading.value = false
+  }
+}
+
 function formatLatency(latency) {
   if (latency < 0) return '未测试'
   if (latency === 0) return '超时'
@@ -430,10 +512,17 @@ onMounted(() => {
 .ip-item {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   padding: 10px 14px;
   border-radius: 12px;
   background: #f8fafc;
+}
+
+.current-ip-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .ip-address {
