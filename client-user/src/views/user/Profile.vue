@@ -1089,9 +1089,7 @@ function pingIp(ip) {
       resolve(Math.round(endTime - startTime))
     }).catch(() => {
       clearTimeout(timeoutId)
-      const endTime = window.performance.now()
-      const elapsed = endTime - startTime
-      resolve(elapsed < 50 ? -1 : Math.round(elapsed))
+      resolve(-1)
     })
   })
 }
