@@ -195,7 +195,8 @@ async function markOrderPaid(db, payload) {
 }
 
 /**
- * 写入支付完成后的用户权益。
+ * 写入支付完成后的用户权益，并无条件清空上一次续费提醒状态。
+ * 核心分支：resetTrafficUsed 仅控制已用流量重置，不影响提醒状态清空。
  *
  * @param {Object} db - 数据库代理对象
  * @param {Object} payload - 用户权益数据
@@ -217,6 +218,8 @@ async function updateUserAfterPaidOrder(db, payload) {
     'traffic_limit = ?',
     'traffic_used_at = NULL',
     'disable_reason = NULL',
+    'renewal_notice_attempted_at = NULL',
+    'renewal_notice_reason = NULL',
     'expire_at = ?',
     'payment_count = payment_count + 1',
     'updated_at = ?'

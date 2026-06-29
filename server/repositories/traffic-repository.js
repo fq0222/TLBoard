@@ -156,18 +156,60 @@ async function findLatestUserDisableState(db, userId) {
 }
 
 /**
- * 将用户标记为流量超限禁用。
+ * 原子地将启用用户标记为流量超限禁用，并仅在提醒状态为空时领取发送资格。
+ * 核心分支：只有本次从 enabled=1 更新为 0 才算禁用；已有提醒状态时保留原值。
  *
  * @param {Object} db - 数据库代理对象
  * @param {number|string} userId - 用户 ID
  * @param {number} trafficUsedAt - 流量用尽时间戳
  * @param {string} disableReason - 禁用原因
- * @returns {Promise<void>}
+ * @param {number} renewalNoticeAttemptedAt - 本次权益周期的毫秒级领取标识
+ * @returns {Promise<{disabled:boolean,notificationClaimed:boolean,renewalNoticeAttemptedAt?:number}>} 禁用与提醒资格领取结果
  */
-async function disableUserByTrafficLimit(db, userId, trafficUsedAt, disableReason) {
-  await db.prepare(`
-    UPDATE users SET enabled = 0, traffic_used_at = ?, disable_reason = ? WHERE id = ?
-  `).run(trafficUsedAt, disableReason, userId);
+async function disableUserByTrafficLimit(
+  db,
+  userId,
+  trafficUsedAt,
+  disableReason,
+  renewalNoticeAttemptedAt = Date.now()
+) {
+  const result = await db.prepare(`
+    WITH target AS (
+      SELECT
+        u.id,
+        u.renewal_notice_attempted_at IS NULL AS notification_claimed
+      FROM users u
+      WHERE u.id = ? AND u.enabled = 1
+      FOR UPDATE
+    ),
+    updated AS (
+      UPDATE users u
+      SET
+        enabled = 0,
+        traffic_used_at = ?,
+        disable_reason = ?,
+        renewal_notice_attempted_at = CASE
+          WHEN t.notification_claimed THEN ?
+          ELSE u.renewal_notice_attempted_at
+        END,
+        renewal_notice_reason = CASE
+          WHEN t.notification_claimed THEN ?
+          ELSE u.renewal_notice_reason
+        END
+      FROM target t
+      WHERE u.id = t.id
+      RETURNING t.notification_claimed, u.renewal_notice_attempted_at
+    )
+    SELECT notification_claimed, renewal_notice_attempted_at FROM updated
+  `).get(userId, trafficUsedAt, disableReason, renewalNoticeAttemptedAt, disableReason);
+
+  return {
+    disabled: Boolean(result),
+    notificationClaimed: Boolean(result?.notification_claimed),
+    ...(result?.notification_claimed
+      ? { renewalNoticeAttemptedAt }
+      : {})
+  };
 }
 
 /**
@@ -194,32 +236,111 @@ async function listExpiredEnabledUsers(db, now) {
 /**
  * 按时间到期原因条件禁用用户。
  * 职责：在写入前二次确认用户仍启用、仍属于限时套餐且到期时间未被续费改写。
- * 核心分支：只有 UPDATE 命中 1 行才代表真正禁用，调用方据此决定是否同步到 3X-UI。
+ * 核心分支：只有本次仍满足限时套餐到期条件并从 enabled=1 更新为 0 才算禁用；
+ * 提醒状态为空时同时领取发送资格，否则保留原提醒状态。
  *
  * @param {Object} db - 数据库代理对象
  * @param {number|string} userId - 用户 ID
  * @param {string} disableReason - 禁用原因，通常为 expired
  * @param {number} now - 当前秒级时间戳
- * @returns {Promise<boolean>} 是否真正禁用成功
+ * @param {number} renewalNoticeAttemptedAt - 本次权益周期的毫秒级领取标识
+ * @returns {Promise<{disabled:boolean,notificationClaimed:boolean,renewalNoticeAttemptedAt?:number}>} 禁用与提醒资格领取结果
  */
-async function disableUserByExpired(db, userId, disableReason, now) {
+async function disableUserByExpired(
+  db,
+  userId,
+  disableReason,
+  now,
+  renewalNoticeAttemptedAt = Date.now()
+) {
   const result = await db.prepare(`
-    UPDATE users
-    SET enabled = 0, disable_reason = ?
-    WHERE users.id = ?
-      AND users.enabled = 1
-      AND users.expire_at IS NOT NULL
-      AND users.expire_at != 0
-      AND users.expire_at <= ?
-      AND EXISTS (
-        SELECT 1
-        FROM plans p
-        WHERE p.id = users.plan_id
-          AND COALESCE(p.plan_type, 'lifetime') = 'timed'
-      )
-  `).run(disableReason, userId, now);
+    WITH target AS (
+      SELECT
+        u.id,
+        u.renewal_notice_attempted_at IS NULL AS notification_claimed
+      FROM users u
+      WHERE u.id = ?
+        AND u.enabled = 1
+        AND u.expire_at IS NOT NULL
+        AND u.expire_at != 0
+        AND u.expire_at <= ?
+        AND EXISTS (
+          SELECT 1
+          FROM plans p
+          WHERE p.id = u.plan_id
+            AND COALESCE(p.plan_type, 'lifetime') = 'timed'
+        )
+      FOR UPDATE
+    ),
+    updated AS (
+      UPDATE users u
+      SET
+        enabled = 0,
+        disable_reason = ?,
+        renewal_notice_attempted_at = CASE
+          WHEN t.notification_claimed THEN ?
+          ELSE u.renewal_notice_attempted_at
+        END,
+        renewal_notice_reason = CASE
+          WHEN t.notification_claimed THEN ?
+          ELSE u.renewal_notice_reason
+        END
+      FROM target t
+      WHERE u.id = t.id
+      RETURNING t.notification_claimed, u.renewal_notice_attempted_at
+    )
+    SELECT notification_claimed, renewal_notice_attempted_at FROM updated
+  `).get(userId, now, disableReason, renewalNoticeAttemptedAt, disableReason);
 
-  return Number(result?.changes || 0) > 0;
+  return {
+    disabled: Boolean(result),
+    notificationClaimed: Boolean(result?.notification_claimed),
+    ...(result?.notification_claimed
+      ? { renewalNoticeAttemptedAt }
+      : {})
+  };
+}
+
+/**
+ * 在专用事务连接中锁定用户行并校验本次续费提醒 claim，命中后才执行发送回调。
+ * 核心分支：支付先提交会使校验不命中；提醒先锁行则支付等待发送尝试提交后再更新。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number|string} userId - 用户 ID
+ * @param {string} reason - 本次禁用原因
+ * @param {number} renewalNoticeAttemptedAt - 本次权益周期的毫秒级领取标识
+ * @param {Function} handler - 持有 users 行锁期间执行的无参数回调，不暴露事务连接
+ * @returns {Promise<{matched:boolean,result?:*}>} claim 是否仍有效及回调结果
+ */
+async function withClaimedRenewalNotice(
+  db,
+  userId,
+  reason,
+  renewalNoticeAttemptedAt,
+  handler
+) {
+  const transaction = db.transaction(async (transactionDb) => {
+    const matchedUser = await transactionDb.prepare(`
+      SELECT id
+      FROM users
+      WHERE id = ?
+        AND enabled = 0
+        AND renewal_notice_attempted_at = ?
+        AND renewal_notice_reason = ?
+      FOR UPDATE
+    `).get(userId, renewalNoticeAttemptedAt, reason);
+
+    if (!matchedUser) {
+      return { matched: false };
+    }
+
+    return {
+      matched: true,
+      result: await handler()
+    };
+  });
+
+  return transaction();
 }
 
 /**
@@ -259,6 +380,7 @@ module.exports = {
   disableUserByTrafficLimit,
   listExpiredEnabledUsers,
   disableUserByExpired,
+  withClaimedRenewalNotice,
   enableUserAfterTrafficLimitRecovery,
   findUserEmailById
 };

@@ -7,6 +7,8 @@ const assert = require('assert');
 const trafficManager = require('../services/shared/traffic-manager');
 const XuiService = require('../integrations/xui/xui-service');
 const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
+const renewalRequiredEmailService = require('../services/shared/renewal-required-email-service');
+const trafficRepository = require('../repositories/traffic-repository');
 
 function createTrafficDb(options = {}) {
   const executedUpdates = [];
@@ -39,6 +41,10 @@ function createTrafficDb(options = {}) {
           }
           if (sql.includes('SELECT email FROM users WHERE id = ?')) {
             return { email: 'disabled@example.com' };
+          }
+          if (sql.includes('WITH target AS') && sql.includes('renewal_notice_attempted_at')) {
+            executedUpdates.push({ sql, params: [param] });
+            return { notification_claimed: true };
           }
           return undefined;
         },
@@ -270,6 +276,17 @@ async function testPartialXuiFailureStillDisablesLocalUser() {
   const db = createTrafficDb({ enabled: 1 });
   const updates = [];
   const restore = installMockXuiService({ updates, failHy2: true });
+  const sentEmails = [];
+  const originalSend = renewalRequiredEmailService.sendRenewalRequiredEmail;
+  const originalWithClaim = trafficRepository.withClaimedRenewalNotice;
+  renewalRequiredEmailService.sendRenewalRequiredEmail = async (_db, payload) => {
+    sentEmails.push(payload);
+    return { sent: true, status: 'email_sent' };
+  };
+  trafficRepository.withClaimedRenewalNotice = async (_db, _userId, _reason, _claim, handler) => ({
+    matched: true,
+    result: await handler(_db)
+  });
 
   try {
     const serverTrafficData = await trafficManager.fetchAllServerTraffic(db);
@@ -279,11 +296,14 @@ async function testPartialXuiFailureStillDisablesLocalUser() {
     assert.strictEqual(result.disabledCount, 1, '流量超限就应该写本地 enabled=0');
     assert.strictEqual(result.retryCount, 1, '存在节点失败时仍应进入待重试计数');
     assert.strictEqual(db.executedUpdates.length, 1, '即使 3X-UI 部分失败也应写 enabled=0');
-    assert(db.executedUpdates[0].sql.includes('UPDATE users SET enabled = 0'));
+    assert.match(db.executedUpdates[0].sql, /UPDATE users u[\s\S]*SET[\s\S]*enabled = 0/);
     assert.strictEqual(updates.length, 2);
     assert(updates.every(item => item.method === 'updateClientByContext'), '所有节点都应走 updateClientByContext');
     assert(updates.some(item => item.email.endsWith('-hy2')));
+    assert.deepStrictEqual(sentEmails, [{ userId: 1, reason: 'traffic_limit' }]);
   } finally {
+    renewalRequiredEmailService.sendRenewalRequiredEmail = originalSend;
+    trafficRepository.withClaimedRenewalNotice = originalWithClaim;
     restore();
   }
 }

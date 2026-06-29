@@ -20,6 +20,8 @@ const tableDefinitions = [
         balance INTEGER DEFAULT 0,
         traffic_used_at BIGINT,
         disable_reason VARCHAR(50),
+        renewal_notice_attempted_at BIGINT,
+        renewal_notice_reason VARCHAR(50),
         expire_at BIGINT,
         enabled INTEGER DEFAULT 0,
         payment_count INTEGER DEFAULT 0,

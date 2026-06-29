@@ -1305,24 +1305,35 @@ test('repository expired disable update avoids top-level plans join', async () =
     prepare(sql) {
       capturedSql = sql;
       return {
-        run(...values) {
+        get(...values) {
           capturedValues = values;
-          return { changes: 1 };
+          return { notification_claimed: true };
         }
       };
     }
   };
 
-  const disabled = await trafficRepository.disableUserByExpired(db, 11, 'expired', 1700000000);
+  const result = await trafficRepository.disableUserByExpired(db, 11, 'expired', 1700000000);
 
-  assert.equal(disabled, true);
-  const updateHeader = capturedSql.slice(0, capturedSql.indexOf('WHERE users.id'));
-  assert.doesNotMatch(updateHeader, /FROM\s+plans\b/i);
+  assert.deepEqual(result, {
+    disabled: true,
+    notificationClaimed: true,
+    renewalNoticeAttemptedAt: capturedValues[3]
+  });
+  const targetHeader = capturedSql.slice(0, capturedSql.indexOf('WHERE u.id'));
+  assert.doesNotMatch(targetHeader, /JOIN\s+plans\b/i);
   assert.match(capturedSql, /EXISTS \(/);
-  assert.match(capturedSql, /users\.enabled = 1/);
-  assert.match(capturedSql, /users\.expire_at <= \?/);
+  assert.match(capturedSql, /u\.enabled = 1/);
+  assert.match(capturedSql, /u\.expire_at <= \?/);
   assert.match(capturedSql, /COALESCE\(p\.plan_type, 'lifetime'\) = 'timed'/);
-  assert.deepEqual(capturedValues, ['expired', 11, 1700000000]);
+  assert.deepEqual(capturedValues, [
+    11,
+    1700000000,
+    'expired',
+    capturedValues[3],
+    'expired'
+  ]);
+  assert.ok(capturedValues[3] > 1700000000000, '提醒 claim 应使用毫秒级时间标识');
 });
 
 test('traffic manager disables expired timed users locally and queues sync', async () => {
@@ -1343,7 +1354,7 @@ test('traffic manager disables expired timed users locally and queues sync', asy
       if (sql.includes('pg_advisory_unlock')) {
         return { get: () => ({ unlocked: true }) };
       }
-      if (sql.includes('FROM users u') && sql.includes('expire_at <= ?')) {
+      if (sql.includes('SELECT u.id, u.email, u.expire_at') && sql.includes('expire_at <= ?')) {
         return {
           all(receivedNow) {
             assert.equal(receivedNow, now);
@@ -1351,11 +1362,11 @@ test('traffic manager disables expired timed users locally and queues sync', asy
           }
         };
       }
-      if (sql.includes('UPDATE users') && sql.includes('SET enabled = 0')) {
+      if (sql.includes('UPDATE users u') && sql.includes('renewal_notice_attempted_at')) {
         return {
-          run(disableReason, userId, receivedNow) {
+          get(userId, receivedNow, disableReason) {
             updated.push({ disableReason, userId, now: receivedNow });
-            return { changes: 1 };
+            return { notification_claimed: false };
           }
         };
       }
@@ -1407,7 +1418,7 @@ test('traffic manager skips expired disable sync when conditional update misses'
       if (sql.includes('pg_advisory_unlock')) {
         return { get: () => ({ unlocked: true }) };
       }
-      if (sql.includes('FROM users u') && sql.includes('expire_at <= ?')) {
+      if (sql.includes('SELECT u.id, u.email, u.expire_at') && sql.includes('expire_at <= ?')) {
         return {
           all() {
             return [{ id: 9, email: 'renewed-before-disable@example.com', expire_at: now - 1 }];
@@ -1416,8 +1427,8 @@ test('traffic manager skips expired disable sync when conditional update misses'
       }
       if (sql.includes('UPDATE users')) {
         return {
-          run() {
-            return { changes: 0 };
+          get() {
+            return undefined;
           }
         };
       }
@@ -1460,7 +1471,7 @@ test('traffic manager still checks expired users when server traffic is unavaila
           }
         };
       }
-      if (sql.includes('FROM users u') && sql.includes('expire_at <= ?')) {
+      if (sql.includes('SELECT u.id, u.email, u.expire_at') && sql.includes('expire_at <= ?')) {
         return {
           all() {
             expiredQueryCount += 1;
@@ -1468,11 +1479,11 @@ test('traffic manager still checks expired users when server traffic is unavaila
           }
         };
       }
-      if (sql.includes('UPDATE users') && sql.includes('SET enabled = 0')) {
+      if (sql.includes('UPDATE users u') && sql.includes('renewal_notice_attempted_at')) {
         return {
-          run(disableReason, userId, receivedNow) {
+          get(userId, receivedNow, disableReason) {
             updated.push({ disableReason, userId, now: receivedNow });
-            return { changes: 1 };
+            return { notification_claimed: false };
           }
         };
       }

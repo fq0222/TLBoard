@@ -9,10 +9,37 @@ const { withUserStatusLock } = require('./user-status-lock');
 const { DISABLE_REASONS } = require('./renew-policy');
 const { createLogger } = require('../../utils/logger');
 const trafficRepository = require('../../repositories/traffic-repository');
+const renewalRequiredEmailService = require('./renewal-required-email-service');
 
 const logger = createLogger('TRAFFIC-MANAGER');
 
 const DEFAULT_TRAFFIC_USAGE_MULTIPLIER = 1.0;
+
+/**
+ * 安全发送首次禁用续费提醒，避免邮件服务异常中断流量定时任务。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number|string} userId - 用户 ID
+ * @param {'traffic_limit'|'expired'} reason - 首次禁用原因
+ * @param {number} renewalNoticeAttemptedAt - 本次权益周期的毫秒级领取标识
+ * @returns {Promise<void>}
+ */
+async function sendRenewalRequiredEmailSafely(db, userId, reason, renewalNoticeAttemptedAt) {
+  try {
+    await trafficRepository.withClaimedRenewalNotice(
+      db,
+      userId,
+      reason,
+      renewalNoticeAttemptedAt,
+      async () => renewalRequiredEmailService.sendRenewalRequiredEmail(
+        db,
+        { userId, reason }
+      )
+    );
+  } catch (error) {
+    logger.error(`续费提醒邮件调用异常: user=${userId}, reason=${reason}, error=${error.message}`);
+  }
+}
 
 /**
  * 判断面板失败是否属于鉴权失败。
@@ -579,12 +606,15 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData, clientStatusSn
 
         logger.info(`用户 ${data.email} 流量超限，开始禁用: ${latestUsed}/${latestLimit}`);
 
-        await trafficRepository.disableUserByTrafficLimit(
+        const disableResult = await trafficRepository.disableUserByTrafficLimit(
           db,
           userId,
           Math.floor(Date.now() / 1000),
           DISABLE_REASONS.TRAFFIC_LIMIT
         );
+        if (!disableResult.disabled) {
+          return { success: true, action: 'skip-rechecked' };
+        }
 
         const syncSuccess = await syncDisableStatusToXui(db, userId, true, {
           skipLock: true,
@@ -595,12 +625,28 @@ async function checkAndDisableOverLimitUsers(db, userTrafficData, clientStatusSn
             success: false,
             retryable: true,
             action: 'disabled-retry',
+            notificationClaimed: disableResult.notificationClaimed,
+            renewalNoticeAttemptedAt: disableResult.renewalNoticeAttemptedAt,
             message: `同步禁用状态到3X-UI失败: user=${userId}`
           };
         }
 
-        return { success: true, action: 'disabled' };
+        return {
+          success: true,
+          action: 'disabled',
+          notificationClaimed: disableResult.notificationClaimed,
+          renewalNoticeAttemptedAt: disableResult.renewalNoticeAttemptedAt
+        };
       });
+
+      if (lockedResult.notificationClaimed) {
+        await sendRenewalRequiredEmailSafely(
+          db,
+          Number(userId),
+          DISABLE_REASONS.TRAFFIC_LIMIT,
+          lockedResult.renewalNoticeAttemptedAt
+        );
+      }
 
       if (lockedResult.retryable) {
         retryCount++;
@@ -664,19 +710,24 @@ async function checkAndDisableExpiredUsers(db, now = Math.floor(Date.now() / 100
 
     for (const user of expiredUsers) {
       const lockedResult = await withUserStatusLock(db, Number(user.id), async () => {
-        const disabled = await trafficRepository.disableUserByExpired(
+        const disableResult = await trafficRepository.disableUserByExpired(
           db,
           user.id,
           DISABLE_REASONS.EXPIRED,
           now
         );
 
-        if (!disabled) {
+        if (!disableResult.disabled) {
           logger.info(`用户 ${user.email} 到期禁用二次校验未命中，可能已续费或状态已变化`);
           return { success: true, action: 'skip-rechecked' };
         }
 
-        return { success: true, action: 'disabled' };
+        return {
+          success: true,
+          action: 'disabled',
+          notificationClaimed: disableResult.notificationClaimed,
+          renewalNoticeAttemptedAt: disableResult.renewalNoticeAttemptedAt
+        };
       });
 
       if (lockedResult.retryable) {
@@ -693,6 +744,14 @@ async function checkAndDisableExpiredUsers(db, now = Math.floor(Date.now() / 100
         });
         if (syncResult.retryable) {
           retryCount++;
+        }
+        if (lockedResult.notificationClaimed) {
+          await sendRenewalRequiredEmailSafely(
+            db,
+            user.id,
+            DISABLE_REASONS.EXPIRED,
+            lockedResult.renewalNoticeAttemptedAt
+          );
         }
         logger.info(`用户 ${user.email} 已因时间到期禁用`);
       }
