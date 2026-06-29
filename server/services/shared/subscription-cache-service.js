@@ -1,6 +1,7 @@
 const crypto = require('crypto');
+const { createLogger } = require('../../utils/logger');
 
-const LOG_PREFIX = '[subscription-cache-service]';
+const logger = createLogger('SUBSCRIPTION-CACHE-SERVICE');
 
 /**
  * 统一规范化值，避免空值、空白和键顺序影响指纹结果。
@@ -35,9 +36,10 @@ function normalizeValue(value) {
 /**
  * 将对象或 JSON 字符串序列化为稳定格式，供指纹计算使用。
  * @param {*} value
+ * @param {boolean} silent - 是否静默处理解析警告
  * @returns {string}
  */
-function stableJson(value) {
+function stableJson(value, silent = false) {
   if (value === null || value === undefined || value === '') {
     return '';
   }
@@ -52,7 +54,9 @@ function stableJson(value) {
     try {
       parsedValue = JSON.parse(trimmed);
     } catch (error) {
-      console.warn(`${LOG_PREFIX} stableJson 解析 JSON 失败，按普通字符串处理: ${error.message}`);
+      if (!silent) {
+        logger.warn(`stableJson 解析 JSON 失败，按普通字符串处理: ${error.message}`);
+      }
       parsedValue = trimmed;
     }
   }
@@ -83,18 +87,19 @@ function normalizeNumber(value) {
  * 计算节点级缓存指纹。
  * 规则：server_id + inbound_id + remark + protocol + port + settings + stream_settings
  * @param {Object} node
+ * @param {boolean} silent - 是否静默处理指纹解析警告
  * @returns {string}
  */
-function computeNodeFingerprint(node = {}) {
+function computeNodeFingerprint(node = {}, silent = false) {
   return hashPayload(stableJson({
     server_id: normalizeNumber(node.server_id),
     inbound_id: normalizeNumber(node.inbound_id),
     remark: normalizeValue(node.remark),
     protocol: normalizeValue(node.protocol),
     port: normalizeNumber(node.port),
-    settings: stableJson(node.settings),
-    stream_settings: stableJson(node.stream_settings)
-  }));
+    settings: stableJson(node.settings, silent),
+    stream_settings: stableJson(node.stream_settings, silent)
+  }, silent));
 }
 
 /**
@@ -113,6 +118,18 @@ function computeServerFingerprint(server = {}) {
 }
 
 /**
+ * 按评估模式输出来源缓存失效日志，静默评估时跳过日志。
+ * @param {string} message - 缓存失效说明
+ * @param {boolean} silent - 是否静默评估
+ * @returns {void}
+ */
+function logCacheInvalid(message, silent) {
+  if (!silent) {
+    logger.info(message);
+  }
+}
+
+/**
  * 判断来源缓存是否仍可复用，并返回失效原因。
  * @param {Object} params
  * @param {Object} params.source
@@ -121,28 +138,37 @@ function computeServerFingerprint(server = {}) {
  * @param {string} params.subId
  * @param {number} params.now
  * @param {number} params.maxAgeSeconds
+ * @param {boolean} params.silent
  * @returns {{ usable: boolean, reason: string }}
  */
-function isSourceCacheUsable({ source, node, server, subId, now, maxAgeSeconds } = {}) {
+function isSourceCacheUsable({
+  source,
+  node,
+  server,
+  subId,
+  now,
+  maxAgeSeconds,
+  silent = false
+} = {}) {
   if (!source) {
-    console.log(`${LOG_PREFIX} 来源缓存不存在`);
+    logCacheInvalid('来源缓存不存在', silent);
     return { usable: false, reason: 'missing_source' };
   }
 
   if (String(source.sub_id || '') !== String(subId || '')) {
-    console.log(`${LOG_PREFIX} 来源缓存失效：sub_id 已变化`);
+    logCacheInvalid('来源缓存失效：sub_id 已变化', silent);
     return { usable: false, reason: 'sub_id_mismatch' };
   }
 
-  const nodeFingerprint = computeNodeFingerprint(node);
+  const nodeFingerprint = computeNodeFingerprint(node, silent);
   if (String(source.node_fingerprint || '') !== nodeFingerprint) {
-    console.log(`${LOG_PREFIX} 来源缓存失效：节点指纹不匹配`);
+    logCacheInvalid('来源缓存失效：节点指纹不匹配', silent);
     return { usable: false, reason: 'node_fingerprint_mismatch' };
   }
 
   const serverFingerprint = computeServerFingerprint(server);
   if (String(source.server_fingerprint || '') !== serverFingerprint) {
-    console.log(`${LOG_PREFIX} 来源缓存失效：服务器指纹不匹配`);
+    logCacheInvalid('来源缓存失效：服务器指纹不匹配', silent);
     return { usable: false, reason: 'server_fingerprint_mismatch' };
   }
 
@@ -150,7 +176,7 @@ function isSourceCacheUsable({ source, node, server, subId, now, maxAgeSeconds }
     const currentTime = normalizeNumber(now);
     const fetchedAt = normalizeNumber(source.fetched_at);
     if (currentTime - fetchedAt > normalizeNumber(maxAgeSeconds)) {
-      console.log(`${LOG_PREFIX} 来源缓存失效：缓存已过期`);
+      logCacheInvalid('来源缓存失效：缓存已过期', silent);
       return { usable: false, reason: 'cache_expired' };
     }
   }

@@ -296,6 +296,10 @@ async function testSelectedServerSyncShouldLimitConcurrencyAndIsolateFailures() 
     assert.strictEqual(result.syncedCount, 24);
     assert.strictEqual(result.failedCount, 1);
     assert.strictEqual(result.results.length, 25);
+    result.results.forEach((item, index) => {
+      assert.strictEqual(item.serverId, index + 1);
+      assert.strictEqual(item.success, index !== 6);
+    });
   } finally {
     XuiService.getInstance = originalGetInstance;
     xuiNodeSnapshotService.refreshServerNodeSnapshots = originalRefresh;
@@ -809,7 +813,8 @@ async function testSourceRefreshShouldLimitConcurrencyAndKeepPartialSuccess() {
   assert.strictEqual(scenario.savedNodes.length, 23);
   const logs = scenario.logMessages.join('\n');
   assert(logs.includes('success=23, failed=2'));
-  assert(logs.includes('user=91, server=7, inbound=107, duration='));
+  assert(logs.includes('user=concurrency@example.com, servers=[source-7], inbound=107, duration='));
+  assert(!logs.includes('user=concurrency@example.com, server=7'));
   assert(!logs.includes('token-uuid'));
 }
 
@@ -1103,8 +1108,12 @@ async function testSourceRefreshShouldWrapExternalFailuresWithoutMutation() {
     }
   });
   const logs = scenario.logMessages.join('\n');
-  const frozenLog = scenario.logMessages.find((message) => message.includes('server=11, inbound=111'));
-  const stringLog = scenario.logMessages.find((message) => message.includes('server=12, inbound=112'));
+  const frozenLog = scenario.logMessages.find(
+    (message) => message.includes('servers=[source-11], inbound=111')
+  );
+  const stringLog = scenario.logMessages.find(
+    (message) => message.includes('servers=[source-12], inbound=112')
+  );
 
   assert.strictEqual(scenario.savedNodes.length, 23);
   assert(frozenLog);
@@ -1130,7 +1139,7 @@ async function testMissingSourceUrlShouldLogItemDuration() {
     }
   });
   const missingUrlLog = scenario.logMessages.find(
-    (message) => message.includes('server=11, inbound=111')
+    (message) => message.includes('servers=[source-11], inbound=111')
   );
 
   assert.strictEqual(scenario.savedNodes.length, 24);
@@ -1274,9 +1283,9 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
     const summary = logs.find((message) => message.includes('订阅生成汇总:'));
     assert(summary);
     for (const field of [
-      'user=501',
-      'localServers=2',
-      'remoteServers=1',
+      'user=secret-user@example.com',
+      'localServers=[server-1, server-3]',
+      'remoteServers=[server-2]',
       'inboundSuccess=1',
       'inboundFailed=0',
       'sourceSuccess=3',
@@ -1470,7 +1479,7 @@ async function testExistingSubscriptionIncrementalSyncShouldReportSummary() {
     const server = servers[config.server_id - 1];
     return [`${config.server_id}:${config.inbound_id}`, {
       user_id: 701, server_id: config.server_id, inbound_id: config.inbound_id,
-      sub_id: config.sub_id, raw_link: `vless://old-${config.server_id}`,
+      sub_id: config.sub_id, original_link: `vless://old-${config.server_id}`,
       node_fingerprint: computeNodeFingerprint(config),
       server_fingerprint: config.server_id === 2 ? '损坏指纹' : computeServerFingerprint(server),
       fetched_at: now
@@ -1498,9 +1507,18 @@ async function testExistingSubscriptionIncrementalSyncShouldReportSummary() {
       info(message) { logs.push(message); }, warn() {}, error() {}
     }, {
       dependencies: {
-        async syncServerNodes(db, server) {
-          syncCalls.push(server.id);
-          return { success: true, serverId: server.id, nodeCount: 1 };
+        async syncSelectedServers(db, selectedServers) {
+          syncCalls.push(...selectedServers.map((server) => server.id));
+          return {
+            success: true,
+            syncedCount: selectedServers.length,
+            failedCount: 0,
+            totalCount: selectedServers.length,
+            results: selectedServers.map((server) => ({ success: true, serverId: server.id }))
+          };
+        },
+        async syncUserToXuiServers() {
+          return { success: true, successCount: 1, failureCount: 0 };
         },
         async fetchOriginalSubscription(subUrl, subId) {
           const id = Number(subId.split('-').pop());
@@ -1509,10 +1527,11 @@ async function testExistingSubscriptionIncrementalSyncShouldReportSummary() {
       }
     });
 
-    assert.deepStrictEqual(syncCalls, [2]);
+    assert.deepStrictEqual(syncCalls, [2, 2]);
     const summary = logs.find((message) => message.includes('订阅生成汇总:'));
-    assert(summary.includes('localServers=2'));
-    assert(summary.includes('remoteServers=1'));
+    assert(summary.includes('user=summary@example.com'));
+    assert(summary.includes('localServers=[summary-1, summary-3]'));
+    assert(summary.includes('remoteServers=[summary-2]'));
     assert(summary.includes('inboundSuccess=1'));
     assert(summary.includes('inboundFailed=0'));
   } finally {

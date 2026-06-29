@@ -110,7 +110,7 @@ async function syncServerNodes(db, server, options = {}) {
     };
   } catch (error) {
     logger.error(`同步服务器 ${server.name} 错误: ${error.message}`);
-    return { success: false, message: error.message };
+    return { success: false, serverId: server.id, message: error.message };
   }
 }
 

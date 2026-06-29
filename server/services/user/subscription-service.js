@@ -137,6 +137,176 @@ function parseNodeConfig(node, settings, streamSettings, userEmail) {
 }
 
 /**
+ * 检查本地入站快照是否能可信地证明当前用户节点配置已同步。
+ *
+ * @param {Object} user - 当前用户，email 用于拼接 3X-UI 客户端标识
+ * @param {Object} config - user_node_configs JOIN xui_nodes 的组合记录，包含用户凭据和入站快照
+ * @returns {{trusted:boolean,reason:string,client?:Object}} 检查结果；可信时携带唯一客户端，
+ *   拒绝时 reason 表示快照缺失、解析失败、客户端重复或凭据不一致等核心分支
+ */
+function inspectUserInNodeSnapshot(user, config) {
+  if (!config) {
+    return { trusted: false, reason: 'missing_snapshot' };
+  }
+  if (!user || !user.email) {
+    return { trusted: false, reason: 'incomplete_snapshot' };
+  }
+
+  const requiredFields = [
+    'server_id',
+    'inbound_id',
+    'protocol',
+    'settings',
+    'stream_settings'
+  ];
+  const incomplete = requiredFields.some(
+    (field) => config[field] === undefined
+      || config[field] === null
+      || config[field] === ''
+  );
+  if (incomplete) {
+    return { trusted: false, reason: 'incomplete_snapshot' };
+  }
+
+  let settings;
+  try {
+    settings = typeof config.settings === 'string'
+      ? JSON.parse(config.settings)
+      : config.settings;
+  } catch (error) {
+    return { trusted: false, reason: 'invalid_settings' };
+  }
+
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    return { trusted: false, reason: 'invalid_settings' };
+  }
+  if (!Array.isArray(settings.clients)) {
+    return { trusted: false, reason: 'invalid_clients' };
+  }
+
+  const expectedEmail = `${user.email}-${config.remark || config.inbound_id}`;
+  const matchingClients = settings.clients.filter(
+    (client) => client && client.email === expectedEmail
+  );
+  if (matchingClients.length === 0) {
+    return { trusted: false, reason: 'missing_user' };
+  }
+  if (matchingClients.length > 1) {
+    return { trusted: false, reason: 'duplicate_user' };
+  }
+
+  const client = matchingClients[0];
+  if (
+    !client.subId
+    || !config.sub_id
+    || String(client.subId || '') !== String(config.sub_id || '')
+  ) {
+    return { trusted: false, reason: 'sub_id_mismatch' };
+  }
+
+  // Hysteria2 使用 auth/password 作为客户端身份凭据，不使用普通节点 UUID。
+  const isHy2 = String(config.protocol || '').toLowerCase() === 'hysteria2'
+    || String(config.remark || '').toLowerCase().includes('hy2');
+  if (isHy2) {
+    const clientAuth = client.auth || client.password || '';
+    if (
+      !clientAuth
+      || !config.auth
+      || String(clientAuth) !== String(config.auth)
+    ) {
+      return { trusted: false, reason: 'auth_mismatch' };
+    }
+    return { trusted: true, reason: 'ok', client };
+  }
+
+  if (
+    !client.id
+    || !config.uuid
+    || String(client.id || '') !== String(config.uuid || '')
+  ) {
+    return { trusted: false, reason: 'uuid_mismatch' };
+  }
+
+  return { trusted: true, reason: 'ok', client };
+}
+
+/**
+ * 按输入顺序格式化服务器名称，优先使用服务器 ID、缺失时使用名称去重。
+ *
+ * @param {Array<Object>} servers - 待格式化的服务器列表
+ * @returns {string} 供日志输出的服务器名称列表；空输入返回 `[]`
+ */
+function formatServerNames(servers) {
+  const seenServerKeys = new Set();
+  const names = [];
+
+  for (const server of servers || []) {
+    if (!server) {
+      continue;
+    }
+
+    const serverKey = String(server?.id ?? server?.name ?? '');
+    if (!serverKey || seenServerKeys.has(serverKey)) {
+      continue;
+    }
+
+    seenServerKeys.add(serverKey);
+    names.push(server.name || `未知服务器-${server.id}`);
+  }
+
+  return `[${names.join(', ')}]`;
+}
+
+/**
+ * 规划失效来源缓存对应的入站快照处理方式。
+ *
+ * @param {Object} user - 当前订阅用户，用于校验快照内的用户凭据
+ * @param {Array<Object>} invalidPairs - 来源缓存失效的节点组合，保持原始处理顺序
+ * @param {Map<number,Object>} serversById - 在线服务器 ID 到服务器信息的映射
+ * @returns {Object} 可本地复用的组合、需远程补拉的组合与服务器，以及校验原因计数
+ *
+ * 核心分支语义：快照内用户 UUID 与 sub_id 均可信时直接复用；其余原因均按
+ * 服务器归并为远程补拉任务，同一服务器无论包含多少组合都只补拉一次。
+ */
+function buildInboundRefreshPlan(user, invalidPairs, serversById) {
+  const reusablePairs = [];
+  const remotePairs = [];
+  const remoteServerIds = new Set();
+  const remoteServers = [];
+  const reasonCounts = {};
+
+  for (const pair of invalidPairs || []) {
+    const inspection = inspectUserInNodeSnapshot(user, pair.config);
+
+    if (inspection.trusted) {
+      reusablePairs.push(pair);
+      continue;
+    }
+
+    remotePairs.push(pair);
+    reasonCounts[inspection.reason] = (reasonCounts[inspection.reason] || 0) + 1;
+    const serverId = pair.config && pair.config.server_id;
+    if (remoteServerIds.has(serverId)) {
+      continue;
+    }
+
+    const server = serversById && serversById.get(serverId);
+    if (server) {
+      remoteServerIds.add(serverId);
+      remoteServers.push(server);
+    }
+  }
+
+  return {
+    reusablePairs,
+    remotePairs,
+    remoteServerIds,
+    remoteServers,
+    reasonCounts
+  };
+}
+
+/**
  * 格式化字节流量为可读字符串。
  *
  * @param {*} bytes - 原始字节数
@@ -365,7 +535,7 @@ async function reloadRepairNodeConfigs(db, user, repairServers, logger, options 
   });
   if (!syncResult.success) {
     logger.warn(
-      `定向修复用户节点配置未完全成功: user=${user.id}, `
+      `定向修复用户节点配置未完全成功: user=${user.email}, `
       + `success=${syncResult.successCount || 0}, failed=${syncResult.failureCount || 0}`
     );
   }
@@ -409,7 +579,8 @@ function collectSourceCacheStatus(nodeConfigs, sourceMap, serversById) {
       server,
       subId: config.sub_id,
       now,
-      maxAgeSeconds: SOURCE_CACHE_MAX_AGE_SECONDS
+      maxAgeSeconds: SOURCE_CACHE_MAX_AGE_SECONDS,
+      silent: true
     });
 
     if (result.usable) {
@@ -441,7 +612,14 @@ function collectSourceCacheStatus(nodeConfigs, sourceMap, serversById) {
 function createSourceRefreshError(cause, context) {
   const error = new Error('原始订阅模板刷新失败', { cause });
   error.name = 'SourceRefreshError';
-  error.sourceRefreshContext = context;
+  const rawErrorType = String(cause?.code || cause?.name || 'Error');
+  const errorType = rawErrorType
+    .replace(/[^A-Za-z0-9_.-]/g, '_')
+    .slice(0, 64) || 'Error';
+  error.sourceRefreshContext = {
+    ...context,
+    errorType
+  };
   return error;
 }
 
@@ -498,12 +676,17 @@ async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, lo
           updated_at: now
         });
 
-        logger.info(`刷新原始订阅模板成功: user=${user.id}, server=${server.id}, inbound=${config.inbound_id}, duration=${Date.now() - itemStartedAt}ms`);
+        logger.info(
+          `刷新原始订阅模板成功: user=${user.email}, `
+          + `servers=${formatServerNames([server])}, inbound=${config.inbound_id}, `
+          + `duration=${Date.now() - itemStartedAt}ms`
+        );
         return config;
       } catch (cause) {
         throw createSourceRefreshError(cause, {
-          userId: user.id,
+          userEmail: user.email,
           serverId: server?.id || config.server_id,
+          serverName: server?.name,
           inboundId: config.inbound_id,
           duration: Date.now() - itemStartedAt
         });
@@ -523,9 +706,12 @@ async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, lo
     failedConfigs.push(config);
     const context = result.reason?.sourceRefreshContext || {};
     logger.warn(
-      `刷新原始订阅模板失败: user=${context.userId || user.id}, `
-      + `server=${context.serverId || config.server_id}, inbound=${context.inboundId || config.inbound_id}, `
-      + `duration=${context.duration ?? Date.now() - startedAt}ms, error=${result.reason?.name || 'Error'}`
+      `刷新原始订阅模板失败: user=${context.userEmail || user.email}, `
+      + `servers=${formatServerNames([{
+        id: context.serverId || config.server_id,
+        name: context.serverName
+      }])}, inbound=${context.inboundId || config.inbound_id}, `
+      + `duration=${context.duration ?? Date.now() - startedAt}ms, errorType=${context.errorType || 'Error'}`
     );
   });
   logger.info(
@@ -792,14 +978,31 @@ async function generateSubscription(db, userId, logger, options = {}) {
   options = { ...options, inboundSnapshotCache };
   const generationStartedAt = Date.now();
   const remoteServerIds = new Set();
+  const remoteServers = [];
   const inboundOutcomes = new Map();
+  /**
+   * 记录本次实际访问的远程服务器及其最新结果；服务器按首次出现顺序去重。
+   *
+   * @param {Object} server - 被访问的在线服务器记录
+   * @param {Object} result - 当前一轮同步结果
+   * @returns {void}
+   */
   const recordInboundResult = (server, result) => {
+    if (!server || server.id === null || server.id === undefined) {
+      return;
+    }
+    const existingIndex = remoteServers.findIndex((item) => item.id === server.id);
+    if (existingIndex === -1) {
+      remoteServers.push(server);
+    } else {
+      remoteServers[existingIndex] = server;
+    }
     remoteServerIds.add(server.id);
     inboundOutcomes.set(server.id, !!result?.success);
   };
   const summary = {
-    localServers: 0,
-    remoteServers: 0,
+    snapshotReused: 0,
+    snapshotRejected: 0,
     inboundSuccess: 0,
     inboundFailed: 0,
     sourceSuccess: 0,
@@ -829,8 +1032,6 @@ async function generateSubscription(db, userId, logger, options = {}) {
     const snapshots = await subscriptionRepository.listNodeSnapshots(db);
     const nodeConfigs = await subscriptionRepository.listUserNodeConfigs(db, user.id);
     const missingServers = findServersRequiringSync(servers, snapshots, nodeConfigs);
-    summary.localServers = servers.length - missingServers.length;
-    summary.remoteServers = missingServers.length;
     if (missingServers.length > 0) {
       logger.info(`用户 ${user.email} 首次生成订阅，定向同步 ${missingServers.length} 台缺口服务器`);
       const syncServers = options.dependencies?.syncSelectedServers || syncSelectedServers;
@@ -855,7 +1056,7 @@ async function generateSubscription(db, userId, logger, options = {}) {
   }
 
   if (isFirstGeneration) {
-    logger.info(`用户 ${user.id} 首次生成订阅，开始拉取全部原始订阅模板`);
+    logger.info(`用户 ${user.email} 首次生成订阅，开始拉取全部原始订阅模板`);
     const firstRefreshResult = await refreshSubscriptionSources(
       db,
       user,
@@ -864,7 +1065,7 @@ async function generateSubscription(db, userId, logger, options = {}) {
       logger,
       options.dependencies
     );
-    logger.info(`用户 ${user.id} 首次模板刷新结果: success=${firstRefreshResult.successfulConfigs.length}, failed=${firstRefreshResult.failedConfigs.length}`);
+    logger.info(`用户 ${user.email} 首次模板刷新结果: success=${firstRefreshResult.successfulConfigs.length}, failed=${firstRefreshResult.failedConfigs.length}`);
 
     if (firstRefreshResult.failedConfigs.length > 0) {
       const sourceMap = mapSourcesByKey(
@@ -951,29 +1152,125 @@ async function generateSubscription(db, userId, logger, options = {}) {
       logger.info(`用户 ${user.email} 的原始订阅模板缓存可用，直接复用本地拼装`);
     } else {
       logger.info(`用户 ${user.email} 的原始订阅模板缓存不可用，开始增量修复: invalidPairs=${cacheStatus.invalidPairs.length}`);
+      const refreshPlan = buildInboundRefreshPlan(user, cacheStatus.invalidPairs, serversById);
+      summary.snapshotReused = refreshPlan.reusablePairs.length;
+      summary.snapshotRejected = refreshPlan.remotePairs.length;
+      const affectedServers = cacheStatus.invalidPairs
+        .map((pair) => serversById.get(pair.config.server_id))
+        .filter(Boolean);
+      logger.info(
+        `本地 inbound 快照评估: user=${user.email}, `
+        + `servers=${formatServerNames(affectedServers)}, `
+        + `invalidPairs=${cacheStatus.invalidPairs.length}, `
+        + `reusedPairs=${refreshPlan.reusablePairs.length}, `
+        + `remotePairs=${refreshPlan.remotePairs.length}, `
+        + `reasons=${JSON.stringify(refreshPlan.reasonCounts)}`
+      );
 
-      if (cacheStatus.invalidServerIds.size > 0) {
-        for (const serverId of cacheStatus.invalidServerIds) {
-          const server = serversById.get(serverId);
-          if (!server) {
-            continue;
+      if (refreshPlan.remoteServers.length > 0) {
+        const inboundStartedAt = Date.now();
+        const syncServers = options.dependencies?.syncSelectedServers || syncSelectedServers;
+        const syncResult = await syncServers(db, refreshPlan.remoteServers, {
+          inboundSnapshotCache: options.inboundSnapshotCache
+        });
+        refreshPlan.remoteServers.forEach((server, index) => {
+          recordInboundResult(server, syncResult.results?.[index]);
+        });
+        logger.info(
+          `inbound 并发补拉完成: user=${user.email}, `
+          + `servers=${formatServerNames(refreshPlan.remoteServers)}, `
+          + `success=${syncResult.syncedCount ?? syncResult.results?.filter((item) => item?.success).length ?? 0}, `
+          + `failed=${syncResult.failedCount ?? syncResult.results?.filter((item) => !item?.success).length ?? 0}, `
+          + `duration=${Date.now() - inboundStartedAt}ms`
+        );
+
+        // 补拉完成后统一重读，避免继续使用本轮请求开始前的旧 JOIN 快照。
+        nodeConfigs = filterOnlineNodeConfigs(
+          await subscriptionRepository.listUserNodeConfigs(db, user.id),
+          serversById
+        );
+        const latestConfigMap = new Map(nodeConfigs.map((config) => [
+          buildSourceCacheKey(config.server_id, config.inbound_id),
+          config
+        ]));
+        const stillUntrustedServerIds = new Set();
+        for (const pair of refreshPlan.remotePairs) {
+          const latestConfig = latestConfigMap.get(pair.key);
+          if (!inspectUserInNodeSnapshot(user, latestConfig).trusted) {
+            stillUntrustedServerIds.add(pair.config.server_id);
           }
-
-          const syncNode = options.dependencies?.syncServerNodes || syncServerNodes;
-          const syncResult = await syncNode(db, server, {
-            inboundSnapshotCache: options.inboundSnapshotCache
-          });
-          recordInboundResult(server, syncResult);
-          logger.info(`增量同步服务器完成: server=${server.name}, success=${syncResult.success}, nodeCount=${syncResult.nodeCount || 0}`);
         }
 
-        nodeConfigs = await ensureUserNodeConfigsComplete(db, user, servers, logger, options);
+        // 补拉后仍不可信时，只执行一轮既有用户同步补偿，防止异常服务器形成循环。
+        const compensationServers = refreshPlan.remoteServers.filter(
+          (server) => stillUntrustedServerIds.has(server.id)
+        );
+        if (compensationServers.length > 0) {
+          summary.repairServers = compensationServers.length;
+          await reloadRepairNodeConfigs(
+            db,
+            user,
+            compensationServers,
+            logger,
+            options
+          );
+
+          // 用户补偿会修改远端客户端；再补拉一次才能让 xui_nodes 反映补偿后的真实状态。
+          for (const server of compensationServers) {
+            options.inboundSnapshotCache.delete(String(server.id));
+          }
+          const verificationSyncResult = await syncServers(db, compensationServers, {
+            inboundSnapshotCache: options.inboundSnapshotCache
+          });
+          compensationServers.forEach((server, index) => {
+            recordInboundResult(server, verificationSyncResult.results?.[index]);
+          });
+          logger.info(
+            `补偿后 inbound 验证同步完成: user=${user.email}, `
+            + `servers=${formatServerNames(compensationServers)}, `
+            + `success=${verificationSyncResult.syncedCount
+              ?? verificationSyncResult.results?.filter((item) => item?.success).length
+              ?? 0}, `
+            + `failed=${verificationSyncResult.failedCount
+              ?? verificationSyncResult.results?.filter((item) => !item?.success).length
+              ?? 0}`
+          );
+          nodeConfigs = filterOnlineNodeConfigs(
+            await subscriptionRepository.listUserNodeConfigs(db, user.id),
+            serversById
+          );
+        }
+      } else {
+        logger.info(
+          `复用本地 inbound 快照: user=${user.email}, `
+          + `servers=${formatServerNames(affectedServers)}, `
+          + `pairs=${refreshPlan.reusablePairs.length}`
+        );
       }
 
-      const repairConfigs = nodeConfigs.filter((config) => {
-        const key = buildSourceCacheKey(config.server_id, config.inbound_id);
-        return cacheStatus.invalidServerIds.has(config.server_id) || cacheStatus.invalidPairKeys.has(key);
-      });
+      const finalConfigMap = new Map(nodeConfigs.map((config) => [
+        buildSourceCacheKey(config.server_id, config.inbound_id),
+        config
+      ]));
+      const finalInvalidPairs = cacheStatus.invalidPairs.map((pair) => ({
+        ...pair,
+        config: finalConfigMap.get(pair.key)
+      }));
+      const verifiedRefreshPlan = buildInboundRefreshPlan(
+        user,
+        finalInvalidPairs,
+        serversById
+      );
+      const trustedInvalidPairKeys = new Set(
+        verifiedRefreshPlan.reusablePairs.map((pair) => pair.key)
+      );
+
+      // 仅刷新最初失效且最终快照可信的 pair；补偿失败项不得发布为新有效来源。
+      const repairConfigs = nodeConfigs.filter((config) => (
+        trustedInvalidPairKeys.has(
+          buildSourceCacheKey(config.server_id, config.inbound_id)
+        )
+      ));
       const refreshResult = await refreshSubscriptionSources(
         db,
         user,
@@ -1000,15 +1297,16 @@ async function generateSubscription(db, userId, logger, options = {}) {
     .filter((key) => latestSourceMap.has(key))
     .length;
   summary.sourceFailed = finalSourceKeys.size - summary.sourceSuccess;
-  summary.remoteServers = remoteServerIds.size;
-  summary.localServers = servers.length - summary.remoteServers;
+  const localServers = servers.filter((server) => !remoteServerIds.has(server.id));
   summary.inboundSuccess = Array.from(inboundOutcomes.values()).filter(Boolean).length;
   summary.inboundFailed = inboundOutcomes.size - summary.inboundSuccess;
   const allNodes = composeSubscriptionNodes(nodeConfigs, latestSourceMap, serversById, cfIps, logger);
   summary.nodes = allNodes.length;
   logger.info(
-    `订阅生成汇总: user=${user.id}, localServers=${summary.localServers}, `
-    + `remoteServers=${summary.remoteServers}, inboundSuccess=${summary.inboundSuccess}, `
+    `订阅生成汇总: user=${user.email}, localServers=${formatServerNames(localServers)}, `
+    + `remoteServers=${formatServerNames(remoteServers)}, `
+    + `snapshotReused=${summary.snapshotReused}, snapshotRejected=${summary.snapshotRejected}, `
+    + `inboundSuccess=${summary.inboundSuccess}, `
     + `inboundFailed=${summary.inboundFailed}, sourceSuccess=${summary.sourceSuccess}, `
     + `sourceFailed=${summary.sourceFailed}, repairServers=${summary.repairServers}, `
     + `nodes=${summary.nodes}, duration=${Date.now() - generationStartedAt}ms`
@@ -1394,6 +1692,11 @@ module.exports = {
   appendAnnouncementVirtualNodes,
   createLegacyBusinessError,
   __testables: {
-    findServersRequiringSync
+    // 仅开放真实业务函数的依赖注入测试路径，不作为生产调用接口。
+    findServersRequiringSync,
+    inspectUserInNodeSnapshot,
+    formatServerNames,
+    buildInboundRefreshPlan,
+    refreshSubscriptionSources
   }
 };
