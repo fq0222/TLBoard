@@ -419,6 +419,7 @@ import {
   CF_IP_TEST_TIMEOUT as TEST_TIMEOUT
 } from '@/utils/cf-ip-test-config'
 import { selectRecommendedCfIps } from '@/utils/cf-ip-optimizer'
+import { getSubscriptionGenerationErrorMessage } from '@/utils/subscription-error'
 
 const userStore = useUserStore()
 const router = useRouter()
@@ -953,7 +954,7 @@ async function generateSubscription() {
     }
   } catch (error) {
     console.error('生成订阅链接失败:', error)
-    ElMessage.error('生成订阅链接失败')
+    ElMessage.error(getSubscriptionGenerationErrorMessage(error))
   } finally {
     generatingSubscription.value = false
   }
