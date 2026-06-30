@@ -390,6 +390,37 @@ async function syncServer(db, serverId) {
 }
 
 /**
+ * 查询单台 3X-UI 服务器的当前在线人数。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} serverId - 服务器 ID
+ * @returns {Promise<Object>} 在线人数查询结果
+ */
+async function getServerOnlineCount(db, serverId) {
+  const server = await serversRepository.findServerById(db, serverId);
+  if (!server) {
+    throw createLegacyBusinessError('服务器不存在');
+  }
+
+  const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+    apiVersion: server.panel_version || '3.0.2'
+  });
+  const onlineResult = await xuiService.getOnlineClients();
+
+  if (!onlineResult.success) {
+    throw createLegacyBusinessError(onlineResult.message || '查询在线人数失败', {
+      code: 3001
+    });
+  }
+
+  return {
+    server_id: serverId,
+    online_count: Number(onlineResult.count) || 0,
+    queried_at: getUnixTimestamp()
+  };
+}
+
+/**
  * 启动一次 3X-UI 数据库手动备份任务。
  *
  * @param {Object} db - 数据库代理对象
@@ -470,6 +501,7 @@ module.exports = {
   deleteServer,
   getServerDetail,
   syncServer,
+  getServerOnlineCount,
   runBackupTask,
   updateServerUser,
   deleteServerUser

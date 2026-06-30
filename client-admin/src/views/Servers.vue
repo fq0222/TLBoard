@@ -11,6 +11,10 @@
           <el-icon><Plus /></el-icon>
           添加服务器
         </el-button>
+        <el-button type="success" @click="fetchAllServersOnlineCount" :loading="queryingAllOnline">
+          <el-icon><Refresh /></el-icon>
+          {{ queryingAllOnline ? '获取中' : '获取在线人数' }}
+        </el-button>
         <el-button type="warning" @click="runBackupTask" :loading="backupTaskRunning">
           <el-icon><Refresh /></el-icon>
           执行备份任务
@@ -62,21 +66,29 @@
             </div>
 
             <div class="info-grid">
-              <div class="info-item">
+              <div class="info-item info-card">
                 <span class="info-icon">📌</span>
                 <span class="info-label">节点</span>
                 <span class="info-value">{{ server.node_count }}</span>
               </div>
-              <div class="info-item">
+              <div class="info-item info-card">
                 <span class="info-icon">👥</span>
                 <span class="info-label">用户</span>
                 <span class="info-value">{{ server.user_count }}</span>
               </div>
-              <div class="info-item">
+              <button
+                type="button"
+                class="info-item info-card info-card-button"
+                :class="{ 'is-loading': queryingOnlineId === server.id }"
+                :disabled="queryingOnlineId === server.id"
+                @click="fetchServerOnlineCount(server)"
+              >
                 <span class="info-icon">🟢</span>
                 <span class="info-label">在线</span>
-                <span class="info-value">{{ server.online_count }}</span>
-              </div>
+                <span class="info-value">
+                  {{ queryingOnlineId === server.id ? '...' : server.online_count }}
+                </span>
+              </button>
             </div>
           </div>
 
@@ -179,6 +191,7 @@ import api from '@/api'
 
 const DEFAULT_PANEL_VERSION = '3.0.2'
 const BACKUP_TASK_WS_PATH = '/api/admin/servers/backup/ws'
+const MAX_ONLINE_COUNT_CONCURRENCY = 10
 
 const router = useRouter()
 
@@ -189,6 +202,8 @@ const submitting = ref(false)
 const editingId = ref(null)
 const serverFormRef = ref(null)
 const syncingId = ref(null)
+const queryingOnlineId = ref(null)
+const queryingAllOnline = ref(false)
 const backupTaskRunning = ref(false)
 const backupTaskId = ref(null)
 const backupStatusText = ref('')
@@ -324,6 +339,79 @@ async function syncServer(server) {
     console.error('同步失败:', error)
   } finally {
     syncingId.value = null
+  }
+}
+
+/**
+ * 查询并仅刷新当前卡片的在线人数。
+ * 关键分支：请求成功时只覆盖 online_count；请求失败时保持原值不变。
+ *
+ * @param {Object} server - 当前服务器卡片数据
+ * @returns {Promise<void>}
+ */
+async function fetchServerOnlineCount(server) {
+  try {
+    queryingOnlineId.value = server.id
+    const response = await api.admin.getServerOnlineCount(server.id)
+    if (response.code === 0) {
+      server.online_count = Number(response.data.online_count) || 0
+    }
+  } catch (error) {
+    console.error('查询在线人数失败:', error)
+  } finally {
+    queryingOnlineId.value = null
+  }
+}
+
+/**
+ * 批量并发获取全部服务器的在线人数。
+ * 关键分支：单台失败只记录失败项，不中断其余服务器的查询。
+ *
+ * @returns {Promise<void>}
+ */
+async function fetchAllServersOnlineCount() {
+  if (!servers.value.length || queryingAllOnline.value) {
+    return
+  }
+
+  const pendingServers = [...servers.value]
+  const failedServers = []
+  const workerCount = Math.min(MAX_ONLINE_COUNT_CONCURRENCY, pendingServers.length)
+
+  try {
+    queryingAllOnline.value = true
+
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (pendingServers.length > 0) {
+        const server = pendingServers.shift()
+        if (!server) {
+          return
+        }
+
+        try {
+          const response = await api.admin.getServerOnlineCount(server.id)
+          if (response.code === 0) {
+            server.online_count = Number(response.data.online_count) || 0
+          } else {
+            failedServers.push(server.name)
+          }
+        } catch (error) {
+          failedServers.push(server.name)
+          console.error(`批量查询服务器 ${server.name} 在线人数失败:`, error)
+        }
+      }
+    })
+
+    await Promise.all(workers)
+
+    if (failedServers.length > 0) {
+      ElMessage.warning(`在线人数获取完成，${failedServers.length} 台服务器获取失败`)
+      return
+    }
+
+    ElMessage.success('已获取全部服务器的在线人数')
+  } finally {
+    queryingAllOnline.value = false
   }
 }
 
@@ -638,6 +726,45 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+}
+
+.info-card {
+  padding: 6px 10px;
+  border: 1px solid #e4e7ed;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+}
+
+.info-card-button {
+  appearance: none;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: center;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.info-card-button:hover {
+  border-color: #409eff;
+  background: linear-gradient(180deg, #ecf5ff 0%, #d9ecff 100%);
+  box-shadow: 0 10px 22px rgba(64, 158, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.info-card-button:focus-visible {
+  outline: 2px solid #409eff;
+  outline-offset: 2px;
+}
+
+.info-card-button:disabled {
+  cursor: wait;
+}
+
+.info-card-button.is-loading {
+  border-color: #79bbff;
+  background: linear-gradient(180deg, #f0f7ff 0%, #e1f0ff 100%);
 }
 
 .info-icon {

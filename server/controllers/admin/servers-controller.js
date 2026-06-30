@@ -133,6 +133,30 @@ async function syncServer(req, res) {
   }
 }
 
+/**
+ * 查询单台服务器的在线人数。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
+async function getServerOnlineCount(req, res) {
+  if (handleValidationFailure(req, res, '查询服务器在线人数')) {
+    return;
+  }
+
+  try {
+    const result = await serversService.getServerOnlineCount(
+      req.app.locals.db,
+      parseInt(req.params.id, 10)
+    );
+    logger.info(`查询服务器在线人数成功: ID ${req.params.id}, online=${result.online_count}`);
+    return legacySuccess(res, result);
+  } catch (error) {
+    return handleControllerError(res, '查询服务器在线人数', error);
+  }
+}
+
 async function updateServerUser(req, res) {
   if (handleValidationFailure(req, res, '更新服务器用户')) {
     return;
@@ -193,6 +217,7 @@ module.exports = {
   deleteServer,
   getServerDetail,
   syncServer,
+  getServerOnlineCount,
   runBackupTask,
   updateServerUser,
   deleteServerUser

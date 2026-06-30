@@ -180,6 +180,15 @@ const adminApi = {
   },
 
   /**
+   * 查询单台服务器当前在线人数
+   * @param {number} id - 服务器ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  getServerOnlineCount(id) {
+    return apiClient.get(`/servers/${id}/online-count`, { timeout: 20000 })
+  },
+
+  /**
    * 同步服务器状态
    * @param {number} id - 服务器ID
    * @returns {Promise<Object>} 响应数据

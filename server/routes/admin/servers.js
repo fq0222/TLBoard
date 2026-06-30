@@ -66,6 +66,12 @@ router.get('/:id/detail', authenticateAdmin, [
     .withMessage('ID必须是大于0的整数')
 ], serversController.getServerDetail);
 
+router.get('/:id/online-count', authenticateAdmin, [
+  param('id')
+    .isInt({ min: 1 })
+    .withMessage('ID必须是大于 0 的整数')
+], serversController.getServerOnlineCount);
+
 router.post('/:id/sync', authenticateAdmin, [
   param('id')
     .isInt({ min: 1 })
