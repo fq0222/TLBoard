@@ -432,6 +432,22 @@ async function listAdminOrders(db, payload) {
 }
 
 /**
+ * 统计管理端订单全局汇总。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @returns {Promise<Object>} 订单总金额与订单类型统计
+ */
+async function summarizeAdminOrders(db) {
+  return db.prepare(`
+    SELECT
+      COALESCE(SUM(amount), 0) as total_amount,
+      SUM(CASE WHEN out_trade_no LIKE 'ORD%' THEN 1 ELSE 0 END) as ord_count,
+      SUM(CASE WHEN out_trade_no LIKE 'REN%' THEN 1 ELSE 0 END) as ren_count
+    FROM orders
+  `).get();
+}
+
+/**
  * 构造管理端订单查询的 where 条件与绑定参数。
  *
  * @param {Object} [filters={}] - 筛选条件
@@ -496,5 +512,6 @@ module.exports = {
   findNotifyOrderByOutTradeNo,
   markPendingOrderExpiredById,
   countAdminOrders,
-  listAdminOrders
+  listAdminOrders,
+  summarizeAdminOrders
 };

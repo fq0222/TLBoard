@@ -41,11 +41,17 @@ async function listOrders(db, query) {
     limit,
     offset
   });
+  const summaryRow = await orderRepository.summarizeAdminOrders(db);
 
   return {
     total: Number(totalRow.total) || 0,
     page,
     limit,
+    summary: {
+      total_amount: (Number(summaryRow?.total_amount || 0) / 100).toFixed(2),
+      ord_count: Number(summaryRow?.ord_count) || 0,
+      ren_count: Number(summaryRow?.ren_count) || 0
+    },
     list: orders.map((order) => ({
       id: order.id,
       out_trade_no: order.out_trade_no,
