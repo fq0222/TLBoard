@@ -26,6 +26,10 @@ function result(id, ip, options = {}) {
     latency: 100,
     packetLoss: 0,
     avgLatency: 100,
+    medianLatency: 100,
+    successTimes: 5,
+    testedTimes: 5,
+    testResults: [100, 100, 100, 100, 100],
     ...options
   }
 }
@@ -35,52 +39,52 @@ test('isIpv6 识别 IPv6 地址', () => {
   assert.equal(isIpv6('1.1.1.1'), false)
 })
 
-test('compareCfIpResults 优先低丢包率', () => {
-  const highLossLowLatency = result(1, '1.1.1.1', { packetLoss: 20, avgLatency: 20 })
-  const lowLossHighLatency = result(2, '1.0.0.1', { packetLoss: 0, avgLatency: 200 })
+test('compareCfIpResults 优先成功次数', () => {
+  const lowerSuccessLowLatency = result(1, '1.1.1.1', { successTimes: 1, avgLatency: 20 })
+  const higherSuccessHighLatency = result(2, '1.0.0.1', { successTimes: 5, avgLatency: 200 })
 
   assert.deepEqual(
-    [highLossLowLatency, lowLossHighLatency].sort(compareCfIpResults).map(item => item.id),
+    [lowerSuccessLowLatency, higherSuccessHighLatency].sort(compareCfIpResults).map(item => item.id),
     [2, 1]
   )
 })
 
-test('compareCfIpResults 在丢包率相同时优先低平均延迟', () => {
-  const slow = result(1, '1.1.1.1', { packetLoss: 10, avgLatency: 180 })
-  const fast = result(2, '1.0.0.1', { packetLoss: 10, avgLatency: 80 })
+test('compareCfIpResults 在成功次数相同时优先低中位数延迟', () => {
+  const slow = result(1, '1.1.1.1', { successTimes: 5, avgLatency: 180, medianLatency: 180 })
+  const fast = result(2, '1.0.0.1', { successTimes: 5, avgLatency: 80, medianLatency: 80 })
 
   assert.deepEqual([slow, fast].sort(compareCfIpResults).map(item => item.id), [2, 1])
 })
 
-test('compareCfIpResults 将指标缺失或非有限的可用项排在完整项之后', () => {
-  const missingPacketLoss = result(1, '1.1.1.1', { packetLoss: undefined, avgLatency: 10 })
-  const infiniteLatency = result(2, '1.0.0.1', { packetLoss: 0, avgLatency: Infinity })
-  const complete = result(3, '8.8.8.8', { packetLoss: 0, avgLatency: 100 })
+test('compareCfIpResults 将中位数延迟缺失或非有限的可用项排在完整项之后', () => {
+  const missingLatency = result(1, '1.1.1.1', { avgLatency: undefined, medianLatency: undefined, testResults: [] })
+  const infiniteLatency = result(2, '1.0.0.1', { avgLatency: Infinity, medianLatency: Infinity, testResults: [] })
+  const complete = result(3, '8.8.8.8', { avgLatency: 100, medianLatency: 100 })
 
   assert.deepEqual(
-    [missingPacketLoss, infiniteLatency, complete].sort(compareCfIpResults).map(item => item.id),
-    [3, 2, 1]
+    [missingLatency, infiniteLatency, complete].sort(compareCfIpResults).map(item => item.id),
+    [3, 1, 2]
   )
 })
 
 test('selectRecommendedCfIps 不为较慢的 IPv6 强制保留名额', () => {
   const items = [
-    result(1, '2606:4700::1', { packetLoss: 0, avgLatency: 500 }),
-    result(2, '1.1.1.1', { packetLoss: 0, avgLatency: 10 }),
-    result(3, '1.0.0.1', { packetLoss: 0, avgLatency: 20 }),
-    result(4, '8.8.8.8', { packetLoss: 0, avgLatency: 30 }),
-    result(5, '8.8.4.4', { packetLoss: 0, avgLatency: 40 }),
-    result(6, '9.9.9.9', { packetLoss: 0, avgLatency: 50 })
+    result(1, '2606:4700::1', { packetLoss: 0, avgLatency: 500, medianLatency: 500 }),
+    result(2, '1.1.1.1', { packetLoss: 0, avgLatency: 10, medianLatency: 10 }),
+    result(3, '1.0.0.1', { packetLoss: 0, avgLatency: 20, medianLatency: 20 }),
+    result(4, '8.8.8.8', { packetLoss: 0, avgLatency: 30, medianLatency: 30 }),
+    result(5, '8.8.4.4', { packetLoss: 0, avgLatency: 40, medianLatency: 40 }),
+    result(6, '9.9.9.9', { packetLoss: 0, avgLatency: 50, medianLatency: 50 })
   ]
 
   assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [2, 3, 4, 5, 6])
 })
 
-test('selectRecommendedCfIps 先按丢包率再按平均延迟选择', () => {
+test('selectRecommendedCfIps 在成功次数相同时按中位数延迟选择', () => {
   const items = [
-    result(1, '2606:4700::1', { packetLoss: 10, avgLatency: 10 }),
-    result(2, '1.1.1.1', { packetLoss: 0, avgLatency: 200 }),
-    result(3, '1.0.0.1', { packetLoss: 0, avgLatency: 30 })
+    result(1, '2606:4700::1', { successTimes: 4, avgLatency: 10, medianLatency: 10 }),
+    result(2, '1.1.1.1', { successTimes: 5, avgLatency: 200, medianLatency: 200 }),
+    result(3, '1.0.0.1', { successTimes: 5, avgLatency: 30, medianLatency: 30 })
   ]
 
   assert.deepEqual(selectRecommendedCfIps(items, 2).map(item => item.id), [3, 2])
@@ -97,11 +101,11 @@ test('selectRecommendedCfIps 推荐数量非正数时返回空数组', () => {
 
 test('selectRecommendedCfIps 对不同协议族统一按质量排序', () => {
   const items = [
-    result(1, '2606:4700::1', { avgLatency: 10 }),
-    result(2, '2606:4700::2', { avgLatency: 20 }),
-    result(3, '2606:4700::3', { avgLatency: 30 }),
-    result(4, '1.1.1.1', { avgLatency: 40 }),
-    result(5, '1.0.0.1', { avgLatency: 50 })
+    result(1, '2606:4700::1', { avgLatency: 10, medianLatency: 10 }),
+    result(2, '2606:4700::2', { avgLatency: 20, medianLatency: 20 }),
+    result(3, '2606:4700::3', { avgLatency: 30, medianLatency: 30 }),
+    result(4, '1.1.1.1', { avgLatency: 40, medianLatency: 40 }),
+    result(5, '1.0.0.1', { avgLatency: 50, medianLatency: 50 })
   ]
 
   assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [1, 2, 3, 4, 5])
@@ -109,29 +113,29 @@ test('selectRecommendedCfIps 对不同协议族统一按质量排序', () => {
 
 test('selectRecommendedCfIps 无 IPv6 时按排序选择 IPv4', () => {
   const items = [
-    result(1, '1.1.1.1', { packetLoss: 10 }),
-    result(2, '1.0.0.1', { packetLoss: 0, avgLatency: 200 }),
-    result(3, '8.8.8.8', { packetLoss: 0, avgLatency: 50 })
+    result(1, '1.1.1.1', { successTimes: 3, avgLatency: 10, medianLatency: 10 }),
+    result(2, '1.0.0.1', { successTimes: 5, avgLatency: 200, medianLatency: 200 }),
+    result(3, '8.8.8.8', { successTimes: 5, avgLatency: 50, medianLatency: 50 })
   ]
 
-  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [3, 2, 1])
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [3, 2])
 })
 
-test('selectRecommendedCfIps 接受 20% 丢包率并排除 21% 丢包率', () => {
+test('selectRecommendedCfIps 不再按丢包率过滤结果', () => {
   const items = [
-    result(1, '1.1.1.1', { packetLoss: 20, avgLatency: 100 }),
-    result(2, '1.0.0.1', { packetLoss: 21, avgLatency: 10 })
+    result(1, '1.1.1.1', { packetLoss: 20, successTimes: 5, avgLatency: 100, medianLatency: 100 }),
+    result(2, '1.0.0.1', { packetLoss: 21, successTimes: 5, avgLatency: 10, medianLatency: 10 })
   ]
 
-  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [1])
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [2, 1])
 })
 
-test('selectRecommendedCfIps 排除平均延迟无效的结果', () => {
+test('selectRecommendedCfIps 排除中位数延迟无效的结果', () => {
   const items = [
-    result(1, '1.1.1.1', { avgLatency: 0 }),
-    result(2, '1.0.0.1', { avgLatency: Infinity }),
-    result(3, '8.8.8.8', { avgLatency: undefined }),
-    result(4, '8.8.4.4', { avgLatency: 80 })
+    result(1, '1.1.1.1', { avgLatency: 0, medianLatency: 0, testResults: [] }),
+    result(2, '1.0.0.1', { avgLatency: Infinity, medianLatency: Infinity, testResults: [] }),
+    result(3, '8.8.8.8', { avgLatency: undefined, medianLatency: undefined, testResults: [] }),
+    result(4, '8.8.4.4', { avgLatency: 80, medianLatency: 80 })
   ]
 
   assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [4])
@@ -141,12 +145,62 @@ test('selectRecommendedCfIps 排除不可用项且不足五个时仅返回可用
   const items = [
     result(1, '1.1.1.1'),
     result(2, '1.0.0.1', { testStatus: 'testing' }),
-    result(3, '8.8.8.8', { latency: 0 }),
+    result(3, '8.8.8.8', { latency: 0, successTimes: 0, testedTimes: 5, avgLatency: 0 }),
     result(4, '2606:4700::1')
   ]
 
   assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [1, 4])
   assert.deepEqual(selectRecommendedCfIps(items.slice(1, 3)), [])
+})
+
+test('selectRecommendedCfIps 优先成功次数，再按中位数延迟排序', () => {
+  const items = [
+    result(1, '1.1.1.1', { successTimes: 3, testedTimes: 5, avgLatency: 20, medianLatency: 20, latency: 20 }),
+    result(2, '1.0.0.1', { successTimes: 5, testedTimes: 5, avgLatency: 100, medianLatency: 100, latency: 100 }),
+    result(3, '8.8.8.8', { successTimes: 5, testedTimes: 5, avgLatency: 50, medianLatency: 50, latency: 50 })
+  ]
+
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [3, 2])
+})
+
+test('selectRecommendedCfIps 排除成功次数不足四次的结果', () => {
+  const items = [
+    result(1, '1.1.1.1', { successTimes: 0, testedTimes: 5, avgLatency: 0, latency: -1 }),
+    result(2, '1.0.0.1', { successTimes: 1, testedTimes: 5, avgLatency: 80, medianLatency: 80, latency: 80 })
+  ]
+
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [])
+})
+
+test('selectRecommendedCfIps 仅接受至少成功四次的结果', () => {
+  const items = [
+    result(1, '1.1.1.1', { successTimes: 3, testedTimes: 5, avgLatency: 10, medianLatency: 10 }),
+    result(2, '1.0.0.1', { successTimes: 4, testedTimes: 5, avgLatency: 80, medianLatency: 80 }),
+    result(3, '8.8.8.8', { successTimes: 5, testedTimes: 5, avgLatency: 120, medianLatency: 120 })
+  ]
+
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [3, 2])
+})
+
+test('selectRecommendedCfIps 在成功次数相同时按中位数延迟排序', () => {
+  const items = [
+    result(1, '1.1.1.1', {
+      successTimes: 5,
+      testedTimes: 5,
+      avgLatency: 70,
+      medianLatency: 50,
+      testResults: [10, 20, 50, 120, 150]
+    }),
+    result(2, '1.0.0.1', {
+      successTimes: 5,
+      testedTimes: 5,
+      avgLatency: 60,
+      medianLatency: 60,
+      testResults: [40, 50, 60, 70, 80]
+    })
+  ]
+
+  assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [1, 2])
 })
 
 test('runWithConcurrency 最大并发数不超过 10', async () => {

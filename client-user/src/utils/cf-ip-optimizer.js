@@ -13,7 +13,7 @@ export function isIpv6(ip) {
  * @returns {boolean} 完成测速且延迟大于零时返回 true。
  */
 function isAvailable(item) {
-  return item?.testStatus === 'done' && Number(item.latency) > 0
+  return item?.testStatus === 'done' && Number(item?.successTimes) > 0
 }
 
 /**
@@ -26,34 +26,55 @@ function normalizeMetric(value) {
   return Number.isFinite(metric) ? metric : Number.POSITIVE_INFINITY
 }
 
-const MAX_RECOMMENDED_PACKET_LOSS = 20
+const MIN_RECOMMENDED_SUCCESS_TIMES = 4
 
 /**
- * 判断测速结果是否满足公共 CF IP 自动推荐门槛。
+ * 计算测速结果的中位数延迟。
  * @param {Object} item - CF IP 测速结果。
- * @returns {boolean} 测试完成、延迟可用、丢包率在 0~20 且平均延迟为正有限数时返回 true。
+ * @returns {number} 中位数延迟；无有效样本时返回正无穷。
  */
+function getMedianLatency(item) {
+  const normalizedMedian = Number(item?.medianLatency)
+  if (Number.isFinite(normalizedMedian) && normalizedMedian > 0) {
+    return normalizedMedian
+  }
+
+  if (!Array.isArray(item?.testResults) || item.testResults.length === 0) {
+    return Number.POSITIVE_INFINITY
+  }
+
+  const samples = item.testResults
+    .map(value => Number(value))
+    .filter(value => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b)
+
+  if (samples.length === 0) {
+    return Number.POSITIVE_INFINITY
+  }
+
+  const middleIndex = Math.floor(samples.length / 2)
+  if (samples.length % 2 === 1) {
+    return samples[middleIndex]
+  }
+
+  return (samples[middleIndex - 1] + samples[middleIndex]) / 2
+}
+
 function isRecommendationCandidate(item) {
-  const packetLoss = Number(item?.packetLoss)
-  const avgLatency = Number(item?.avgLatency)
+  const successTimes = Number(item?.successTimes) || 0
+  const medianLatency = getMedianLatency(item)
 
   return isAvailable(item) &&
-    item?.packetLoss !== null &&
-    item?.packetLoss !== '' &&
-    Number.isFinite(packetLoss) &&
-    packetLoss >= 0 &&
-    packetLoss <= MAX_RECOMMENDED_PACKET_LOSS &&
-    item?.avgLatency !== null &&
-    item?.avgLatency !== '' &&
-    Number.isFinite(avgLatency) &&
-    avgLatency > 0
+    successTimes >= MIN_RECOMMENDED_SUCCESS_TIMES &&
+    Number.isFinite(medianLatency) &&
+    medianLatency > 0
 }
 
 /**
  * 比较两个 CF IP 测速结果。
  * @param {Object} a - 第一个测速结果。
  * @param {Object} b - 第二个测速结果。
- * @returns {number} 可用项优先，再按丢包率和平均延迟升序排列。
+ * @returns {number} 可用项优先，再按成功次数降序和中位数延迟升序排列。
  */
 export function compareCfIpResults(a, b) {
   const aAvailable = isAvailable(a)
@@ -62,13 +83,13 @@ export function compareCfIpResults(a, b) {
   if (aAvailable !== bAvailable) return aAvailable ? -1 : 1
   if (!aAvailable) return 0
 
-  const aPacketLoss = normalizeMetric(a.packetLoss)
-  const bPacketLoss = normalizeMetric(b.packetLoss)
-  if (aPacketLoss !== bPacketLoss) return aPacketLoss < bPacketLoss ? -1 : 1
+  const aSuccessTimes = Number(a?.successTimes) || 0
+  const bSuccessTimes = Number(b?.successTimes) || 0
+  if (aSuccessTimes !== bSuccessTimes) return aSuccessTimes > bSuccessTimes ? -1 : 1
 
-  const aAvgLatency = normalizeMetric(a.avgLatency)
-  const bAvgLatency = normalizeMetric(b.avgLatency)
-  if (aAvgLatency !== bAvgLatency) return aAvgLatency < bAvgLatency ? -1 : 1
+  const aMedianLatency = normalizeMetric(getMedianLatency(a))
+  const bMedianLatency = normalizeMetric(getMedianLatency(b))
+  if (aMedianLatency !== bMedianLatency) return aMedianLatency < bMedianLatency ? -1 : 1
 
   return 0
 }

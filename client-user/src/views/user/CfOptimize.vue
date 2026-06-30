@@ -171,9 +171,9 @@ import api from '@/api'
 import {
   CF_IP_TEST_CONCURRENCY as TEST_CONCURRENCY,
   CF_IP_TEST_COUNT as TEST_COUNT,
-  CF_IP_TEST_INTERVAL as TEST_INTERVAL,
-  CF_IP_TEST_TIMEOUT as TEST_TIMEOUT
+  CF_IP_TEST_INTERVAL as TEST_INTERVAL
 } from '@/utils/cf-ip-test-config'
+import { createCfLatencySample } from '@/utils/cf-ip-browser-test.js'
 import {
   compareCfIpResults,
   isIpv6,
@@ -323,31 +323,7 @@ async function testSingleIp(ipData) {
 }
 
 function pingIp(ip) {
-  return new Promise((resolve) => {
-    const startTime = window.performance.now()
-    const host = ip.includes(':') ? `[${ip}]` : ip
-    const url = `https://${host}:443/cdn-cgi/trace`
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => {
-      controller.abort()
-      resolve(-1)
-    }, TEST_TIMEOUT)
-
-    fetch(url, {
-      mode: 'no-cors',
-      signal: controller.signal,
-      cache: 'no-store'
-    }).then(() => {
-      clearTimeout(timeoutId)
-      const endTime = window.performance.now()
-      resolve(Math.round(endTime - startTime))
-    }).catch(() => {
-      clearTimeout(timeoutId)
-      const endTime = window.performance.now()
-      const elapsed = endTime - startTime
-      resolve(elapsed < 50 ? -1 : Math.round(elapsed))
-    })
-  })
+  return createCfLatencySample(ip)
 }
 
 function toggleSelection(row) {
