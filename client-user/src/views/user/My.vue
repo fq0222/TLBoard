@@ -160,6 +160,7 @@
     <el-dialog
       v-model="posterVisible"
       class="referral-poster-dialog"
+      title="推广海报"
       width="440px"
       append-to-body
     >
@@ -598,11 +599,11 @@ onMounted(async () => {
   font-size: 14px;
 }
 
-:deep(.referral-poster-dialog) {
+:global(.referral-poster-dialog) {
   max-width: 440px;
 }
 
-:deep(.referral-poster-dialog .el-dialog__body) {
+:global(.referral-poster-dialog .el-dialog__body) {
   padding: 0 20px 20px;
 }
 
@@ -774,13 +775,13 @@ onMounted(async () => {
     margin-left: 0;
   }
 
-  :deep(.referral-poster-dialog) {
+  :global(.referral-poster-dialog) {
     width: calc(100vw - 32px) !important;
     margin-right: auto;
     margin-left: auto;
   }
 
-  :deep(.referral-poster-dialog .el-dialog__body) {
+  :global(.referral-poster-dialog .el-dialog__body) {
     padding: 0 12px 12px;
   }
 
