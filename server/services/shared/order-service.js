@@ -14,6 +14,7 @@ const { getServerInboundsSnapshot } = require('../../integrations/xui/xui-sync')
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const { isTimedPlan } = require('./plan-type');
 const { createLogger } = require('../../utils/logger');
+const { runWithConcurrency } = require('../../utils/concurrency');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
 const orderRepository = require('../../repositories/order-repository');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
@@ -21,6 +22,7 @@ const referralService = require('../referral-service');
 const orderActivationEmailService = require('./order-activation-email-service');
 
 const logger = createLogger('ORDER-SERVICE');
+const ORDER_XUI_SYNC_CONCURRENCY = 10;
 
 /**
  * 清理用户单个节点的原始订阅模板缓存
@@ -340,58 +342,40 @@ async function legacySyncUserToXuiServers(db, user, plan = {}) {
 }
 
 /**
- * 将用户同步到在线 3X-UI 服务器，可按 serverIds 限定处理范围并复用 inbound 快照。
+ * 将用户同步到单台 3X-UI 服务器。
+ *
+ * 同一服务器内先获取一次 inbound 快照，再按快照顺序串行处理各 inbound；每个节点依次完成
+ * 配置落库、客户端写入及可选流量重置，单节点失败不会中断该服务器的其余节点。
  *
  * @param {Object} db - 数据库实例。
  * @param {Object} user - 待同步用户快照。
+ * @param {Object} server - 目标 3X-UI 服务器配置。
  * @param {Object} [plan={}] - 同步计划及套餐权益。
- * @param {Array<number|string>} [plan.serverIds] - 仅处理的服务器 ID；省略时保持全量同步。
- * @param {Map<string,Object>} [plan.inboundSnapshotCache] - 15 分钟 TTL 的 inbound 快照缓存。
- * @returns {Promise<Object>} 同步汇总；目标为空或节点失败时返回失败语义。
+ * @param {Map<string,Object>} [plan.inboundSnapshotCache] - 可复用的 inbound 快照缓存。
+ * @returns {Promise<{successCount: number, failureCount: number, lastError: string}>} 单台服务器的同步统计。
  */
-async function syncUserToXuiServers(db, user, plan = {}) {
+async function syncUserToSingleServer(db, user, server, plan = {}) {
   let successCount = 0;
   let failureCount = 0;
   let lastError = '';
 
   try {
-    const onlineServers = await xuiSyncRepository.listOnlineXuiServers(db);
-    const selectedServerIds = Array.isArray(plan.serverIds)
-      ? new Set(plan.serverIds.map((serverId) => String(serverId)))
-      : null;
-    const servers = selectedServerIds
-      ? onlineServers.filter((server) => selectedServerIds.has(String(server.id)))
-      : onlineServers;
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+      apiVersion: server.panel_version || '3.0.2'
+    });
+    const inboundsResult = await getServerInboundsSnapshot(server, {
+      inboundSnapshotCache: plan.inboundSnapshotCache
+    });
 
-    if (servers.length === 0) {
-      const message = selectedServerIds
-        ? '指定范围内没有在线的 3X-UI 服务器'
-        : '没有在线的 3X-UI 服务器';
-      logger.warn(`${message}，跳过同步`);
-      return { success: false, message };
+    if (!inboundsResult.success) {
+      failureCount++;
+      lastError = inboundsResult.message || '获取 inbounds 失败';
+      logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${lastError}`);
+      return { successCount, failureCount, lastError };
     }
 
-    logger.info(`开始同步用户 ${user.email} 到 ${servers.length} 个 3X-UI 服务器`);
-    await orderRepository.updateUserSyncStatus(db, user.id, 1);
-
-    for (const server of servers) {
+    for (const inbound of inboundsResult.data) {
       try {
-        const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
-          apiVersion: server.panel_version || '3.0.2'
-        });
-        const inboundsResult = await getServerInboundsSnapshot(server, {
-          inboundSnapshotCache: plan.inboundSnapshotCache
-        });
-
-        if (!inboundsResult.success) {
-          failureCount++;
-          lastError = inboundsResult.message || '获取 inbounds 失败';
-          logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${lastError}`);
-          continue;
-        }
-
-        for (const inbound of inboundsResult.data) {
-          try {
             const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
             const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
             const totalBytes = getXuiTotalTrafficLimit(user, plan);
@@ -457,16 +441,71 @@ async function syncUserToXuiServers(db, user, plan = {}) {
               lastError = syncResult.message || '同步 3X-UI 用户失败';
               logger.warn(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${lastError}`);
             }
-          } catch (error) {
-            failureCount++;
-            lastError = error.message;
-            logger.error(`同步用户到 inbound ${inbound.id} 错误: ${error.message}`);
-          }
-        }
       } catch (error) {
         failureCount++;
         lastError = error.message;
-        logger.error(`同步用户到服务器 ${server.name} 错误: ${error.message}`);
+        logger.error(`同步用户到 inbound ${inbound.id} 错误: ${error.message}`);
+      }
+    }
+  } catch (error) {
+    failureCount++;
+    lastError = error.message;
+    logger.error(`同步用户到服务器 ${server.name} 错误: ${error.message}`);
+  }
+
+  return { successCount, failureCount, lastError };
+}
+
+/**
+ * 将用户同步到在线 3X-UI 服务器，可按 serverIds 限定处理范围并复用 inbound 快照。
+ *
+ * @param {Object} db - 数据库实例。
+ * @param {Object} user - 待同步用户快照。
+ * @param {Object} [plan={}] - 同步计划及套餐权益。
+ * @param {Array<number|string>} [plan.serverIds] - 仅处理的服务器 ID；省略时保持全量同步。
+ * @param {Map<string,Object>} [plan.inboundSnapshotCache] - 15 分钟 TTL 的 inbound 快照缓存。
+ * @returns {Promise<Object>} 同步汇总；目标为空或节点失败时返回失败语义。
+ */
+async function syncUserToXuiServers(db, user, plan = {}) {
+  let successCount = 0;
+  let failureCount = 0;
+  let lastError = '';
+
+  try {
+    const onlineServers = await xuiSyncRepository.listOnlineXuiServers(db);
+    const selectedServerIds = Array.isArray(plan.serverIds)
+      ? new Set(plan.serverIds.map((serverId) => String(serverId)))
+      : null;
+    const servers = selectedServerIds
+      ? onlineServers.filter((server) => selectedServerIds.has(String(server.id)))
+      : onlineServers;
+
+    if (servers.length === 0) {
+      const message = selectedServerIds
+        ? '指定范围内没有在线的 3X-UI 服务器'
+        : '没有在线的 3X-UI 服务器';
+      logger.warn(`${message}，跳过同步`);
+      return { success: false, message };
+    }
+
+    logger.info(`开始同步用户 ${user.email} 到 ${servers.length} 个 3X-UI 服务器`);
+    await orderRepository.updateUserSyncStatus(db, user.id, 1);
+
+    const results = await runWithConcurrency(
+      servers,
+      ORDER_XUI_SYNC_CONCURRENCY,
+      (server) => syncUserToSingleServer(db, user, server, plan)
+    );
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        successCount += result.value.successCount;
+        failureCount += result.value.failureCount;
+        if (result.value.lastError) {
+          lastError = result.value.lastError;
+        }
+      } else {
+        failureCount++;
+        lastError = result.reason?.message || String(result.reason);
       }
     }
 
