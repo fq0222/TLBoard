@@ -11,7 +11,8 @@
 ## Global Constraints
 
 - PC 端“海报”按钮位于“复制”按钮左侧。
-- 移动端“海报”按钮位于“复制”按钮上方。
+- 移动端“海报”和“复制”按钮同排，各占约一半宽度。
+- PC 端和移动端均不显示弹窗顶部的“推广海报”标题。
 - 海报卖点固定为“AI 畅享 · 流媒体流畅 · 4K 高清体验”。
 - 海报仅展示，不提供下载、保存或系统分享功能。
 - 移动端弹窗不得横向溢出屏幕。
@@ -144,6 +145,10 @@ async function showReferralPoster() {
 移动端媒体查询必须包含：
 
 ```css
+:global(.referral-poster-dialog .el-dialog__title) {
+  display: none;
+}
+
 .referral-actions {
   display: flex;
   flex-shrink: 0;
@@ -153,12 +158,12 @@ async function showReferralPoster() {
 @media (max-width: 768px) {
   .referral-actions {
     width: 100%;
-    flex-direction: column;
   }
 
   .poster-button,
   .copy-button {
-    width: 100%;
+    flex: 1;
+    width: 0;
     margin-left: 0;
   }
 
@@ -200,7 +205,8 @@ Expected: Vite 输出 `built in ...`，进程退出码为 0。
 
 移动端宽度（375px）检查：
 
-- “海报”在“复制”上方。
+- “海报”和“复制”同排，各占约一半宽度。
+- 弹窗顶部不显示“推广海报”标题。
 - 弹窗左右各至少保留约 16px 间距。
 - 二维码与文案不超出弹窗，页面无横向滚动。
 
