@@ -607,6 +607,10 @@ onMounted(async () => {
   padding: 0 20px 20px;
 }
 
+:global(.referral-poster-dialog .el-dialog__title) {
+  display: none;
+}
+
 .referral-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -764,12 +768,12 @@ onMounted(async () => {
   }
 
   .referral-actions {
-    flex-direction: column;
     width: 100%;
   }
 
   .copy-button {
-    width: 100%;
+    flex: 1;
+    width: 0;
     min-width: 0;
     justify-content: center;
     margin-left: 0;
