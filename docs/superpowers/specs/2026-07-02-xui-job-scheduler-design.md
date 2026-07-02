@@ -116,3 +116,15 @@ xuiJobScheduler.schedule('traffic-sync', async () => {
 - 不限制用户请求、管理端操作或同步重试队列对 3X-UI 的访问。
 - 不实现任务持久化、进程重启后恢复队列或跨进程互斥。
 - 不为调度器引入第三方队列依赖。
+
+## Class 结构补充
+
+调度器使用 `XuiJobScheduler` class 封装内部状态和行为：
+
+- `queue`、`scheduledNames`、`runningName`、`lastFinishedAt`、`cooldownTimer`、`stopped` 作为实例字段。
+- `schedule()`、`processQueue()`、`stop()` 作为类方法。
+- 模块创建一个默认单例，保持现有 handler 通过 `schedule()` 和 `stop()` 调用的方式不变。
+- 测试通过 `new XuiJobScheduler({ cooldownMs })` 创建隔离实例。
+- 本次调整只改变代码组织方式，不改变 FIFO、同名合并、结束后冷却、异常隔离和停止清理语义。
+
+项目协作规则同步增加：包含多个方法和内部状态的模块优先使用 class 封装，避免使用工厂函数内嵌套定义多个函数并通过闭包保存状态。
