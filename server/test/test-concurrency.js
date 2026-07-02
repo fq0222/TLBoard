@@ -1,5 +1,8 @@
 const assert = require('assert');
 const { runWithConcurrency } = require('../utils/concurrency');
+const XuiService = require('../integrations/xui/xui-service');
+const trafficRepository = require('../repositories/traffic-repository');
+const trafficManager = require('../services/shared/traffic-manager');
 
 /**
  * 验证任务池限制并发数，并保持 allSettled 结果语义和输入顺序。
@@ -68,7 +71,61 @@ async function testArgumentValidation() {
 }
 
 /**
- * 运行通用并发任务池测试；任一断言失败时以非零状态退出。
+ * 验证流量同步仅以最多 10 个并发请求获取服务器 inbounds，并在全部请求完成后解析流量。
+ *
+ * @returns {Promise<void>}
+ */
+async function testTrafficInboundFetchConcurrencyLimit() {
+  const originalListOnlineServers = trafficRepository.listOnlineServers;
+  const originalGetInstance = XuiService.getInstance;
+  const servers = Array.from({ length: 25 }, (_, index) => ({
+    id: index + 1,
+    name: `server-${index + 1}`,
+    api_url: `http://server-${index + 1}`,
+    api_token: `token-${index + 1}`,
+    panel_version: '3.0.2'
+  }));
+  let activeRequests = 0;
+  let maxActiveRequests = 0;
+  let parsedInboundCount = 0;
+
+  trafficRepository.listOnlineServers = async () => servers;
+  XuiService.getInstance = async () => ({
+    getInbounds: async () => {
+      activeRequests += 1;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      activeRequests -= 1;
+      return {
+        success: true,
+        data: [{
+          id: 1,
+          protocol: 'vless',
+          settings: '{}',
+          get clientStats() {
+            assert.strictEqual(activeRequests, 0, '所有 inbounds 获取完成后才能开始解析流量');
+            parsedInboundCount += 1;
+            return [];
+          }
+        }]
+      };
+    }
+  });
+
+  try {
+    const result = await trafficManager.fetchAllServerTraffic({});
+
+    assert.strictEqual(maxActiveRequests, 10);
+    assert.strictEqual(Object.keys(result).length, servers.length);
+    assert.strictEqual(parsedInboundCount, servers.length);
+  } finally {
+    trafficRepository.listOnlineServers = originalListOnlineServers;
+    XuiService.getInstance = originalGetInstance;
+  }
+}
+
+/**
+ * 运行通用并发任务池及流量同步并发边界测试；任一断言失败时以非零状态退出。
  *
  * @returns {Promise<void>}
  */
@@ -76,6 +133,7 @@ async function main() {
   await testConcurrencyAndSettledResults();
   await testEmptyItems();
   await testArgumentValidation();
+  await testTrafficInboundFetchConcurrencyLimit();
   console.log('concurrency tests passed');
 }
 

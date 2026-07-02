@@ -8,12 +8,14 @@ const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service
 const { withUserStatusLock } = require('./user-status-lock');
 const { DISABLE_REASONS } = require('./renew-policy');
 const { createLogger } = require('../../utils/logger');
+const { runWithConcurrency } = require('../../utils/concurrency');
 const trafficRepository = require('../../repositories/traffic-repository');
 const renewalRequiredEmailService = require('./renewal-required-email-service');
 
 const logger = createLogger('TRAFFIC-MANAGER');
 
 const DEFAULT_TRAFFIC_USAGE_MULTIPLIER = 1.0;
+const INBOUND_FETCH_CONCURRENCY = 10;
 
 /**
  * 安全发送首次禁用续费提醒，避免邮件服务异常中断流量定时任务。
@@ -233,16 +235,29 @@ async function fetchAllServerTraffic(db) {
 
     const serverTrafficData = {};
 
-    const promises = servers.map(async (server) => {
-      try {
+    const inboundResults = await runWithConcurrency(
+      servers,
+      INBOUND_FETCH_CONCURRENCY,
+      async (server) => {
         const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
           apiVersion: server.panel_version || '3.0.2'
         });
 
-        const inboundsResult = await xuiService.getInbounds();
+        return xuiService.getInbounds();
+      }
+    );
+
+    for (const [index, server] of servers.entries()) {
+      try {
+        const settledResult = inboundResults[index];
+        if (settledResult.status === 'rejected') {
+          throw settledResult.reason;
+        }
+
+        const inboundsResult = settledResult.value;
         if (!inboundsResult.success) {
           logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${inboundsResult.message}`);
-          return;
+          continue;
         }
 
         const serverData = {};
@@ -282,9 +297,7 @@ async function fetchAllServerTraffic(db) {
       } catch (error) {
         logger.error(`获取服务器 ${server.name} 流量数据错误: ${error.message}`);
       }
-    });
-
-    await Promise.all(promises);
+    }
 
     logger.info(`获取所有服务器流量数据完成，共 ${Object.keys(serverTrafficData).length} 台服务器`);
     return serverTrafficData;
