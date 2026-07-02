@@ -1,9 +1,11 @@
 const XuiService = require('../../integrations/xui/xui-service');
 const telegramRepository = require('../../repositories/telegram-repository');
 const trafficRepository = require('../../repositories/traffic-repository');
+const { runWithConcurrency } = require('../../utils/concurrency');
 const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('TELEGRAM-MONITOR');
+const TELEGRAM_HEALTH_CHECK_CONCURRENCY = 10;
 
 /**
  * 归一化健康状态值，避免表中混入非预期文案。
@@ -291,17 +293,19 @@ async function checkAllServersHealth(db) {
     return;
   }
 
-  let successCount = 0;
-  let failureCount = 0;
-  for (const server of servers) {
-    try {
-      await checkSingleServerHealth(db, server);
-      successCount += 1;
-    } catch (error) {
-      failureCount += 1;
-      logger.error(`服务器 ${server.name} 巡检执行失败: ${error.message}`);
+  const results = await runWithConcurrency(
+    servers,
+    TELEGRAM_HEALTH_CHECK_CONCURRENCY,
+    (server) => checkSingleServerHealth(db, server)
+  );
+  const successCount = results.filter((result) => result.status === 'fulfilled').length;
+  const failureCount = results.length - successCount;
+
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      logger.error(`服务器 ${servers[index].name} 巡检执行失败: ${result.reason?.message || result.reason}`);
     }
-  }
+  });
 
   logger.info(`Telegram 服务器健康巡检完成：共 ${servers.length} 台，成功 ${successCount} 台，失败 ${failureCount} 台`);
 }
