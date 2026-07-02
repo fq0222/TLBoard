@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { createXuiJobScheduler } = require('../jobs/xui-job-scheduler');
+const { XuiJobScheduler } = require('../jobs/xui-job-scheduler');
 
 /**
  * 等待指定毫秒数，用于控制异步任务的执行时序。
@@ -180,7 +180,7 @@ test('注册异常回滚会停止调度器并清理全部已注册句柄', t => 
 
 test('不同任务串行执行，并从上一个任务结束后计算冷却时间', async () => {
   const events = [];
-  const scheduler = createXuiJobScheduler({ cooldownMs: 30 });
+  const scheduler = new XuiJobScheduler({ cooldownMs: 30 });
 
   try {
     scheduler.schedule('first', async () => {
@@ -214,7 +214,7 @@ test('不同任务串行执行，并从上一个任务结束后计算冷却时�
 
 test('同名任务运行中或排队时只保留一次执行', async () => {
   const counts = { running: 0, queued: 0 };
-  const scheduler = createXuiJobScheduler({ cooldownMs: 10 });
+  const scheduler = new XuiJobScheduler({ cooldownMs: 10 });
 
   try {
     scheduler.schedule('running', async () => {
@@ -240,7 +240,7 @@ test('同名任务运行中或排队时只保留一次执行', async () => {
 
 test('任务失败后继续调度，停止后不再启动排队任务', async () => {
   const events = [];
-  const scheduler = createXuiJobScheduler({ cooldownMs: 10 });
+  const scheduler = new XuiJobScheduler({ cooldownMs: 10 });
 
   try {
     scheduler.schedule('failure', async () => {

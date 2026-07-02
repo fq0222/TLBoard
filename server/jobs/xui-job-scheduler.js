@@ -3,41 +3,42 @@ const { createLogger } = require('../utils/logger');
 const logger = createLogger('XUI-JOB-SCHEDULER');
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
 
-/**
- * 创建串行执行、同名合并且带结束后冷却的 3X-UI 任务调度器。
- * @param {{ cooldownMs?: number }} options 调度选项，cooldownMs 为任务结束后的冷却毫秒数。
- * @returns {{ schedule: (name: string, handler: () => Promise<void>) => boolean, stop: () => void }} 调度与停止方法。
- */
-function createXuiJobScheduler(options = {}) {
-  const cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
-  const queue = [];
-  const scheduledNames = new Set();
-  let runningName = null;
-  let lastFinishedAt = 0;
-  let cooldownTimer = null;
-  let stopped = false;
+class XuiJobScheduler {
+  /**
+   * 创建串行执行、同名合并且带结束后冷却的 3X-UI 任务调度器。
+   * @param {{ cooldownMs?: number }} options 调度选项，cooldownMs 为任务结束后的冷却毫秒数。
+   */
+  constructor(options = {}) {
+    this.cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+    this.queue = [];
+    this.scheduledNames = new Set();
+    this.runningName = null;
+    this.lastFinishedAt = 0;
+    this.cooldownTimer = null;
+    this.stopped = false;
+  }
 
   /**
    * 按 FIFO 顺序处理任务；运行中、停止、空队列或冷却计时中时直接返回。
    * 任务异常仅记录失败，不阻断后续任务。
    * @returns {Promise<void>} 当前一轮处理完成的 Promise。
    */
-  async function processQueue() {
-    if (stopped || runningName || queue.length === 0 || cooldownTimer) return;
+  async processQueue() {
+    if (this.stopped || this.runningName || this.queue.length === 0 || this.cooldownTimer) return;
 
-    const remaining = Math.max(0, lastFinishedAt + cooldownMs - Date.now());
+    const remaining = Math.max(0, this.lastFinishedAt + this.cooldownMs - Date.now());
     if (remaining > 0) {
       logger.info(`3X-UI 下一任务等待冷却: ${remaining}ms`);
-      cooldownTimer = setTimeout(() => {
-        cooldownTimer = null;
-        void processQueue();
+      this.cooldownTimer = setTimeout(() => {
+        this.cooldownTimer = null;
+        void this.processQueue();
       }, remaining);
       return;
     }
 
-    const item = queue.shift();
-    scheduledNames.delete(item.name);
-    runningName = item.name;
+    const item = this.queue.shift();
+    this.scheduledNames.delete(item.name);
+    this.runningName = item.name;
     const startedAt = Date.now();
     let status = 'success';
 
@@ -49,10 +50,10 @@ function createXuiJobScheduler(options = {}) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(`3X-UI 任务执行失败: ${item.name}, error=${errorMessage}`);
     } finally {
-      lastFinishedAt = Date.now();
-      logger.info(`3X-UI 任务执行结束: ${item.name}, status=${status}, duration=${lastFinishedAt - startedAt}ms`);
-      runningName = null;
-      void processQueue();
+      this.lastFinishedAt = Date.now();
+      logger.info(`3X-UI 任务执行结束: ${item.name}, status=${status}, duration=${this.lastFinishedAt - startedAt}ms`);
+      this.runningName = null;
+      void this.processQueue();
     }
   }
 
@@ -62,20 +63,20 @@ function createXuiJobScheduler(options = {}) {
    * @param {() => Promise<void>} handler 异步任务处理函数。
    * @returns {boolean} 是否成功加入队列。
    */
-  function schedule(name, handler) {
-    if (stopped) {
-      stopped = false;
+  schedule(name, handler) {
+    if (this.stopped) {
+      this.stopped = false;
       logger.info('3X-UI 调度器已重新激活');
     }
-    if (runningName === name || scheduledNames.has(name)) {
+    if (this.runningName === name || this.scheduledNames.has(name)) {
       logger.info(`合并重复 3X-UI 任务: ${name}`);
       return false;
     }
 
-    queue.push({ name, handler });
-    scheduledNames.add(name);
-    logger.info(`3X-UI 任务已入队: ${name}, queue=${queue.length}`);
-    void processQueue();
+    this.queue.push({ name, handler });
+    this.scheduledNames.add(name);
+    logger.info(`3X-UI 任务已入队: ${name}, queue=${this.queue.length}`);
+    void this.processQueue();
     return true;
   }
 
@@ -84,26 +85,24 @@ function createXuiJobScheduler(options = {}) {
    * 后续再次调用 schedule 时会自动重新激活。
    * @returns {void}
    */
-  function stop() {
-    stopped = true;
-    if (cooldownTimer) {
-      clearTimeout(cooldownTimer);
-      cooldownTimer = null;
+  stop() {
+    this.stopped = true;
+    if (this.cooldownTimer) {
+      clearTimeout(this.cooldownTimer);
+      this.cooldownTimer = null;
     }
-    const discarded = queue.length;
-    queue.length = 0;
-    scheduledNames.clear();
+    const discarded = this.queue.length;
+    this.queue.length = 0;
+    this.scheduledNames.clear();
     logger.info(`3X-UI 调度器已停止，丢弃待执行任务: ${discarded}`);
   }
-
-  return { schedule, stop };
 }
 
-const scheduler = createXuiJobScheduler();
+const scheduler = new XuiJobScheduler();
 
 module.exports = {
   DEFAULT_COOLDOWN_MS,
-  createXuiJobScheduler,
-  schedule: scheduler.schedule,
-  stop: scheduler.stop
+  XuiJobScheduler,
+  schedule: scheduler.schedule.bind(scheduler),
+  stop: scheduler.stop.bind(scheduler)
 };
