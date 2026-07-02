@@ -5,6 +5,7 @@
 
 const telegramMonitorService = require('../../services/shared/telegram-monitor-service');
 const { createLogger } = require('../../utils/logger');
+const xuiJobScheduler = require('../xui-job-scheduler');
 
 const logger = createLogger('JOBS');
 
@@ -46,15 +47,29 @@ function registerTelegramServerHealthCheckJob({ db, intervals, registerTimeout }
   };
 
   registerTimeout(() => {
-    void runTelegramServerHealthCheckSafely(db, state);
+    scheduleTelegramServerHealthCheck(db, state);
   }, 13 * 60 * 1000);
 
   const interval = setInterval(() => {
-    void runTelegramServerHealthCheckSafely(db, state);
+    scheduleTelegramServerHealthCheck(db, state);
   }, 40 * 60 * 1000);
 
   intervals.push(interval);
   logger.info('Telegram服务器健康巡检任务已注册（每40分钟执行一次）');
+}
+
+/**
+ * 将 Telegram 服务器健康巡检提交到统一调度器。
+ * 同名任务运行中或排队时由调度器合并，巡检内部仍保留重入保护。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {{running: boolean}} state - 当前任务运行状态
+ * @returns {void}
+ */
+function scheduleTelegramServerHealthCheck(db, state) {
+  xuiJobScheduler.schedule('telegram-health-check', async () => {
+    await runTelegramServerHealthCheckSafely(db, state);
+  });
 }
 
 module.exports = {

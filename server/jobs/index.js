@@ -51,6 +51,7 @@ const { registerCleanEmailLogsJob } = require('./handlers/clean-email-logs');
 const { registerBackupXuiDbJob } = require('./handlers/backup-xui-db');
 const { registerBatchSubscriptionTaskJob } = require('./handlers/resume-batch-subscription-tasks');
 const { registerTelegramServerHealthCheckJob } = require('./handlers/telegram-server-health-check');
+const xuiJobScheduler = require('./xui-job-scheduler');
 
 const logger = createLogger('JOBS');
 
@@ -97,6 +98,8 @@ function cleanupJobHandles() {
 
   cronTasks.forEach(task => task.stop());
   cronTasks.length = 0;
+
+  xuiJobScheduler.stop();
 }
 
 /**

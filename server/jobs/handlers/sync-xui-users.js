@@ -8,6 +8,7 @@ const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const xuiNodeSnapshotService = require('../../services/shared/xui-node-snapshot-service');
 const { createLogger } = require('../../utils/logger');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
+const xuiJobScheduler = require('../xui-job-scheduler');
 
 const logger = createLogger('JOBS');
 
@@ -395,16 +396,29 @@ async function syncUsersToServer(db, server, users) {
  * @param {Function} context.registerTimeout - 延迟任务注册函数
  */
 function registerXuiSyncJob({ db, intervals, registerTimeout }) {
-  registerTimeout(async () => {
-    await runXuiSync(db);
+  registerTimeout(() => {
+    scheduleXuiUserSync(db);
   }, 1 * 60 * 1000);
 
-  const interval = setInterval(async () => {
-    await runXuiSync(db);
+  const interval = setInterval(() => {
+    scheduleXuiUserSync(db);
   }, 4 * 60 * 60 * 1000);
 
   intervals.push(interval);
   logger.info('3X-UI用户同步任务已注册（每4小时执行一次）');
+}
+
+/**
+ * 将 3X-UI 用户同步提交到统一调度器。
+ * 同名任务运行中或排队时由调度器合并，避免并发访问 3X-UI。
+ *
+ * @param {Object} db - 数据库实例
+ * @returns {void}
+ */
+function scheduleXuiUserSync(db) {
+  xuiJobScheduler.schedule('xui-user-sync', async () => {
+    await runXuiSync(db);
+  });
 }
 
 /**
