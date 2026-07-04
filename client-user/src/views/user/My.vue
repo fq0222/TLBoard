@@ -157,27 +157,10 @@
       </div>
     </section>
 
-    <el-dialog
-      v-model="posterVisible"
-      class="referral-poster-dialog"
-      title="推广海报"
-      width="440px"
-      append-to-body
-    >
-      <div class="referral-poster">
-        <h2 class="poster-title">分享好友，余额奖励轻松拿</h2>
-        <div class="poster-qr-wrap">
-          <img
-            v-if="posterQrCode"
-            class="poster-qr-code"
-            :src="posterQrCode"
-            alt="推广注册链接二维码"
-          >
-          <span class="poster-qr-hint">扫码注册</span>
-        </div>
-        <p class="poster-features">AI 畅享 · 流媒体流畅 · 4K 高清体验</p>
-      </div>
-    </el-dialog>
+    <ReferralPosterDialog
+      ref="posterDialogRef"
+      :referral-url="referralSummary.referral_url || ''"
+    />
   </div>
 </template>
 
@@ -186,16 +169,15 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight } from '@element-plus/icons-vue'
-import QRCode from 'qrcode'
 import api from '@/api'
+import ReferralPosterDialog from '@/components/ReferralPosterDialog.vue'
 import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
 const userStore = useUserStore()
 const unreadTicketCount = ref(0)
 const referralSummary = ref({})
-const posterVisible = ref(false)
-const posterQrCode = ref('')
+const posterDialogRef = ref(null)
 
 const userInfo = computed(() => userStore.userInfo || {})
 const subscriptionReady = computed(() => !!userStore.userInfo?.subscription_ready)
@@ -321,32 +303,9 @@ async function copyReferralLink() {
   }
 }
 
-/**
- * 生成并展示推广二维码海报；无参数，返回 Promise<void>。
- * 推广链接为空时直接返回；二维码生成失败时记录错误、提示用户且不打开弹窗。
- *
- * @returns {Promise<void>}
- */
-async function showReferralPoster() {
-  const referralUrl = referralSummary.value.referral_url
-  if (!referralUrl) {
-    return
-  }
-
-  try {
-    posterQrCode.value = await QRCode.toDataURL(referralUrl, {
-      width: 280,
-      margin: 2,
-      color: {
-        dark: '#0f172a',
-        light: '#ffffff'
-      }
-    })
-    posterVisible.value = true
-  } catch (error) {
-    console.error('推广海报二维码生成失败:', error)
-    ElMessage.error('海报生成失败，请稍后重试')
-  }
+/** 打开共享推广海报弹窗。 */
+function showReferralPoster() {
+  posterDialogRef.value?.open()
 }
 
 /**
@@ -554,63 +513,6 @@ onMounted(async () => {
   box-shadow: none;
 }
 
-.referral-poster {
-  overflow: hidden;
-  padding: 30px 24px 26px;
-  border-radius: 20px;
-  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
-  text-align: center;
-}
-
-.poster-title {
-  margin: 0 0 24px;
-  color: #0f172a;
-  font-size: 24px;
-  line-height: 1.4;
-}
-
-.poster-qr-wrap {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  max-width: 100%;
-  padding: 16px;
-  border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.14);
-}
-
-.poster-qr-code {
-  display: block;
-  width: 280px;
-  max-width: 100%;
-  height: auto;
-}
-
-.poster-qr-hint {
-  color: #2563eb;
-  font-weight: 700;
-}
-
-.poster-features {
-  margin: 22px 0 0;
-  color: #475569;
-  font-size: 14px;
-}
-
-:global(.referral-poster-dialog) {
-  max-width: 440px;
-}
-
-:global(.referral-poster-dialog .el-dialog__body) {
-  padding: 0 20px 20px;
-}
-
-:global(.referral-poster-dialog .el-dialog__title) {
-  display: none;
-}
-
 .referral-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -777,28 +679,6 @@ onMounted(async () => {
     min-width: 0;
     justify-content: center;
     margin-left: 0;
-  }
-
-  :global(.referral-poster-dialog) {
-    width: calc(100vw - 32px) !important;
-    margin-right: auto;
-    margin-left: auto;
-  }
-
-  :global(.referral-poster-dialog .el-dialog__body) {
-    padding: 0 12px 12px;
-  }
-
-  .referral-poster {
-    padding: 26px 14px 22px;
-  }
-
-  .poster-title {
-    font-size: 21px;
-  }
-
-  .poster-qr-wrap {
-    box-sizing: border-box;
   }
 
   .action-item {

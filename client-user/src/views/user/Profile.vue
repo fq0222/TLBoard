@@ -109,11 +109,17 @@
     <section class="dashboard-grid">
       <div class="main-column">
         <article class="panel-card subscription-workspace">
-          <div class="panel-head">
+          <div class="panel-head subscription-workspace-head">
             <div>
               <h2 class="panel-title">订阅工作区</h2>
               <p class="panel-subtitle">请按顺序完成优选和订阅生成，避免节点不可用。</p>
             </div>
+            <el-button
+              class="guide-button share-friend-button"
+              @click="referralPosterRef?.open()"
+            >
+              分享给好友
+            </el-button>
           </div>
 
           <div class="step-actions">
@@ -389,6 +395,7 @@
         </footer>
       </section>
     </div>
+    <ReferralPosterDialog ref="referralPosterRef" :referral-url="referralUrl" />
   </div>
 </template>
 
@@ -407,6 +414,7 @@ import {
 import { marked } from 'marked'
 import { useUserStore } from '@/stores/user'
 import RenewDialog from '@/components/RenewDialog.vue'
+import ReferralPosterDialog from '@/components/ReferralPosterDialog.vue'
 import api from '@/api'
 import {
   getOnboardingGuideMode,
@@ -425,6 +433,8 @@ const userStore = useUserStore()
 const router = useRouter()
 
 const userInfo = ref({})
+const referralUrl = ref('')
+const referralPosterRef = ref(null)
 const announcements = ref([])
 const loading = ref(false)
 const cfOptimized = ref(false)
@@ -1225,10 +1235,27 @@ function getRenewErrorMessage(error) {
   return error?.userMessage || error?.response?.data?.message || '续费失败，请重试'
 }
 
+/**
+ * 获取当前用户的推广链接。
+ *
+ * @returns {Promise<void>} 成功时保存推广链接；请求失败时仅记录错误，不阻塞页面加载。
+ */
+async function fetchReferralUrl() {
+  try {
+    const response = await api.user.getReferralSummary()
+    if (response.code === 0) {
+      referralUrl.value = response.data?.referral_url || ''
+    }
+  } catch (error) {
+    console.error('获取推广链接失败:', error)
+  }
+}
+
 onMounted(() => {
   window.addEventListener('resize', handleResize)
   fetchUserInfo()
   loadPublicSettings()
+  fetchReferralUrl()
   fetchAnnouncements()
   fetchAnnouncementPopup()
   checkSyncStatus()
@@ -1418,6 +1445,10 @@ onBeforeUnmount(() => {
   border-color: rgba(37, 99, 235, 0.28);
   background: #dbeafe;
   color: #1d4ed8;
+}
+
+.share-friend-button {
+  flex: 0 0 auto;
 }
 
 .progress-panel {
@@ -2186,6 +2217,11 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 768px) {
+  .subscription-workspace-head {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
   .welcome-card,
   .panel-card,
   .compact-card {
@@ -2251,6 +2287,16 @@ onBeforeUnmount(() => {
     border-color: rgba(37, 99, 235, 0.28);
     background: #dbeafe;
     color: #1d4ed8;
+  }
+
+  .share-friend-button {
+    position: static;
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    padding: 4px 10px !important;
+    border-radius: 999px;
+    font-size: 12px;
   }
 
   .step-actions {
