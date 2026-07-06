@@ -1002,6 +1002,7 @@ async function testRegisterAndPayPassesResolvedReferrerToPendingOrder() {
       markOrderExpiredByOutTradeNo: async () => {}
     }, async () => {
       await withObjectMocks(vmqService, {
+        isMonitorOnline: async () => true,
         createOrder: async () => ({
           code: 1,
           data: {
@@ -1066,6 +1067,7 @@ async function testRegisterAndPayKeepsOrderingWhenReferralCodeIsInvalid() {
       markOrderExpiredByOutTradeNo: async () => {}
     }, async () => {
       await withObjectMocks(vmqService, {
+        isMonitorOnline: async () => true,
         createOrder: async () => ({
           code: 1,
           data: {

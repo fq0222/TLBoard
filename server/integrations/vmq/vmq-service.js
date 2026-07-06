@@ -186,11 +186,26 @@ async function getState() {
   });
 }
 
+/**
+ * 判断 VMQ 监控端是否在线，仅接受成功响应中的字符串在线状态。
+ *
+ * @returns {Promise<boolean>} 监控端是否在线
+ */
+async function isMonitorOnline() {
+  try {
+    const result = await getState();
+    return Number(result?.code) === 1 && result?.data?.state === '1';
+  } catch (error) {
+    return false;
+  }
+}
+
 module.exports = {
   createOrder,
   getOrder,
   checkOrder,
   closeOrder,
   getState,
+  isMonitorOnline,
   verifyNotifySign
 };

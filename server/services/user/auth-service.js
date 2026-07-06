@@ -405,6 +405,13 @@ async function registerAndPay(db, payload) {
     });
   }
 
+  if (!await vmqService.isMonitorOnline()) {
+    throw createLegacyBusinessError('暂时无法支付，请联系客服', {
+      statusCode: 503,
+      code: 5004
+    });
+  }
+
   const subscriptionToken = crypto.randomUUID();
   const subId = crypto.randomBytes(8).toString('hex');
   const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);

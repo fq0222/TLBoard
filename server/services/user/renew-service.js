@@ -231,6 +231,13 @@ async function createRenewOrder(db, userId, payload) {
     };
   }
 
+  if (!(await vmqService.isMonitorOnline())) {
+    throw createLegacyBusinessError('暂时无法支付，请联系客服', {
+      statusCode: 503,
+      code: 5004
+    });
+  }
+
   const transaction = db.transaction(async (transactionDb) => {
     const orderResult = await orderRepository.createPendingRenewOrder(transactionDb, {
       userId,
