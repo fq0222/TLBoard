@@ -92,7 +92,9 @@ async function backupServer(server, options = {}) {
   fs.mkdirSync(backupDir, { recursive: true });
 
   const client = buildClient(server, options);
-  const data = await client.getDb();
+  const data = typeof client.getMigration === 'function'
+    ? await client.getMigration()
+    : await client.getDb();
   const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
   const filePath = path.join(backupDir, `${sanitizeFileName(server.name)}-x-ui.db`);
   const validSqlite = isSqliteDatabase(buffer);

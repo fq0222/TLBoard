@@ -5,13 +5,15 @@
 
 const XuiApiClientV302 = require('./xui-api-client-v302');
 const XuiApiClientV325 = require('./xui-api-client-v325');
+const XuiApiClientV342 = require('./xui-api-client-v342');
 
 const DEFAULT_XUI_API_VERSION = '3.0.2';
 const CLIENT_REGISTRY = {
   '3.0.2': XuiApiClientV302,
   '3.2.5': XuiApiClientV325,
   // 3.3.1 延续 3.2.5 的 clients API 路由族，复用新版客户端适配器。
-  '3.3.1': XuiApiClientV325
+  '3.3.1': XuiApiClientV325,
+  '3.4.2': XuiApiClientV342
 };
 
 /**
