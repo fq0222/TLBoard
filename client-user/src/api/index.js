@@ -65,6 +65,9 @@ apiClient.interceptors.response.use(
         case 500:
           ElMessage.error('服务器内部错误')
           break
+        case 503:
+          // 503 业务错误交给具体页面展示，避免响应拦截器与页面重复弹窗
+          break
         default:
           ElMessage.error(userMessage)
       }
