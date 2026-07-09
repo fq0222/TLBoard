@@ -139,6 +139,32 @@ test('admin user list marks traffic limited disabled account as renew status', a
   ]);
 });
 
+test('admin user list sorts traffic used before pagination when requested', async () => {
+  const { db, getListSql } = createListUsersDb([
+    {
+      id: 1,
+      email: 'high@example.com',
+      plan_id: 1,
+      plan_name: '基础套餐',
+      traffic_used: 2048,
+      traffic_limit: 4096,
+      expire_at: 0,
+      enabled: 1,
+      disable_reason: null,
+      created_at: 1
+    }
+  ]);
+
+  await usersService.listUsers(db, {
+    page: 2,
+    limit: 15,
+    sort_by: 'traffic_used',
+    sort_order: 'desc'
+  });
+
+  assert.match(getListSql(), /ORDER BY COALESCE\(u\.traffic_used, 0\) DESC, u\.created_at DESC\s+LIMIT \? OFFSET \?/);
+});
+
 test('admin user update preserves disable reason when enabled value is unchanged', async () => {
   const originalUser = {
     id: 10,

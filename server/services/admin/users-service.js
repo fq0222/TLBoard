@@ -200,6 +200,27 @@ function buildUserListWhere(query) {
 }
 
 /**
+ * 构造管理端用户列表排序选项。
+ * 关键分支：目前只开放已用流量倒序，其它输入回落到默认创建时间倒序。
+ *
+ * @param {Object} query - 路由查询参数
+ * @returns {{sortBy:string,sortOrder:string}} 仓储层使用的排序配置
+ */
+function buildUserListSort(query) {
+  if (query.sort_by === 'traffic_used' && query.sort_order === 'desc') {
+    return {
+      sortBy: 'traffic_used',
+      sortOrder: 'desc'
+    };
+  }
+
+  return {
+    sortBy: 'created_at',
+    sortOrder: 'desc'
+  };
+}
+
+/**
  * 查询管理端用户分页列表。
  *
  * @param {Object} db - 数据库代理对象
@@ -209,8 +230,9 @@ function buildUserListWhere(query) {
 async function listUsers(db, query) {
   const { page, limit, offset } = parsePagination(query);
   const { whereClause, params } = buildUserListWhere(query);
+  const sort = buildUserListSort(query);
   const totalRow = await userRepository.countUsers(db, whereClause, params);
-  const users = await userRepository.listUsers(db, whereClause, params, limit, offset);
+  const users = await userRepository.listUsers(db, whereClause, params, limit, offset, sort);
 
   return {
     total: Number(totalRow.total) || 0,

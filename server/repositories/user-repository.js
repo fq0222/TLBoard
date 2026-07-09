@@ -384,6 +384,23 @@ async function countUsers(db, whereClause, params) {
 }
 
 /**
+ * 构造管理端用户列表排序 SQL。
+ * 关键分支：仅允许仓储内置字段，避免请求参数直接进入 ORDER BY。
+ *
+ * @param {Object} sort - 排序配置
+ * @param {string} sort.sortBy - 排序字段
+ * @param {string} sort.sortOrder - 排序方向
+ * @returns {string} ORDER BY 片段
+ */
+function buildUserListOrderBy(sort = {}) {
+  if (sort.sortBy === 'traffic_used' && sort.sortOrder === 'desc') {
+    return 'ORDER BY COALESCE(u.traffic_used, 0) DESC, u.created_at DESC';
+  }
+
+  return 'ORDER BY u.created_at DESC';
+}
+
+/**
  * 查询管理端用户分页列表。
  *
  * @param {Object} db - 数据库代理对象
@@ -391,9 +408,12 @@ async function countUsers(db, whereClause, params) {
  * @param {Array} params - 绑定参数
  * @param {number} limit - 分页数量
  * @param {number} offset - 分页偏移
+ * @param {Object} [sort] - 排序配置
  * @returns {Promise<Array>} 用户列表
  */
-async function listUsers(db, whereClause, params, limit, offset) {
+async function listUsers(db, whereClause, params, limit, offset, sort) {
+  const orderBy = buildUserListOrderBy(sort);
+
   return db.prepare(`
     SELECT
       u.id, u.email, u.plan_id, u.traffic_used, u.traffic_limit,
@@ -402,7 +422,7 @@ async function listUsers(db, whereClause, params, limit, offset) {
     FROM users u
     LEFT JOIN plans p ON u.plan_id = p.id
     ${whereClause}
-    ORDER BY u.created_at DESC
+    ${orderBy}
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset);
 }

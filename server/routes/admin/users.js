@@ -30,7 +30,15 @@ router.get('/', authenticateAdmin, [
   query('plan_id')
     .optional()
     .isInt({ min: 1 })
-    .withMessage('套餐ID必须是大于0的整数')
+    .withMessage('套餐ID必须是大于0的整数'),
+  query('sort_by')
+    .optional()
+    .isIn(['traffic_used'])
+    .withMessage('排序字段无效'),
+  query('sort_order')
+    .optional()
+    .isIn(['desc'])
+    .withMessage('排序方向无效')
 ], usersController.listUsers);
 
 router.post('/batch-generate-subscriptions', authenticateAdmin, [

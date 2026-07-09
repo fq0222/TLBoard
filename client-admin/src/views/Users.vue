@@ -29,11 +29,20 @@
         </div>
       </div>
       
-      <el-table :data="users" style="width: 100%">
+      <el-table :data="users" style="width: 100%" @sort-change="handleSortChange">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="email" label="邮箱" />
         <el-table-column prop="plan_name" label="套餐" />
-        <el-table-column prop="traffic_used_text" label="已用流量" />
+        <el-table-column
+          prop="traffic_used"
+          label="已用流量"
+          sortable="custom"
+          :sort-orders="['descending', null]"
+        >
+          <template #default="scope">
+            {{ scope.row.traffic_used_text }}
+          </template>
+        </el-table-column>
         <el-table-column prop="traffic_limit_text" label="流量上限" />
         <el-table-column prop="expire_text" label="到期时间" />
         <el-table-column prop="status_text" label="状态" width="100">
@@ -251,6 +260,8 @@ const status = ref('')
 const page = ref(1)
 const limit = ref(15)
 const total = ref(0)
+const sortBy = ref('')
+const sortOrder = ref('')
 const dialogVisible = ref(false)
 const basicSubmitting = ref(false)
 const cfIpsSubmitting = ref(false)
@@ -395,6 +406,10 @@ async function fetchUsers() {
     }
     if (keyword.value) params.keyword = keyword.value
     if (status.value) params.status = status.value
+    if (sortBy.value && sortOrder.value) {
+      params.sort_by = sortBy.value
+      params.sort_order = sortOrder.value
+    }
     
     const response = await api.admin.getUsers(params)
     if (response.code === 0) {
@@ -730,6 +745,23 @@ async function deleteUser(user) {
   } finally {
     deletingUserId.value = null
   }
+}
+
+/**
+ * 处理管理端用户列表的服务端排序。
+ * 关键分支：仅响应“已用流量”列，排序变化后回到第一页，让后端按全量结果排序再分页。
+ */
+function handleSortChange({ prop, order }) {
+  if (prop === 'traffic_used' && order === 'descending') {
+    sortBy.value = 'traffic_used'
+    sortOrder.value = 'desc'
+  } else {
+    sortBy.value = ''
+    sortOrder.value = ''
+  }
+
+  page.value = 1
+  fetchUsers()
 }
 
 /**
