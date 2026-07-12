@@ -13,6 +13,7 @@ const subscriptionService = require('../../services/user/subscription-service');
 const router = express.Router();
 
 router.post('/generate', authenticateUser, subscriptionController.generateSubscription);
+router.post('/replace-link', authenticateUser, subscriptionController.replaceSubscriptionLink);
 router.get('/', authenticateUser, subscriptionController.getSubscriptionInfo);
 router.get('/sub/:token', [
   param('token')

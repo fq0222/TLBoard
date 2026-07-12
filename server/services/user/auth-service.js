@@ -9,6 +9,7 @@ const emailRepository = require('../../repositories/email-repository');
 const referralService = require('../referral-service');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
 const { isTimedPlan } = require('../shared/plan-type');
+const { generatePublicSubscriptionId } = require('../../utils/subscription-id');
 
 const TELEGRAM_CHANNEL_URL_KEY = 'telegram_channel_url';
 const PASSWORD_RESET_MESSAGE = '如果该邮箱已注册，重置密码邮件已发送，请查收。';
@@ -413,7 +414,7 @@ async function registerAndPay(db, payload) {
   }
 
   const subscriptionToken = crypto.randomUUID();
-  const subId = crypto.randomBytes(8).toString('hex');
+  const subId = generatePublicSubscriptionId();
   const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
   const now = getNowTimestamp();
   // 注册归因：推广码只用于绑定订单来源，无效或自推时返回 null，不阻断正常注册下单。

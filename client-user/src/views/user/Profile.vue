@@ -114,12 +114,22 @@
               <h2 class="panel-title">订阅工作区</h2>
               <p class="panel-subtitle">请按顺序完成优选和订阅生成，避免节点不可用。</p>
             </div>
-            <el-button
-              class="guide-button share-friend-button"
-              @click="referralPosterRef?.open()"
-            >
-              分享给好友
-            </el-button>
+            <div class="subscription-head-actions">
+              <el-button
+                class="guide-button share-friend-button"
+                @click="referralPosterRef?.open()"
+              >
+                分享给好友
+              </el-button>
+              <el-button
+                v-if="userInfo.subscription_ready"
+                class="guide-button replace-subscription-button"
+                :disabled="actionBusy"
+                @click="confirmReplaceSubscriptionLink"
+              >
+                更换订阅链接
+              </el-button>
+            </div>
           </div>
 
           <div class="step-actions">
@@ -328,6 +338,29 @@
       </div>
     </el-dialog>
 
+    <el-dialog
+      v-model="replacingSubscription"
+      title="更换订阅中"
+      :width="optimizeDialogWidth"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+      class="generate-dialog"
+    >
+      <div class="generate-dialog-content">
+        <div class="generate-loading-orb">
+          <el-icon class="generate-loading-icon"><Loading /></el-icon>
+        </div>
+        <h3 class="generate-dialog-title">正在更换订阅链接</h3>
+        <p class="generate-dialog-text">系统正在生成新的订阅链接并刷新订阅缓存，请稍候。</p>
+        <div class="generate-loading-dots" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </div>
+    </el-dialog>
+
     <el-tour
       v-if="!isMobileView"
       v-model="onboardingTourVisible"
@@ -443,6 +476,7 @@ const onlineCustomerServiceUrl = ref('')
 const optimizeProgress = ref(0)
 const optimizeStatusText = ref('')
 const generatingSubscription = ref(false)
+const replacingSubscription = ref(false)
 const showRenewDialog = ref(false)
 const renewSubmitting = ref(false)
 const announcementPopupVisible = ref(false)
@@ -458,7 +492,7 @@ const onboardingCompletionSaving = ref(false)
 const MOBILE_ONBOARDING_TARGET_CLASS = 'mobile-onboarding-target'
 const MOBILE_ONBOARDING_TARGET_HOST_CLASS = 'mobile-onboarding-target-host'
 
-const actionBusy = computed(() => optimizing.value || generatingSubscription.value)
+const actionBusy = computed(() => optimizing.value || generatingSubscription.value || replacingSubscription.value)
 const optimizeDialogWidth = computed(() => (windowWidth.value <= 768 ? '94%' : '420px'))
 const announcementDialogWidth = computed(() => (windowWidth.value <= 768 ? '92vw' : '720px'))
 const onboardingGuideMode = computed(() => getOnboardingGuideMode(windowWidth.value))
@@ -933,7 +967,7 @@ function fallbackCopyText(text) {
 }
 
 async function generateSubscription() {
-  if (generatingSubscription.value || optimizing.value) {
+  if (generatingSubscription.value || optimizing.value || replacingSubscription.value) {
     return
   }
 
@@ -970,8 +1004,62 @@ async function generateSubscription() {
   }
 }
 
+/**
+ * 确认并更换当前用户的公开订阅链接。
+ * 职责：二次确认风险提示，成功后刷新页面中的通用/Clash 订阅地址。
+ * 核心分支：用户取消时直接返回；后端失败时保留原链接并展示错误提示。
+ *
+ * @returns {Promise<void>}
+ */
+async function confirmReplaceSubscriptionLink() {
+  if (replacingSubscription.value || optimizing.value || generatingSubscription.value) {
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '更换后，当前已导入到客户端中的订阅链接将失效，需要重新导入更换后的新订阅链接。',
+      '更换订阅链接',
+      {
+        confirmButtonText: '确认更换',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch (error) {
+    return
+  }
+
+  try {
+    replacingSubscription.value = true
+    const response = await api.user.replaceSubscriptionLink()
+    if (response.code === 0) {
+      userInfo.value = {
+        ...userInfo.value,
+        subscription_url: response.data.subscription_url,
+        clash_url: response.data.clash_url,
+        subscription_ready: true
+      }
+      userStore.userInfo = {
+        ...(userStore.userInfo || {}),
+        subscription_url: response.data.subscription_url,
+        clash_url: response.data.clash_url,
+        subscription_ready: true
+      }
+      ElMessage.success('订阅链接已更换，请重新导入客户端')
+    } else {
+      ElMessage.error(response.message || '更换订阅链接失败')
+    }
+  } catch (error) {
+    console.error('更换订阅链接失败:', error)
+    ElMessage.error(getSubscriptionGenerationErrorMessage(error))
+  } finally {
+    replacingSubscription.value = false
+  }
+}
+
 async function startOptimize() {
-  if (optimizing.value || generatingSubscription.value) {
+  if (optimizing.value || generatingSubscription.value || replacingSubscription.value) {
     return
   }
 
@@ -1448,6 +1536,22 @@ onBeforeUnmount(() => {
 }
 
 .share-friend-button {
+  flex: 0 0 auto;
+}
+
+.subscription-head-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.subscription-head-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.replace-subscription-button {
   flex: 0 0 auto;
 }
 
@@ -2297,6 +2401,23 @@ onBeforeUnmount(() => {
     padding: 4px 10px !important;
     border-radius: 999px;
     font-size: 12px;
+  }
+
+  .subscription-head-actions {
+    align-items: flex-end;
+    gap: 6px;
+  }
+
+  .subscription-head-actions .guide-button {
+    position: static;
+    flex: 0 0 auto !important;
+    width: 112px !important;
+    min-width: 0 !important;
+    padding: 4px 10px !important;
+    border-radius: 999px;
+    font-size: 12px;
+    justify-content: center;
+    white-space: nowrap;
   }
 
   .step-actions {

@@ -280,7 +280,11 @@ async function testDisabledSubscriptionShouldThrowBusinessError() {
       'sub-token-3',
       {}
     ),
-    (error) => error.isLegacyBusinessError && error.code === 2003
+    (error) => (
+      error.isLegacyBusinessError
+      && error.code === 2003
+      && error.message === '账号 user@example.com 已被禁用'
+    )
   );
 }
 
@@ -369,6 +373,91 @@ async function testSubscriptionInfoShouldHideNodesBeforeFirstGeneration() {
 }
 
 /**
+ * 验证公开订阅链接使用 32 位十六进制 ID，避免新用户继续拿到旧的 16 位链接。
+ *
+ * @returns {Promise<void>}
+ */
+async function testPublicSubscriptionIdShouldUse32HexChars() {
+  const subId = subscriptionService.generatePublicSubscriptionId();
+
+  assert.match(subId, /^[0-9a-f]{32}$/);
+}
+
+/**
+ * 验证更换订阅链接只替换用户级 sub_id 并复用现有节点缓存，不触发全量订阅生成。
+ *
+ * @returns {Promise<void>}
+ */
+async function testReplaceSubscriptionLinkShouldInvalidateOldCacheAndRegenerate() {
+  const originals = {
+    findSubscriptionUserById: subscriptionRepository.findSubscriptionUserById,
+    findLatestUserSubscription: subscriptionRepository.findLatestUserSubscription,
+    replaceUserSubscriptionId: subscriptionRepository.replaceUserSubscriptionId,
+    deleteUserSubscriptionCaches: subscriptionRepository.deleteUserSubscriptionCaches,
+    saveUserSubscriptionCache: subscriptionRepository.saveUserSubscriptionCache
+  };
+  const calls = [];
+  const logs = [];
+  const nodes = [{ node_name: 'node-a', link: 'vless://node-a' }];
+
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 7,
+    email: 'replace@example.com',
+    sub_id: 'old-sub-id',
+    enabled: 1,
+    traffic_used: 0,
+    traffic_limit: 1024,
+    referral_traffic_limit: 0,
+    expire_at: 0
+  });
+  subscriptionRepository.findLatestUserSubscription = async (db, userId) => {
+    calls.push(['findLatestUserSubscription', db, userId]);
+    return {
+      nodes_data: JSON.stringify(nodes)
+    };
+  };
+  subscriptionRepository.replaceUserSubscriptionId = async (db, userId, subId) => {
+    calls.push(['replaceUserSubscriptionId', db, userId, subId]);
+  };
+  subscriptionRepository.deleteUserSubscriptionCaches = async (db, userId) => {
+    calls.push(['deleteUserSubscriptionCaches', db, userId]);
+  };
+  subscriptionRepository.saveUserSubscriptionCache = async (db, userId, subId, savedNodes) => {
+    calls.push(['saveUserSubscriptionCache', db, userId, subId, savedNodes]);
+  };
+
+  try {
+    const db = { name: 'fake-db' };
+    const logger = {
+      info(message) {
+        logs.push(message);
+      }
+    };
+    const result = await subscriptionService.replaceSubscriptionLink(db, 7, logger, {
+      dependencies: {
+        generatePublicSubscriptionId: () => '1234567890abcdef1234567890abcdef',
+        generateSubscription: async () => {
+          throw new Error('更换订阅链接不应触发全量订阅生成');
+        }
+      }
+    });
+
+    assert.strictEqual(result, '1234567890abcdef1234567890abcdef');
+    assert.deepStrictEqual(calls, [
+      ['findLatestUserSubscription', db, 7],
+      ['replaceUserSubscriptionId', db, 7, '1234567890abcdef1234567890abcdef'],
+      ['deleteUserSubscriptionCaches', db, 7],
+      ['saveUserSubscriptionCache', db, 7, '1234567890abcdef1234567890abcdef', nodes]
+    ]);
+    assert.deepStrictEqual(logs, [
+      '用户 replace@example.com 更换订阅链接成功，复用 1 个本地节点缓存'
+    ]);
+  } finally {
+    Object.assign(subscriptionRepository, originals);
+  }
+}
+
+/**
  * 验证用户 CF IP 查询只读取当前 cf_ip_pool 表真实存在的字段。
  *
  * @returns {Promise<void>}
@@ -402,6 +491,8 @@ async function run() {
   await testDisabledSubscriptionShouldThrowBusinessError();
   await testAdminSubscriptionShouldReuseUserIncrementalGenerator();
   await testSubscriptionInfoShouldHideNodesBeforeFirstGeneration();
+  await testPublicSubscriptionIdShouldUse32HexChars();
+  await testReplaceSubscriptionLinkShouldInvalidateOldCacheAndRegenerate();
   await testUserCfIpQueriesShouldMatchCurrentSchema();
   console.log('user subscription service tests passed');
 }

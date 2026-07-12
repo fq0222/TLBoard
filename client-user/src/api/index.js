@@ -236,6 +236,14 @@ const userApi = {
   },
 
   /**
+   * 更换订阅链接，旧链接会失效并重新生成订阅缓存
+   * @returns {Promise<Object>} 响应数据
+   */
+  replaceSubscriptionLink() {
+    return apiClient.post('/subscription/replace-link', {}, { timeout: 120000 })
+  },
+
+  /**
    * 获取 CF IP 池
    * @returns {Promise<Object>} 响应数据
    */

@@ -11,6 +11,7 @@ const { isTimedPlan } = require('../shared/plan-type');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
 const subscriptionRepository = require('../../repositories/subscription-repository');
 const { runWithConcurrency } = require('../../utils/concurrency');
+const { generatePublicSubscriptionId } = require('../../utils/subscription-id');
 
 const SOURCE_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60;
 const SOURCE_FETCH_CONCURRENCY = 10;
@@ -837,13 +838,13 @@ function assertActiveSubscriptionUser(user) {
   }
 
   if (!isEnabledValue(user.enabled) && user.disable_reason === DISABLE_REASONS.ADMIN) {
-    throw createLegacyBusinessError(2003, '账号已被禁用，请联系管理员', 400, null);
+    throw createLegacyBusinessError(2003, `账号 ${user.email} 已被禁用，请联系管理员`, 400, null);
   }
 
   assertSubscriptionNotExpired(user);
 
   if (!isEnabledValue(user.enabled)) {
-    throw createLegacyBusinessError(2003, '账号已被禁用', 400, null);
+    throw createLegacyBusinessError(2003, `账号 ${user.email} 已被禁用`, 400, null);
   }
 
   return user;
@@ -1321,6 +1322,39 @@ async function generateSubscription(db, userId, logger, options = {}) {
 }
 
 /**
+ * 更换用户公开订阅链接，并复用现有节点缓存。
+ * 核心分支：先读取旧缓存，再替换 users.sub_id、清理旧缓存并用新 sub_id 写回同一批节点。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {Object} logger - 日志对象
+ * @param {Object} [options={}] - 测试依赖注入与生成选项
+ * @returns {Promise<string>} 新的公开订阅 ID
+ */
+async function replaceSubscriptionLink(db, userId, logger, options = {}) {
+  const user = assertActiveSubscriptionUser(
+    await subscriptionRepository.findSubscriptionUserById(db, userId)
+  );
+
+  const dependencies = options.dependencies || {};
+  const createSubId = dependencies.generatePublicSubscriptionId || generatePublicSubscriptionId;
+  const existingSubscription = await subscriptionRepository.findLatestUserSubscription(db, userId);
+  if (!existingSubscription || !existingSubscription.nodes_data) {
+    throw createLegacyBusinessError(3002, '请先生成订阅链接', 400, null);
+  }
+
+  const newSubId = createSubId();
+  const nodes = JSON.parse(existingSubscription.nodes_data || '[]');
+
+  await subscriptionRepository.replaceUserSubscriptionId(db, userId, newSubId);
+  await subscriptionRepository.deleteUserSubscriptionCaches(db, userId);
+  await subscriptionRepository.saveUserSubscriptionCache(db, userId, newSubId, nodes);
+
+  logger?.info?.(`用户 ${user.email} 更换订阅链接成功，复用 ${nodes.length} 个本地节点缓存`);
+  return newSubId;
+}
+
+/**
  * 获取用户当前订阅详情与节点展示信息。
  *
  * @param {Object} db - 数据库代理对象
@@ -1431,13 +1465,13 @@ async function getSubscriptionContent(db, token, query) {
   }
 
   if (!isEnabledValue(subscription.enabled) && subscription.disable_reason === DISABLE_REASONS.ADMIN) {
-    throw createLegacyBusinessError(2003, '账号已被禁用，请联系管理员', 400, null);
+    throw createLegacyBusinessError(2003, `账号 ${subscription.email} 已被禁用，请联系管理员`, 400, null);
   }
 
   assertSubscriptionNotExpired(subscription);
 
   if (!isEnabledValue(subscription.enabled)) {
-    throw createLegacyBusinessError(2003, '账号已被禁用', 400, null);
+    throw createLegacyBusinessError(2003, `账号 ${subscription.email} 已被禁用`, 400, null);
   }
 
   const nodes = await appendAnnouncementVirtualNodes(
@@ -1683,7 +1717,9 @@ function generateV2RayConfig(nodes) {
 }
 
 module.exports = {
+  generatePublicSubscriptionId,
   generateSubscription,
+  replaceSubscriptionLink,
   getSubscriptionInfo,
   getSubscriptionContent,
   generateClashConfig,

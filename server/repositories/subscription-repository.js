@@ -193,6 +193,29 @@ async function saveUserSubscriptionCache(db, userId, subId, nodes) {
 }
 
 /**
+ * 替换用户公开订阅链接 ID。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {string} subId - 新的 32 位公开订阅 ID
+ * @returns {Promise<void>}
+ */
+async function replaceUserSubscriptionId(db, userId, subId) {
+  await db.prepare('UPDATE users SET sub_id = ? WHERE id = ?').run(subId, userId);
+}
+
+/**
+ * 清理用户已有订阅缓存，使旧公开订阅链接立即失效。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<void>}
+ */
+async function deleteUserSubscriptionCaches(db, userId) {
+  await db.prepare('DELETE FROM user_subscriptions WHERE user_id = ?').run(userId);
+}
+
+/**
  * 查询订阅内容输出所需缓存与用户信息。
  *
  * @param {Object} db - 数据库代理对象
@@ -261,6 +284,8 @@ module.exports = {
   listUserSubscriptionSources,
   upsertSubscriptionSource,
   saveUserSubscriptionCache,
+  replaceUserSubscriptionId,
+  deleteUserSubscriptionCaches,
   findSubscriptionContentByToken,
   findSystemSettingByKey,
   listNodeShowAnnouncements,

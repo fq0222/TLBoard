@@ -81,6 +81,27 @@ async function generateSubscription(req, res) {
 }
 
 /**
+ * 更换当前用户的公开订阅链接并重新写入订阅缓存。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
+async function replaceSubscriptionLink(req, res) {
+  try {
+    const subId = await subscriptionService.replaceSubscriptionLink(
+      req.app.locals.db,
+      req.user.id,
+      logger
+    );
+    const urls = generateSubscriptionUrls(req, subId);
+    return legacySuccess(res, urls);
+  } catch (error) {
+    return handleControllerError(res, '更换订阅链接', error);
+  }
+}
+
+/**
  * 获取当前用户的订阅链接与节点展示信息。
  *
  * @param {Object} req - Express 请求对象
@@ -154,6 +175,7 @@ async function getSubscriptionContent(req, res) {
 
 module.exports = {
   generateSubscription,
+  replaceSubscriptionLink,
   getSubscriptionInfo,
   getSubscriptionContent
 };
