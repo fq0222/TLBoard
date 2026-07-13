@@ -12,6 +12,18 @@ const xuiJobScheduler = require('../xui-job-scheduler');
 
 const logger = createLogger('JOBS');
 
+function isPanelVersionAtLeast(version, minimum) {
+  const left = String(version || '').split('.').map(Number);
+  const right = String(minimum || '').split('.').map(Number);
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const a = Number.isFinite(left[index]) ? left[index] : 0;
+    const b = Number.isFinite(right[index]) ? right[index] : 0;
+    if (a > b) return true;
+    if (a < b) return false;
+  }
+  return true;
+}
+
 /**
  * 统一计算巡检补偿同步时写回 3X-UI 的总流量上限。
  *
@@ -20,6 +32,44 @@ const logger = createLogger('JOBS');
  */
 function getXuiTotalTrafficLimit(user) {
   return Number(user?.traffic_limit) || 0;
+}
+
+function normalizeComparableNumber(value) {
+  const numberValue = Number(value || 0);
+  return Number.isFinite(numberValue) ? numberValue : 0;
+}
+
+function normalizeComparableBoolean(value) {
+  return value === true || value === 1 || value === '1';
+}
+
+/**
+ * 判断 3X-UI 3.4.2+ 服务器级 client 是否已经与本地期望一致。
+ * @param {Object} existing - getServerClientByEmail 返回结果。
+ * @param {number[]} inboundIds - 当前服务器应关联的 inbound ID。
+ * @param {Object} desiredClient - 本地期望写入的全量 client。
+ * @returns {boolean} 一致时可跳过同步。
+ */
+function isServerClientAlreadySynced(existing, inboundIds, desiredClient) {
+  if (!existing?.success || !existing.client) {
+    return false;
+  }
+
+  const remoteInboundIds = new Set((existing.inboundIds || []).map(Number));
+  const allInboundsAttached = (inboundIds || []).every((id) => remoteInboundIds.has(Number(id)));
+  if (!allInboundsAttached) {
+    return false;
+  }
+
+  const client = existing.client;
+  return String(client.uuid || client.id || '') === String(desiredClient.id || '')
+    && String(client.password || '') === String(desiredClient.password || '')
+    && String(client.auth || '') === String(desiredClient.auth || '')
+    && String(client.subId || '') === String(desiredClient.subId || '')
+    && String(client.flow || '') === String(desiredClient.flow || '')
+    && normalizeComparableBoolean(client.enable) === normalizeComparableBoolean(desiredClient.enable)
+    && normalizeComparableNumber(client.expiryTime) === normalizeComparableNumber(desiredClient.expiryTime)
+    && normalizeComparableNumber(client.totalGB) === normalizeComparableNumber(desiredClient.totalGB);
 }
 
 /**
@@ -309,6 +359,84 @@ async function syncUsersToServer(db, server, users) {
 
     let syncCount = 0;
 
+    if (isPanelVersionAtLeast(server.panel_version, '3.4.2')) {
+      const crypto = require('crypto');
+      const inbounds = inboundsResult.data || [];
+      const inboundIds = inbounds.map((inbound) => inbound.id);
+
+      for (const user of users) {
+        try {
+          const existing = await xuiService.getServerClientByEmail(user.email);
+          const firstInbound = inbounds[0];
+          const firstConfig = firstInbound
+            ? await xuiSyncRepository.findUserNodeConfig(db, user.id, server.id, firstInbound.id)
+            : null;
+          const uuid = existing.success
+            ? (existing.client.uuid || existing.client.id || crypto.randomUUID())
+            : (firstConfig?.uuid || crypto.randomUUID());
+          const password = existing.success
+            ? (existing.client.password || firstConfig?.password || crypto.randomBytes(8).toString('hex'))
+            : (firstConfig?.password || crypto.randomBytes(8).toString('hex'));
+          const auth = existing.success
+            ? (existing.client.auth || firstConfig?.auth || generateXuiAuth())
+            : (firstConfig?.auth || generateXuiAuth());
+          const subId = existing.success
+            ? (existing.client.subId || firstConfig?.sub_id || crypto.randomBytes(8).toString('hex'))
+            : (firstConfig?.sub_id || crypto.randomBytes(8).toString('hex'));
+          const desiredClient = {
+            id: uuid,
+            password,
+            auth,
+            email: user.email,
+            enable: normalizeComparableBoolean(user.enabled),
+            expiryTime: user.expire_at ? Number(user.expire_at) * 1000 : 0,
+            totalGB: getXuiTotalTrafficLimit(user),
+            limitIp: 0,
+            tgId: 0,
+            subId,
+            flow: 'xtls-rprx-vision'
+          };
+
+          for (const inbound of inbounds) {
+            await xuiSyncRepository.saveUserNodeConfig(db, {
+              userId: user.id,
+              serverId: server.id,
+              inboundId: inbound.id,
+              uuid,
+              password,
+              auth,
+              subId
+            });
+          }
+
+          if (isServerClientAlreadySynced(existing, inboundIds, desiredClient)) {
+            logger.info(`用户 ${user.email} 在服务器 ${server.name} 已一致，跳过同步`);
+            continue;
+          }
+
+          const syncResult = await xuiService.upsertServerClient({
+            email: user.email,
+            inboundIds,
+            client: desiredClient
+          });
+
+          if (syncResult.success) {
+            syncCount++;
+            logger.info(`同步用户 ${user.email} 到服务器 ${server.name} 成功，关联 ${inbounds.length} 个 inbound`);
+          } else {
+            logger.warn(`同步用户 ${user.email} 到服务器 ${server.name} 失败: ${syncResult.message}`);
+          }
+        } catch (error) {
+          logger.error(`同步用户 ${user.email} 到服务器 ${server.name} 失败: ${error.message}`);
+        }
+      }
+
+      if (syncCount > 0) {
+        logger.info(`服务器 ${server.name} 同步完成，成功 ${syncCount} 个用户`);
+      }
+      return;
+    }
+
     for (const inbound of inboundsResult.data) {
       const existingClientsSnapshot = parseInboundClientsSnapshot(inbound);
       if (existingClientsSnapshot === null) {
@@ -460,5 +588,8 @@ async function runXuiSync(db) {
 }
 
 module.exports = {
-  registerXuiSyncJob
+  registerXuiSyncJob,
+  __testables: {
+    isServerClientAlreadySynced
+  }
 };

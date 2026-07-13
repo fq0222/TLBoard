@@ -106,6 +106,36 @@ async function run() {
       }]
     })
   });
+  await v325Client.addClient({
+    client: {
+      id: 'uuid-full',
+      password: 'password-full',
+      auth: 'auth-full',
+      email: 'full@example.com',
+      enable: true,
+      expiryTime: 0,
+      totalGB: 1073741824,
+      limitIp: 0,
+      tgId: 0,
+      subId: 'sub-full',
+      flow: 'xtls-rprx-vision'
+    },
+    inboundIds: [10, 11]
+  });
+  await v325Client.attachClient('full@example.com', [10, 11]);
+  await v325Client.detachClient('full@example.com', [12]);
+  await v325Client.updateClient('full@example.com', {
+    id: 'uuid-full',
+    password: 'password-full-2',
+    auth: 'auth-full-2',
+    email: 'full@example.com',
+    enable: false,
+    expiryTime: 456,
+    totalGB: 2048,
+    limitIp: 1,
+    tgId: 2,
+    subId: 'sub-full-2'
+  });
   await v325Client.updateClient('ignored-uuid', {
     id: 5,
     settings: JSON.stringify({
@@ -174,8 +204,50 @@ async function run() {
   });
 
   assert.strictEqual(requests[8].method, 'post');
-  assert.strictEqual(requests[8].url, '/panel/api/clients/update/foo%40example.com');
+  assert.strictEqual(requests[8].url, '/panel/api/clients/add');
   assert.deepStrictEqual(requests[8].data, {
+    client: {
+      id: 'uuid-full',
+      password: 'password-full',
+      auth: 'auth-full',
+      email: 'full@example.com',
+      enable: true,
+      expiryTime: 0,
+      totalGB: 1073741824,
+      limitIp: 0,
+      tgId: 0,
+      subId: 'sub-full',
+      flow: 'xtls-rprx-vision'
+    },
+    inboundIds: [10, 11]
+  });
+
+  assert.strictEqual(requests[9].method, 'post');
+  assert.strictEqual(requests[9].url, '/panel/api/clients/full%40example.com/attach');
+  assert.deepStrictEqual(requests[9].data, { inboundIds: [10, 11] });
+
+  assert.strictEqual(requests[10].method, 'post');
+  assert.strictEqual(requests[10].url, '/panel/api/clients/full%40example.com/detach');
+  assert.deepStrictEqual(requests[10].data, { inboundIds: [12] });
+
+  assert.strictEqual(requests[11].method, 'post');
+  assert.strictEqual(requests[11].url, '/panel/api/clients/update/full%40example.com');
+  assert.deepStrictEqual(requests[11].data, {
+    id: 'uuid-full',
+    password: 'password-full-2',
+    auth: 'auth-full-2',
+    email: 'full@example.com',
+    enable: false,
+    expiryTime: 456,
+    totalGB: 2048,
+    limitIp: 1,
+    tgId: 2,
+    subId: 'sub-full-2'
+  });
+
+  assert.strictEqual(requests[12].method, 'post');
+  assert.strictEqual(requests[12].url, '/panel/api/clients/update/foo%40example.com');
+  assert.deepStrictEqual(requests[12].data, {
     id: 'uuid-1',
     email: 'foo@example.com',
     enable: false,
@@ -186,16 +258,16 @@ async function run() {
     subId: 'sub-2'
   });
 
-  assert.strictEqual(requests[9].method, 'post');
-  assert.strictEqual(requests[9].url, '/panel/api/clients/del/foo%40example.com');
+  assert.strictEqual(requests[13].method, 'post');
+  assert.strictEqual(requests[13].url, '/panel/api/clients/del/foo%40example.com');
 
-  assert.strictEqual(requests[10].method, 'get');
-  assert.strictEqual(requests[10].url, '/panel/api/server/status');
+  assert.strictEqual(requests[14].method, 'get');
+  assert.strictEqual(requests[14].url, '/panel/api/server/status');
 
-  assert.strictEqual(requests[11].method, 'get');
-  assert.strictEqual(requests[11].url, '/panel/api/server/getMigration');
-  assert.strictEqual(requests[11].responseType, 'arraybuffer');
-  assert.strictEqual(requests[11].headers.Authorization, 'Bearer secret-token');
+  assert.strictEqual(requests[15].method, 'get');
+  assert.strictEqual(requests[15].url, '/panel/api/server/getMigration');
+  assert.strictEqual(requests[15].responseType, 'arraybuffer');
+  assert.strictEqual(requests[15].headers.Authorization, 'Bearer secret-token');
 
   console.log('test-xui-api-client: PASS');
 }

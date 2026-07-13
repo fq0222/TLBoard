@@ -1,8 +1,8 @@
 const crypto = require('crypto');
 
-const XUI_AUTH_LENGTH = 10;
-const XUI_AUTH_PATTERN = /^[A-Za-z0-9]{10}$/;
-const XUI_AUTH_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const XUI_AUTH_LENGTH = 16;
+const XUI_AUTH_PATTERN = /^[a-z0-9]{16}$/;
+const XUI_AUTH_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
 /**
  * 判断 auth 是否符合 3X-UI 对 hysteria/hy2 密码的格式要求。

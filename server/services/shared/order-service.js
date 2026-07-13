@@ -13,6 +13,7 @@ const XuiService = require('../../integrations/xui/xui-service');
 const { getServerInboundsSnapshot } = require('../../integrations/xui/xui-sync');
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const { isTimedPlan } = require('./plan-type');
+const { getStrategyFromRemark } = require('./subscription-strategy');
 const { createLogger } = require('../../utils/logger');
 const { runWithConcurrency } = require('../../utils/concurrency');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
@@ -61,6 +62,56 @@ function generateNodeCredentials(strategy = 'direct') {
     auth: '',
     subId
   };
+}
+
+/**
+ * 为 3X-UI 3.4.2+ 服务器级全量 client 生成完整凭证。
+ * @returns {{uuid:string,password:string,auth:string,subId:string}} 全量 client 凭证。
+ */
+function generateServerClientCredentials() {
+  return {
+    uuid: crypto.randomUUID(),
+    password: crypto.randomBytes(8).toString('hex'),
+    auth: generateXuiAuth(),
+    subId: crypto.randomBytes(8).toString('hex')
+  };
+}
+
+/**
+ * 归一化 3X-UI 订阅 ID，历史数据可能带有换行或回车。
+ * @param {*} value - 3X-UI client.subId 或本地 user_node_configs.sub_id。
+ * @returns {string} 可直接写入 3X-UI 的 16 位十六进制 subId。
+ */
+function normalizeXuiSubId(value) {
+  const subId = String(value || '').trim();
+  return /^[0-9a-f]{16}$/i.test(subId) ? subId.toLowerCase() : '';
+}
+
+/**
+ * 判断 3X-UI 是否因为 subId 被其他 client 占用而拒绝写入。
+ * @param {string} message - 3X-UI API 返回的错误信息。
+ * @returns {boolean} 是否属于可通过重新生成 subId 恢复的冲突。
+ */
+function isXuiSubIdConflict(message) {
+  return /subId already in use/i.test(String(message || ''));
+}
+
+/**
+ * 判断 3X-UI 面板版本是否达到指定版本。
+ * @param {string} version - 当前面板版本。
+ * @param {string} minimum - 最低版本。
+ * @returns {boolean} 是否满足最低版本。
+ */
+function isPanelVersionAtLeast(version, minimum) {
+  const left = String(version || '').split('.').map(Number);
+  const right = String(minimum || '').split('.').map(Number);
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const a = Number.isFinite(left[index]) ? left[index] : 0;
+    const b = Number.isFinite(right[index]) ? right[index] : 0;
+    if (a > b) return true;
+    if (a < b) return false;
+  }
+  return true;
 }
 
 /**
@@ -194,6 +245,47 @@ async function ensureNodeConfig(db, user, server, inbound, existingClient = null
   logger.info(`保存用户节点配置: user=${user.email}, server=${server.id}, inbound=${inbound.id}, uuid=${uuid}, sub_id=${subId}`);
   await clearSubscriptionSourceCache(db, user.id, server.id, inbound.id);
   return { uuid, auth, subId };
+}
+
+/**
+ * 确保同一用户在同一 3X-UI 服务器下的所有 inbound 共用一组全量 client 凭证。
+ * @param {Object} db - 数据库实例。
+ * @param {Object} user - 用户快照。
+ * @param {Object} server - 3X-UI 服务器配置。
+ * @param {Array<Object>} inbounds - 目标 inbound 列表。
+ * @param {Object|null} existingClient - 3X-UI 已存在的服务器级 client。
+ * @returns {Promise<{uuid:string,password:string,auth:string,subId:string}>} 统一凭证。
+ */
+async function ensureServerNodeConfigs(db, user, server, inbounds, existingClient = null, overrides = {}) {
+  const firstInbound = inbounds[0];
+  const firstConfig = firstInbound
+    ? await xuiSyncRepository.findUserNodeConfig(db, user.id, server.id, firstInbound.id)
+    : null;
+  const generated = generateServerClientCredentials();
+  const uuid = existingClient?.uuid || existingClient?.id || firstConfig?.uuid || generated.uuid;
+  const password = existingClient?.password || firstConfig?.password || generated.password;
+  const auth = isValidXuiAuth(existingClient?.auth)
+    ? existingClient.auth
+    : (isValidXuiAuth(firstConfig?.auth) ? firstConfig.auth : generated.auth);
+  const subId = normalizeXuiSubId(overrides.subId)
+    || normalizeXuiSubId(existingClient?.subId)
+    || normalizeXuiSubId(firstConfig?.sub_id)
+    || generated.subId;
+
+  for (const inbound of inbounds) {
+    await xuiSyncRepository.saveUserNodeConfig(db, {
+      userId: user.id,
+      serverId: server.id,
+      inboundId: inbound.id,
+      uuid,
+      password,
+      auth,
+      subId
+    });
+    await clearSubscriptionSourceCache(db, user.id, server.id, inbound.id);
+  }
+
+  return { uuid, password, auth, subId };
 }
 
 /**
@@ -372,6 +464,80 @@ async function syncUserToSingleServer(db, user, server, plan = {}) {
       lastError = inboundsResult.message || '获取 inbounds 失败';
       logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${lastError}`);
       return { successCount, failureCount, lastError };
+    }
+
+    if (isPanelVersionAtLeast(server.panel_version, '3.4.2')) {
+      const inbounds = inboundsResult.data || [];
+      if (inbounds.length === 0) {
+        return { successCount, failureCount: failureCount + 1, lastError: '服务器没有可关联 inbound' };
+      }
+
+      const existing = await xuiService.getServerClientByEmail(user.email);
+      const existingClient = existing.success ? existing.client : null;
+      const config = await ensureServerNodeConfigs(db, user, server, inbounds, existingClient);
+      const totalBytes = getXuiTotalTrafficLimit(user, plan);
+      const client = {
+        id: config.uuid,
+        password: config.password,
+        auth: config.auth,
+        email: user.email,
+        enable: normalizeUserEnabled(user.enabled),
+        expiryTime: user.expire_at ? Number(user.expire_at) * 1000 : 0,
+        totalGB: totalBytes,
+        limitIp: 0,
+        tgId: 0,
+        subId: config.subId,
+        flow: 'xtls-rprx-vision'
+      };
+
+      for (const inbound of inbounds) {
+        logger.info(
+          `构建客户端配置: protocol=${inbound.protocol}, `
+          + `strategy=${getStrategyFromRemark(inbound.remark)}, `
+          + `email=${user.email}, hasAuth=${Boolean(client.auth)}, hasId=${Boolean(client.id)}`
+        );
+      }
+
+      let syncResult = await xuiService.upsertServerClient({
+        email: user.email,
+        inboundIds: inbounds.map((inbound) => inbound.id),
+        client
+      });
+
+      if (!syncResult.success && isXuiSubIdConflict(syncResult.message)) {
+        const retryConfig = await ensureServerNodeConfigs(db, user, server, inbounds, existingClient, {
+          subId: generateServerClientCredentials().subId
+        });
+        client.subId = retryConfig.subId;
+        logger.warn(`3X-UI subId 冲突，已为用户 ${user.email} 在服务器 ${server.name} 重新生成 subId 并重试`);
+        syncResult = await xuiService.upsertServerClient({
+          email: user.email,
+          inboundIds: inbounds.map((inbound) => inbound.id),
+          client
+        });
+      }
+
+      if (!syncResult.success) {
+        return {
+          successCount,
+          failureCount: failureCount + 1,
+          lastError: syncResult.message || '同步服务器级 3X-UI 用户失败'
+        };
+      }
+
+      if (shouldResetClientTraffic(plan)) {
+        const resetResult = await xuiService.resetClientTraffic(0, user.email);
+        if (!resetResult.success) {
+          return {
+            successCount,
+            failureCount: failureCount + 1,
+            lastError: resetResult.message || '重置服务器级客户端流量失败'
+          };
+        }
+      }
+
+      logger.info(`同步用户 ${user.email} 到服务器 ${server.name} 成功，关联 ${inbounds.length} 个 inbound`);
+      return { successCount: successCount + inbounds.length, failureCount, lastError };
     }
 
     for (const inbound of inboundsResult.data) {

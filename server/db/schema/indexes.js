@@ -33,6 +33,8 @@ const indexStatements = [
   'CREATE INDEX IF NOT EXISTS idx_user_node_configs_server_id ON user_node_configs(server_id)',
   'CREATE INDEX IF NOT EXISTS idx_user_node_configs_inbound_id ON user_node_configs(inbound_id)',
   'CREATE INDEX IF NOT EXISTS idx_user_node_configs_sub_id ON user_node_configs(sub_id)',
+  'CREATE INDEX IF NOT EXISTS idx_xui_client_model_migrations_status ON xui_client_model_migrations(status)',
+  'CREATE INDEX IF NOT EXISTS idx_xui_client_model_migrations_server_id ON xui_client_model_migrations(server_id)',
   'CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_id ON user_subscriptions(user_id)',
   'CREATE INDEX IF NOT EXISTS idx_user_subscription_sources_user_id ON user_subscription_sources(user_id)',
   'CREATE INDEX IF NOT EXISTS idx_user_subscription_sources_server_id ON user_subscription_sources(server_id)',

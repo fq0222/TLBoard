@@ -109,7 +109,7 @@ async function listNodeSnapshots(db) {
 async function listUserNodeConfigs(db, userId) {
   return db.prepare(`
     SELECT
-      unc.user_id, unc.server_id, unc.inbound_id, unc.uuid, unc.auth, unc.sub_id,
+      unc.user_id, unc.server_id, unc.inbound_id, unc.uuid, unc.password, unc.auth, unc.sub_id,
       xn.remark, xn.protocol, xn.port, xn.settings, xn.stream_settings
     FROM user_node_configs unc
     JOIN xui_nodes xn ON unc.server_id = xn.server_id AND unc.inbound_id = xn.inbound_id

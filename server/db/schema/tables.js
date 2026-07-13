@@ -184,10 +184,30 @@ const tableDefinitions = [
         server_id INTEGER NOT NULL REFERENCES xui_servers(id) ON DELETE CASCADE,
         inbound_id INTEGER NOT NULL,
         uuid VARCHAR(100) NOT NULL,
+        password VARCHAR(100) NOT NULL DEFAULT '',
         auth VARCHAR(100) NOT NULL DEFAULT '',
         sub_id VARCHAR(50) NOT NULL,
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
         UNIQUE(user_id, server_id, inbound_id)
+      )
+    `
+  },
+  {
+    logMessage: '3X-UI客户端模型迁移审计表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS xui_client_model_migrations (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        server_id INTEGER NOT NULL REFERENCES xui_servers(id) ON DELETE CASCADE,
+        status VARCHAR(30) NOT NULL,
+        old_emails TEXT NOT NULL DEFAULT '[]',
+        new_email VARCHAR(255) NOT NULL DEFAULT '',
+        inbound_ids TEXT NOT NULL DEFAULT '[]',
+        credential_source VARCHAR(50) NOT NULL DEFAULT '',
+        message TEXT NOT NULL DEFAULT '',
+        migrated_at BIGINT,
+        updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        UNIQUE(user_id, server_id)
       )
     `
   },

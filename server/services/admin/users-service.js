@@ -345,6 +345,30 @@ async function syncUserToXuiServers(db, user) {
       const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
         apiVersion: server.panel_version || '3.0.2'
       });
+      if (isPanelVersionAtLeast(server.panel_version, '3.4.2')) {
+        const existing = await xuiService.getServerClientByEmail(user.email);
+        if (existing.success) {
+          await xuiService.upsertServerClient({
+            email: user.email,
+            inboundIds,
+            client: {
+              id: existing.client.uuid,
+              password: existing.client.password || '',
+              auth: existing.client.auth || '',
+              email: user.email,
+              enable: !!user.enabled,
+              expiryTime,
+              totalGB: trafficLimit,
+              limitIp: 0,
+              tgId: 0,
+              subId: existing.client.subId || '',
+              flow: 'xtls-rprx-vision'
+            }
+          });
+        }
+        continue;
+      }
+
       for (const inboundId of inboundIds) {
         const node = await userRepository.findXuiNodeByServerAndInbound(db, server.id, inboundId);
         const strategy = getNodeUpdateStrategy(node);
@@ -531,6 +555,18 @@ function getNodeUpdateStrategy(node = {}) {
     return 'direct';
   }
   return 'cf';
+}
+
+function isPanelVersionAtLeast(version, minimum) {
+  const left = String(version || '').split('.').map(Number);
+  const right = String(minimum || '').split('.').map(Number);
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const a = Number.isFinite(left[index]) ? left[index] : 0;
+    const b = Number.isFinite(right[index]) ? right[index] : 0;
+    if (a > b) return true;
+    if (a < b) return false;
+  }
+  return true;
 }
 
 module.exports = {

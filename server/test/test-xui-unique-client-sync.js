@@ -41,13 +41,21 @@ function createFakeDb(initialNodeConfigs = []) {
               server_id: params[1],
               inbound_id: params[2],
               uuid: params[3],
-              auth: params[4],
-              sub_id: params[5]
+              password: sql.includes('password') ? params[4] : '',
+              auth: sql.includes('password') ? params[5] : params[4],
+              sub_id: sql.includes('password') ? params[6] : params[5]
             });
             return { changes: 1 };
           }
           if (sql.includes('UPDATE user_node_configs')) {
-            const [uuid, auth, subId, userId, serverId, inboundId] = params;
+            const hasPassword = sql.includes('password');
+            const uuid = params[0];
+            const password = hasPassword ? params[1] : '';
+            const auth = hasPassword ? params[2] : params[1];
+            const subId = hasPassword ? params[3] : params[2];
+            const userId = hasPassword ? params[4] : params[3];
+            const serverId = hasPassword ? params[5] : params[4];
+            const inboundId = hasPassword ? params[6] : params[5];
             const target = nodeConfigs.find(item =>
               item.user_id === userId &&
               item.server_id === serverId &&
@@ -55,6 +63,7 @@ function createFakeDb(initialNodeConfigs = []) {
             );
             if (!target) return { changes: 0 };
             target.uuid = uuid;
+            target.password = password;
             target.auth = auth;
             target.sub_id = subId;
             return { changes: 1 };
@@ -444,13 +453,13 @@ async function testUpdateClientByContextShouldKeepUuidWhenAuthIsEmpty() {
 
 async function testHy2ClientShouldStillCheckSubId() {
   const db = createFakeDb([
-    { user_id: 20, server_id: 1, inbound_id: 5, uuid: '', auth: 'Abc123XyZ9', sub_id: 'db-sub' }
+    { user_id: 20, server_id: 1, inbound_id: 5, uuid: '', auth: 'ps6ne77kxinlotaz', sub_id: 'db-sub' }
   ]);
   const service = createFakeXuiService([
     {
       inboundId: 5,
       uuid: '',
-      auth: 'Abc123XyZ9',
+      auth: 'ps6ne77kxinlotaz',
       email: 'payment@163.com-hy2',
       subId: '',
       enable: true,
@@ -466,7 +475,7 @@ async function testHy2ClientShouldStillCheckSubId() {
     email: 'payment@163.com-hy2',
     desiredClient: {
       id: '',
-      auth: 'Abc123XyZ9',
+      auth: 'ps6ne77kxinlotaz',
       email: 'payment@163.com-hy2',
       enable: true,
       expiryTime: 99,
@@ -482,9 +491,9 @@ async function testHy2ClientShouldStillCheckSubId() {
   assert.ok(service._calls.some(item => item.type === 'client.updateClient'));
 }
 
-async function testGeneratedXuiAuthShouldBeAlphanumericAndTenChars() {
+async function testGeneratedXuiAuthShouldBeLowercaseAlphanumericAndSixteenChars() {
   const auth = generateXuiAuth();
-  assert.strictEqual(auth.length, 10);
+  assert.strictEqual(auth.length, 16);
   assert.strictEqual(isValidXuiAuth(auth), true);
   assert.strictEqual(isValidXuiAuth('PnF71NOt_KdMuRCX'), false);
 }
@@ -531,7 +540,7 @@ async function run() {
   await testShouldNotUpdateWhenServerTotalGBStoresBytes();
   await testUpdateClientByContextShouldKeepUuidWhenAuthIsEmpty();
   await testHy2ClientShouldStillCheckSubId();
-  await testGeneratedXuiAuthShouldBeAlphanumericAndTenChars();
+  await testGeneratedXuiAuthShouldBeLowercaseAlphanumericAndSixteenChars();
   await testAddClientByContextShouldKeepNumericDisabledState();
   await testOrderAndJobPathsShouldUseUpsertUniqueClient();
   console.log('xui unique client sync tests passed');

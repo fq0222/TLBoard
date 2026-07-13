@@ -172,12 +172,51 @@ class XuiApiClientV325 extends XuiApiClientV302 {
   }
 
   addClient(clientConfig) {
+    if (clientConfig && clientConfig.client && Array.isArray(clientConfig.inboundIds)) {
+      const inboundIds = clientConfig.inboundIds
+        .map(Number)
+        .filter((id) => Number.isFinite(id) && id > 0);
+      const payload = {
+        client: this.buildClientApiPayload(clientConfig.client),
+        inboundIds
+      };
+      return this.request('post', `${this.clientBasePath}/add`, payload);
+    }
+
     const { inboundId, client } = this.parseLegacyClientConfig(clientConfig);
     const payload = {
       client: this.buildClientApiPayload(client),
       inboundIds: [inboundId]
     };
     return this.request('post', `${this.clientBasePath}/add`, payload);
+  }
+
+  /**
+   * 将已存在的全量客户端关联到一组 inbound。
+   * @param {string} email - 3X-UI 客户端邮箱标识。
+   * @param {number[]} inboundIds - 需要关联的 inbound ID 列表。
+   * @returns {Promise<Object>} 3X-UI attach 响应。
+   */
+  attachClient(email, inboundIds) {
+    return this.request('post', `${this.clientBasePath}/${encodeURIComponent(email)}/attach`, {
+      inboundIds: (inboundIds || [])
+        .map(Number)
+        .filter((id) => Number.isFinite(id) && id > 0)
+    });
+  }
+
+  /**
+   * 将已存在的全量客户端从一组 inbound 解除关联。
+   * @param {string} email - 3X-UI 客户端邮箱标识。
+   * @param {number[]} inboundIds - 需要解除关联的 inbound ID 列表。
+   * @returns {Promise<Object>} 3X-UI detach 响应。
+   */
+  detachClient(email, inboundIds) {
+    return this.request('post', `${this.clientBasePath}/${encodeURIComponent(email)}/detach`, {
+      inboundIds: (inboundIds || [])
+        .map(Number)
+        .filter((id) => Number.isFinite(id) && id > 0)
+    });
   }
 
   async deleteClient(_inboundId, clientId) {
@@ -190,6 +229,18 @@ class XuiApiClientV325 extends XuiApiClientV302 {
   }
 
   updateClient(_clientId, clientConfig) {
+    if (clientConfig && typeof clientConfig === 'object' && !clientConfig.settings) {
+      const email = clientConfig.email || _clientId;
+      if (!email) {
+        throw new Error('client email is required for 3.2.5+ updateClient');
+      }
+      const payload = this.buildClientApiPayload({
+        ...clientConfig,
+        email
+      });
+      return this.request('post', `${this.clientBasePath}/update/${encodeURIComponent(email)}`, payload);
+    }
+
     const { client } = this.parseLegacyClientConfig(clientConfig);
     if (!client.email) {
       throw new Error('client email is required for 3.2.5+ updateClient');

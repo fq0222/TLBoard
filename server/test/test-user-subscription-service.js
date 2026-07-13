@@ -481,6 +481,335 @@ async function testUserCfIpQueriesShouldMatchCurrentSchema() {
   await userRepository.findEnabledCfIpsByIds(fakeDb, [1, 2]);
 }
 
+/**
+ * 验证同一个 3X-UI 服务器订阅返回多条同协议链接时，会按 inbound 特征选择 direct Reality 模板。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshShouldPickInboundMatchedRealityLink() {
+  const refreshSubscriptionSources = subscriptionService.__testables.refreshSubscriptionSources;
+  const savedSources = [];
+  const user = { id: 1, email: 'user@example.com' };
+  const server = { id: 1, name: '测试', sub_url: 'https://xui.example/sub/' };
+  const config = {
+    user_id: 1,
+    server_id: 1,
+    inbound_id: 11,
+    sub_id: 'shared-sub-id',
+    uuid: 'a8c40026-06cd-4e53-98a2-af99f4c76971',
+    remark: 'direct',
+    protocol: 'vless',
+    port: 443,
+    settings: JSON.stringify({
+      clients: [{
+        email: 'user@example.com',
+        id: 'a8c40026-06cd-4e53-98a2-af99f4c76971',
+        subId: 'shared-sub-id'
+      }]
+    }),
+    stream_settings: JSON.stringify({
+      network: 'tcp',
+      security: 'reality'
+    })
+  };
+  const wsLink = 'vless://a8c40026-06cd-4e53-98a2-af99f4c76971@us00.bidding.dpdns.org:26015?encryption=none&security=none&type=ws&path=%2Fbypeaeifpd4akh9o#ws-node';
+  const realityLink = 'vless://a8c40026-06cd-4e53-98a2-af99f4c76971@jp01.bidding.dpdns.org:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.amd.com&fp=chrome&pbk=c6AJu3vTFA3nacnnaGuS-3CxFNUcpAymqQTL7GFXSxg&sid=c5a3decc&type=tcp&headerType=none#direct';
+
+  const originalUpsert = subscriptionRepository.upsertSubscriptionSource;
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => savedSources.push(source);
+  try {
+    await refreshSubscriptionSources(
+      {},
+      user,
+      [config],
+      new Map([[1, server]]),
+      { info() {}, warn() {}, error() {} },
+      {
+        fetchOriginalSubscription: async () => Buffer.from(`${wsLink}\n${realityLink}`).toString('base64')
+      }
+    );
+  } finally {
+    subscriptionRepository.upsertSubscriptionSource = originalUpsert;
+  }
+
+  assert.strictEqual(savedSources.length, 1);
+  assert.strictEqual(savedSources[0].original_link, realityLink);
+
+  const clash = subscriptionService.generateClashConfig([{
+    node_name: '测试-direct',
+    link: savedSources[0].original_link
+  }]);
+  assert.ok(clash.includes('flow: xtls-rprx-vision'));
+  assert.ok(clash.includes('tls: true'));
+  assert.ok(clash.includes('servername: www.amd.com'));
+  assert.ok(clash.includes('client-fingerprint: chrome'));
+  assert.ok(clash.includes('reality-opts:'));
+  assert.ok(clash.includes('public-key: c6AJu3vTFA3nacnnaGuS-3CxFNUcpAymqQTL7GFXSxg'));
+  assert.ok(clash.includes('short-id: "c5a3decc"'));
+  assert.ok(clash.includes('network: tcp'));
+  assert.ok(!clash.includes('ws-opts:'));
+}
+
+/**
+ * 验证同一服务器同一 subId 的多个 inbound 只拉取一次原始订阅，避免并发重复请求 3X-UI。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshShouldFetchSharedSubIdOnce() {
+  const refreshSubscriptionSources = subscriptionService.__testables.refreshSubscriptionSources;
+  const savedSources = [];
+  const user = { id: 1, email: 'user@example.com' };
+  const server = { id: 1, name: '测试', sub_url: 'https://xui.example/sub/' };
+  const baseConfig = {
+    user_id: 1,
+    server_id: 1,
+    sub_id: 'shared-sub-id',
+    uuid: 'a8c40026-06cd-4e53-98a2-af99f4c76971',
+    protocol: 'vless',
+    settings: JSON.stringify({
+      clients: [{
+        email: 'user@example.com',
+        id: 'a8c40026-06cd-4e53-98a2-af99f4c76971',
+        subId: 'shared-sub-id'
+      }]
+    })
+  };
+  const configs = [
+    {
+      ...baseConfig,
+      inbound_id: 1,
+      remark: 'direct',
+      port: 443,
+      stream_settings: JSON.stringify({ network: 'tcp', security: 'reality' })
+    },
+    {
+      ...baseConfig,
+      inbound_id: 2,
+      remark: 'ws',
+      port: 26015,
+      stream_settings: JSON.stringify({ network: 'ws', security: 'none' })
+    },
+    {
+      ...baseConfig,
+      inbound_id: 3,
+      remark: 'direct-backup',
+      port: 8443,
+      stream_settings: JSON.stringify({ network: 'tcp', security: 'reality' })
+    }
+  ];
+  const links = [
+    'vless://a8c40026-06cd-4e53-98a2-af99f4c76971@jp01.bidding.dpdns.org:443?encryption=none&flow=xtls-rprx-vision&security=reality&type=tcp#direct',
+    'vless://a8c40026-06cd-4e53-98a2-af99f4c76971@us00.bidding.dpdns.org:26015?encryption=none&security=none&type=ws&path=%2Fws#ws',
+    'vless://a8c40026-06cd-4e53-98a2-af99f4c76971@jp02.bidding.dpdns.org:8443?encryption=none&flow=xtls-rprx-vision&security=reality&type=tcp#direct-backup'
+  ];
+  let fetchCount = 0;
+
+  const originalUpsert = subscriptionRepository.upsertSubscriptionSource;
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => savedSources.push(source);
+  try {
+    await refreshSubscriptionSources(
+      {},
+      user,
+      configs,
+      new Map([[1, server]]),
+      { info() {}, warn() {}, error() {} },
+      {
+        fetchOriginalSubscription: async (subUrl, subId, options) => {
+          fetchCount += 1;
+          assert.strictEqual(options.timeout, 15000);
+          return Buffer.from(links.join('\n')).toString('base64');
+        }
+      }
+    );
+  } finally {
+    subscriptionRepository.upsertSubscriptionSource = originalUpsert;
+  }
+
+  assert.strictEqual(fetchCount, 1);
+  assert.strictEqual(savedSources.length, 3);
+  assert.deepStrictEqual(savedSources.map((source) => source.original_link), links);
+}
+
+/**
+ * 验证历史误选的原始模板缓存会因 inbound 特征不匹配而自动刷新。
+ *
+ * @returns {Promise<void>}
+ */
+async function testGenerateSubscriptionShouldRefreshMismatchedSourceCache() {
+  const originals = {
+    findLatestUserSubscription: subscriptionRepository.findLatestUserSubscription,
+    findSubscriptionUserById: subscriptionRepository.findSubscriptionUserById,
+    listEnabledUserCfIps: subscriptionRepository.listEnabledUserCfIps,
+    listOnlineServers: subscriptionRepository.listOnlineServers,
+    listNodeSnapshots: subscriptionRepository.listNodeSnapshots,
+    listUserNodeConfigs: subscriptionRepository.listUserNodeConfigs,
+    listUserSubscriptionSources: subscriptionRepository.listUserSubscriptionSources,
+    upsertSubscriptionSource: subscriptionRepository.upsertSubscriptionSource,
+    saveUserSubscriptionCache: subscriptionRepository.saveUserSubscriptionCache
+  };
+  const wsLink = 'vless://a8c40026-06cd-4e53-98a2-af99f4c76971@us00.bidding.dpdns.org:26015?encryption=none&security=none&type=ws&path=%2Fbypeaeifpd4akh9o#ws-node';
+  const realityLink = 'vless://a8c40026-06cd-4e53-98a2-af99f4c76971@jp01.bidding.dpdns.org:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.amd.com&fp=chrome&pbk=c6AJu3vTFA3nacnnaGuS-3CxFNUcpAymqQTL7GFXSxg&sid=c5a3decc&type=tcp&headerType=none#direct';
+  const server = { id: 1, name: '测试', sub_url: 'https://xui.example/sub/', host: 'jp01.bidding.dpdns.org', client_port: 443 };
+  const config = {
+    user_id: 1,
+    server_id: 1,
+    inbound_id: 11,
+    sub_id: 'shared-sub-id',
+    uuid: 'a8c40026-06cd-4e53-98a2-af99f4c76971',
+    remark: 'direct',
+    protocol: 'vless',
+    port: 443,
+    settings: JSON.stringify({
+      clients: [{
+        email: 'user@example.com',
+        id: 'a8c40026-06cd-4e53-98a2-af99f4c76971',
+        subId: 'shared-sub-id'
+      }]
+    }),
+    stream_settings: JSON.stringify({ network: 'tcp', security: 'reality' })
+  };
+  let fetchCount = 0;
+  let savedNodes = [];
+  let currentSources;
+
+  subscriptionRepository.findLatestUserSubscription = async () => ({ id: 1 });
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 1,
+    email: 'user@example.com',
+    sub_id: 'public-sub-id',
+    enabled: 1,
+    traffic_limit: 1024
+  });
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServers = async () => [server];
+  subscriptionRepository.listNodeSnapshots = async () => [config];
+  subscriptionRepository.listUserNodeConfigs = async () => [config];
+  currentSources = [{
+    user_id: 1,
+    server_id: 1,
+    inbound_id: 11,
+    sub_id: 'shared-sub-id',
+    original_link: wsLink,
+    node_fingerprint: require('../services/shared/subscription-cache-service').computeNodeFingerprint(config),
+    server_fingerprint: require('../services/shared/subscription-cache-service').computeServerFingerprint(server),
+    fetched_at: Math.floor(Date.now() / 1000)
+  }];
+  subscriptionRepository.listUserSubscriptionSources = async () => currentSources;
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => {
+    currentSources = [source];
+  };
+  subscriptionRepository.saveUserSubscriptionCache = async (db, userId, subId, nodes) => {
+    savedNodes = nodes;
+  };
+
+  try {
+    await subscriptionService.generateSubscription({}, 1, { info() {}, warn() {}, error() {} }, {
+      dependencies: {
+        fetchOriginalSubscription: async () => {
+          fetchCount += 1;
+          return Buffer.from(`${wsLink}\n${realityLink}`).toString('base64');
+        }
+      }
+    });
+  } finally {
+    Object.assign(subscriptionRepository, originals);
+  }
+
+  assert.strictEqual(fetchCount, 1);
+  assert.strictEqual(savedNodes.length, 1);
+  assert.ok(savedNodes[0].link.includes('flow=xtls-rprx-vision'));
+  assert.ok(savedNodes[0].link.includes('security=reality'));
+  assert.ok(!savedNodes[0].link.includes('type=ws'));
+}
+
+/**
+ * 验证 hy2 原始模板刷新成功后不会被 vless 的 streamSettings 匹配规则误判为不可复用。
+ *
+ * @returns {Promise<void>}
+ */
+async function testGenerateSubscriptionShouldKeepRefreshedHy2SourceCache() {
+  const originals = {
+    findLatestUserSubscription: subscriptionRepository.findLatestUserSubscription,
+    findSubscriptionUserById: subscriptionRepository.findSubscriptionUserById,
+    listEnabledUserCfIps: subscriptionRepository.listEnabledUserCfIps,
+    listOnlineServers: subscriptionRepository.listOnlineServers,
+    listNodeSnapshots: subscriptionRepository.listNodeSnapshots,
+    listUserNodeConfigs: subscriptionRepository.listUserNodeConfigs,
+    listUserSubscriptionSources: subscriptionRepository.listUserSubscriptionSources,
+    upsertSubscriptionSource: subscriptionRepository.upsertSubscriptionSource,
+    saveUserSubscriptionCache: subscriptionRepository.saveUserSubscriptionCache
+  };
+  const { computeNodeFingerprint, computeServerFingerprint } = require('../services/shared/subscription-cache-service');
+  const hy2Link = 'hysteria2://ps6ne77kxinlotaz@us00.bidding.dpdns.org:32458?security=tls&fp=chrome&alpn=h3&sni=us00.bidding.dpdns.org#hy2';
+  const server = { id: 2, name: '测试', sub_url: 'https://xui.example/sub/', host: 'us00.bidding.dpdns.org', client_port: 443 };
+  const config = {
+    user_id: 1,
+    server_id: 2,
+    inbound_id: 3,
+    sub_id: 'shared-sub-id',
+    uuid: '',
+    auth: 'ps6ne77kxinlotaz',
+    remark: 'hy2',
+    protocol: 'hysteria2',
+    port: 32458,
+    settings: JSON.stringify({
+      clients: [{
+        email: 'user@example.com',
+        password: 'ps6ne77kxinlotaz',
+        subId: 'shared-sub-id'
+      }]
+    }),
+    stream_settings: JSON.stringify({ network: 'tcp', security: 'reality' })
+  };
+  let fetchCount = 0;
+  let savedNodes = [];
+  let currentSources = [];
+
+  subscriptionRepository.findLatestUserSubscription = async () => ({ id: 1 });
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 1,
+    email: 'user@example.com',
+    sub_id: 'public-sub-id',
+    enabled: 1,
+    traffic_limit: 1024
+  });
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServers = async () => [server];
+  subscriptionRepository.listNodeSnapshots = async () => [config];
+  subscriptionRepository.listUserNodeConfigs = async () => [config];
+  subscriptionRepository.listUserSubscriptionSources = async () => currentSources;
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => {
+    currentSources = [{
+      ...source,
+      node_fingerprint: computeNodeFingerprint(config),
+      server_fingerprint: computeServerFingerprint(server),
+      fetched_at: Math.floor(Date.now() / 1000)
+    }];
+  };
+  subscriptionRepository.saveUserSubscriptionCache = async (db, userId, subId, nodes) => {
+    savedNodes = nodes;
+  };
+
+  try {
+    await subscriptionService.generateSubscription({}, 1, { info() {}, warn() {}, error() {} }, {
+      dependencies: {
+        fetchOriginalSubscription: async () => {
+          fetchCount += 1;
+          return Buffer.from(hy2Link).toString('base64');
+        }
+      }
+    });
+  } finally {
+    Object.assign(subscriptionRepository, originals);
+  }
+
+  assert.strictEqual(fetchCount, 1);
+  assert.strictEqual(savedNodes.length, 1);
+  assert.ok(savedNodes[0].link.startsWith('hysteria2://ps6ne77kxinlotaz@us00.bidding.dpdns.org:32458?'));
+  assert.ok(savedNodes[0].link.includes('security=tls'));
+  assert.ok(savedNodes[0].link.includes('alpn=h3'));
+}
+
 async function run() {
   await testDefaultSubscriptionContentShouldReturnBase64AndUserinfo();
   await testClashSubscriptionShouldRenderYaml();
@@ -494,6 +823,10 @@ async function run() {
   await testPublicSubscriptionIdShouldUse32HexChars();
   await testReplaceSubscriptionLinkShouldInvalidateOldCacheAndRegenerate();
   await testUserCfIpQueriesShouldMatchCurrentSchema();
+  await testSourceRefreshShouldPickInboundMatchedRealityLink();
+  await testSourceRefreshShouldFetchSharedSubIdOnce();
+  await testGenerateSubscriptionShouldRefreshMismatchedSourceCache();
+  await testGenerateSubscriptionShouldKeepRefreshedHy2SourceCache();
   console.log('user subscription service tests passed');
 }
 

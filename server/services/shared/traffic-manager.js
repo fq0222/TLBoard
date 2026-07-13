@@ -17,6 +17,18 @@ const logger = createLogger('TRAFFIC-MANAGER');
 const DEFAULT_TRAFFIC_USAGE_MULTIPLIER = 1.0;
 const INBOUND_FETCH_CONCURRENCY = 10;
 
+function isPanelVersionAtLeast(version, minimum) {
+  const left = String(version || '').split('.').map(Number);
+  const right = String(minimum || '').split('.').map(Number);
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const a = Number.isFinite(left[index]) ? left[index] : 0;
+    const b = Number.isFinite(right[index]) ? right[index] : 0;
+    if (a > b) return true;
+    if (a < b) return false;
+  }
+  return true;
+}
+
 /**
  * 安全发送首次禁用续费提醒，避免邮件服务异常中断流量定时任务。
  *
@@ -120,7 +132,7 @@ function getUserClientSnapshotEntries(email, clientStatusSnapshot = {}) {
 
   for (const serverSnapshot of Object.values(clientStatusSnapshot || {})) {
     for (const [nodeEmail, snapshotClient] of Object.entries(serverSnapshot || {})) {
-      if (nodeEmail.startsWith(nodeEmailPrefix)) {
+      if (nodeEmail === email || nodeEmail.startsWith(nodeEmailPrefix)) {
         entries.push(snapshotClient);
       }
     }
@@ -354,7 +366,7 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
           let userTotalTraffic = 0;
           let found = false;
           for (const [email, data] of Object.entries(serverData)) {
-            if (email.startsWith(user.email + '-')) {
+            if (email === user.email || email.startsWith(user.email + '-')) {
               userTotalTraffic += data.total || 0;
               found = true;
             }
@@ -827,8 +839,55 @@ async function syncDisableStatusToXui(db, userId, disable, options = {}) {
           apiVersion: server.panel_version || '3.0.2'
         });
 
+        if (isPanelVersionAtLeast(server.panel_version, '3.4.2')) {
+          const inboundsResult = await xuiService.getInbounds();
+          if (!inboundsResult.success) {
+            failureCount++;
+            logger.warn(`获取服务器 ${server.name} 的 inbounds 失败`);
+            continue;
+          }
+
+          const existing = await xuiService.getServerClientByEmail(user.email);
+          if (!existing.success) {
+            failureCount++;
+            logger.warn(`获取服务器 ${server.name} 的 canonical client 失败: ${existing.message}`);
+            continue;
+          }
+
+          if (existing.client.enable === desiredEnabled) {
+            skippedCount += (inboundsResult.data || []).length;
+            continue;
+          }
+
+          const updateResult = await xuiService.upsertServerClient({
+            email: user.email,
+            inboundIds: (inboundsResult.data || []).map((inbound) => inbound.id),
+            client: {
+              id: existing.client.uuid,
+              password: existing.client.password || '',
+              auth: existing.client.auth || '',
+              email: user.email,
+              enable: desiredEnabled,
+              expiryTime: existing.client.expiryTime || 0,
+              totalGB: existing.client.totalGB || 0,
+              limitIp: 0,
+              tgId: 0,
+              subId: existing.client.subId || '',
+              flow: 'xtls-rprx-vision'
+            }
+          });
+
+          if (updateResult.success) {
+            successCount += (inboundsResult.data || []).length;
+          } else {
+            failureCount++;
+            logger.warn(`同步服务器 ${server.name} 的 canonical client 失败: ${updateResult.message}`);
+          }
+          continue;
+        }
+
         const snapshotEntries = Object.entries(clientStatusSnapshot[server.id] || {})
-          .filter(([email]) => email.startsWith(`${user.email}-`));
+          .filter(([email]) => email === user.email || email.startsWith(`${user.email}-`));
         if (snapshotEntries.length > 0) {
           for (const [nodeEmail, snapshotClient] of snapshotEntries) {
             if (snapshotClient.enabledKnown && snapshotClient.enabled === desiredEnabled) {

@@ -1,7 +1,12 @@
 const { syncSelectedServers, syncServerNodes } = require('../../integrations/xui/xui-sync');
 const { syncUserToXuiServers } = require('../shared/order-service');
 const { getStrategyFromRemark, processNodeLink, parseNodeLink } = require('../shared/subscription-strategy');
-const { fetchOriginalSubscription, parseSubscriptionContent, pickSingleNodeLink } = require('../shared/subscription-service');
+const {
+  fetchOriginalSubscription,
+  parseSubscriptionContent,
+  pickSingleNodeLink,
+  getProtocolAliases
+} = require('../shared/subscription-service');
 const {
   computeNodeFingerprint,
   computeServerFingerprint,
@@ -15,7 +20,7 @@ const { generatePublicSubscriptionId } = require('../../utils/subscription-id');
 
 const SOURCE_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60;
 const SOURCE_FETCH_CONCURRENCY = 10;
-const SOURCE_FETCH_TIMEOUT_MS = 5000;
+const SOURCE_FETCH_TIMEOUT_MS = 15000;
 const CLASH_CONFIG_NAME_KEY = 'clash_config_name';
 const CLASH_PROFILE_UPDATE_INTERVAL_KEY = 'clash_profile_update_interval';
 const DEFAULT_CLASH_CONFIG_NAME = '天澜大陆';
@@ -185,9 +190,12 @@ function inspectUserInNodeSnapshot(user, config) {
     return { trusted: false, reason: 'invalid_clients' };
   }
 
-  const expectedEmail = `${user.email}-${config.remark || config.inbound_id}`;
+  const expectedEmails = [
+    user.email,
+    `${user.email}-${config.remark || config.inbound_id}`
+  ];
   const matchingClients = settings.clients.filter(
-    (client) => client && client.email === expectedEmail
+    (client) => client && expectedEmails.includes(client.email)
   );
   if (matchingClients.length === 0) {
     return { trusted: false, reason: 'missing_user' };
@@ -229,6 +237,144 @@ function inspectUserInNodeSnapshot(user, config) {
   }
 
   return { trusted: true, reason: 'ok', client };
+}
+
+/**
+ * 安全解析入站 streamSettings，解析失败时返回空对象。
+ * @param {string|Object} streamSettings - xui_nodes.stream_settings 快照。
+ * @returns {Object} streamSettings 对象。
+ */
+function parseStreamSettings(streamSettings) {
+  if (!streamSettings) {
+    return {};
+  }
+  if (typeof streamSettings === 'object') {
+    return streamSettings;
+  }
+  try {
+    return JSON.parse(streamSettings);
+  } catch (error) {
+    return {};
+  }
+}
+
+/**
+ * 从同一个服务器订阅返回的多条链接中选择当前 inbound 对应的原始模板。
+ * @param {string[]} links - 3X-UI 原始订阅解析出的链接列表。
+ * @param {Object} config - user_node_configs 与 xui_nodes 的组合记录。
+ * @returns {string|null} 匹配当前 inbound 的原始链接。
+ */
+/**
+ * 判断协议是否为 Hysteria 系列，用于跳过不适用的 streamSettings 匹配规则。
+ * @param {string} protocol - 节点协议名。
+ * @returns {boolean} 是否为 hysteria/hysteria2/hy2 协议。
+ */
+function isHysteriaProtocol(protocol) {
+  const normalized = String(protocol || '').toLowerCase();
+  return normalized === 'hysteria2' || normalized === 'hysteria' || normalized === 'hy2';
+}
+
+/**
+ * 从同一个服务器订阅返回的多条链接中选择当前 inbound 对应的原始模板。
+ * @param {string[]} links - 3X-UI 原始订阅解析出的链接列表。
+ * @param {Object} config - user_node_configs 与 xui_nodes 的组合记录。
+ * @returns {string|null} 匹配当前 inbound 的原始链接。
+ */
+function pickInboundMatchedNodeLink(links, config) {
+  const aliases = new Set(getProtocolAliases(config?.protocol));
+  const streamSettings = parseStreamSettings(config?.stream_settings);
+  const expectedPort = Number(config?.port);
+  const expectedNetwork = String(streamSettings.network || '').toLowerCase();
+  const expectedSecurity = String(streamSettings.security || '').toLowerCase();
+  const expectedRemark = String(config?.remark || '').toLowerCase();
+  const expectedUuid = String(config?.uuid || '').toLowerCase();
+
+  const candidates = (links || [])
+    .map((link) => ({ link, parsed: parseNodeLink(link) }))
+    .filter((item) => item.parsed && aliases.has(String(item.parsed.protocol || '').toLowerCase()));
+
+  if (candidates.length === 0) {
+    return pickSingleNodeLink(links, config?.protocol);
+  }
+
+  let best = null;
+  for (const candidate of candidates) {
+    const { parsed } = candidate;
+    const params = parsed.params || {};
+    let score = 0;
+
+    if (Number.isFinite(expectedPort) && expectedPort > 0 && Number(parsed.port) === expectedPort) {
+      score += 100;
+    }
+    if (expectedNetwork && String(params.type || 'tcp').toLowerCase() === expectedNetwork) {
+      score += 20;
+    }
+    if (expectedSecurity && String(params.security || 'none').toLowerCase() === expectedSecurity) {
+      score += 20;
+    }
+    if (expectedRemark && String(parsed.remark || '').toLowerCase().includes(expectedRemark)) {
+      score += 5;
+    }
+    if (expectedUuid && String(parsed.uuid || '').toLowerCase() === expectedUuid) {
+      score += 2;
+    }
+
+    if (!best || score > best.score) {
+      best = { ...candidate, score };
+    }
+  }
+
+  return best && best.score > 0
+    ? best.link
+    : pickSingleNodeLink(links, config?.protocol);
+}
+
+/**
+ * 判断缓存中的原始链接是否仍然对应当前 inbound 快照。
+ * @param {string} originalLink - user_subscription_sources.original_link。
+ * @param {Object} config - user_node_configs 与 xui_nodes 的组合记录。
+ * @returns {boolean} 原始链接是否匹配当前 inbound。
+ */
+function isOriginalLinkMatchedToInbound(originalLink, config) {
+  const parsed = parseNodeLink(originalLink);
+  if (!parsed) {
+    return false;
+  }
+
+  const aliases = new Set(getProtocolAliases(config?.protocol));
+  if (!aliases.has(String(parsed.protocol || '').toLowerCase())) {
+    return false;
+  }
+
+  const streamSettings = parseStreamSettings(config?.stream_settings);
+  const expectedPort = Number(config?.port);
+  const expectedNetwork = String(streamSettings.network || '').toLowerCase();
+  const expectedSecurity = String(streamSettings.security || '').toLowerCase();
+  const params = parsed.params || {};
+
+  if (Number.isFinite(expectedPort) && expectedPort > 0 && Number(parsed.port) !== expectedPort) {
+    return false;
+  }
+  if (isHysteriaProtocol(config?.protocol) || isHysteriaProtocol(parsed.protocol)) {
+    return true;
+  }
+  if (expectedNetwork && String(params.type || 'tcp').toLowerCase() !== expectedNetwork) {
+    return false;
+  }
+  if (expectedSecurity && String(params.security || 'none').toLowerCase() !== expectedSecurity) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * 判断缓存失效是否需要触发服务器级快照修复。
+ * @param {string} reason - 缓存失效原因。
+ * @returns {boolean} 是否需要重新同步服务器快照。
+ */
+function shouldRepairServerForCacheReason(reason) {
+  return reason === 'node_fingerprint_mismatch' || reason === 'server_fingerprint_mismatch';
 }
 
 /**
@@ -584,13 +730,17 @@ function collectSourceCacheStatus(nodeConfigs, sourceMap, serversById) {
       silent: true
     });
 
-    if (result.usable) {
+    const sourceMatched = result.usable
+      ? isOriginalLinkMatchedToInbound(source.original_link, config)
+      : false;
+    if (result.usable && sourceMatched) {
       continue;
     }
 
+    const reason = result.usable ? 'original_link_mismatch' : result.reason;
     invalidPairKeys.add(key);
-    invalidPairs.push({ key, config, reason: result.reason });
-    if (result.reason === 'node_fingerprint_mismatch' || result.reason === 'server_fingerprint_mismatch') {
+    invalidPairs.push({ key, config, reason });
+    if (shouldRepairServerForCacheReason(reason)) {
       invalidServerIds.add(config.server_id);
     }
   }
@@ -639,6 +789,30 @@ async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, lo
   const now = Math.floor(Date.now() / 1000);
   const startedAt = Date.now();
   const fetchSource = dependencies.fetchOriginalSubscription || fetchOriginalSubscription;
+  const sourceFetchCache = new Map();
+
+  /**
+   * 同一服务器同一 subId 的原始订阅只拉取一次，避免 3X-UI 在多 inbound 共用 subId 时被并发重复请求打爆。
+   * @param {Object} server - 当前 3X-UI 服务器。
+   * @param {Object} config - 当前 inbound 配置。
+   * @returns {Promise<string[]>} 解析后的原始订阅链接列表。
+   */
+  async function getSourceLinks(server, config) {
+    const cacheKey = `${config.server_id}:${config.sub_id}`;
+    if (!sourceFetchCache.has(cacheKey)) {
+      sourceFetchCache.set(cacheKey, (async () => {
+        const originalContent = await fetchSource(
+          server.sub_url,
+          config.sub_id,
+          { timeout: SOURCE_FETCH_TIMEOUT_MS }
+        );
+        return parseSubscriptionContent(originalContent);
+      })());
+    }
+
+    return sourceFetchCache.get(cacheKey);
+  }
+
   const results = await runWithConcurrency(
     nodeConfigs,
     SOURCE_FETCH_CONCURRENCY,
@@ -651,13 +825,8 @@ async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, lo
           throw new Error('服务器不存在或缺少订阅地址');
         }
 
-        const originalContent = await fetchSource(
-          server.sub_url,
-          config.sub_id,
-          { timeout: SOURCE_FETCH_TIMEOUT_MS }
-        );
-        const links = parseSubscriptionContent(originalContent);
-        const originalLink = pickSingleNodeLink(links, config.protocol);
+        const links = await getSourceLinks(server, config);
+        const originalLink = pickInboundMatchedNodeLink(links, config);
 
         if (!originalLink) {
           throw new Error('未找到协议匹配的原始节点链接');

@@ -21,7 +21,7 @@ const USER_SYNC_TASK_TYPES = [
  */
 async function findUserNodeConfig(db, userId, serverId, inboundId) {
   return db.prepare(
-    'SELECT uuid, auth, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
+    'SELECT uuid, password, auth, sub_id FROM user_node_configs WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
   ).get(userId, serverId, inboundId);
 }
 
@@ -38,6 +38,7 @@ async function saveUserNodeConfig(db, payload) {
     serverId,
     inboundId,
     uuid,
+    password = '',
     auth,
     subId
   } = payload;
@@ -45,14 +46,76 @@ async function saveUserNodeConfig(db, payload) {
   const existing = await findUserNodeConfig(db, userId, serverId, inboundId);
   if (existing) {
     await db.prepare(
-      'UPDATE user_node_configs SET uuid = ?, auth = ?, sub_id = ? WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
-    ).run(uuid, auth, subId, userId, serverId, inboundId);
+      'UPDATE user_node_configs SET uuid = ?, password = ?, auth = ?, sub_id = ? WHERE user_id = ? AND server_id = ? AND inbound_id = ?'
+    ).run(uuid, password, auth, subId, userId, serverId, inboundId);
     return;
   }
 
   await db.prepare(
-    'INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, auth, sub_id) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(userId, serverId, inboundId, uuid, auth, subId);
+    'INSERT INTO user_node_configs (user_id, server_id, inbound_id, uuid, password, auth, sub_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(userId, serverId, inboundId, uuid, password, auth, subId);
+}
+
+/**
+ * 写入或更新 3X-UI 客户端模型迁移审计记录。
+ *
+ * @param {Object} db - 数据库代理。
+ * @param {Object} payload - 审计数据。
+ * @returns {Promise<void>}
+ */
+async function upsertClientModelMigrationAudit(db, payload) {
+  const now = payload.migratedAt || Math.floor(Date.now() / 1000);
+  await db.prepare(`
+    INSERT INTO xui_client_model_migrations (
+      user_id, server_id, status, old_emails, new_email, inbound_ids,
+      credential_source, message, migrated_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (user_id, server_id) DO UPDATE SET
+      status = excluded.status,
+      old_emails = excluded.old_emails,
+      new_email = excluded.new_email,
+      inbound_ids = excluded.inbound_ids,
+      credential_source = excluded.credential_source,
+      message = excluded.message,
+      migrated_at = excluded.migrated_at,
+      updated_at = excluded.updated_at
+  `).run(
+    payload.userId,
+    payload.serverId,
+    payload.status,
+    JSON.stringify(payload.oldEmails || []),
+    payload.newEmail || '',
+    JSON.stringify(payload.inboundIds || []),
+    payload.credentialSource || '',
+    String(payload.message || '').slice(0, 2000),
+    now,
+    now
+  );
+}
+
+/**
+ * 查询客户端模型迁移需要处理的全部本地用户，包含历史禁用用户。
+ * @param {Object} db - 数据库代理。
+ * @returns {Promise<Array>} 全量用户列表。
+ */
+async function listAllUsersForClientModelMigration(db) {
+  return db.prepare(`
+    SELECT id, email, enabled, traffic_limit, referral_traffic_limit, expire_at, sub_id
+    FROM users
+    ORDER BY id ASC
+  `).all();
+}
+
+/**
+ * 清理指定用户的订阅缓存，确保迁移后重新生成 canonical client 节点。
+ * @param {Object} db - 数据库代理。
+ * @param {number} userId - 用户 ID。
+ * @returns {Promise<void>}
+ */
+async function clearUserSubscriptionCachesForMigration(db, userId) {
+  await db.prepare('DELETE FROM user_subscription_sources WHERE user_id = ?').run(userId);
+  await db.prepare('DELETE FROM user_subscriptions WHERE user_id = ?').run(userId);
 }
 
 /**
@@ -311,6 +374,9 @@ async function insertServerNodeSnapshot(db, payload) {
 module.exports = {
   findUserNodeConfig,
   saveUserNodeConfig,
+  upsertClientModelMigrationAudit,
+  listAllUsersForClientModelMigration,
+  clearUserSubscriptionCachesForMigration,
   tryAcquireUniqueClientLock,
   releaseUniqueClientLock,
   supersedePendingUserSyncTasks,

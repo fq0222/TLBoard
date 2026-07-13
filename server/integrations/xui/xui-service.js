@@ -25,6 +25,14 @@ function isClientApiNotFoundMessage(message) {
   return normalized.includes('record not found');
 }
 
+function isTransientXuiNetworkError(message) {
+  const normalized = String(message || '').toLowerCase();
+  return normalized.includes('client network socket disconnected')
+    || normalized.includes('econnreset')
+    || normalized.includes('socket hang up')
+    || normalized.includes('tls connection');
+}
+
 /**
  * 3X-UI 服务类
  * 封装与 3X-UI 面板的所有交互
@@ -206,35 +214,49 @@ class XuiService {
    * @returns {Promise<Object>} 标准化的 inbounds 列表
    */
   async getInbounds(options = {}) {
-    try {
-      if (!this.client) {
-        await this.init();
-      }
+    if (!this.client) {
+      await this.init();
+    }
 
-      const response = await this.client.getInbounds(options);
-      
-      if (response.success) {
-        logger.info(`获取 inbounds 成功，共 ${response.obj ? response.obj.length : 0} 个`);
-        return {
-          success: true,
-          data: response.obj || []
-        };
-      } else {
+    const maxAttempts = Number.isFinite(options.retries) && options.retries > 0
+      ? Math.floor(options.retries) + 1
+      : 2;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const response = await this.client.getInbounds(options);
+
+        if (response.success) {
+          logger.info(`获取 inbounds 成功，共 ${response.obj ? response.obj.length : 0} 个`);
+          return {
+            success: true,
+            data: response.obj || []
+          };
+        }
+
         logger.warn(`获取 inbounds 失败: ${response.msg}`);
         return {
           success: false,
           message: response.msg,
           data: []
         };
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxAttempts && isTransientXuiNetworkError(error.message)) {
+          logger.warn(`获取 inbounds 遇到瞬时网络错误，准备重试: attempt=${attempt}/${maxAttempts}, error=${error.message}`);
+          continue;
+        }
+        break;
       }
-    } catch (error) {
-      logger.error(`获取 inbounds 错误: ${error.message}`);
-      return {
-        success: false,
-        message: error.message,
-        data: []
-      };
     }
+
+    logger.error(`获取 inbounds 错误: ${lastError.message}`);
+    return {
+      success: false,
+      message: lastError.message,
+      data: []
+    };
   }
 
   /**
@@ -534,6 +556,7 @@ class XuiService {
   mapClientApiRecord(client = {}) {
     return {
       uuid: client.uuid || client.id || '',
+      password: client.password || '',
       email: client.email || '',
       enable: client.enable,
       expiryTime: client.expiryTime,
@@ -542,6 +565,116 @@ class XuiService {
       flow: client.flow || '',
       auth: client.auth || client.password || ''
     };
+  }
+
+  /**
+   * 归一化服务器级 client 关联的 inbound ID 列表。
+   * @param {number[]} inboundIds - 原始 inbound ID 列表。
+   * @returns {number[]} 去重后的正整数 ID。
+   */
+  normalizeInboundIds(inboundIds) {
+    return Array.from(new Set((inboundIds || [])
+      .map(Number)
+      .filter((id) => Number.isFinite(id) && id > 0)));
+  }
+
+  /**
+   * 通过 canonical email 查询服务器级 3X-UI client。
+   * @param {string} email - 本地用户邮箱，也是 3X-UI client email。
+   * @returns {Promise<Object>} 查询结果，成功时包含 client 与 inboundIds。
+   */
+  async getServerClientByEmail(email) {
+    try {
+      if (!this.client) {
+        await this.init();
+      }
+
+      if (!this.usesClientApi() || typeof this.client.getClientByEmail !== 'function') {
+        return { success: false, message: 'clients API is not supported' };
+      }
+
+      const response = await this.client.getClientByEmail(email);
+      if (!response.success) {
+        return { success: false, message: response.msg || 'client not found' };
+      }
+
+      const obj = response.obj || {};
+      const rawClient = obj.client || obj;
+      return {
+        success: true,
+        client: this.mapClientApiRecord(rawClient),
+        inboundIds: this.normalizeInboundIds(obj.inboundIds || rawClient.inboundIds || [])
+      };
+    } catch (error) {
+      logger.error(`查询服务器级客户端错误: ${email} - ${error.message}`);
+      return { success: false, message: error.message };
+    }
+  }
+
+  /**
+   * 创建或更新每服务器唯一的全量 client，并补齐 inbound 关联。
+   * @param {Object} payload - upsert 参数。
+   * @param {string} payload.email - canonical email。
+   * @param {number[]} payload.inboundIds - 目标 inbound ID 列表。
+   * @param {Object} payload.client - 全量 client 凭证与状态。
+   * @returns {Promise<Object>} 同步结果。
+   */
+  async upsertServerClient(payload = {}) {
+    try {
+      if (!this.client) {
+        await this.init();
+      }
+
+      if (!this.usesClientApi()) {
+        return { success: false, message: 'clients API is not supported' };
+      }
+
+      const email = String(payload.email || payload.client?.email || '').trim();
+      const inboundIds = this.normalizeInboundIds(payload.inboundIds);
+      if (!email) {
+        return { success: false, message: 'email is required' };
+      }
+      if (inboundIds.length === 0) {
+        return { success: false, message: 'inboundIds is required' };
+      }
+
+      const desiredClient = {
+        ...(payload.client || {}),
+        email
+      };
+      const existing = await this.getServerClientByEmail(email);
+
+      if (!existing.success) {
+        const addResult = await this.client.addClient({ client: desiredClient, inboundIds });
+        return addResult.success
+          ? { success: true, action: 'add', message: addResult.msg }
+          : { success: false, message: addResult.msg || addResult.message || '新增服务器级客户端失败' };
+      }
+
+      if (this.shouldUpdateClient(existing.client, desiredClient)) {
+        const updateResult = await this.client.updateClient(email, desiredClient);
+        if (!updateResult.success) {
+          return { success: false, message: updateResult.msg || updateResult.message || '更新服务器级客户端失败' };
+        }
+      }
+
+      const existingIds = new Set(this.normalizeInboundIds(existing.inboundIds));
+      const missingIds = inboundIds.filter((id) => !existingIds.has(id));
+      if (missingIds.length > 0 && typeof this.client.attachClient === 'function') {
+        const attachResult = await this.client.attachClient(email, missingIds);
+        if (!attachResult.success) {
+          return { success: false, message: attachResult.msg || attachResult.message || '关联 inbound 失败' };
+        }
+      }
+
+      return {
+        success: true,
+        action: this.shouldUpdateClient(existing.client, desiredClient) ? 'update' : 'attach'
+      };
+    } catch (error) {
+      logger.error(`同步服务器级客户端错误: ${error.message}`);
+      return { success: false, message: error.message };
+    }
   }
 
   buildClientSettingsPayload(options = {}) {
@@ -1003,6 +1136,8 @@ class XuiService {
 
   normalizeClientSnapshot(client = {}) {
     return {
+      uuid: client.uuid || client.id || '',
+      password: client.password || '',
       enable: this.normalizeClientEnabled(client.enable),
       expiryTime: Number(client.expiryTime || 0),
       totalBytes: Number(client.totalGB || 0),
@@ -1032,6 +1167,8 @@ class XuiService {
   buildClientDiff(existingClient, desiredClient) {
     const current = this.normalizeClientSnapshot(existingClient);
     const desired = {
+      uuid: desiredClient.uuid || desiredClient.id || '',
+      password: desiredClient.password || '',
       enable: this.normalizeClientEnabled(desiredClient.enable),
       expiryTime: Number(desiredClient.expiryTime || 0),
       totalBytes: Number(desiredClient.totalGB || 0),
@@ -1041,6 +1178,12 @@ class XuiService {
     };
 
     const diff = {};
+    if (current.uuid !== desired.uuid) {
+      diff.uuid = { current: current.uuid, desired: desired.uuid };
+    }
+    if (current.password !== desired.password) {
+      diff.password = { current: current.password, desired: desired.password };
+    }
     if (current.enable !== desired.enable) {
       diff.enable = { current: current.enable, desired: desired.enable };
     }

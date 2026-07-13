@@ -536,6 +536,23 @@ function testInspectUserInNodeSnapshot() {
   assert.strictEqual(trusted.trusted, true);
   assert.strictEqual(trusted.reason, 'ok');
   assert.strictEqual(trusted.client.email, 'user@example.com-direct-node');
+  const trustedCanonical = inspectUserInNodeSnapshot(
+    user,
+    createJoinedConfig({
+      settings: JSON.stringify({
+        clients: [{
+          email: 'user@example.com',
+          id: 'uuid-1',
+          password: 'password-1',
+          auth: 'auth-1',
+          subId: 'sub-id-1'
+        }]
+      })
+    })
+  );
+  assert.strictEqual(trustedCanonical.trusted, true);
+  assert.strictEqual(trustedCanonical.reason, 'ok');
+  assert.strictEqual(trustedCanonical.client.email, 'user@example.com');
   assert.strictEqual(
     inspectUserInNodeSnapshot(user, createJoinedConfig({
       uuid: 123456,
@@ -956,7 +973,7 @@ function testNodeFingerprintMismatchUsesUnifiedLogger() {
 }
 
 /**
- * 验证用户节点配置查询会带出 hy2 身份校验所需的 auth 字段。
+ * 验证用户节点配置查询会带出服务器级全量 client 所需的 password/auth 字段。
  *
  * @returns {Promise<void>}
  */
@@ -974,6 +991,7 @@ async function testListUserNodeConfigsSelectsAuth() {
   };
 
   await subscriptionRepository.listUserNodeConfigs(db, 1);
+  assert.match(capturedSql, /unc\.password/);
   assert.match(capturedSql, /unc\.auth/);
 }
 
