@@ -11,6 +11,9 @@ const databaseManager = require('../db/init');
 const XuiService = require('../integrations/xui/xui-service');
 const orderService = require('../services/shared/order-service');
 const xuiSyncRepository = require('../repositories/xui-sync-repository');
+const { runWithConcurrency } = require('../utils/concurrency');
+
+const MIGRATION_CONCURRENCY = 10;
 
 function isPanelVersionAtLeast(version, minimum) {
   const left = String(version || '').split('.').map(Number);
@@ -82,6 +85,134 @@ async function migrateUserOnServer(db, user, server, dryRun) {
   return { oldEmails, inboundIds, status: 'success', message: 'ok' };
 }
 
+/**
+ * 生成迁移审计的任务键，粒度与审计表唯一约束一致。
+ * @param {number} userId - 用户 ID。
+ * @param {number} serverId - 3X-UI 服务器 ID。
+ * @returns {string} user/server 组合键。
+ */
+function buildMigrationKey(userId, serverId) {
+  return `${userId}:${serverId}`;
+}
+
+/**
+ * 读取已成功迁移的 user/server 组合，用于重跑脚本时跳过已完成任务。
+ * @param {Object} db - 数据库实例。
+ * @returns {Promise<Set<string>>} 已成功迁移的任务键集合。
+ */
+async function listCompletedMigrationKeys(db) {
+  const rows = await db.prepare(`
+    SELECT user_id, server_id
+    FROM xui_client_model_migrations
+    WHERE status = 'success'
+  `).all();
+  return new Set((rows || []).map((row) => buildMigrationKey(row.user_id, row.server_id)));
+}
+
+/**
+ * 根据用户和服务器笛卡尔积生成待迁移任务，并跳过审计表已成功的组合。
+ * @param {Array<Object>} users - 全量用户列表。
+ * @param {Array<Object>} servers - 3X-UI 3.4.2+ 服务器列表。
+ * @param {Set<string>} completedKeys - 已成功迁移的任务键集合。
+ * @returns {Array<{user:Object,server:Object}>} 待执行迁移任务。
+ */
+function buildMigrationTasks(users, servers, completedKeys) {
+  const tasks = [];
+  for (const server of servers) {
+    for (const user of users) {
+      if (completedKeys.has(buildMigrationKey(user.id, server.id))) {
+        console.log(`[SKIP] user=${user.email}, server=${server.name}, reason=already success`);
+        continue;
+      }
+      tasks.push({ user, server });
+    }
+  }
+  return tasks;
+}
+
+/**
+ * 写入成功迁移审计记录，保持脚本调度和审计字段组装集中在一处。
+ * @param {Object} db - 数据库实例。
+ * @param {Object} user - 当前用户。
+ * @param {Object} server - 当前服务器。
+ * @param {Object} result - 单任务迁移结果。
+ * @returns {Promise<void>}
+ */
+async function writeMigrationAudit(db, user, server, result) {
+  await xuiSyncRepository.upsertClientModelMigrationAudit(db, {
+    userId: user.id,
+    serverId: server.id,
+    status: result.status,
+    oldEmails: result.oldEmails,
+    newEmail: user.email,
+    inboundIds: result.inboundIds,
+    credentialSource: 'canonical',
+    message: result.message
+  });
+}
+
+/**
+ * 写入失败迁移审计记录，让下次重跑可以重新尝试 failed 任务。
+ * @param {Object} db - 数据库实例。
+ * @param {Object} user - 当前用户。
+ * @param {Object} server - 当前服务器。
+ * @param {Error} error - 单任务错误。
+ * @returns {Promise<void>}
+ */
+async function writeMigrationFailureAudit(db, user, server, error) {
+  await xuiSyncRepository.upsertClientModelMigrationAudit(db, {
+    userId: user.id,
+    serverId: server.id,
+    status: 'failed',
+    oldEmails: [],
+    newEmail: user.email,
+    inboundIds: [],
+    credentialSource: '',
+    message: error.message
+  });
+}
+
+/**
+ * 按固定并发执行迁移任务；只改变脚本调度，不修改单任务业务迁移逻辑。
+ * @param {Object} options - 调度参数。
+ * @param {Object} options.db - 数据库实例。
+ * @param {Array<{user:Object,server:Object}>} options.tasks - 待迁移任务。
+ * @param {boolean} options.dryRun - 是否只预演。
+ * @param {number} options.concurrency - 最大并发数。
+ * @returns {Promise<{success:number,failed:number}>} 本轮执行统计。
+ */
+async function runMigrationTasks({
+  db,
+  tasks,
+  dryRun,
+  concurrency = MIGRATION_CONCURRENCY,
+  logger = console,
+  migrateUserOnServer: migrateTask = migrateUserOnServer,
+  writeAudit = writeMigrationAudit,
+  writeFailureAudit = writeMigrationFailureAudit
+}) {
+  let success = 0;
+  let failed = 0;
+
+  await runWithConcurrency(tasks, concurrency, async ({ user, server }) => {
+    try {
+      const result = await migrateTask(db, user, server, dryRun);
+      if (!dryRun) {
+        await writeAudit(db, user, server, result);
+      }
+      success += 1;
+    } catch (error) {
+      failed += 1;
+      logger.error(`[FAIL] user=${user.email}, server=${server.name}, error=${error.message}`);
+      if (!dryRun) {
+        await writeFailureAudit(db, user, server, error);
+      }
+    }
+  });
+
+  return { success, failed };
+}
+
 async function run() {
   const dryRun = process.argv.includes('--dry-run');
   const db = await databaseManager.init();
@@ -90,41 +221,18 @@ async function run() {
     const servers = (await xuiSyncRepository.listOnlineXuiServers(db))
       .filter((server) => isPanelVersionAtLeast(server.panel_version, '3.4.2'));
     const users = await xuiSyncRepository.listAllUsersForClientModelMigration(db);
+    const completedKeys = await listCompletedMigrationKeys(db);
+    const tasks = buildMigrationTasks(users, servers, completedKeys);
+    const skipped = (servers.length * users.length) - tasks.length;
 
-    console.log(`[START] dryRun=${dryRun}, servers=${servers.length}, users=${users.length}`);
-    for (const server of servers) {
-      for (const user of users) {
-        try {
-          const result = await migrateUserOnServer(db, user, server, dryRun);
-          if (!dryRun) {
-            await xuiSyncRepository.upsertClientModelMigrationAudit(db, {
-              userId: user.id,
-              serverId: server.id,
-              status: result.status,
-              oldEmails: result.oldEmails,
-              newEmail: user.email,
-              inboundIds: result.inboundIds,
-              credentialSource: 'canonical',
-              message: result.message
-            });
-          }
-        } catch (error) {
-          console.error(`[FAIL] user=${user.email}, server=${server.name}, error=${error.message}`);
-          if (!dryRun) {
-            await xuiSyncRepository.upsertClientModelMigrationAudit(db, {
-              userId: user.id,
-              serverId: server.id,
-              status: 'failed',
-              oldEmails: [],
-              newEmail: user.email,
-              inboundIds: [],
-              credentialSource: '',
-              message: error.message
-            });
-          }
-        }
-      }
-    }
+    console.log(`[START] dryRun=${dryRun}, servers=${servers.length}, users=${users.length}, skipped=${skipped}, tasks=${tasks.length}, concurrency=${MIGRATION_CONCURRENCY}`);
+    const result = await runMigrationTasks({
+      db,
+      tasks,
+      dryRun,
+      concurrency: MIGRATION_CONCURRENCY
+    });
+    console.log(`[DONE] success=${result.success}, failed=${result.failed}, skipped=${skipped}`);
   } finally {
     await databaseManager.close();
   }
@@ -138,6 +246,11 @@ if (require.main === module) {
 }
 
 module.exports = {
+  MIGRATION_CONCURRENCY,
+  buildMigrationKey,
+  listCompletedMigrationKeys,
+  buildMigrationTasks,
+  runMigrationTasks,
   extractOldSuffixEmails,
   migrateUserOnServer,
   run
