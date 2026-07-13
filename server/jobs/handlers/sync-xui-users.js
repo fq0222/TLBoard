@@ -6,6 +6,7 @@
 const XuiService = require('../../integrations/xui/xui-service');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const xuiNodeSnapshotService = require('../../services/shared/xui-node-snapshot-service');
+const { getStrategyFromRemark } = require('../../services/shared/subscription-strategy');
 const { createLogger } = require('../../utils/logger');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
 const xuiJobScheduler = require('../xui-job-scheduler');
@@ -44,32 +45,71 @@ function normalizeComparableBoolean(value) {
 }
 
 /**
+ * 获取 3X-UI 3.4.2+ 服务器级 client 与本地期望的差异原因。
+ * @param {Object} existing - getServerClientByEmail 返回结果。
+ * @param {number[]} inboundIds - 当前服务器应关联的 inbound ID。
+ * @param {Object} desiredClient - 本地期望写入的全量 client。
+ * @param {Array<Object>} inbounds - 当前服务器的 inbound 快照，用于按 remark 判断 flow。
+ * @returns {string[]} 不一致原因；空数组表示一致。
+ */
+function getServerClientSyncMismatches(existing, inboundIds, desiredClient, inbounds = []) {
+  if (!existing?.success || !existing.client) {
+    return ['client_missing'];
+  }
+
+  const mismatches = [];
+  const remoteInboundIds = new Set((existing.inboundIds || []).map(Number));
+  const missingInboundIds = (inboundIds || [])
+    .map(Number)
+    .filter((id) => Number.isFinite(id) && !remoteInboundIds.has(id));
+  if (missingInboundIds.length > 0) {
+    mismatches.push(`inboundIds:missing=${missingInboundIds.join(',')}`);
+  }
+
+  const client = existing.client;
+  const comparableFields = [
+    ['uuid', String(client.uuid || client.id || ''), String(desiredClient.id || '')],
+    ['password', String(client.password || ''), String(desiredClient.password || '')],
+    ['auth', String(client.auth || ''), String(desiredClient.auth || '')],
+    ['subId', String(client.subId || ''), String(desiredClient.subId || '')],
+    ['enable', normalizeComparableBoolean(client.enable), normalizeComparableBoolean(desiredClient.enable)],
+    ['expiryTime', normalizeComparableNumber(client.expiryTime), normalizeComparableNumber(desiredClient.expiryTime)],
+    ['totalGB', normalizeComparableNumber(client.totalGB), normalizeComparableNumber(desiredClient.totalGB)]
+  ];
+
+  for (const [field, current, desired] of comparableFields) {
+    if (current !== desired) {
+      mismatches.push(`${field}:${current}->${desired}`);
+    }
+  }
+
+  for (const inbound of inbounds || []) {
+    if (getStrategyFromRemark(inbound?.remark) !== 'direct') {
+      continue;
+    }
+
+    const inboundId = Number(inbound.id);
+    const inboundClient = existing.inboundClientsById?.[inboundId] || existing.client;
+    const currentFlow = String(inboundClient?.flow || '');
+    const desiredFlow = String(desiredClient.flow || '');
+    if (currentFlow !== desiredFlow) {
+      mismatches.push(`flow:inbound=${inboundId}:${currentFlow}->${desiredFlow}`);
+    }
+  }
+
+  return mismatches;
+}
+
+/**
  * 判断 3X-UI 3.4.2+ 服务器级 client 是否已经与本地期望一致。
  * @param {Object} existing - getServerClientByEmail 返回结果。
  * @param {number[]} inboundIds - 当前服务器应关联的 inbound ID。
  * @param {Object} desiredClient - 本地期望写入的全量 client。
+ * @param {Array<Object>} inbounds - 当前服务器的 inbound 快照，用于按 remark 判断 flow。
  * @returns {boolean} 一致时可跳过同步。
  */
-function isServerClientAlreadySynced(existing, inboundIds, desiredClient) {
-  if (!existing?.success || !existing.client) {
-    return false;
-  }
-
-  const remoteInboundIds = new Set((existing.inboundIds || []).map(Number));
-  const allInboundsAttached = (inboundIds || []).every((id) => remoteInboundIds.has(Number(id)));
-  if (!allInboundsAttached) {
-    return false;
-  }
-
-  const client = existing.client;
-  return String(client.uuid || client.id || '') === String(desiredClient.id || '')
-    && String(client.password || '') === String(desiredClient.password || '')
-    && String(client.auth || '') === String(desiredClient.auth || '')
-    && String(client.subId || '') === String(desiredClient.subId || '')
-    && String(client.flow || '') === String(desiredClient.flow || '')
-    && normalizeComparableBoolean(client.enable) === normalizeComparableBoolean(desiredClient.enable)
-    && normalizeComparableNumber(client.expiryTime) === normalizeComparableNumber(desiredClient.expiryTime)
-    && normalizeComparableNumber(client.totalGB) === normalizeComparableNumber(desiredClient.totalGB);
+function isServerClientAlreadySynced(existing, inboundIds, desiredClient, inbounds = []) {
+  return getServerClientSyncMismatches(existing, inboundIds, desiredClient, inbounds).length === 0;
 }
 
 /**
@@ -97,6 +137,81 @@ function parseInboundClientsSnapshot(inbound) {
   }
 
   return [];
+}
+
+/**
+ * 将 inbound settings 中的客户端快照归一化为服务器级 client 对比结构。
+ * @param {Object} client - settings.clients 中的原始 client。
+ * @returns {Object} 用于一致性判断的 client 快照。
+ */
+function normalizeServerClientSnapshot(client = {}) {
+  return {
+    uuid: client.uuid || client.id || '',
+    password: client.password || '',
+    email: client.email || '',
+    enable: client.enable,
+    expiryTime: client.expiryTime,
+    totalGB: client.totalGB || 0,
+    subId: client.subId || '',
+    flow: client.flow || '',
+    auth: client.auth || client.password || ''
+  };
+}
+
+/**
+ * 合并同一个服务器级 client 在不同 inbound 快照中的字段，优先补齐非空值。
+ * @param {Object|null} current - 当前已收集的 client 快照。
+ * @param {Object} next - 下一个 inbound 中匹配到的 client。
+ * @returns {Object} 合并后的 client。
+ */
+function mergeServerClientSnapshot(current, next = {}) {
+  const merged = { ...(current || {}) };
+  for (const key of Object.keys(next)) {
+    if (merged[key] === undefined || merged[key] === null || merged[key] === '') {
+      merged[key] = next[key];
+    }
+  }
+  return merged;
+}
+
+/**
+ * 从已获取的 inbounds 快照中收集指定 canonical email 的 client 与关联 inbound。
+ * 返回 null 表示快照解析失败，调用方应回退到 clients API。
+ * @param {string} email - canonical client email。
+ * @param {Array<Object>} inbounds - getInbounds 返回的 inbound 快照。
+ * @returns {Object|null} 兼容 getServerClientByEmail 的查询结果，或 null。
+ */
+function getServerClientFromInboundSnapshots(email, inbounds = []) {
+  const inboundIds = [];
+  const inboundClientsById = {};
+  let mergedClient = null;
+
+  for (const inbound of inbounds) {
+    const clients = parseInboundClientsSnapshot(inbound);
+    if (clients === null) {
+      return null;
+    }
+
+    const matched = clients.find((client) => client?.email === email);
+    if (!matched) {
+      continue;
+    }
+
+    mergedClient = mergeServerClientSnapshot(mergedClient, matched);
+    inboundIds.push(inbound.id);
+    inboundClientsById[Number(inbound.id)] = normalizeServerClientSnapshot(matched);
+  }
+
+  if (!mergedClient) {
+    return { success: false, message: 'client not found in inbound snapshots' };
+  }
+
+  return {
+    success: true,
+    client: normalizeServerClientSnapshot(mergedClient),
+    inboundIds,
+    inboundClientsById
+  };
 }
 
 /**
@@ -337,25 +452,29 @@ async function legacySyncUsersToServer(db, server, users) {
  * @param {Object} server - 3X-UI 服务器配置
  * @param {Array} users - 需要巡检同步的用户列表
  */
-async function syncUsersToServer(db, server, users) {
+async function syncUsersToServer(db, server, users, dependencies = {}) {
   try {
     const crypto = require('crypto');
-    const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
-      apiVersion: server.panel_version || '3.0.2'
-    });
+    const activeLogger = dependencies.logger || logger;
+    const repository = dependencies.repository || xuiSyncRepository;
+    const snapshotService = dependencies.snapshotService || xuiNodeSnapshotService;
+    const xuiService = dependencies.xuiService
+      || await XuiService.getInstance(server.api_url, server.api_token, {
+        apiVersion: server.panel_version || '3.0.2'
+      });
     const inboundsResult = await xuiService.getInbounds();
 
     if (!inboundsResult.success) {
-      logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${inboundsResult.message}`);
+      activeLogger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${inboundsResult.message}`);
       return;
     }
 
-    const refreshResult = await xuiNodeSnapshotService.refreshServerNodeSnapshots(
+    const refreshResult = await snapshotService.refreshServerNodeSnapshots(
       db,
       server.id,
       inboundsResult.data
     );
-    logger.info(`服务器 ${server.name} 节点快照已刷新: ${refreshResult.nodeCount} 个节点`);
+    activeLogger.info(`服务器 ${server.name} 节点快照已刷新: ${refreshResult.nodeCount} 个节点`);
 
     let syncCount = 0;
 
@@ -366,10 +485,14 @@ async function syncUsersToServer(db, server, users) {
 
       for (const user of users) {
         try {
-          const existing = await xuiService.getServerClientByEmail(user.email);
+          let existing = getServerClientFromInboundSnapshots(user.email, inbounds);
+          if (existing === null) {
+            activeLogger.warn(`服务器 ${server.name} inbound 快照解析失败，回退 clients API 查询: user=${user.email}`);
+            existing = await xuiService.getServerClientByEmail(user.email);
+          }
           const firstInbound = inbounds[0];
           const firstConfig = firstInbound
-            ? await xuiSyncRepository.findUserNodeConfig(db, user.id, server.id, firstInbound.id)
+            ? await repository.findUserNodeConfig(db, user.id, server.id, firstInbound.id)
             : null;
           const uuid = existing.success
             ? (existing.client.uuid || existing.client.id || crypto.randomUUID())
@@ -398,7 +521,7 @@ async function syncUsersToServer(db, server, users) {
           };
 
           for (const inbound of inbounds) {
-            await xuiSyncRepository.saveUserNodeConfig(db, {
+            await repository.saveUserNodeConfig(db, {
               userId: user.id,
               serverId: server.id,
               inboundId: inbound.id,
@@ -409,10 +532,12 @@ async function syncUsersToServer(db, server, users) {
             });
           }
 
-          if (isServerClientAlreadySynced(existing, inboundIds, desiredClient)) {
-            logger.info(`用户 ${user.email} 在服务器 ${server.name} 已一致，跳过同步`);
+          const mismatches = getServerClientSyncMismatches(existing, inboundIds, desiredClient, inbounds);
+          if (mismatches.length === 0) {
+            activeLogger.info(`用户 ${user.email} 在服务器 ${server.name} 已一致，跳过同步`);
             continue;
           }
+          activeLogger.info(`用户 ${user.email} 在服务器 ${server.name} 不一致，原因=${mismatches.join('; ')}`);
 
           const syncResult = await xuiService.upsertServerClient({
             email: user.email,
@@ -422,17 +547,17 @@ async function syncUsersToServer(db, server, users) {
 
           if (syncResult.success) {
             syncCount++;
-            logger.info(`同步用户 ${user.email} 到服务器 ${server.name} 成功，关联 ${inbounds.length} 个 inbound`);
+            activeLogger.info(`同步用户 ${user.email} 到服务器 ${server.name} 成功，关联 ${inbounds.length} 个 inbound`);
           } else {
-            logger.warn(`同步用户 ${user.email} 到服务器 ${server.name} 失败: ${syncResult.message}`);
+            activeLogger.warn(`同步用户 ${user.email} 到服务器 ${server.name} 失败: ${syncResult.message}`);
           }
         } catch (error) {
-          logger.error(`同步用户 ${user.email} 到服务器 ${server.name} 失败: ${error.message}`);
+          activeLogger.error(`同步用户 ${user.email} 到服务器 ${server.name} 失败: ${error.message}`);
         }
       }
 
       if (syncCount > 0) {
-        logger.info(`服务器 ${server.name} 同步完成，成功 ${syncCount} 个用户`);
+        activeLogger.info(`服务器 ${server.name} 同步完成，成功 ${syncCount} 个用户`);
       }
       return;
     }
@@ -590,6 +715,9 @@ async function runXuiSync(db) {
 module.exports = {
   registerXuiSyncJob,
   __testables: {
-    isServerClientAlreadySynced
+    getServerClientSyncMismatches,
+    getServerClientFromInboundSnapshots,
+    isServerClientAlreadySynced,
+    syncUsersToServer
   }
 };
