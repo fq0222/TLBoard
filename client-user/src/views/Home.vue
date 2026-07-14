@@ -32,7 +32,40 @@
           </button>
         </div>
 
-        <div class="plans-grid">
+        <div
+          v-if="loading"
+          class="plans-grid plans-loading"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <article v-for="index in 3" :key="index" class="plan-card plan-skeleton">
+            <div class="skeleton-pill"></div>
+            <div class="skeleton-row">
+              <div class="skeleton-line title"></div>
+              <div class="skeleton-line price"></div>
+            </div>
+            <div class="plan-metrics">
+              <div class="metric-card skeleton-block"></div>
+              <div class="metric-card skeleton-block"></div>
+            </div>
+            <div class="plan-summary skeleton-summary"></div>
+            <div class="skeleton-line note"></div>
+            <div class="skeleton-button"></div>
+          </article>
+        </div>
+
+        <div v-else-if="loadError" class="plans-state" role="status">
+          <div class="state-title">套餐加载失败</div>
+          <p>网络可能有点慢，请刷新页面或稍后再试。</p>
+          <button type="button" class="state-retry" @click="fetchPlans">重新加载</button>
+        </div>
+
+        <div v-else-if="displayPlans.length === 0" class="plans-state" role="status">
+          <div class="state-title">当前分类暂无套餐</div>
+          <p>可以切换到其他分类查看可购买套餐。</p>
+        </div>
+
+        <div v-else class="plans-grid">
           <article
             v-for="plan in displayPlans"
             :key="plan.id"
@@ -111,6 +144,7 @@ import { ArrowRight, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { filterPlansByDurationType } from '@/utils/plan-filter'
+import { loadPlansWithRetry } from '@/utils/plan-loader'
 
 const route = useRoute()
 const router = useRouter()
@@ -118,6 +152,7 @@ const userStore = useUserStore()
 
 const plans = ref([])
 const loading = ref(false)
+const loadError = ref(false)
 const activePlanFilter = ref('all')
 const planFilters = [
   { label: '全部', value: 'all' },
@@ -148,12 +183,11 @@ const displayPlans = computed(() =>
 async function fetchPlans() {
   try {
     loading.value = true
-    const response = await api.user.getPlans()
-    if (response.code === 0) {
-      plans.value = response.data.plans || []
-    }
+    loadError.value = false
+    plans.value = await loadPlansWithRetry(() => api.user.getPlans())
   } catch (error) {
     console.error('获取套餐列表失败:', error)
+    loadError.value = true
   } finally {
     loading.value = false
   }
@@ -369,6 +403,148 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
+}
+
+.plans-loading {
+  pointer-events: none;
+}
+
+.plan-skeleton {
+  overflow: hidden;
+}
+
+.skeleton-pill,
+.skeleton-line,
+.skeleton-block,
+.skeleton-summary,
+.skeleton-button {
+  position: relative;
+  overflow: hidden;
+  background: #eef3f3;
+}
+
+.skeleton-pill::after,
+.skeleton-line::after,
+.skeleton-block::after,
+.skeleton-summary::after,
+.skeleton-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.skeleton-pill {
+  width: 74px;
+  height: 28px;
+  border-radius: 999px;
+}
+
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.skeleton-line {
+  height: 22px;
+  border-radius: 999px;
+}
+
+.skeleton-line.title {
+  width: 42%;
+}
+
+.skeleton-line.price {
+  width: 30%;
+  height: 30px;
+}
+
+.skeleton-block {
+  min-height: 78px;
+  border-color: transparent;
+}
+
+.skeleton-summary {
+  height: 88px;
+  border-radius: 18px;
+}
+
+.skeleton-line.note {
+  width: 76%;
+  height: 16px;
+}
+
+.skeleton-button {
+  width: 100%;
+  height: 50px;
+  border-radius: 16px;
+}
+
+.plans-state {
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 34px 24px;
+  border: 1px dashed rgba(20, 33, 61, 0.14);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.state-title {
+  color: var(--text-main);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.plans-state p {
+  max-width: 360px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.state-retry {
+  min-width: 108px;
+  min-height: 42px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.state-retry:hover {
+  background: var(--accent-strong);
+}
+
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-pill::after,
+  .skeleton-line::after,
+  .skeleton-block::after,
+  .skeleton-summary::after,
+  .skeleton-button::after {
+    animation: none;
+  }
 }
 
 .plan-card {
