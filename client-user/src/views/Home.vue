@@ -19,6 +19,19 @@
           </div>
         </div>
 
+        <div class="plan-filter" aria-label="套餐分类">
+          <button
+            v-for="filter in planFilters"
+            :key="filter.value"
+            type="button"
+            class="filter-button"
+            :class="{ active: activePlanFilter === filter.value }"
+            @click="activePlanFilter = filter.value"
+          >
+            {{ filter.label }}
+          </button>
+        </div>
+
         <div class="plans-grid">
           <article
             v-for="plan in displayPlans"
@@ -97,6 +110,7 @@ import { useUserStore } from '@/stores/user'
 import { ArrowRight, User } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { filterPlansByDurationType } from '@/utils/plan-filter'
 
 const route = useRoute()
 const router = useRouter()
@@ -104,6 +118,12 @@ const userStore = useUserStore()
 
 const plans = ref([])
 const loading = ref(false)
+const activePlanFilter = ref('all')
+const planFilters = [
+  { label: '全部', value: 'all' },
+  { label: '限时', value: 'limited' },
+  { label: '不限时', value: 'unlimited' }
+]
 
 const isLoggedIn = computed(() => userStore.isLoggedIn)
 
@@ -118,7 +138,7 @@ const recommendedPlanId = computed(() => {
 })
 
 const displayPlans = computed(() =>
-  plans.value.map((plan) => ({
+  filterPlansByDurationType(plans.value, activePlanFilter.value).map((plan) => ({
     ...plan,
     isRecommended: plan.id === recommendedPlanId.value,
     summary: getPlanSummary(plan)
@@ -312,9 +332,42 @@ onMounted(() => {
   text-align: right;
 }
 
+.plan-filter {
+  display: inline-flex;
+  width: 370px;
+  gap: 6px;
+  padding: 5px;
+  margin-bottom: 18px;
+  border: 1px solid rgba(20, 33, 61, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 10px 28px rgba(20, 33, 61, 0.06);
+}
+
+.filter-button {
+  flex: 1;
+  min-width: 70px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.filter-button:hover,
+.filter-button.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
 .plans-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
 }
 
@@ -506,6 +559,10 @@ onMounted(() => {
     max-width: none;
     text-align: left;
   }
+
+  .plans-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 768px) {
@@ -533,6 +590,16 @@ onMounted(() => {
 
   .section-title {
     font-size: 28px;
+  }
+
+  .plan-filter {
+    display: flex;
+    width: 100%;
+  }
+
+  .filter-button {
+    flex: 1;
+    min-width: 0;
   }
 
   .plans-grid {
