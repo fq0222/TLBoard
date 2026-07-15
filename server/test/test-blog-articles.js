@@ -60,13 +60,34 @@ async function main() {
       status: 'published'
     });
     assertOk(published.status === 'published', '管理端可以发布文章');
+    assertOk(!published.pinned, '新增文章默认不置顶');
 
-    const userList = await blogService.listPublishedArticles(db, { page: 1, limit: 20 });
+    const pinned = await blogService.createArticle(db, {
+      title: '测试博客-置顶',
+      summary: '置顶简介',
+      category: 'Clash',
+      content: '# 置顶内容',
+      status: 'published',
+      pinned: true
+    });
+    assertOk(Boolean(pinned.pinned), '管理端可以新增置顶文章');
+
+    const unpinned = await blogService.updateArticle(db, pinned.id, { pinned: false });
+    assertOk(!unpinned.pinned, '管理端可以取消文章置顶');
+
+    const repinned = await blogService.updateArticle(db, pinned.id, { pinned: true });
+    assertOk(Boolean(repinned.pinned), '管理端可以重新置顶文章');
+
+    const adminList = await blogService.listAdminArticles(db, { page: 1, limit: 20, keyword: '测试博客' });
+    assertOk(adminList.list[0].id === pinned.id, '管理端列表置顶文章排在前面');
+
+    const userList = await blogService.listPublishedArticles(db, { page: 1, limit: 20, keyword: '测试博客' });
     assertOk(
       userList.list.some((item) => item.id === published.id) &&
         !userList.list.some((item) => item.id === draft.id),
       '用户端列表只返回已发布文章'
     );
+    assertOk(userList.list[0].id === pinned.id, '用户端列表置顶文章排在前面');
 
     const hiddenDraft = await blogService.getPublishedArticle(db, draft.id);
     assertOk(hiddenDraft === null, '用户端详情不能访问草稿文章');

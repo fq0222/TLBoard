@@ -32,24 +32,30 @@
       </div>
 
       <el-table :data="articles" v-loading="loading" style="width: 100%">
-        <el-table-column prop="title" label="标题" min-width="220" />
+        <el-table-column prop="title" label="标题" width="760" show-overflow-tooltip />
         <el-table-column prop="category" label="分类" width="140">
           <template #default="{ row }">{{ row.category || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="status" label="状态" width="150">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'published' ? 'success' : 'info'" size="small">
-              {{ getStatusText(row.status) }}
-            </el-tag>
+            <div class="status-tags">
+              <el-tag :type="row.status === 'published' ? 'success' : 'info'" size="small">
+                {{ getStatusText(row.status) }}
+              </el-tag>
+              <el-tag v-if="row.pinned" type="warning" size="small">置顶</el-tag>
+            </div>
           </template>
         </el-table-column>
         <el-table-column prop="updated_at" label="更新时间" width="180">
           <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="340" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="showEditor(row)">编辑</el-button>
             <el-button link type="primary" @click="showPreview(row)">预览</el-button>
+            <el-button link :type="row.pinned ? 'warning' : 'success'" @click="togglePinned(row)">
+              {{ row.pinned ? '取消置顶' : '置顶' }}
+            </el-button>
             <el-button link type="success" @click="toggleStatus(row)">
               {{ row.status === 'published' ? '设为草稿' : '发布' }}
             </el-button>
@@ -87,6 +93,9 @@
             <el-radio-button label="draft">草稿</el-radio-button>
             <el-radio-button label="published">已发布</el-radio-button>
           </el-radio-group>
+        </el-form-item>
+        <el-form-item label="置顶">
+          <el-switch v-model="form.pinned" />
         </el-form-item>
         <el-form-item label="内容" required>
           <div class="editor-shell">
@@ -167,7 +176,8 @@ const form = reactive({
   summary: '',
   category: '',
   content: '',
-  status: 'draft'
+  status: 'draft',
+  pinned: false
 })
 
 function sanitizeHtml(html) {
@@ -218,6 +228,7 @@ function resetForm() {
   form.category = ''
   form.content = ''
   form.status = 'draft'
+  form.pinned = false
 }
 
 async function fetchCategories() {
@@ -267,6 +278,7 @@ async function showEditor(row) {
       form.category = response.data.category || ''
       form.content = response.data.content
       form.status = response.data.status
+      form.pinned = !!response.data.pinned
     }
   }
   editorVisible.value = true
@@ -305,7 +317,8 @@ async function submitArticle() {
       summary: form.summary,
       category: form.category || null,
       content: form.content,
-      status: form.status
+      status: form.status,
+      pinned: form.pinned
     }
     const response = editingId.value
       ? await api.admin.updateBlog(editingId.value, payload)
@@ -338,6 +351,22 @@ async function toggleStatus(row) {
     }
   } catch (error) {
     console.error('切换状态失败:', error)
+  }
+}
+
+async function togglePinned(row) {
+  try {
+    const response = await api.admin.getBlog(row.id)
+    if (response.code !== 0) return
+    const article = response.data
+    const nextPinned = !article.pinned
+    const updateResponse = await api.admin.updateBlog(article.id, { ...article, pinned: nextPinned })
+    if (updateResponse.code === 0) {
+      ElMessage.success(nextPinned ? '已置顶' : '已取消置顶')
+      fetchArticles()
+    }
+  } catch (error) {
+    console.error('切换置顶状态失败:', error)
   }
 }
 
@@ -450,6 +479,13 @@ onMounted(() => {
 
 .filter-select {
   width: 160px;
+}
+
+.status-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .pagination {

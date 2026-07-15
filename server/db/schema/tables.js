@@ -338,10 +338,15 @@ const tableDefinitions = [
         category VARCHAR(100),
         content TEXT NOT NULL,
         status VARCHAR(20) DEFAULT 'draft',
+        pinned INTEGER DEFAULT 0,
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
         updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
       )
     `
+  },
+  {
+    logMessage: '博客文章置顶字段初始化完成',
+    sql: 'ALTER TABLE blog_articles ADD COLUMN IF NOT EXISTS pinned INTEGER DEFAULT 0'
   },
   {
     logMessage: '工单表初始化完成',

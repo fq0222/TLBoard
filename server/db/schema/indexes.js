@@ -22,6 +22,7 @@ const indexStatements = [
   'CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets(created_at)',
   'CREATE INDEX IF NOT EXISTS idx_blog_articles_status ON blog_articles(status)',
   'CREATE INDEX IF NOT EXISTS idx_blog_articles_category ON blog_articles(category)',
+  'CREATE INDEX IF NOT EXISTS idx_blog_articles_pinned ON blog_articles(pinned)',
   'CREATE INDEX IF NOT EXISTS idx_blog_articles_updated_at ON blog_articles(updated_at)',
   'CREATE INDEX IF NOT EXISTS idx_ticket_replies_ticket_id ON ticket_replies(ticket_id)',
   'CREATE INDEX IF NOT EXISTS idx_ticket_replies_created_at ON ticket_replies(created_at)',

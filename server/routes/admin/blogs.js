@@ -32,7 +32,8 @@ const articleValidators = [
   body('summary').notEmpty().withMessage('简介不能为空').isLength({ max: 500 }).withMessage('简介不能超过500个字符'),
   body('category').optional({ nullable: true }).isLength({ max: 100 }).withMessage('分类不能超过100个字符'),
   body('content').notEmpty().withMessage('内容不能为空'),
-  body('status').optional().isIn(['draft', 'published']).withMessage('状态不合法')
+  body('status').optional().isIn(['draft', 'published']).withMessage('状态不合法'),
+  body('pinned').optional().isBoolean().withMessage('pinned 必须是布尔值')
 ];
 
 function attachBlogDeleteOptions(req, _res, next) {

@@ -52,10 +52,10 @@ async function listPublishedArticles(db, options = {}) {
   const { whereSql, params, page, limit, offset } = buildPublishedArticleQuery(options);
   const totalRow = await db.prepare(`SELECT COUNT(*) as count FROM blog_articles ${whereSql}`).get(...params);
   const list = await db.prepare(`
-    SELECT id, title, summary, category, status, created_at, updated_at
+    SELECT id, title, summary, category, status, pinned, created_at, updated_at
     FROM blog_articles
     ${whereSql}
-    ORDER BY updated_at DESC, id DESC
+    ORDER BY pinned DESC, updated_at DESC, id DESC
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset);
 

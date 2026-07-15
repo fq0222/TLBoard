@@ -48,6 +48,7 @@ function normalizeArticleInput(data) {
   const category = data.category === undefined || data.category === null ? null : String(data.category).trim();
   const content = String(data.content || '').trim();
   const status = data.status || 'draft';
+  const pinned = data.pinned ? 1 : 0;
 
   if (!title) throw new Error('标题不能为空');
   if (!summary) throw new Error('简介不能为空');
@@ -62,7 +63,8 @@ function normalizeArticleInput(data) {
     summary,
     category: category || null,
     content,
-    status
+    status,
+    pinned
   };
 }
 
@@ -114,7 +116,8 @@ async function updateArticle(db, id, data) {
     summary: data.summary !== undefined ? data.summary : existing.summary,
     category: data.category !== undefined ? data.category : existing.category,
     content: data.content !== undefined ? data.content : existing.content,
-    status: data.status !== undefined ? data.status : existing.status
+    status: data.status !== undefined ? data.status : existing.status,
+    pinned: data.pinned !== undefined ? data.pinned : existing.pinned
   });
 
   await blogRepository.updateArticleFields(db, id, {

@@ -51,12 +51,15 @@ async function ensureBlogArticlesTable(db) {
       category VARCHAR(100),
       content TEXT NOT NULL,
       status VARCHAR(20) DEFAULT 'draft',
+      pinned INTEGER DEFAULT 0,
       created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
       updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
     )
   `);
+  await db.exec('ALTER TABLE blog_articles ADD COLUMN IF NOT EXISTS pinned INTEGER DEFAULT 0');
   await db.exec('CREATE INDEX IF NOT EXISTS idx_blog_articles_status ON blog_articles(status)');
   await db.exec('CREATE INDEX IF NOT EXISTS idx_blog_articles_category ON blog_articles(category)');
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_blog_articles_pinned ON blog_articles(pinned)');
   await db.exec('CREATE INDEX IF NOT EXISTS idx_blog_articles_updated_at ON blog_articles(updated_at)');
 }
 
@@ -71,10 +74,10 @@ async function listAdminArticles(db, options = {}) {
   const { whereSql, params, page, limit, offset } = buildAdminArticleQuery(options);
   const totalRow = await db.prepare(`SELECT COUNT(*) as count FROM blog_articles ${whereSql}`).get(...params);
   const list = await db.prepare(`
-    SELECT id, title, summary, category, status, created_at, updated_at
+    SELECT id, title, summary, category, status, pinned, created_at, updated_at
     FROM blog_articles
     ${whereSql}
-    ORDER BY updated_at DESC, id DESC
+    ORDER BY pinned DESC, updated_at DESC, id DESC
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset);
 
@@ -93,13 +96,14 @@ async function insertArticle(db, payload) {
     category,
     content,
     status,
+    pinned,
     now
   } = payload;
 
   return db.prepare(`
-    INSERT INTO blog_articles (title, summary, category, content, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(title, summary, category, content, status, now, now);
+    INSERT INTO blog_articles (title, summary, category, content, status, pinned, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(title, summary, category, content, status, pinned, now, now);
 }
 
 /**
@@ -128,14 +132,15 @@ async function updateArticleFields(db, articleId, payload) {
     category,
     content,
     status,
+    pinned,
     updatedAt
   } = payload;
 
   await db.prepare(`
     UPDATE blog_articles
-    SET title = ?, summary = ?, category = ?, content = ?, status = ?, updated_at = ?
+    SET title = ?, summary = ?, category = ?, content = ?, status = ?, pinned = ?, updated_at = ?
     WHERE id = ?
-  `).run(title, summary, category, content, status, updatedAt, articleId);
+  `).run(title, summary, category, content, status, pinned, updatedAt, articleId);
 }
 
 /**
