@@ -110,6 +110,25 @@ export function selectRecommendedCfIps(results, limit = 5) {
 }
 
 /**
+ * 从候选池中选择一个兜底占位 IP。
+ * @param {Object[]} ipPool - 后端返回的候选池列表，元素需包含 id 和 ip。
+ * @param {Function} random - 随机数函数，测试时可注入固定值。
+ * @returns {Object|null} 返回单个有效池项；没有有效项时返回 null。
+ */
+export function selectFallbackCfIp(ipPool, random = Math.random) {
+  const candidates = (Array.isArray(ipPool) ? ipPool : [])
+    .filter(item => Number(item?.id) > 0 && String(item?.ip || '').trim())
+
+  if (candidates.length === 0) return null
+
+  const index = Math.min(
+    candidates.length - 1,
+    Math.floor(random() * candidates.length)
+  )
+  return candidates[index]
+}
+
+/**
  * 使用动态工作池并发处理列表，任务结束后立即领取下一项，直到全部完成。
  * @param {Array} items - 待处理的数据列表。
  * @param {Function} worker - 异步任务函数，接收当前数据项。

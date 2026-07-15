@@ -459,7 +459,7 @@ import {
   CF_IP_TEST_INTERVAL as TEST_INTERVAL
 } from '@/utils/cf-ip-test-config'
 import { createCfLatencySample } from '@/utils/cf-ip-browser-test.js'
-import { selectRecommendedCfIps } from '@/utils/cf-ip-optimizer'
+import { selectFallbackCfIp, selectRecommendedCfIps } from '@/utils/cf-ip-optimizer'
 import { getSubscriptionGenerationErrorMessage } from '@/utils/subscription-error'
 
 const userStore = useUserStore()
@@ -488,9 +488,11 @@ const windowWidth = ref(window.innerWidth)
 const onboardingTourVisible = ref(false)
 const onboardingTourCurrent = ref(0)
 const onboardingCompletionSaving = ref(false)
+const optimizeFailureCount = ref(0)
 
 const MOBILE_ONBOARDING_TARGET_CLASS = 'mobile-onboarding-target'
 const MOBILE_ONBOARDING_TARGET_HOST_CLASS = 'mobile-onboarding-target-host'
+const MAX_OPTIMIZE_FAILURE_COUNT = 3
 
 const actionBusy = computed(() => optimizing.value || generatingSubscription.value || replacingSubscription.value)
 const optimizeDialogWidth = computed(() => (windowWidth.value <= 768 ? '94%' : '420px'))
@@ -1114,7 +1116,12 @@ async function startOptimize() {
 
     const selectedIps = selectRecommendedCfIps(ipTestData)
     if (selectedIps.length === 0) {
-      throw new Error('没有测速成功的可用线路')
+      optimizeFailureCount.value += 1
+      if (optimizeFailureCount.value >= MAX_OPTIMIZE_FAILURE_COUNT) {
+        await applyFallbackOptimize(ipPool)
+        return
+      }
+      throw new Error(`当前网络暂时无法完成线路检测，请稍后重试（${optimizeFailureCount.value}/3）`)
     }
 
     optimizeProgress.value = 95
@@ -1127,6 +1134,7 @@ async function startOptimize() {
       optimizeProgress.value = 100
       optimizeStatusText.value = '极速通道已开启'
       cfOptimized.value = true
+      optimizeFailureCount.value = 0
       await fetchUserInfo()
       ElMessage.success('已成功开启极速通道')
     } else {
@@ -1142,6 +1150,40 @@ async function startOptimize() {
       optimizing.value = false
     }, 1500)
   }
+}
+
+/**
+ * 连续检测失败后的备用配置入口。
+ * @param {Object[]} ipPool - 本轮后端返回的候选线路池。
+ * @returns {Promise<void>} 备用配置保存并提示用户后完成。
+ */
+async function applyFallbackOptimize(ipPool) {
+  const fallbackIp = selectFallbackCfIp(ipPool)
+  if (!fallbackIp) {
+    throw new Error('暂无可用线路，请联系管理员')
+  }
+
+  optimizeProgress.value = 95
+  optimizeStatusText.value = '正在启用备用配置...'
+
+  const applyResponse = await api.user.applyCfIps([fallbackIp.id])
+  if (applyResponse.code !== 0) {
+    throw new Error(applyResponse.message || '启用备用配置失败')
+  }
+
+  optimizeProgress.value = 100
+  optimizeStatusText.value = '备用配置已启用'
+  cfOptimized.value = true
+  optimizeFailureCount.value = 0
+  await fetchUserInfo()
+  await ElMessageBox.alert(
+    '当前网络环境无法完成线路检测。这通常与您当前使用的网络有关，并不是系统故障。我们已为您启用备用配置，您可以继续生成订阅；除极速线路以外的其他节点不受影响，可以正常使用。',
+    '已启用备用配置',
+    {
+      confirmButtonText: '我知道了',
+      type: 'warning'
+    }
+  )
 }
 
 async function testSingleIp(ipData) {

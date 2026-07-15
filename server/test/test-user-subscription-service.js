@@ -810,6 +810,39 @@ async function testGenerateSubscriptionShouldKeepRefreshedHy2SourceCache() {
   assert.ok(savedNodes[0].link.includes('alpn=h3'));
 }
 
+/**
+ * 验证未完成极速通道优选时，订阅生成返回面向用户的新提示文案。
+ *
+ * @returns {Promise<void>}
+ */
+async function testGenerateSubscriptionShouldAskForSpeedChannelOptimization() {
+  const originals = {
+    findLatestUserSubscription: subscriptionRepository.findLatestUserSubscription,
+    findSubscriptionUserById: subscriptionRepository.findSubscriptionUserById,
+    listEnabledUserCfIps: subscriptionRepository.listEnabledUserCfIps
+  };
+
+  subscriptionRepository.findLatestUserSubscription = async () => undefined;
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 1,
+    email: 'user@example.com',
+    enabled: 1,
+    expired_at: Math.floor(Date.now() / 1000) + 3600,
+    traffic_used: 0,
+    traffic_limit: 1024
+  });
+  subscriptionRepository.listEnabledUserCfIps = async () => [];
+
+  try {
+    await assert.rejects(
+      subscriptionService.generateSubscription({}, 1, { info() {}, warn() {}, error() {} }),
+      error => error.code === 3001 && error.message === '请先完成极速通道优选'
+    );
+  } finally {
+    Object.assign(subscriptionRepository, originals);
+  }
+}
+
 async function run() {
   await testDefaultSubscriptionContentShouldReturnBase64AndUserinfo();
   await testClashSubscriptionShouldRenderYaml();
@@ -827,6 +860,7 @@ async function run() {
   await testSourceRefreshShouldFetchSharedSubIdOnce();
   await testGenerateSubscriptionShouldRefreshMismatchedSourceCache();
   await testGenerateSubscriptionShouldKeepRefreshedHy2SourceCache();
+  await testGenerateSubscriptionShouldAskForSpeedChannelOptimization();
   console.log('user subscription service tests passed');
 }
 

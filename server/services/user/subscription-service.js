@@ -1187,7 +1187,7 @@ async function generateSubscription(db, userId, logger, options = {}) {
   const cfIps = await subscriptionRepository.listEnabledUserCfIps(db, userId);
 
   if (cfIps.length === 0) {
-    throw createLegacyBusinessError(3001, '请先完成 IP 优选', 400, null);
+    throw createLegacyBusinessError(3001, '请先完成极速通道优选', 400, null);
   }
 
   const servers = await subscriptionRepository.listOnlineServers(db);

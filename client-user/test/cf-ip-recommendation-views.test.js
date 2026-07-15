@@ -48,6 +48,8 @@ const subscriptionSource = readUserView('Subscription.vue')
 const cfOptimizeSource = readUserView('CfOptimize.vue')
 const optimizerImportPattern =
   /import\s*\{[^}]*\bselectRecommendedCfIps\b[^}]*\}\s*from\s*['"]@\/utils\/cf-ip-optimizer['"]/
+const fallbackImportPattern =
+  /import\s*\{[^}]*\bselectFallbackCfIp\b[^}]*\}\s*from\s*['"]@\/utils\/cf-ip-optimizer['"]/
 const profileStartOptimizeSource = extractFunctionBody(
   profileSource,
   'async function startOptimize()'
@@ -64,24 +66,49 @@ const subscriptionTestSingleIpSource = extractFunctionBody(
   subscriptionSource,
   'async function testSingleIp(ipData)'
 )
+const profileFallbackSource = extractFunctionBody(
+  profileSource,
+  'async function applyFallbackOptimize(ipPool)'
+)
+const subscriptionFallbackSource = extractFunctionBody(
+  subscriptionSource,
+  'async function applyFallbackOptimize(ipPool)'
+)
 const selectTop5Source = extractFunctionBody(cfOptimizeSource, 'function selectTop5()')
 
 test('个人中心一键优选使用公共推荐策略处理完整测速结果', () => {
   assert.match(profileSource, optimizerImportPattern)
+  assert.match(profileSource, fallbackImportPattern)
   assert.ok(profileStartOptimizeSource, 'Profile.vue 应存在 startOptimize 函数')
   assert.match(profileStartOptimizeSource, /testStatus:\s*['"]pending['"]/)
   assert.match(profileStartOptimizeSource, /selectRecommendedCfIps\(ipTestData\)/)
+  assert.match(profileStartOptimizeSource, /optimizeFailureCount\.value \+= 1/)
+  assert.match(profileStartOptimizeSource, /await applyFallbackOptimize\(ipPool\)/)
   assert.ok(profileTestSingleIpSource, 'Profile.vue 应存在 testSingleIp 函数')
   assert.match(profileTestSingleIpSource, /ipData\.testStatus\s*=\s*['"]done['"]\s*$/)
 })
 
 test('订阅页一键优选使用公共推荐策略处理完整测速结果', () => {
   assert.match(subscriptionSource, optimizerImportPattern)
+  assert.match(subscriptionSource, fallbackImportPattern)
   assert.ok(subscriptionStartOptimizeSource, 'Subscription.vue 应存在 startOptimize 函数')
   assert.match(subscriptionStartOptimizeSource, /testStatus:\s*['"]pending['"]/)
   assert.match(subscriptionStartOptimizeSource, /selectRecommendedCfIps\(ipTestData\)/)
+  assert.match(subscriptionStartOptimizeSource, /optimizeFailureCount\.value \+= 1/)
+  assert.match(subscriptionStartOptimizeSource, /await applyFallbackOptimize\(ipPool\)/)
   assert.ok(subscriptionTestSingleIpSource, 'Subscription.vue 应存在 testSingleIp 函数')
   assert.match(subscriptionTestSingleIpSource, /ipData\.testStatus\s*=\s*['"]done['"]\s*$/)
+})
+
+test('兜底提示使用弹窗并避免暴露技术细节', () => {
+  assert.ok(profileFallbackSource, 'Profile.vue 应存在 applyFallbackOptimize 函数')
+  assert.ok(subscriptionFallbackSource, 'Subscription.vue 应存在 applyFallbackOptimize 函数')
+  assert.match(profileFallbackSource, /ElMessageBox\.alert/)
+  assert.match(subscriptionFallbackSource, /ElMessageBox\.alert/)
+  assert.match(profileFallbackSource, /当前网络环境无法完成线路检测/)
+  assert.match(subscriptionFallbackSource, /当前网络环境无法完成线路检测/)
+  assert.doesNotMatch(profileFallbackSource, /CF IP|Cloudflare/)
+  assert.doesNotMatch(subscriptionFallbackSource, /CF IP|Cloudflare/)
 })
 
 test('CF 优选页使用公共推荐策略并传入最大选择数', () => {

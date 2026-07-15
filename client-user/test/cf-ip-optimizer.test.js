@@ -8,6 +8,7 @@ import {
   isIpv6,
   compareCfIpResults,
   selectRecommendedCfIps,
+  selectFallbackCfIp,
   runWithConcurrency
 } from '../src/utils/cf-ip-optimizer.js'
 
@@ -180,6 +181,28 @@ test('selectRecommendedCfIps 仅接受至少成功四次的结果', () => {
   ]
 
   assert.deepEqual(selectRecommendedCfIps(items).map(item => item.id), [3, 2])
+})
+
+test('selectFallbackCfIp 从 IP 池中按随机位置选择一个占位项', () => {
+  const items = [
+    { id: 1, ip: '1.1.1.1' },
+    { id: 2, ip: '1.0.0.1' },
+    { id: 3, ip: '8.8.8.8' }
+  ]
+
+  assert.deepEqual(selectFallbackCfIp(items, () => 0.67), items[2])
+})
+
+test('selectFallbackCfIp 过滤无效池项且空池返回 null', () => {
+  assert.deepEqual(
+    selectFallbackCfIp([
+      { id: 0, ip: '1.1.1.1' },
+      { id: 4, ip: '' },
+      { id: 5, ip: '8.8.8.8' }
+    ], () => 0),
+    { id: 5, ip: '8.8.8.8' }
+  )
+  assert.equal(selectFallbackCfIp([], () => 0), null)
 })
 
 test('selectRecommendedCfIps 在成功次数相同时按中位数延迟排序', () => {
