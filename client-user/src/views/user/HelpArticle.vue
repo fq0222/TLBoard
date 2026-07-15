@@ -40,6 +40,11 @@ function sanitizeHtml(html) {
   const template = document.createElement('template')
   template.innerHTML = html
   template.content.querySelectorAll('script, iframe, object, embed, style, link').forEach((node) => node.remove())
+  template.content.querySelectorAll('img').forEach((node) => {
+    node.setAttribute('loading', 'lazy')
+    node.setAttribute('decoding', 'async')
+    node.setAttribute('fetchpriority', 'low')
+  })
   template.content.querySelectorAll('*').forEach((node) => {
     Array.from(node.attributes).forEach((attr) => {
       const name = attr.name.toLowerCase()
