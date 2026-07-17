@@ -1,9 +1,12 @@
 const assert = require('assert');
+const http = require('http');
 const subscriptionService = require('../services/user/subscription-service');
+const sharedSubscriptionService = require('../services/shared/subscription-service');
 const adminUsersService = require('../services/admin/users-service');
 const systemSettingsRouter = require('../routes/admin/system-settings');
 const subscriptionRepository = require('../repositories/subscription-repository');
 const userRepository = require('../repositories/user-repository');
+const xuiActivityTracker = require('../utils/xui-activity-tracker');
 
 /**
  * 构造仅覆盖订阅查询 SQL 的轻量假数据库。
@@ -107,6 +110,43 @@ async function testDefaultSubscriptionContentShouldReturnBase64AndUserinfo() {
     Buffer.from(result.body, 'base64').toString('utf8'),
     'vless://11111111-1111-1111-1111-111111111111@example.com:443?encryption=none&security=tls&type=ws&host=example.com&path=%2F#Test-Node'
   );
+}
+
+/**
+ * 验证原始订阅拉取按前台 3X-UI 请求计入活动追踪，但不增加后台冷却计数。
+ *
+ * @returns {Promise<void>}
+ */
+async function testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgroundCooldown() {
+  const observedActiveCounts = [];
+  const backgroundCountBefore = xuiActivityTracker.getBackgroundRequestCount();
+  const server = http.createServer((req, res) => {
+    observedActiveCounts.push(xuiActivityTracker.getActiveCount());
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(Buffer.from('vless://node').toString('base64'));
+  });
+
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+
+  try {
+    const { port } = server.address();
+    const content = await sharedSubscriptionService.fetchOriginalSubscription(
+      `http://127.0.0.1:${port}/sub/`,
+      'token',
+      { timeout: 1000 }
+    );
+
+    assert.strictEqual(content, Buffer.from('vless://node').toString('base64'));
+    assert.deepStrictEqual(observedActiveCounts, [1]);
+    assert.strictEqual(
+      xuiActivityTracker.getBackgroundRequestCount(),
+      backgroundCountBefore
+    );
+    assert.strictEqual(xuiActivityTracker.getActiveCount(), 0);
+  } finally {
+    xuiActivityTracker.reset();
+    await new Promise(resolve => server.close(resolve));
+  }
 }
 
 /**
@@ -845,6 +885,7 @@ async function testGenerateSubscriptionShouldAskForSpeedChannelOptimization() {
 
 async function run() {
   await testDefaultSubscriptionContentShouldReturnBase64AndUserinfo();
+  await testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgroundCooldown();
   await testClashSubscriptionShouldRenderYaml();
   await testClashSubscriptionShouldUseSystemSettingsHeaders();
   await testSubscriptionHeaderShouldIgnoreReferralTrafficLimit();

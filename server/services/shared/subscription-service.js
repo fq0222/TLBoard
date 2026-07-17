@@ -6,6 +6,7 @@
 const https = require('https');
 const http = require('http');
 const { createLogger } = require('../../utils/logger');
+const xuiActivityTracker = require('../../utils/xui-activity-tracker');
 
 const logger = createLogger('SUBSCRIPTION-SERVICE');
 const SUBSCRIPTION_FETCH_TIMEOUT = 15000;
@@ -41,7 +42,14 @@ function getProtocolAliases(protocol) {
  * @returns {Promise<string>} 原始订阅内容
  */
 async function fetchOriginalSubscription(subUrl, subId, options = {}) {
-  return new Promise((resolve, reject) => {
+  const source = xuiActivityTracker.getCurrentSource();
+  if (source === 'background') {
+    await xuiActivityTracker.waitForForegroundIdle();
+  }
+
+  xuiActivityTracker.beginRequest(source);
+  try {
+    return await new Promise((resolve, reject) => {
     const fullUrl = `${subUrl}${subId}`;
     const client = fullUrl.startsWith('https') ? https : http;
     const timeout = Number.isFinite(options.timeout) && options.timeout > 0
@@ -152,6 +160,9 @@ async function fetchOriginalSubscription(subUrl, subId, options = {}) {
 
     request.on('error', handleRequestError);
   });
+  } finally {
+    xuiActivityTracker.endRequest(source);
+  }
 }
 
 /**
