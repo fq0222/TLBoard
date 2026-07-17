@@ -17,6 +17,7 @@ const { DISABLE_REASONS } = require('../shared/renew-policy');
 const subscriptionRepository = require('../../repositories/subscription-repository');
 const { runWithConcurrency } = require('../../utils/concurrency');
 const { generatePublicSubscriptionId } = require('../../utils/subscription-id');
+const { getUserAppBaseUrl } = require('../../shared/utils/site-url');
 
 const SOURCE_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60;
 const SOURCE_FETCH_CONCURRENCY = 10;
@@ -25,6 +26,11 @@ const CLASH_CONFIG_NAME_KEY = 'clash_config_name';
 const CLASH_PROFILE_UPDATE_INTERVAL_KEY = 'clash_profile_update_interval';
 const DEFAULT_CLASH_CONFIG_NAME = '天澜大陆';
 const DEFAULT_CLASH_PROFILE_UPDATE_INTERVAL_HOURS = '2';
+const FALLBACK_NODE_HOST = 'invalid.subscription.local';
+const FALLBACK_NODE_UUIDS = [
+  '00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000002'
+];
 
 /**
  * 用户端订阅服务。
@@ -1086,6 +1092,102 @@ function buildClashSubscriptionHeaders(subscription, config) {
 }
 
 /**
+ * 构造订阅失败时展示给客户端的假节点。
+ * 职责：将官网入口和失败原因伪装成普通节点名称，确保订阅客户端刷新后能直接看到提示。
+ * 关键参数：reason 为归一化后的用户可读原因，siteUrl 为空时仅展示“官网地址”。
+ *
+ * @param {string} reason - 失败原因文案
+ * @param {string} [siteUrl=''] - 官网地址
+ * @returns {Array<{node_name:string,link:string}>} 两个可解析的假节点
+ */
+function buildFallbackSubscriptionNodes(reason, siteUrl = '') {
+  const siteLabel = String(siteUrl || '').trim()
+    ? `官网地址 ${String(siteUrl).trim()}`
+    : '官网地址';
+  const names = [siteLabel, reason];
+
+  return names.map((nodeName, index) => ({
+    node_name: nodeName,
+    link: `vmess://${FALLBACK_NODE_UUIDS[index]}@${FALLBACK_NODE_HOST}:443?security=none&type=tcp#${encodeURIComponent(nodeName)}`
+  }));
+}
+
+/**
+ * 构造订阅失败兜底响应。
+ * 职责：失败时仍输出合法的 Base64 或 Clash 内容，避免订阅客户端只得到 HTTP 错误。
+ * 核心分支：clash=1 返回 YAML，其余返回 Base64 文本。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} query - 请求查询参数
+ * @param {string} reason - 失败原因文案
+ * @param {Object} [subscription] - 可选订阅记录，用于保留流量响应头
+ * @returns {Promise<{contentType:string,headers:Object,body:string,email:string}>} 兜底订阅内容
+ */
+async function buildFallbackSubscriptionContent(db, query, reason, subscription = {}) {
+  const fallbackSubscription = {
+    email: subscription.email || '',
+    traffic_used: subscription.traffic_used || 0,
+    traffic_limit: subscription.traffic_limit || 0,
+    referral_traffic_limit: subscription.referral_traffic_limit || 0,
+    expire_at: subscription.expire_at || 0
+  };
+  const nodes = buildFallbackSubscriptionNodes(reason, getUserAppBaseUrl());
+
+  if (query.clash === '1') {
+    const clashHeaderConfig = await getClashSubscriptionHeaderConfig(db);
+    return {
+      email: fallbackSubscription.email,
+      contentType: 'text/yaml; charset=utf-8',
+      headers: buildClashSubscriptionHeaders(fallbackSubscription, clashHeaderConfig),
+      body: generateClashConfig(nodes, fallbackSubscription)
+    };
+  }
+
+  return {
+    email: fallbackSubscription.email,
+    contentType: 'text/plain; charset=utf-8',
+    headers: buildSubscriptionUserinfoHeaders(fallbackSubscription),
+    body: Buffer.from(generateV2RayConfig(nodes)).toString('base64')
+  };
+}
+
+/**
+ * 根据用户订阅状态生成失败兜底内容。
+ * 职责：统一缓存命中和缓存缺失后的状态判定，避免把需要续费误判为链接无效。
+ * 核心分支：管理员禁用优先；过期或普通禁用返回续费；无状态异常时返回 null 交给调用方继续处理。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} query - 请求查询参数
+ * @param {Object} subscription - 用户或订阅缓存记录
+ * @returns {Promise<Object|null>} 需要兜底时返回订阅内容，否则返回 null
+ */
+async function buildStatusFallbackContent(db, query, subscription) {
+  if (!subscription) {
+    return null;
+  }
+
+  if (!isEnabledValue(subscription.enabled) && subscription.disable_reason === DISABLE_REASONS.ADMIN) {
+    return buildFallbackSubscriptionContent(db, query, '被管理员禁用', subscription);
+  }
+
+  if (!isEnabledValue(subscription.enabled)
+    && [DISABLE_REASONS.TRAFFIC_LIMIT, DISABLE_REASONS.EXPIRED].includes(subscription.disable_reason)) {
+    return buildFallbackSubscriptionContent(db, query, '需要续费', subscription);
+  }
+
+  try {
+    assertSubscriptionNotExpired(subscription);
+  } catch (error) {
+    if (error && error.isLegacyBusinessError) {
+      return buildFallbackSubscriptionContent(db, query, '需要续费', subscription);
+    }
+    throw error;
+  }
+
+  return null;
+}
+
+/**
  * 将公告标题规范化为可显示的虚拟节点名称。
  *
  * @param {string} title - 公告标题
@@ -1630,17 +1732,20 @@ async function getSubscriptionContent(db, token, query) {
   const subscription = await subscriptionRepository.findSubscriptionContentByToken(db, token);
 
   if (!subscription) {
+    const user = await subscriptionRepository.findSubscriptionUserBySubId(db, token);
+    const fallback = await buildStatusFallbackContent(db, query, user);
+    if (fallback) {
+      return fallback;
+    }
+    if (user) {
+      return buildFallbackSubscriptionContent(db, query, '订阅链接无效需要重新生成', user);
+    }
     throw createLegacyBusinessError(2004, '订阅链接无效或尚未生成', 400, null);
   }
 
-  if (!isEnabledValue(subscription.enabled) && subscription.disable_reason === DISABLE_REASONS.ADMIN) {
-    throw createLegacyBusinessError(2003, `账号 ${subscription.email} 已被禁用，请联系管理员`, 400, null);
-  }
-
-  assertSubscriptionNotExpired(subscription);
-
-  if (!isEnabledValue(subscription.enabled)) {
-    throw createLegacyBusinessError(2003, `账号 ${subscription.email} 已被禁用`, 400, null);
+  const fallback = await buildStatusFallbackContent(db, query, subscription);
+  if (fallback) {
+    return fallback;
   }
 
   const nodes = await appendAnnouncementVirtualNodes(

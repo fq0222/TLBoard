@@ -43,7 +43,8 @@ function createIpLimiter(options = {}) {
   const {
     windowMs = 15 * 60 * 1000,
     max = 3,
-    message = { code: 429, message: '请求过于频繁，请稍后再试', data: null }
+    message = { code: 429, message: '请求过于频繁，请稍后再试', data: null },
+    skipSuccessfulRequests = false
   } = options;
 
   return rateLimit({
@@ -52,6 +53,7 @@ function createIpLimiter(options = {}) {
     message,
     keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown',
     headers: true,
+    skipSuccessfulRequests,
     handler: (req, res) => {
       res.status(429).json(message);
     }
@@ -78,11 +80,20 @@ const passwordResetSubmitLimiter = createIpLimiter({
   message: { code: 429, message: '密码重置尝试过于频繁，请15分钟后再试', data: null }
 });
 
+// 订阅无效 token 限制：单 IP 每 15 分钟最多 3 次失败，成功订阅响应不计入。
+const subscriptionInvalidTokenLimiter = createIpLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  message: { code: 429, message: '订阅链接尝试过于频繁，请15分钟后再试', data: null },
+  skipSuccessfulRequests: true
+});
+
 module.exports = {
   createAuthLimiter,
   createIpLimiter,
   userLoginLimiter,
   userRegisterLimiter,
   passwordResetEmailLimiter,
-  passwordResetSubmitLimiter
+  passwordResetSubmitLimiter,
+  subscriptionInvalidTokenLimiter
 };

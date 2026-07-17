@@ -40,6 +40,33 @@ function createFakeDb(subscription, settings = {}) {
   };
 }
 
+function createFakeDbWithUserSubscriptionId(user, settings = {}) {
+  return {
+    prepare(sql) {
+      return {
+        all() {
+          if (sql.includes('FROM announcements')) {
+            return [];
+          }
+          throw new Error(`未支持的 all 查询: ${sql}`);
+        },
+        get(param) {
+          if (sql.includes('FROM system_settings')) {
+            return settings[param] === undefined ? undefined : { value: settings[param] };
+          }
+          if (sql.includes('FROM user_subscriptions')) {
+            return undefined;
+          }
+          if (sql.includes('FROM users') && sql.includes('sub_id') && param === user?.sub_id) {
+            return user;
+          }
+          return undefined;
+        }
+      };
+    }
+  };
+}
+
 /**
  * 构造仅覆盖订阅配置读写的轻量系统设置数据库。
  *
@@ -303,29 +330,133 @@ async function testSystemSettingsSubscriptionSave() {
  *
  * @returns {Promise<void>}
  */
-async function testDisabledSubscriptionShouldThrowBusinessError() {
+function decodeSubscriptionBody(result) {
+  return decodeURIComponent(Buffer.from(result.body, 'base64').toString('utf8'));
+}
+
+async function testDisabledSubscriptionShouldReturnFallbackNodes() {
   const subscription = {
     sub_id: 'sub-token-3',
     email: 'user@example.com',
     enabled: 0,
+    disable_reason: 'admin',
     traffic_used: 0,
     traffic_limit: 0,
     expire_at: 0,
     nodes_data: '[]'
   };
 
+  const result = await subscriptionService.getSubscriptionContent(
+    createFakeDb(subscription),
+    'sub-token-3',
+    {}
+  );
+
+  const content = decodeSubscriptionBody(result);
+  assert.strictEqual(result.contentType, 'text/plain; charset=utf-8');
+  assert.ok(content.includes('官网地址'));
+  assert.ok(content.includes('被管理员禁用'));
+  assert.strictEqual(content.split('\n').length, 2);
+}
+
+async function testInvalidSubscriptionShouldReturnRegenerateFallbackNodes() {
   await assert.rejects(
     () => subscriptionService.getSubscriptionContent(
-      createFakeDb(subscription),
-      'sub-token-3',
+      createFakeDb(undefined),
+      'missing-token',
       {}
     ),
     (error) => (
       error.isLegacyBusinessError
-      && error.code === 2003
-      && error.message === '账号 user@example.com 已被禁用'
+      && error.code === 2004
+      && error.statusCode === 400
     )
   );
+}
+
+async function testMissingCacheActiveUserShouldReturnRegenerateFallbackNodes() {
+  const result = await subscriptionService.getSubscriptionContent(
+    createFakeDbWithUserSubscriptionId({
+      sub_id: 'sub-token-active-missing-cache',
+      email: 'active@example.com',
+      enabled: 1,
+      traffic_used: 0,
+      traffic_limit: 10737418240,
+      expire_at: 0,
+      plan_type: 'lifetime'
+    }),
+    'sub-token-active-missing-cache',
+    {}
+  );
+
+  const content = decodeSubscriptionBody(result);
+  assert.ok(content.includes('官网地址'));
+  assert.ok(content.includes('订阅链接无效需要重新生成'));
+}
+
+async function testMissingCacheExpiredUserShouldReturnRenewFallbackNodes() {
+  const result = await subscriptionService.getSubscriptionContent(
+    createFakeDbWithUserSubscriptionId({
+      sub_id: 'sub-token-missing-cache',
+      email: 'expired@example.com',
+      enabled: 1,
+      traffic_used: 0,
+      traffic_limit: 10737418240,
+      expire_at: 1,
+      plan_type: 'timed'
+    }),
+    'sub-token-missing-cache',
+    {}
+  );
+
+  const content = decodeSubscriptionBody(result);
+  assert.ok(content.includes('官网地址'));
+  assert.ok(content.includes('需要续费'));
+  assert.ok(!content.includes('订阅链接无效需要重新生成'));
+}
+
+async function testExpiredSubscriptionShouldReturnRenewFallbackNodes() {
+  const subscription = {
+    sub_id: 'sub-token-expired',
+    email: 'user@example.com',
+    enabled: 1,
+    traffic_used: 0,
+    traffic_limit: 0,
+    expire_at: 1,
+    plan_type: 'timed',
+    nodes_data: '[]'
+  };
+
+  const result = await subscriptionService.getSubscriptionContent(
+    createFakeDb(subscription),
+    'sub-token-expired',
+    {}
+  );
+
+  const content = decodeSubscriptionBody(result);
+  assert.ok(content.includes('官网地址'));
+  assert.ok(content.includes('需要续费'));
+}
+
+async function testFallbackSubscriptionShouldRenderClashYaml() {
+  const result = await subscriptionService.getSubscriptionContent(
+    createFakeDbWithUserSubscriptionId({
+      sub_id: 'clash-missing-cache',
+      email: 'active@example.com',
+      enabled: 1,
+      traffic_used: 0,
+      traffic_limit: 10737418240,
+      expire_at: 0,
+      plan_type: 'lifetime'
+    }),
+    'clash-missing-cache',
+    { clash: '1' }
+  );
+
+  assert.strictEqual(result.contentType, 'text/yaml; charset=utf-8');
+  assert.ok(result.body.includes('name: 官网地址'));
+  assert.ok(result.body.includes('name: 订阅链接无效需要重新生成'));
+  assert.ok(result.body.includes('type: vmess'));
 }
 
 /**
@@ -891,7 +1022,12 @@ async function run() {
   await testSubscriptionHeaderShouldIgnoreReferralTrafficLimit();
   await testSystemSettingsSubscriptionDefaults();
   await testSystemSettingsSubscriptionSave();
-  await testDisabledSubscriptionShouldThrowBusinessError();
+  await testDisabledSubscriptionShouldReturnFallbackNodes();
+  await testInvalidSubscriptionShouldReturnRegenerateFallbackNodes();
+  await testMissingCacheActiveUserShouldReturnRegenerateFallbackNodes();
+  await testMissingCacheExpiredUserShouldReturnRenewFallbackNodes();
+  await testExpiredSubscriptionShouldReturnRenewFallbackNodes();
+  await testFallbackSubscriptionShouldRenderClashYaml();
   await testAdminSubscriptionShouldReuseUserIncrementalGenerator();
   await testSubscriptionInfoShouldHideNodesBeforeFirstGeneration();
   await testPublicSubscriptionIdShouldUse32HexChars();

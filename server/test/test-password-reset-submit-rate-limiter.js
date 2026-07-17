@@ -1,6 +1,9 @@
 const assert = require('assert');
 const express = require('express');
-const { passwordResetSubmitLimiter } = require('../middleware/rate-limiter');
+const {
+  passwordResetSubmitLimiter,
+  subscriptionInvalidTokenLimiter
+} = require('../middleware/rate-limiter');
 
 /**
  * 启动仅用于限流验证的临时 HTTP 服务。
@@ -26,6 +29,28 @@ async function createTestServer() {
   };
 }
 
+/**
+ * 启动订阅无效 token 限流测试服务。
+ * 职责：隔离验证订阅限流器只统计失败响应，避免依赖真实订阅路由和数据库。
+ *
+ * @param {Function} handler - 测试路由处理函数
+ * @returns {Promise<{baseUrl:string,close:Function}>} 临时服务信息
+ */
+async function createSubscriptionLimiterTestServer(handler) {
+  const app = express();
+  app.set('trust proxy', true);
+  app.get('/sub/:token', subscriptionInvalidTokenLimiter, handler);
+
+  const server = await new Promise((resolve) => {
+    const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
+  });
+
+  return {
+    baseUrl: `http://127.0.0.1:${server.address().port}`,
+    close: () => new Promise((resolve) => server.close(resolve))
+  };
+}
+
 async function postReset(baseUrl) {
   return fetch(`${baseUrl}/reset-password`, {
     method: 'POST',
@@ -36,6 +61,14 @@ async function postReset(baseUrl) {
       token: 'a'.repeat(64),
       password: 'Newpass123'
     })
+  });
+}
+
+async function getSubscription(baseUrl, token = 'missing-token', ip = '127.0.0.1') {
+  return fetch(`${baseUrl}/sub/${token}`, {
+    headers: {
+      'X-Forwarded-For': ip
+    }
   });
 }
 
@@ -56,9 +89,53 @@ async function testResetPasswordSubmitRateLimit() {
   }
 }
 
+async function testInvalidSubscriptionTokenShouldBeLimitedAfterThreeFailures() {
+  const server = await createSubscriptionLimiterTestServer((req, res) => {
+    res.status(400).json({ code: 2004, message: '订阅链接无效或尚未生成', data: null });
+  });
+
+  try {
+    const statuses = [];
+    for (let index = 0; index < 4; index += 1) {
+      const response = await getSubscription(server.baseUrl, 'missing-token', '192.0.2.10');
+      statuses.push(response.status);
+    }
+
+    assert.deepStrictEqual(statuses, [400, 400, 400, 429]);
+  } finally {
+    await server.close();
+  }
+}
+
+async function testSuccessfulSubscriptionShouldNotCountTowardInvalidTokenLimit() {
+  let requestCount = 0;
+  const server = await createSubscriptionLimiterTestServer((req, res) => {
+    requestCount += 1;
+    if (requestCount <= 3) {
+      res.type('text/plain').send('fake subscription');
+      return;
+    }
+    res.status(400).json({ code: 2004, message: '订阅链接无效或尚未生成', data: null });
+  });
+
+  try {
+    const statuses = [];
+    for (let index = 0; index < 4; index += 1) {
+      const response = await getSubscription(server.baseUrl, `token-${index}`, '192.0.2.11');
+      statuses.push(response.status);
+    }
+
+    assert.deepStrictEqual(statuses, [200, 200, 200, 400]);
+  } finally {
+    await server.close();
+  }
+}
+
 async function run() {
   await testResetPasswordSubmitRateLimit();
-  console.log('password reset submit rate limiter tests passed');
+  await testInvalidSubscriptionTokenShouldBeLimitedAfterThreeFailures();
+  await testSuccessfulSubscriptionShouldNotCountTowardInvalidTokenLimit();
+  console.log('rate limiter tests passed');
 }
 
 run().catch((error) => {

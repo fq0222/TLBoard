@@ -7,6 +7,7 @@
 const express = require('express');
 const { param, query } = require('express-validator');
 const { authenticateUser } = require('../../middleware/auth-user');
+const { subscriptionInvalidTokenLimiter } = require('../../middleware/rate-limiter');
 const subscriptionController = require('../../controllers/user/subscription-controller');
 const subscriptionService = require('../../services/user/subscription-service');
 
@@ -15,7 +16,7 @@ const router = express.Router();
 router.post('/generate', authenticateUser, subscriptionController.generateSubscription);
 router.post('/replace-link', authenticateUser, subscriptionController.replaceSubscriptionLink);
 router.get('/', authenticateUser, subscriptionController.getSubscriptionInfo);
-router.get('/sub/:token', [
+router.get('/sub/:token', subscriptionInvalidTokenLimiter, [
   param('token')
     .notEmpty()
     .withMessage('订阅token不能为空'),

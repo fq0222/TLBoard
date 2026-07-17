@@ -233,6 +233,26 @@ async function findSubscriptionContentByToken(db, token) {
 }
 
 /**
+ * 按公开订阅 ID 查询用户状态。
+ * 职责：订阅缓存缺失时仍能判断该链接是否属于已存在用户，从而返回续费或禁用提示。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {string} subId - users.sub_id 公开订阅 ID
+ * @returns {Promise<Object|undefined>} 用户订阅状态
+ */
+async function findSubscriptionUserBySubId(db, subId) {
+  return db.prepare(`
+    SELECT
+      u.id, u.email, u.sub_id,
+      u.traffic_used, u.traffic_limit, u.referral_traffic_limit, u.expire_at, u.enabled, u.disable_reason,
+      p.plan_type
+    FROM users u
+    LEFT JOIN plans p ON u.plan_id = p.id
+    WHERE u.sub_id = ?
+  `).get(subId);
+}
+
+/**
  * 查询单个系统设置值。
  *
  * @param {Object} db - 数据库代理对象
@@ -287,6 +307,7 @@ module.exports = {
   replaceUserSubscriptionId,
   deleteUserSubscriptionCaches,
   findSubscriptionContentByToken,
+  findSubscriptionUserBySubId,
   findSystemSettingByKey,
   listNodeShowAnnouncements,
   listServerNodes
