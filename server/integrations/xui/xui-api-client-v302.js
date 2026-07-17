@@ -84,7 +84,11 @@ class XuiApiClientV302 {
    * @returns {Promise<Object>} 接口响应数据。
    */
   async request(method, path, data, options = {}) {
-    xuiActivityTracker.beginRequest();
+    const source = xuiActivityTracker.getCurrentSource();
+    if (source === 'background') {
+      await xuiActivityTracker.waitForForegroundIdle();
+    }
+    xuiActivityTracker.beginRequest(source);
     try {
       const response = await this.api.request({
         method,
@@ -94,7 +98,7 @@ class XuiApiClientV302 {
       });
       return response.data;
     } finally {
-      xuiActivityTracker.endRequest();
+      xuiActivityTracker.endRequest(source);
     }
   }
 
@@ -104,7 +108,11 @@ class XuiApiClientV302 {
    * @returns {Promise<Buffer>} 下载结果。
    */
   async download(path) {
-    xuiActivityTracker.beginRequest();
+    const source = xuiActivityTracker.getCurrentSource();
+    if (source === 'background') {
+      await xuiActivityTracker.waitForForegroundIdle();
+    }
+    xuiActivityTracker.beginRequest(source);
     try {
       const response = await this.api.request({
         method: 'get',
@@ -113,7 +121,7 @@ class XuiApiClientV302 {
       });
       return response.data;
     } finally {
-      xuiActivityTracker.endRequest();
+      xuiActivityTracker.endRequest(source);
     }
   }
 

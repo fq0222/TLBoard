@@ -2,7 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const Module = require('node:module');
 const { XuiJobScheduler } = require('../jobs/xui-job-scheduler');
+const xuiActivityTracker = require('../utils/xui-activity-tracker');
 
 /**
  * 等待指定毫秒数，用于控制异步任务的执行时序。
@@ -133,7 +135,45 @@ function loadJobsIndexForTest({ throwOnRegister }) {
   };
 }
 
-test('仅三个指定定时任务接入统一调度器', () => {
+function loadXuiApiClientWithAxiosStub(requests) {
+  const entryPath = require.resolve('../integrations/xui/xui-api-client-v302');
+  const originalLoad = Module._load;
+  const originalCache = require.cache[entryPath];
+
+  delete require.cache[entryPath];
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === 'axios') {
+      return {
+        create() {
+          return {
+            interceptors: {
+              request: { use() {} },
+              response: { use() {} }
+            },
+            async request(config) {
+              requests.push({ config, at: Date.now() });
+              return { data: { success: true } };
+            }
+          };
+        }
+      };
+    }
+    return originalLoad(request, parent, isMain);
+  };
+
+  try {
+    return require(entryPath);
+  } finally {
+    Module._load = originalLoad;
+    if (originalCache) {
+      require.cache[entryPath] = originalCache;
+    } else {
+      delete require.cache[entryPath];
+    }
+  }
+}
+
+test('四个指定定时任务接入统一调度器', () => {
   const handlersDir = path.join(__dirname, '..', 'jobs', 'handlers');
   const scheduledHandlers = fs.readdirSync(handlersDir)
     .filter(file => file.endsWith('.js'))
@@ -143,6 +183,7 @@ test('仅三个指定定时任务接入统一调度器', () => {
 
   assert.deepEqual(scheduledHandlers, [
     'sync-traffic.js',
+    'sync-xui-tasks.js',
     'sync-xui-users.js',
     'telegram-server-health-check.js'
   ]);
@@ -185,7 +226,9 @@ test('不同任务串行执行，并从上一个任务结束后计算冷却时�
   try {
     scheduler.schedule('first', async () => {
       events.push({ name: 'first-start', at: Date.now() });
+      xuiActivityTracker.beginRequest();
       await delay(15);
+      xuiActivityTracker.endRequest();
       events.push({ name: 'first-end', at: Date.now() });
     });
     await waitFor(
@@ -209,6 +252,87 @@ test('不同任务串行执行，并从上一个任务结束后计算冷却时�
     ]);
   } finally {
     scheduler.stop();
+  }
+});
+
+test('未访问 3X-UI 的空后台任务不会触发冷却', async () => {
+  const events = [];
+  const scheduler = new XuiJobScheduler({ cooldownMs: 60 });
+
+  try {
+    scheduler.schedule('empty', async () => {
+      events.push({ name: 'empty-end', at: Date.now() });
+    });
+    await waitFor(() => events.length === 1);
+
+    const emptyEnd = events[0].at;
+    scheduler.schedule('after-empty', async () => {
+      events.push({ name: 'after-empty-start', at: Date.now() });
+    });
+
+    await waitFor(() => events.length === 2);
+    assert.ok(events[1].at - emptyEnd < 30);
+  } finally {
+    scheduler.stop();
+    xuiActivityTracker.reset();
+  }
+});
+
+test('前台 3X-UI 请求结束后，后台任务等待空闲窗口再启动', async () => {
+  const events = [];
+  const scheduler = new XuiJobScheduler({
+    cooldownMs: 0,
+    foregroundIdleMs: 30
+  });
+
+  try {
+    xuiActivityTracker.beginRequest('foreground');
+    scheduler.schedule('background', async () => {
+      events.push({ name: 'background-start', at: Date.now() });
+    });
+
+    await delay(10);
+    assert.deepEqual(events, []);
+
+    const endedAt = Date.now();
+    xuiActivityTracker.endRequest('foreground');
+
+    await waitFor(() => events.length === 1);
+    assert.ok(events[0].at - endedAt >= 25);
+  } finally {
+    scheduler.stop();
+    xuiActivityTracker.reset();
+  }
+});
+
+test('后台 3X-UI API 请求会等待前台请求空闲', async () => {
+  const requests = [];
+  const XuiApiClient = loadXuiApiClientWithAxiosStub(requests);
+  const client = new XuiApiClient('https://xui.example.com', 'token');
+  const originalWaitForForegroundIdle = xuiActivityTracker.waitForForegroundIdle;
+
+  try {
+    xuiActivityTracker.waitForForegroundIdle = options => originalWaitForForegroundIdle({
+      ...options,
+      idleMs: 30,
+      checkIntervalMs: 5
+    });
+
+    xuiActivityTracker.beginRequest('foreground');
+    const promise = xuiActivityTracker.runAsBackground(() => client.getInbounds());
+
+    await delay(10);
+    assert.equal(requests.length, 0);
+
+    const endedAt = Date.now();
+    xuiActivityTracker.endRequest('foreground');
+
+    await promise;
+    assert.equal(requests.length, 1);
+    assert.ok(requests[0].at - endedAt >= 25);
+  } finally {
+    xuiActivityTracker.waitForForegroundIdle = originalWaitForForegroundIdle;
+    xuiActivityTracker.reset();
   }
 });
 

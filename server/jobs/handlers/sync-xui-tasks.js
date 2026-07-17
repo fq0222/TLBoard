@@ -8,6 +8,7 @@ const trafficManager = require('../../services/shared/traffic-manager');
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const { createLogger } = require('../../utils/logger');
+const xuiJobScheduler = require('../xui-job-scheduler');
 
 const logger = createLogger('JOBS');
 
@@ -24,15 +25,26 @@ let isXuiSyncTaskRunning = false;
  */
 function registerXuiSyncTaskJob({ db, intervals, registerTimeout }) {
   registerTimeout(async () => {
-    await runXuiSyncTasks(db);
+    scheduleXuiSyncTasks(db);
   }, 30 * 1000);
 
   const interval = setInterval(async () => {
-    await runXuiSyncTasks(db);
+    scheduleXuiSyncTasks(db);
   }, 60 * 1000);
 
   intervals.push(interval);
   logger.info('3X-UI 同步重试队列 worker 已注册（每1分钟执行一次）');
+}
+
+/**
+ * 将 3X-UI 同步重试队列提交到统一调度器。
+ * @param {Object} db - 数据库实例
+ * @returns {void}
+ */
+function scheduleXuiSyncTasks(db) {
+  xuiJobScheduler.schedule('xui-sync-tasks', async () => {
+    await runXuiSyncTasks(db);
+  });
 }
 
 /**
@@ -211,6 +223,7 @@ async function runXuiSyncTasks(db) {
 
 module.exports = {
   registerXuiSyncTaskJob,
+  scheduleXuiSyncTasks,
   runXuiSyncTasks,
   shouldSkipStaleStatusSyncTask
 };
