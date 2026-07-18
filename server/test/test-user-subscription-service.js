@@ -392,7 +392,7 @@ async function testMissingCacheActiveUserShouldReturnRegenerateFallbackNodes() {
 
   const content = decodeSubscriptionBody(result);
   assert.ok(content.includes('官网地址'));
-  assert.ok(content.includes('订阅链接无效需要重新生成'));
+  assert.ok(content.includes('订阅链接已失效，请到官网重新生成'));
 }
 
 async function testMissingCacheExpiredUserShouldReturnRenewFallbackNodes() {
@@ -413,7 +413,7 @@ async function testMissingCacheExpiredUserShouldReturnRenewFallbackNodes() {
   const content = decodeSubscriptionBody(result);
   assert.ok(content.includes('官网地址'));
   assert.ok(content.includes('需要续费'));
-  assert.ok(!content.includes('订阅链接无效需要重新生成'));
+  assert.ok(!content.includes('订阅链接已失效，请到官网重新生成'));
 }
 
 async function testExpiredSubscriptionShouldReturnRenewFallbackNodes() {
@@ -456,7 +456,7 @@ async function testFallbackSubscriptionShouldRenderClashYaml() {
 
   assert.strictEqual(result.contentType, 'text/yaml; charset=utf-8');
   assert.ok(result.body.includes('name: 官网地址'));
-  assert.ok(result.body.includes('name: 订阅链接无效需要重新生成'));
+  assert.ok(result.body.includes('name: 订阅链接已失效，请到官网重新生成'));
   assert.ok(result.body.includes('type: vmess'));
 }
 

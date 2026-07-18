@@ -1832,7 +1832,7 @@ async function getSubscriptionContent(db, token, query) {
       return fallback;
     }
     if (user) {
-      return buildFallbackSubscriptionContent(db, query, '订阅链接无效需要重新生成', user);
+      return buildFallbackSubscriptionContent(db, query, '订阅链接已失效，请到官网重新生成', user);
     }
     throw createLegacyBusinessError(2004, '订阅链接无效或尚未生成', 400, null);
   }
