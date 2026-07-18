@@ -994,6 +994,102 @@ async function testGenerateSubscriptionShouldQueueFailedSourceRefreshRetry() {
 }
 
 /**
+ * 验证后台模板重试成功后会重新执行完整订阅生成并保存用户订阅缓存。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshRetryShouldRegenerateSubscriptionCache() {
+  const originals = {
+    findLatestUserSubscription: subscriptionRepository.findLatestUserSubscription,
+    findSubscriptionUserById: subscriptionRepository.findSubscriptionUserById,
+    listEnabledUserCfIps: subscriptionRepository.listEnabledUserCfIps,
+    listOnlineServers: subscriptionRepository.listOnlineServers,
+    listNodeSnapshots: subscriptionRepository.listNodeSnapshots,
+    listUserNodeConfigs: subscriptionRepository.listUserNodeConfigs,
+    listUserSubscriptionSources: subscriptionRepository.listUserSubscriptionSources,
+    upsertSubscriptionSource: subscriptionRepository.upsertSubscriptionSource,
+    saveUserSubscriptionCache: subscriptionRepository.saveUserSubscriptionCache
+  };
+  const { computeNodeFingerprint, computeServerFingerprint } = require('../services/shared/subscription-cache-service');
+  const link = 'vless://b8c40026-06cd-4e53-98a2-af99f4c76972@good.example.com:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.amd.com&fp=chrome&pbk=c6AJu3vTFA3nacnnaGuS-3CxFNUcpAymqQTL7GFXSxg&sid=c5a3decc&type=tcp&headerType=none#retry';
+  const server = {
+    id: 1,
+    name: '测试',
+    sub_url: 'https://xui.example/sub/',
+    host: 'good.example.com',
+    client_port: 443
+  };
+  const config = {
+    user_id: 7,
+    server_id: 1,
+    inbound_id: 12,
+    sub_id: 'bad-sub-id',
+    uuid: 'b8c40026-06cd-4e53-98a2-af99f4c76972',
+    remark: 'direct-bad',
+    protocol: 'vless',
+    port: 443,
+    settings: JSON.stringify({
+      clients: [{
+        email: 'user@example.com-direct-bad',
+        id: 'b8c40026-06cd-4e53-98a2-af99f4c76972',
+        subId: 'bad-sub-id'
+      }]
+    }),
+    stream_settings: JSON.stringify({ network: 'tcp', security: 'reality' })
+  };
+  let currentSources = [];
+  let savedNodes = [];
+
+  subscriptionRepository.findLatestUserSubscription = async () => ({ id: 1 });
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 7,
+    email: 'user@example.com',
+    sub_id: 'public-sub-id',
+    enabled: 1,
+    traffic_limit: 1024
+  });
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServers = async () => [server];
+  subscriptionRepository.listNodeSnapshots = async () => [config];
+  subscriptionRepository.listUserNodeConfigs = async () => [config];
+  subscriptionRepository.listUserSubscriptionSources = async () => currentSources;
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => {
+    currentSources = [{
+      ...source,
+      node_fingerprint: computeNodeFingerprint(config),
+      server_fingerprint: computeServerFingerprint(server),
+      fetched_at: Math.floor(Date.now() / 1000)
+    }];
+  };
+  subscriptionRepository.saveUserSubscriptionCache = async (db, userId, subId, nodes) => {
+    savedNodes = nodes;
+  };
+
+  try {
+    const result = await subscriptionService.retrySubscriptionSourceRefreshTask(
+      {},
+      {
+        user_id: 7,
+        payload_data: {
+          configs: [{ server_id: 1, inbound_id: 12 }]
+        }
+      },
+      { info() {}, warn() {}, error() {} },
+      {
+        fetchOriginalSubscription: async () => Buffer.from(link).toString('base64')
+      }
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(savedNodes.length, 1);
+    assert.equal(savedNodes[0].original_link, link);
+    assert.ok(savedNodes[0].link.includes('flow=xtls-rprx-vision'));
+  } finally {
+    Object.assign(subscriptionRepository, originals);
+  }
+}
+
+/**
  * 验证 hy2 原始模板刷新成功后不会被 vless 的 streamSettings 匹配规则误判为不可复用。
  *
  * @returns {Promise<void>}
@@ -1137,6 +1233,7 @@ async function run() {
   await testSourceRefreshShouldFetchSharedSubIdOnce();
   await testGenerateSubscriptionShouldRefreshMismatchedSourceCache();
   await testGenerateSubscriptionShouldQueueFailedSourceRefreshRetry();
+  await testSourceRefreshRetryShouldRegenerateSubscriptionCache();
   await testGenerateSubscriptionShouldKeepRefreshedHy2SourceCache();
   await testGenerateSubscriptionShouldAskForSpeedChannelOptimization();
   console.log('user subscription service tests passed');

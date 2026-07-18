@@ -987,7 +987,9 @@ async function retrySubscriptionSourceRefreshTask(db, task, logger, dependencies
     };
   }
 
-  return { success: true, message: '原始订阅模板刷新成功' };
+  await generateSubscription(db, user.id, logger, { dependencies });
+
+  return { success: true, message: '原始订阅模板刷新并重新生成订阅缓存成功' };
 }
 
 /**
