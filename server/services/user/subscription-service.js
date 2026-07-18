@@ -14,6 +14,7 @@ const {
 } = require('../shared/subscription-cache-service');
 const { isTimedPlan } = require('../shared/plan-type');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
+const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const subscriptionRepository = require('../../repositories/subscription-repository');
 const { runWithConcurrency } = require('../../utils/concurrency');
 const { generatePublicSubscriptionId } = require('../../utils/subscription-id');
@@ -903,6 +904,93 @@ async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, lo
 }
 
 /**
+ * 将刷新失败的原始订阅模板写入后台补偿队列。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} user - 当前订阅用户
+ * @param {Array<Object>} failedConfigs - 最终刷新失败的节点配置
+ * @param {Object} logger - 日志实例
+ * @returns {Promise<void>}
+ */
+async function enqueueFailedSourceRefreshRetry(db, user, failedConfigs, logger) {
+  if (!Array.isArray(failedConfigs) || failedConfigs.length === 0) {
+    return;
+  }
+
+  const configs = failedConfigs.map((config) => ({
+    server_id: config.server_id,
+    inbound_id: config.inbound_id
+  }));
+
+  try {
+    await xuiSyncTaskService.enqueueTask(db, {
+      userId: user.id,
+      taskType: xuiSyncTaskService.TASK_TYPES.SUBSCRIPTION_SOURCE_REFRESH,
+      payload: { configs }
+    });
+    logger.warn(
+      `原始订阅模板刷新失败项已加入重试队列: user=${user.email}, failed=${configs.length}`
+    );
+  } catch (error) {
+    logger.error(`原始订阅模板刷新失败项写入重试队列失败: user=${user.email}, error=${error.message}`);
+  }
+}
+
+/**
+ * 执行后台原始订阅模板刷新补偿任务。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object} task - xui_sync_tasks 中的任务记录
+ * @param {Object} logger - 日志实例
+ * @param {Object} [dependencies={}] - 测试依赖注入
+ * @returns {Promise<{success:boolean,message:string}>}
+ */
+async function retrySubscriptionSourceRefreshTask(db, task, logger, dependencies = {}) {
+  const payload = task.payload_data || {};
+  const requestedKeys = new Set((payload.configs || []).map((config) => (
+    buildSourceCacheKey(config.server_id, config.inbound_id)
+  )));
+  if (requestedKeys.size === 0) {
+    return { success: true, message: '任务缺少刷新目标，已跳过' };
+  }
+
+  const userId = task.user_id || payload.user_id;
+  const user = assertActiveSubscriptionUser(
+    await subscriptionRepository.findSubscriptionUserById(db, userId)
+  );
+  const servers = await subscriptionRepository.listOnlineServers(db);
+  const serversById = mapServersById(servers);
+  const nodeConfigs = filterOnlineNodeConfigs(
+    await subscriptionRepository.listUserNodeConfigs(db, user.id),
+    serversById
+  ).filter((config) => requestedKeys.has(
+    buildSourceCacheKey(config.server_id, config.inbound_id)
+  ));
+
+  if (nodeConfigs.length === 0) {
+    return { success: true, message: '刷新目标已不存在或服务器已离线，已跳过' };
+  }
+
+  const refreshResult = await refreshSubscriptionSources(
+    db,
+    user,
+    nodeConfigs,
+    serversById,
+    logger,
+    dependencies
+  );
+
+  if (refreshResult.failedConfigs.length > 0) {
+    return {
+      success: false,
+      message: `仍有 ${refreshResult.failedConfigs.length} 个原始订阅模板刷新失败`
+    };
+  }
+
+  return { success: true, message: '原始订阅模板刷新成功' };
+}
+
+/**
  * 基于来源缓存和用户优选 IP 组合最终订阅节点。
  *
  * @param {Array} nodeConfigs - 用户节点配置
@@ -1411,7 +1499,10 @@ async function generateSubscription(db, userId, logger, options = {}) {
             logger,
             options.dependencies
           );
+          await enqueueFailedSourceRefreshRetry(db, user, retryResult.failedConfigs, logger);
         }
+      } else {
+        await enqueueFailedSourceRefreshRetry(db, user, firstRefreshResult.failedConfigs, logger);
       }
     }
   } else {
@@ -1552,6 +1643,7 @@ async function generateSubscription(db, userId, logger, options = {}) {
         options.dependencies
       );
       logger.info(`用户 ${user.email} 增量模板刷新结果: success=${refreshResult.successfulConfigs.length}, failed=${refreshResult.failedConfigs.length}`);
+      await enqueueFailedSourceRefreshRetry(db, user, refreshResult.failedConfigs, logger);
     }
   }
 
@@ -1993,6 +2085,7 @@ function generateV2RayConfig(nodes) {
 module.exports = {
   generatePublicSubscriptionId,
   generateSubscription,
+  retrySubscriptionSourceRefreshTask,
   replaceSubscriptionLink,
   getSubscriptionInfo,
   getSubscriptionContent,
@@ -2007,6 +2100,8 @@ module.exports = {
     inspectUserInNodeSnapshot,
     formatServerNames,
     buildInboundRefreshPlan,
-    refreshSubscriptionSources
+    refreshSubscriptionSources,
+    enqueueFailedSourceRefreshRetry,
+    retrySubscriptionSourceRefreshTask
   }
 };

@@ -15,7 +15,8 @@ const TASK_TYPES = {
   RENEW_SYNC: 'renew_sync',
   USER_SYNC: 'user_sync',
   ENABLE_SYNC: 'enable_sync',
-  DISABLE_SYNC: 'disable_sync'
+  DISABLE_SYNC: 'disable_sync',
+  SUBSCRIPTION_SOURCE_REFRESH: 'subscription_source_refresh'
 };
 
 const TASK_STATUS = {

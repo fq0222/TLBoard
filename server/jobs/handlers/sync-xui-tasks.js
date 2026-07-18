@@ -5,6 +5,7 @@
 
 const orderService = require('../../services/shared/order-service');
 const trafficManager = require('../../services/shared/traffic-manager');
+const userSubscriptionService = require('../../services/user/subscription-service');
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const { createLogger } = require('../../utils/logger');
@@ -17,7 +18,7 @@ let isXuiSyncTaskRunning = false;
 
 /**
  * 注册 3X-UI 同步重试队列 worker
- * 首次延迟 30 秒执行，之后每 1 分钟处理一次到期 pending 任务。
+ * 首次延迟 30 秒执行，之后每 3 分钟处理一次到期 pending 任务。
  * @param {Object} context - 任务上下文
  * @param {Object} context.db - 数据库实例
  * @param {Array} context.intervals - 间隔任务引用集合
@@ -30,10 +31,10 @@ function registerXuiSyncTaskJob({ db, intervals, registerTimeout }) {
 
   const interval = setInterval(async () => {
     scheduleXuiSyncTasks(db);
-  }, 60 * 1000);
+  }, 3 * 60 * 1000);
 
   intervals.push(interval);
-  logger.info('3X-UI 同步重试队列 worker 已注册（每1分钟执行一次）');
+  logger.info('3X-UI 同步重试队列 worker 已注册（每3分钟执行一次）');
 }
 
 /**
@@ -199,6 +200,10 @@ async function runXuiSyncTasks(db) {
 
         const ok = await trafficManager.syncDisableStatusToXui(db, staleCheck.userId, true);
         return { success: ok, message: ok ? 'ok' : '同步禁用状态失败' };
+      }
+
+      if (task.task_type === xuiSyncTaskService.TASK_TYPES.SUBSCRIPTION_SOURCE_REFRESH) {
+        return userSubscriptionService.retrySubscriptionSourceRefreshTask(db, task, logger);
       }
 
       return { success: false, message: `未知任务类型: ${task.task_type}` };

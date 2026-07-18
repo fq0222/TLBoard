@@ -6,6 +6,7 @@ const adminUsersService = require('../services/admin/users-service');
 const systemSettingsRouter = require('../routes/admin/system-settings');
 const subscriptionRepository = require('../repositories/subscription-repository');
 const userRepository = require('../repositories/user-repository');
+const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
 const xuiActivityTracker = require('../utils/xui-activity-tracker');
 
 /**
@@ -894,6 +895,105 @@ async function testGenerateSubscriptionShouldRefreshMismatchedSourceCache() {
 }
 
 /**
+ * 验证生成订阅时仍刷新失败的原始模板会进入后台重试队列。
+ *
+ * @returns {Promise<void>}
+ */
+async function testGenerateSubscriptionShouldQueueFailedSourceRefreshRetry() {
+  const originals = {
+    findLatestUserSubscription: subscriptionRepository.findLatestUserSubscription,
+    findSubscriptionUserById: subscriptionRepository.findSubscriptionUserById,
+    listEnabledUserCfIps: subscriptionRepository.listEnabledUserCfIps,
+    listOnlineServers: subscriptionRepository.listOnlineServers,
+    listNodeSnapshots: subscriptionRepository.listNodeSnapshots,
+    listUserNodeConfigs: subscriptionRepository.listUserNodeConfigs,
+    listUserSubscriptionSources: subscriptionRepository.listUserSubscriptionSources,
+    upsertSubscriptionSource: subscriptionRepository.upsertSubscriptionSource,
+    saveUserSubscriptionCache: subscriptionRepository.saveUserSubscriptionCache,
+    enqueueTask: xuiSyncTaskService.enqueueTask
+  };
+  const goodLink = 'vless://a8c40026-06cd-4e53-98a2-af99f4c76971@good.example.com:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.amd.com&fp=chrome&pbk=c6AJu3vTFA3nacnnaGuS-3CxFNUcpAymqQTL7GFXSxg&sid=c5a3decc&type=tcp&headerType=none#good';
+  const server = { id: 1, name: '测试', sub_url: 'https://xui.example/sub/', host: 'good.example.com', client_port: 443 };
+  const configs = [
+    {
+      user_id: 7,
+      server_id: 1,
+      inbound_id: 11,
+      sub_id: 'good-sub-id',
+      uuid: 'a8c40026-06cd-4e53-98a2-af99f4c76971',
+      remark: 'direct-good',
+      protocol: 'vless',
+      port: 443,
+      settings: JSON.stringify({ clients: [{ email: 'user@example.com', id: 'a8c40026-06cd-4e53-98a2-af99f4c76971', subId: 'good-sub-id' }] }),
+      stream_settings: JSON.stringify({ network: 'tcp', security: 'reality' })
+    },
+    {
+      user_id: 7,
+      server_id: 1,
+      inbound_id: 12,
+      sub_id: 'bad-sub-id',
+      uuid: 'b8c40026-06cd-4e53-98a2-af99f4c76972',
+      remark: 'direct-bad',
+      protocol: 'vless',
+      port: 443,
+      settings: JSON.stringify({ clients: [{ email: 'user@example.com', id: 'b8c40026-06cd-4e53-98a2-af99f4c76972', subId: 'bad-sub-id' }] }),
+      stream_settings: JSON.stringify({ network: 'tcp', security: 'reality' })
+    }
+  ];
+  const enqueuedTasks = [];
+  let currentSources = [];
+  let savedNodes = [];
+
+  subscriptionRepository.findLatestUserSubscription = async () => ({ id: 1 });
+  subscriptionRepository.findSubscriptionUserById = async () => ({
+    id: 7,
+    email: 'user@example.com',
+    sub_id: 'public-sub-id',
+    enabled: 1,
+    traffic_limit: 1024
+  });
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServers = async () => [server];
+  subscriptionRepository.listNodeSnapshots = async () => configs;
+  subscriptionRepository.listUserNodeConfigs = async () => configs;
+  subscriptionRepository.listUserSubscriptionSources = async () => currentSources;
+  subscriptionRepository.upsertSubscriptionSource = async (db, source) => {
+    currentSources = currentSources
+      .filter((item) => item.server_id !== source.server_id || item.inbound_id !== source.inbound_id)
+      .concat(source);
+  };
+  subscriptionRepository.saveUserSubscriptionCache = async (db, userId, subId, nodes) => {
+    savedNodes = nodes;
+  };
+  xuiSyncTaskService.enqueueTask = async (db, task) => {
+    enqueuedTasks.push(task);
+    return 99;
+  };
+
+  try {
+    await subscriptionService.generateSubscription({}, 7, { info() {}, warn() {}, error() {} }, {
+      dependencies: {
+        fetchOriginalSubscription: async (subUrl, subId) => {
+          if (subId === 'bad-sub-id') {
+            throw new Error('source timeout');
+          }
+          return Buffer.from(goodLink).toString('base64');
+        }
+      }
+    });
+  } finally {
+    Object.assign(subscriptionRepository, originals);
+    xuiSyncTaskService.enqueueTask = originals.enqueueTask;
+  }
+
+  assert.strictEqual(savedNodes.length, 1);
+  assert.strictEqual(enqueuedTasks.length, 1);
+  assert.strictEqual(enqueuedTasks[0].userId, 7);
+  assert.strictEqual(enqueuedTasks[0].taskType, 'subscription_source_refresh');
+  assert.deepStrictEqual(enqueuedTasks[0].payload.configs, [{ server_id: 1, inbound_id: 12 }]);
+}
+
+/**
  * 验证 hy2 原始模板刷新成功后不会被 vless 的 streamSettings 匹配规则误判为不可复用。
  *
  * @returns {Promise<void>}
@@ -1036,6 +1136,7 @@ async function run() {
   await testSourceRefreshShouldPickInboundMatchedRealityLink();
   await testSourceRefreshShouldFetchSharedSubIdOnce();
   await testGenerateSubscriptionShouldRefreshMismatchedSourceCache();
+  await testGenerateSubscriptionShouldQueueFailedSourceRefreshRetry();
   await testGenerateSubscriptionShouldKeepRefreshedHy2SourceCache();
   await testGenerateSubscriptionShouldAskForSpeedChannelOptimization();
   console.log('user subscription service tests passed');
