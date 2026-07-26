@@ -420,6 +420,11 @@ async function updateUser(db, userId, payload) {
     values.push(payload.plan_id);
   }
 
+  if (payload.traffic_used !== undefined && normalizeBytes(payload.traffic_used) !== normalizeBytes(user.traffic_used)) {
+    updates.push('traffic_used = ?');
+    values.push(payload.traffic_used);
+  }
+
   if (payload.traffic_limit !== undefined && normalizeBytes(payload.traffic_limit) !== normalizeBytes(user.traffic_limit)) {
     updates.push('traffic_limit = ?');
     values.push(payload.traffic_limit);
@@ -446,6 +451,8 @@ async function updateUser(db, userId, payload) {
     email: updatedUser.email,
     plan_id: updatedUser.plan_id,
     plan_name: updatedUser.plan_name,
+    traffic_used: updatedUser.traffic_used,
+    traffic_used_text: formatTraffic(updatedUser.traffic_used),
     traffic_limit: updatedUser.traffic_limit,
     traffic_limit_text: formatTraffic(updatedUser.traffic_limit),
     expire_at: updatedUser.expire_at,

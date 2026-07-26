@@ -72,6 +72,10 @@ router.put('/:id', authenticateAdmin, [
     .optional()
     .isInt({ min: 0 })
     .withMessage('流量上限必须是非负整数'),
+  body('traffic_used')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('已用流量必须是非负整数'),
   body('expire_at')
     .optional({ values: 'null' })
     .custom((value) => {

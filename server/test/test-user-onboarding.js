@@ -165,7 +165,7 @@ test('admin user list sorts traffic used before pagination when requested', asyn
   assert.match(getListSql(), /ORDER BY COALESCE\(u\.traffic_used, 0\) DESC, u\.created_at DESC\s+LIMIT \? OFFSET \?/);
 });
 
-test('admin user update preserves disable reason when enabled value is unchanged', async () => {
+test('admin user update preserves disable reason when enabled value is unchanged and updates traffic used', async () => {
   const originalUser = {
     id: 10,
     email: 'traffic-limited@example.com',
@@ -180,6 +180,7 @@ test('admin user update preserves disable reason when enabled value is unchanged
   };
   const updatedUser = {
     ...originalUser,
+    traffic_used: 3072,
     traffic_limit: 4096
   };
   const updateCalls = [];
@@ -199,15 +200,18 @@ test('admin user update preserves disable reason when enabled value is unchanged
   try {
     await usersService.updateUser({}, 10, {
       enabled: false,
+      traffic_used: 3072,
       traffic_limit: 4096
     });
 
     assert.equal(updateCalls.length, 1);
     assert.deepEqual(updateCalls[0].updates, [
+      'traffic_used = ?',
       'traffic_limit = ?',
       'updated_at = ?'
     ]);
-    assert.equal(updateCalls[0].values[0], 4096);
+    assert.equal(updateCalls[0].values[0], 3072);
+    assert.equal(updateCalls[0].values[1], 4096);
   } finally {
     restoreRepository();
   }

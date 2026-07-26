@@ -80,7 +80,7 @@
       </div>
     </div>
     
-    <el-dialog v-model="dialogVisible" title="编辑用户" width="600px" :close-on-click-modal="!submitting">
+    <el-dialog v-model="dialogVisible" title="编辑用户" width="600px" top="8vh" :close-on-click-modal="!submitting">
       <el-form :model="userForm" label-width="100px">
         <!-- 基本信息 -->
         <el-divider content-position="left">基本信息</el-divider>
@@ -91,21 +91,73 @@
           <el-switch v-model="userForm.enabled" :disabled="submitting" />
         </el-form-item>
         <el-form-item label="流量上限">
-          <div style="display: flex; gap: 10px; align-items: center;">
-            <el-input-number v-model="userForm.traffic_value" :min="0" :precision="2" style="flex: 1;" @change="handleValueChange" :disabled="submitting" />
-            <el-select v-model="userForm.traffic_unit" style="width: 100px;" @change="handleUnitChange" :disabled="submitting">
+          <div class="traffic-edit-row">
+            <el-input-number
+              v-model="userForm.traffic_value"
+              :min="0"
+              :precision="2"
+              :step="trafficStepSize('limit')"
+              class="traffic-number-input"
+              @change="handleTrafficValueChange('limit')"
+              :disabled="submitting"
+            />
+            <el-select v-model="userForm.traffic_unit" style="width: 100px;" @change="handleTrafficUnitChange('limit', $event)" :disabled="submitting">
               <el-option label="B" value="B" />
               <el-option label="KB" value="KB" />
               <el-option label="MB" value="MB" />
               <el-option label="GB" value="GB" />
               <el-option label="TB" value="TB" />
             </el-select>
+            <button
+              type="button"
+              class="traffic-step-button"
+              :class="{ active: userForm.traffic_step_100 }"
+              :disabled="submitting"
+              @click="toggleTrafficStepMultiplier('limit')"
+            >
+              100
+            </button>
+          </div>
+        </el-form-item>
+        <el-form-item label="已用流量">
+          <div class="traffic-edit-row">
+            <el-input-number
+              v-model="userForm.used_traffic_value"
+              :min="0"
+              :precision="2"
+              :step="trafficStepSize('used')"
+              class="traffic-number-input"
+              @change="handleTrafficValueChange('used')"
+              :disabled="submitting"
+            />
+            <el-select v-model="userForm.used_traffic_unit" style="width: 100px;" @change="handleTrafficUnitChange('used', $event)" :disabled="submitting">
+              <el-option label="B" value="B" />
+              <el-option label="KB" value="KB" />
+              <el-option label="MB" value="MB" />
+              <el-option label="GB" value="GB" />
+              <el-option label="TB" value="TB" />
+            </el-select>
+            <button
+              type="button"
+              class="traffic-step-button"
+              :class="{ active: userForm.used_traffic_step_100 }"
+              :disabled="submitting"
+              @click="toggleTrafficStepMultiplier('used')"
+            >
+              100
+            </button>
           </div>
         </el-form-item>
         <el-form-item label="到期时间">
           <el-date-picker v-model="userForm.expire_at" type="datetime" placeholder="选择到期时间" :disabled="submitting" />
         </el-form-item>
         <el-form-item>
+          <el-button
+            @click="resetBasicInfoChanges"
+            :disabled="submitting"
+          >
+            重置
+          </el-button>
           <el-button
             type="primary"
             @click="saveBasicInfo"
@@ -304,11 +356,17 @@ const userForm = reactive({
   traffic_value: 0,
   traffic_unit: 'GB',
   traffic_bytes: 0,  // 存储原始字节值
+  traffic_step_100: false,
+  used_traffic_value: 0,
+  used_traffic_unit: 'GB',
+  used_traffic_bytes: 0,
+  used_traffic_step_100: false,
   expire_at: null
 })
 
 const basicInfoSnapshot = reactive({
   enabled: true,
+  used_traffic_bytes: 0,
   traffic_bytes: 0,
   expire_at: null
 })
@@ -347,13 +405,49 @@ function bytesToUnit(bytes) {
   return { value: Math.round(value * 100) / 100, unit: units[unitIndex] }
 }
 
-function handleUnitChange(newUnit) {
-  // 从存储的字节值转换为新单位的值
+/**
+ * 获取流量输入框的加减步长。
+ * @param {'limit'|'used'} type - limit 表示流量上限，used 表示已用流量。
+ * @returns {number} 当前字段的步进倍数，选中 100 时返回 100，否则返回 1。
+ */
+function trafficStepSize(type) {
+  return type === 'used' && userForm.used_traffic_step_100 ? 100 : (type === 'limit' && userForm.traffic_step_100 ? 100 : 1)
+}
+
+/**
+ * 切换流量输入框的 100 倍步进选中状态。
+ * @param {'limit'|'used'} type - 要切换的流量字段。
+ */
+function toggleTrafficStepMultiplier(type) {
+  if (type === 'used') {
+    userForm.used_traffic_step_100 = !userForm.used_traffic_step_100
+    return
+  }
+  userForm.traffic_step_100 = !userForm.traffic_step_100
+}
+
+/**
+ * 切换单位时按原始字节值重新换算显示值。
+ * @param {'limit'|'used'} type - 要换算的流量字段。
+ * @param {string} newUnit - 新选择的流量单位。
+ */
+function handleTrafficUnitChange(type, newUnit) {
+  if (type === 'used') {
+    userForm.used_traffic_value = bytesToUnitValue(userForm.used_traffic_bytes, newUnit)
+    return
+  }
   userForm.traffic_value = bytesToUnitValue(userForm.traffic_bytes, newUnit)
 }
 
-function handleValueChange() {
-  // 当用户修改数值时，更新存储的字节值
+/**
+ * 数值变化后同步维护用于提交接口的字节值。
+ * @param {'limit'|'used'} type - 要同步的流量字段。
+ */
+function handleTrafficValueChange(type) {
+  if (type === 'used') {
+    userForm.used_traffic_bytes = Math.round(userForm.used_traffic_value * unitMultipliers[userForm.used_traffic_unit])
+    return
+  }
   userForm.traffic_bytes = Math.round(userForm.traffic_value * unitMultipliers[userForm.traffic_unit])
 }
 
@@ -370,21 +464,58 @@ function toExpireTimestamp(value) {
  */
 function captureBasicInfoSnapshot() {
   basicInfoSnapshot.enabled = !!userForm.enabled
+  basicInfoSnapshot.used_traffic_bytes = Number(userForm.used_traffic_bytes) || 0
   basicInfoSnapshot.traffic_bytes = Number(userForm.traffic_bytes) || 0
   basicInfoSnapshot.expire_at = toExpireTimestamp(userForm.expire_at)
 }
 
 /**
+ * 将字节值写回指定流量字段，并选择适合显示的单位。
+ * @param {'limit'|'used'} type - 要恢复的流量字段。
+ * @param {number} bytes - 要恢复的字节值。
+ */
+function applyTrafficBytes(type, bytes) {
+  const traffic = bytesToUnit(bytes)
+  if (type === 'used') {
+    userForm.used_traffic_bytes = bytes
+    userForm.used_traffic_value = traffic.value
+    userForm.used_traffic_unit = traffic.unit
+    return
+  }
+  userForm.traffic_bytes = bytes
+  userForm.traffic_value = traffic.value
+  userForm.traffic_unit = traffic.unit
+}
+
+/**
+ * 恢复弹窗打开或上次保存成功时的基础信息。
+ * 核心分支：只重置基础信息字段和步进按钮，不影响优选 IP、订阅链接等其它编辑区。
+ */
+function resetBasicInfoChanges() {
+  userForm.enabled = basicInfoSnapshot.enabled
+  applyTrafficBytes('used', basicInfoSnapshot.used_traffic_bytes)
+  applyTrafficBytes('limit', basicInfoSnapshot.traffic_bytes)
+  userForm.expire_at = basicInfoSnapshot.expire_at > 0 ? new Date(basicInfoSnapshot.expire_at * 1000) : null
+  userForm.used_traffic_step_100 = false
+  userForm.traffic_step_100 = false
+}
+
+/**
  * 构造基础信息差异数据。
- * 核心分支：启用状态、流量上限、到期时间分别比较；未变化字段不进入请求体。
+ * 核心分支：启用状态、已用流量、流量上限、到期时间分别比较；未变化字段不进入请求体。
  */
 function buildBasicInfoChanges() {
   const data = {}
   const currentExpireAt = toExpireTimestamp(userForm.expire_at)
+  const currentUsedTrafficBytes = Number(userForm.used_traffic_bytes) || 0
   const currentTrafficBytes = Number(userForm.traffic_bytes) || 0
 
   if (!!userForm.enabled !== basicInfoSnapshot.enabled) {
     data.enabled = !!userForm.enabled
+  }
+
+  if (currentUsedTrafficBytes !== basicInfoSnapshot.used_traffic_bytes) {
+    data.traffic_used = currentUsedTrafficBytes
   }
 
   if (currentTrafficBytes !== basicInfoSnapshot.traffic_bytes) {
@@ -674,10 +805,11 @@ async function showEditDialog(user) {
   
   // 存储原始字节值，并转换为合适的单位显示
   const trafficLimit = Number(user.traffic_limit) || 0
-  userForm.traffic_bytes = trafficLimit
-  const traffic = bytesToUnit(trafficLimit)
-  userForm.traffic_value = traffic.value
-  userForm.traffic_unit = traffic.unit
+  const trafficUsed = Number(user.traffic_used) || 0
+  applyTrafficBytes('limit', trafficLimit)
+  applyTrafficBytes('used', trafficUsed)
+  userForm.traffic_step_100 = false
+  userForm.used_traffic_step_100 = false
   
   // 处理到期时间：0 或 "0" 表示无限期，应设为 null
   const expireAt = Number(user.expire_at) || 0
@@ -843,6 +975,22 @@ onBeforeUnmount(() => {
 .toolbar { display: flex; align-items: center; margin-bottom: 20px; gap: 0; flex-wrap: wrap; }
 .pagination { margin-top: 20px; display: flex; justify-content: flex-end; }
 .section-actions { margin-top: 12px; display: flex; align-items: center; gap: 10px; }
+.traffic-edit-row { display: flex; gap: 10px; align-items: center; width: 100%; }
+.traffic-number-input { flex: 1; }
+.traffic-step-button {
+  width: 72px;
+  height: 32px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background: #fff;
+  color: #303133;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+}
+.traffic-step-button.active { border-color: #409eff; color: #409eff; }
+.traffic-step-button:disabled { cursor: not-allowed; opacity: 0.6; }
 .batch-progress { margin-left: 16px; color: #606266; font-size: 13px; white-space: nowrap; }
 .batch-dialog-tip { margin-bottom: 12px; color: #606266; font-size: 13px; line-height: 1.6; }
 </style>
