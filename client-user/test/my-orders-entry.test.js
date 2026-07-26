@@ -109,3 +109,12 @@ test('我的订单页会把秒级订单时间戳转换为毫秒再显示', () =>
   assert.match(ordersSource, /numericValue < 100000000000/)
   assert.match(ordersSource, /new Date\(numericValue \* 1000\)/)
 })
+
+test('我的订单刷新按钮不会把点击事件当作页码请求', () => {
+  const ordersSource = readFileSync(
+    new URL('../src/views/user/UserOrders.vue', import.meta.url),
+    'utf8'
+  )
+
+  assert.match(ordersSource, /@click="fetchOrders\(\)"[\s\S]*>刷新<\/el-button>/)
+})

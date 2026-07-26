@@ -7,7 +7,7 @@
           <p class="page-subtitle desktop-subtitle">查看当前账号的套餐购买、续费和支付记录</p>
           <p class="page-subtitle mobile-subtitle">长按订单可复制完整文字信息</p>
         </div>
-        <el-button :loading="loading" @click="fetchOrders">刷新</el-button>
+        <el-button :loading="loading" @click="fetchOrders()">刷新</el-button>
       </div>
 
       <el-table
