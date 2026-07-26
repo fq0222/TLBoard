@@ -89,7 +89,7 @@
               :key="`${node.node_name}-${node.address}-${node.port}`"
               class="node-mobile-card"
             >
-              <div class="node-mobile-head">
+              <div class="node-mobile-top">
                 <h3 class="node-mobile-title">{{ node.node_name || '未命名节点' }}</h3>
                 <div class="node-mobile-tags">
                   <template v-for="tag in parseProtocol(node.protocol)" :key="tag">
@@ -98,16 +98,16 @@
                 </div>
               </div>
 
-              <div class="node-mobile-meta">
-                <div class="node-mobile-row">
+              <div class="node-mobile-grid">
+                <div class="node-mobile-field address-field">
                   <span class="node-mobile-label">地址</span>
                   <span class="node-mobile-value">{{ node.address || '-' }}</span>
                 </div>
-                <div class="node-mobile-row">
+                <div class="node-mobile-field port-field">
                   <span class="node-mobile-label">端口</span>
                   <span class="node-mobile-value">{{ node.port || '-' }}</span>
                 </div>
-                <div class="node-mobile-row">
+                <div class="node-mobile-field remark-field">
                   <span class="node-mobile-label">备注</span>
                   <span class="node-mobile-value">{{ node.remark || '-' }}</span>
                 </div>
@@ -679,11 +679,13 @@ onBeforeUnmount(() => {
   margin-top: 12px;
 }
 
-.node-mobile-head {
+.node-mobile-top {
   display: flex;
-  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
+  min-width: 0;
 }
 
 .node-mobile-title {
@@ -691,34 +693,39 @@ onBeforeUnmount(() => {
   color: #0f172a;
   font-size: 17px;
   line-height: 1.4;
+  min-width: 0;
 }
 
 .node-mobile-tags {
   display: flex;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
-.node-mobile-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.node-mobile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
 }
 
-.node-mobile-row {
+.node-mobile-field {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
   gap: 6px;
+  min-width: 0;
 }
 
 .node-mobile-label {
   color: #64748b;
   font-size: 13px;
+  flex-shrink: 0;
 }
 
 .node-mobile-value {
   color: #0f172a;
   line-height: 1.6;
   word-break: break-all;
+  min-width: 0;
 }
 
 .progress-panel {
@@ -872,29 +879,38 @@ onBeforeUnmount(() => {
   }
 
   .nodes-mobile-list {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .node-mobile-card {
-    padding: 14px;
-    border-radius: 16px;
+    padding: 8px 10px;
+    border-radius: 8px;
   }
 
   .node-mobile-card + .node-mobile-card {
-    margin-top: 10px;
+    margin-top: 0;
   }
 
-  .node-mobile-head {
+  .node-mobile-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
     gap: 8px;
-    margin-bottom: 10px;
+    margin-bottom: 6px;
   }
 
   .node-mobile-title {
-    font-size: 16px;
-    line-height: 1.35;
+    overflow: hidden;
+    font-size: 14px;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .node-mobile-tags {
+    flex-wrap: nowrap;
     gap: 4px;
   }
 
@@ -903,27 +919,41 @@ onBeforeUnmount(() => {
     margin-bottom: 0;
   }
 
-  .node-mobile-meta {
-    gap: 8px;
+  .node-mobile-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 10px;
+    align-items: center;
   }
 
-  .node-mobile-row {
-    display: grid;
-    grid-template-columns: 52px minmax(0, 1fr);
-    gap: 8px;
-    align-items: start;
+  .node-mobile-field {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    min-width: 0;
   }
 
   .node-mobile-label {
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: 11px;
+    line-height: 1.2;
   }
 
   .node-mobile-value {
-    font-size: 15px;
-    line-height: 1.5;
+    overflow: hidden;
+    font-size: 12px;
+    line-height: 1.3;
     min-width: 0;
-    overflow-wrap: anywhere;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    word-break: normal;
+  }
+
+  .port-field {
+    justify-content: flex-end;
+  }
+
+  .remark-field {
+    grid-column: 1 / -1;
   }
 
   .link-group :deep(.el-input-group) {

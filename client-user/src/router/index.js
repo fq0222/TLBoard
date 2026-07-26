@@ -56,6 +56,12 @@ const routes = [
         meta: { title: '推广' }
       },
       {
+        path: 'orders',
+        name: 'UserOrders',
+        component: () => import('@/views/user/UserOrders.vue'),
+        meta: { title: '我的订单' }
+      },
+      {
         path: 'subscription',
         name: 'Subscription',
         component: () => import('@/views/user/Subscription.vue'),

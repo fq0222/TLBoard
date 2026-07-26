@@ -92,6 +92,14 @@
       </div>
 
       <div class="action-list">
+        <router-link to="/user/orders" class="action-item">
+          <div class="action-main">
+            <span class="action-title">我的订单</span>
+            <span class="action-desc">查看当前账号的套餐购买、续费和支付记录</span>
+          </div>
+          <el-icon><ArrowRight /></el-icon>
+        </router-link>
+
         <router-link to="/user/tickets" class="action-item">
           <div class="action-main">
             <span class="action-title">工单支持</span>
@@ -103,34 +111,10 @@
           </div>
         </router-link>
 
-        <router-link to="/user/help" class="action-item">
-          <div class="action-main">
-            <span class="action-title">帮助中心</span>
-            <span class="action-desc">查看使用文档、常见问题和接入说明</span>
-          </div>
-          <el-icon><ArrowRight /></el-icon>
-        </router-link>
-
-        <router-link v-if="subscriptionReady" to="/user/subscription" class="action-item">
-          <div class="action-main">
-            <span class="action-title">订阅信息</span>
-            <span class="action-desc">复制通用订阅和 Clash 订阅链接</span>
-          </div>
-          <el-icon><ArrowRight /></el-icon>
-        </router-link>
-
         <router-link v-if="subscriptionReady" to="/user/cf-optimize" class="action-item">
           <div class="action-main">
             <span class="action-title">线路优选</span>
             <span class="action-desc">测试并应用更优节点入口，改善连接体验</span>
-          </div>
-          <el-icon><ArrowRight /></el-icon>
-        </router-link>
-
-        <router-link to="/user" class="action-item">
-          <div class="action-main">
-            <span class="action-title">套餐与续费</span>
-            <span class="action-desc">返回服务台查看套餐、续费或处理订阅生成</span>
           </div>
           <el-icon><ArrowRight /></el-icon>
         </router-link>
