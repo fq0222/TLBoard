@@ -209,8 +209,9 @@ function parseTime(value) {
     return null
   }
 
+  const numericValue = Number(value)
   const time = /^\d+$/.test(String(value))
-    ? new Date(Number(value))
+    ? (numericValue < 100000000000 ? new Date(numericValue * 1000) : new Date(numericValue))
     : new Date(value)
 
   if (Number.isNaN(time.getTime())) {

@@ -98,3 +98,14 @@ test('我的订单页移动端提示长按可复制，桌面端保留原说明',
   assert.match(ordersSource, /\.desktop-subtitle\s*\{[\s\S]*display:\s*none/)
   assert.match(ordersSource, /\.mobile-subtitle\s*\{[\s\S]*display:\s*block/)
 })
+
+test('我的订单页会把秒级订单时间戳转换为毫秒再显示', () => {
+  const ordersSource = readFileSync(
+    new URL('../src/views/user/UserOrders.vue', import.meta.url),
+    'utf8'
+  )
+
+  assert.match(ordersSource, /const numericValue = Number\(value\)/)
+  assert.match(ordersSource, /numericValue < 100000000000/)
+  assert.match(ordersSource, /new Date\(numericValue \* 1000\)/)
+})
