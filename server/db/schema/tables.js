@@ -158,6 +158,21 @@ const tableDefinitions = [
     `
   },
   {
+    logMessage: '最近一轮服务器流量统计表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS traffic_usage_current (
+        id SERIAL PRIMARY KEY,
+        sync_at BIGINT NOT NULL,
+        server_id INTEGER NOT NULL REFERENCES xui_servers(id) ON DELETE CASCADE,
+        server_name VARCHAR(255) NOT NULL,
+        total_traffic BIGINT DEFAULT 0,
+        user_count INTEGER DEFAULT 0,
+        users_data TEXT NOT NULL DEFAULT '[]',
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+      )
+    `
+  },
+  {
     logMessage: '3X-UI节点快照表初始化完成',
     sql: `
       CREATE TABLE IF NOT EXISTS xui_nodes (

@@ -11,6 +11,10 @@
           <el-icon><DataBoard /></el-icon>
           <span v-if="!isCollapsed">仪表盘</span>
         </router-link>
+        <router-link to="/admin/traffic-stats" class="nav-item" active-class="active">
+          <el-icon><DataAnalysis /></el-icon>
+          <span v-if="!isCollapsed">数据统计</span>
+        </router-link>
         <router-link to="/admin/servers" class="nav-item" active-class="active">
           <el-icon><Monitor /></el-icon>
           <span v-if="!isCollapsed">服务器管理</span>
@@ -122,6 +126,7 @@ import {
   Bell,
   ChatDotRound,
   Connection,
+  DataAnalysis,
   DataBoard,
   Document,
   Expand,

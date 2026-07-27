@@ -26,6 +26,12 @@ const routes = [
         meta: { title: '仪表盘' }
       },
       {
+        path: 'traffic-stats',
+        name: 'TrafficStats',
+        component: () => import('@/views/TrafficStats.vue'),
+        meta: { title: '数据统计' }
+      },
+      {
         path: 'servers',
         name: 'Servers',
         component: () => import('@/views/Servers.vue'),

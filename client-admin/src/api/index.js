@@ -511,6 +511,14 @@ const adminApi = {
   },
 
   /**
+   * 获取最近一轮服务器流量统计
+   * @returns {Promise<Object>} 响应数据
+   */
+  getTrafficUsageStats() {
+    return apiClient.get('/dashboard/traffic-usage')
+  },
+
+  /**
    * 获取工单统计
    * @returns {Promise<Object>} 响应数据
    */

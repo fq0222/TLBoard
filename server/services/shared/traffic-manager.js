@@ -10,6 +10,8 @@ const { DISABLE_REASONS } = require('./renew-policy');
 const { createLogger } = require('../../utils/logger');
 const { runWithConcurrency } = require('../../utils/concurrency');
 const trafficRepository = require('../../repositories/traffic-repository');
+const trafficUsageStatsRepository = require('../../repositories/traffic-usage-stats-repository');
+const trafficUsageStatsService = require('../admin/traffic-usage-stats-service');
 const renewalRequiredEmailService = require('./renewal-required-email-service');
 
 const logger = createLogger('TRAFFIC-MANAGER');
@@ -344,6 +346,8 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
 
   const now = Math.floor(Date.now() / 1000);
   const trafficUsageMultiplier = await getTrafficUsageMultiplier(db);
+  const servers = await trafficRepository.listOnlineServers(db);
+  const serversById = new Map(servers.map(server => [String(server.id), server]));
   logger.info(`当前流量统计倍率: ${trafficUsageMultiplier}`);
 
   try {
@@ -417,9 +421,19 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
       }
 
       await trafficRepository.upsertTrafficSyncLogs(client, syncLogUpdates);
+      const currentUsageSnapshot = trafficUsageStatsService.buildCurrentTrafficUsageSnapshot({
+        serverTrafficData,
+        users,
+        syncLogMap,
+        serversById,
+        multiplier: trafficUsageMultiplier,
+        syncAt: now
+      });
+      await trafficUsageStatsRepository.replaceCurrentTrafficUsageSnapshot(client, currentUsageSnapshot);
       return {
         userTrafficData,
-        syncLogUpdateCount: syncLogUpdates.length
+        syncLogUpdateCount: syncLogUpdates.length,
+        currentUsageSnapshotCount: currentUsageSnapshot.length
       };
     });
 

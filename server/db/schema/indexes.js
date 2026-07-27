@@ -30,6 +30,8 @@ const indexStatements = [
   'CREATE INDEX IF NOT EXISTS idx_ticket_reads_user_id ON ticket_reads(user_id)',
   'CREATE INDEX IF NOT EXISTS idx_traffic_sync_log_user_server ON traffic_sync_log(user_id, server_id)',
   'CREATE INDEX IF NOT EXISTS idx_traffic_sync_log_last_sync_at ON traffic_sync_log(last_sync_at)',
+  'CREATE INDEX IF NOT EXISTS idx_traffic_usage_current_server_id ON traffic_usage_current(server_id)',
+  'CREATE INDEX IF NOT EXISTS idx_traffic_usage_current_sync_at ON traffic_usage_current(sync_at)',
   'CREATE INDEX IF NOT EXISTS idx_user_node_configs_user_id ON user_node_configs(user_id)',
   'CREATE INDEX IF NOT EXISTS idx_user_node_configs_server_id ON user_node_configs(server_id)',
   'CREATE INDEX IF NOT EXISTS idx_user_node_configs_inbound_id ON user_node_configs(inbound_id)',

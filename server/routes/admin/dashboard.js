@@ -15,4 +15,10 @@ const router = express.Router();
  */
 router.get('/stats', authenticateAdmin, dashboardController.getStats);
 
+/**
+ * GET /api/admin/dashboard/traffic-usage
+ * 获取最近一轮服务器流量统计。
+ */
+router.get('/traffic-usage', authenticateAdmin, dashboardController.getTrafficUsageStats);
+
 module.exports = router;

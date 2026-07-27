@@ -29,6 +29,24 @@ async function getStats(req, res) {
   }
 }
 
+/**
+ * 获取最近一轮服务器流量统计。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function getTrafficUsageStats(req, res) {
+  try {
+    const stats = await dashboardService.getTrafficUsageStats(req.app.locals.db);
+    return legacySuccess(res, stats);
+  } catch (error) {
+    logger.error(`获取服务器流量统计错误: ${error.message}`);
+    return legacyFail(res);
+  }
+}
+
 module.exports = {
-  getStats
+  getStats,
+  getTrafficUsageStats
 };

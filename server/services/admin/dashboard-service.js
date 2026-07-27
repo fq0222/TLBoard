@@ -1,5 +1,6 @@
 const { getUnixTimestamp, getStartOfToday } = require('../../shared/utils/time');
 const dashboardRepository = require('../../repositories/dashboard-repository');
+const trafficUsageStatsService = require('./traffic-usage-stats-service');
 
 /**
  * 管理端仪表盘服务
@@ -27,6 +28,17 @@ async function getDashboardStats(db) {
   };
 }
 
+/**
+ * 获取最近一轮服务器流量统计。
+ *
+ * @param {Object} db - 数据库实例
+ * @returns {Promise<Object>} 最近一轮服务器流量统计
+ */
+async function getTrafficUsageStats(db) {
+  return trafficUsageStatsService.getCurrentTrafficUsageStats(db);
+}
+
 module.exports = {
-  getDashboardStats
+  getDashboardStats,
+  getTrafficUsageStats
 };
