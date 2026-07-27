@@ -186,7 +186,8 @@ import {
   Tickets,
   InfoFilled
 } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index.mjs'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
 import api from '@/api'
 
 const DEFAULT_PANEL_VERSION = '3.0.2'

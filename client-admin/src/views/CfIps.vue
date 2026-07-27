@@ -78,7 +78,8 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { Plus, Upload } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index.mjs'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
 import api from '@/api'
 
 const ips = ref([])

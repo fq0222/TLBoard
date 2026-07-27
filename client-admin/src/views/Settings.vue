@@ -332,7 +332,8 @@
 <script setup>
 import { reactive, ref, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index.mjs'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
 import { useAdminStore } from '@/stores/admin'
 import api from '@/api'
 
