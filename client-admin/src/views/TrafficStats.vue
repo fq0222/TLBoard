@@ -43,7 +43,7 @@
         <el-table-column prop="email" label="用户 email" min-width="260" />
         <el-table-column label="使用流量" width="140" align="right">
           <template #default="{ row }">
-            {{ formatTrafficValue(row.trafficValue) }} {{ stats.unit }}
+            {{ formatUserTraffic(row.traffic) }}
           </template>
         </el-table-column>
       </el-table>
@@ -352,6 +352,30 @@ function formatTrafficValue(value) {
   }
 
   return numberValue.toFixed(2).replace(/\.?0+$/, '')
+}
+
+/**
+ * 按用户原始字节数自动匹配弹窗内的流量单位。
+ *
+ * @param {number|string} bytes - 用户在当前服务器上的原始流量字节数。
+ * @returns {string} 带自动单位的用户流量文本。
+ */
+function formatUserTraffic(bytes) {
+  const numberBytes = Number(bytes) || 0
+  if (numberBytes <= 0) {
+    return '0 B'
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = numberBytes
+  let unitIndex = 0
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+
+  return `${formatTrafficValue(value)} ${units[unitIndex]}`
 }
 
 function handleResize() {

@@ -47,4 +47,6 @@ test('管理端提供最近一轮服务器流量统计页面入口', () => {
   assert.match(page, /el-dialog/)
   assert.match(page, /selectedServer/)
   assert.match(page, /getTrafficUsageStats/)
+  assert.match(page, /formatUserTraffic\(row\.traffic\)/)
+  assert.match(page, /function formatUserTraffic\(bytes\)/)
 })
