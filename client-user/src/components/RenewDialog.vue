@@ -47,7 +47,6 @@
             <div class="plan-top">
               <div>
                 <h3 class="plan-name">{{ plan.name }}</h3>
-                <p class="plan-fit">{{ plan.fitLabel }}</p>
               </div>
               <div class="plan-price">
                 <span class="currency">¥</span>
@@ -218,7 +217,6 @@ const displayPlans = computed(() =>
   plans.value.map((plan) => ({
     ...plan,
     isRecommended: plan.id === recommendedPlanId.value,
-    fitLabel: getFitLabel(plan),
     durationText: Number(plan.duration_days) === 0 ? '不限时套餐' : `${plan.duration_days} 天周期`
   }))
 )
@@ -282,16 +280,6 @@ function formatTraffic(bytes) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   const index = Math.min(Math.floor(Math.log(numBytes) / Math.log(1024)), units.length - 1)
   return `${parseFloat((numBytes / (1024 ** index)).toFixed(2))} ${units[index]}`
-}
-
-function getFitLabel(plan) {
-  if (plan.description) return '可查看下方套餐说明'
-
-  const duration = Number(plan.duration_days)
-  if (duration === 0) return '适合长期维持当前线路'
-  if (duration <= 30) return '适合短期补充流量'
-  if (duration <= 90) return '适合常规续费'
-  return '适合中长期稳定使用'
 }
 
 function getStateText(plan) {
@@ -458,12 +446,6 @@ async function handleRenew() {
   margin: 0;
   color: var(--text-main);
   font-size: 21px;
-}
-
-.plan-fit {
-  margin: 8px 0 0;
-  color: var(--text-muted);
-  font-size: 13px;
 }
 
 .plan-price {
@@ -646,9 +628,13 @@ async function handleRenew() {
 }
 
 @media (max-width: 768px) {
+  .renew-dialog-content {
+    min-height: 240px;
+  }
+
   .renew-hero {
-    gap: 12px;
-    margin-bottom: 18px;
+    gap: 8px;
+    margin-bottom: 12px;
   }
 
   .renew-title {
@@ -657,60 +643,149 @@ async function handleRenew() {
 
   .renew-tip-card {
     display: block;
+    padding: 12px 14px;
+    border-radius: 16px;
   }
 
   .tip-title {
-    margin-bottom: 8px;
+    margin-bottom: 5px;
+    font-size: 13px;
   }
 
   .renew-tip-card p {
     text-align: left;
+    line-height: 1.45;
   }
 
   .plans-grid {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .plan-card {
-    padding: 16px;
-    border-radius: 20px;
+    gap: 10px;
+    padding: 13px;
+    border-radius: 16px;
+  }
+
+  .plan-badges {
+    gap: 6px;
+    min-height: 24px;
+  }
+
+  .plan-badge {
+    padding: 5px 9px;
   }
 
   .plan-top {
     flex-direction: column;
+    gap: 8px;
+  }
+
+  .plan-name {
+    font-size: 19px;
+  }
+
+  .amount {
+    font-size: 28px;
+  }
+
+  .plan-metrics {
+    gap: 8px;
+  }
+
+  .metric-item {
+    padding: 10px 12px;
+    border-radius: 12px;
+  }
+
+  .metric-item span {
+    margin-bottom: 4px;
+  }
+
+  .plan-description {
+    line-height: 1.45;
+  }
+
+  .plan-state {
+    gap: 8px;
+    line-height: 1.45;
+  }
+
+  .plan-check {
+    font-size: 18px;
   }
 
   .pay-section {
-    margin-top: 18px;
-    padding: 16px;
-    border-radius: 20px;
+    margin-top: 12px;
+    padding: 13px;
+    border-radius: 16px;
+  }
+
+  .pay-section-head h3 {
+    font-size: 17px;
   }
 
   .pay-type-options {
     grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .pay-type-card {
+    padding: 11px 13px;
+    border-radius: 14px;
+  }
+
+  .pay-type-main {
+    gap: 10px;
+  }
+
+  .pay-type-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    font-size: 14px;
+  }
+
+  .pay-type-check {
+    top: 10px;
+    right: 10px;
+    font-size: 18px;
   }
 
   .dialog-footer {
-    flex-direction: column;
+    flex-direction: row;
+    gap: 10px;
   }
 
   .dialog-footer .el-button {
-    width: 100%;
+    flex: 1;
+    width: 0;
     margin-left: 0;
   }
 
-  :deep(.el-dialog) {
-    margin-top: 4vh !important;
+  .footer-button {
+    height: 40px;
   }
 
-  :deep(.el-dialog__body) {
-    padding: 16px !important;
-    max-height: 72vh;
+  :global(.renew-dialog.el-dialog) {
+    margin-top: 8px !important;
+    margin-bottom: 0 !important;
+  }
+
+  :global(.renew-dialog.el-dialog .el-dialog__body) {
+    padding: 12px 14px !important;
+    max-height: 80vh;
     overflow-y: auto;
   }
 
-  :deep(.el-dialog__footer) {
-    padding: 0 16px 16px !important;
+  :global(.renew-dialog.el-dialog .el-dialog__footer) {
+    padding: 0 14px 14px !important;
+  }
+
+  :global(.renew-dialog.el-dialog .el-dialog__header) {
+    padding: 10px 14px 0 !important;
   }
 }
 </style>

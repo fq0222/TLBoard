@@ -621,22 +621,87 @@ onMounted(async () => {
 }
 
 @media (max-width: 768px) {
+  .my-container {
+    gap: 14px;
+  }
+
   .profile-top,
   .section-head,
   .referral-link-row {
     flex-direction: column;
     align-items: flex-start;
+    gap: 10px;
   }
 
   .content-card {
     border-radius: 14px;
-    padding: 16px;
+    padding: 15px;
+  }
+
+  .profile-card,
+  .referral-overview {
+    gap: 14px;
+  }
+
+  .profile-label {
+    margin-bottom: 7px;
+    font-size: 12px;
+  }
+
+  .profile-email {
+    font-size: 19px;
+    line-height: 1.25;
+  }
+
+  .profile-plan {
+    margin-top: 7px;
+  }
+
+  .profile-shortcut,
+  .section-link {
+    min-height: 38px;
+    padding: 8px 12px;
+    border-radius: 14px;
   }
 
   .profile-meta,
   .management-grid,
   .referral-metrics {
     grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .meta-item,
+  .metric-card {
+    gap: 6px;
+    padding: 13px 14px;
+    border-radius: 11px;
+  }
+
+  .meta-label,
+  .metric-label,
+  .referral-stat-label,
+  .action-desc,
+  .manage-desc,
+  .section-subtitle {
+    font-size: 13px;
+  }
+
+  .metric-value {
+    font-size: 18px;
+  }
+
+  .section-head {
+    margin-bottom: 12px;
+  }
+
+  .section-title {
+    font-size: 17px;
+  }
+
+  .section-subtitle {
+    margin-top: 6px;
+    line-height: 1.4;
   }
 
   .section-link {
@@ -653,24 +718,65 @@ onMounted(async () => {
     align-items: stretch;
   }
 
+  .referral-stat {
+    padding: 13px;
+    border-radius: 12px;
+  }
+
+  .referral-stat-label {
+    margin-bottom: 8px;
+  }
+
+  .referral-link-text {
+    line-height: 1.35;
+  }
+
   .referral-actions {
     width: 100%;
+    gap: 10px;
   }
 
   .copy-button {
     flex: 1;
     width: 0;
     min-width: 0;
+    height: 36px;
+    padding: 0 14px;
     justify-content: center;
     margin-left: 0;
   }
 
   .action-item {
     align-items: flex-start;
+    gap: 12px;
+    padding: 13px 0;
+  }
+
+  .action-main {
+    gap: 5px;
+  }
+
+  .action-desc,
+  .manage-desc {
+    line-height: 1.4;
   }
 
   .action-extra {
     align-self: center;
+  }
+
+  .management-grid {
+    gap: 10px;
+  }
+
+  .manage-tile {
+    gap: 6px;
+    padding: 14px;
+    border-radius: 12px;
+  }
+
+  .manage-title {
+    font-size: 15px;
   }
 }
 </style>

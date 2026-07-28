@@ -2363,6 +2363,14 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 768px) {
+  .profile-container,
+  .top-grid,
+  .dashboard-grid,
+  .main-column,
+  .side-column {
+    gap: 14px;
+  }
+
   .subscription-workspace-head {
     flex-direction: row;
     align-items: flex-start;
@@ -2371,20 +2379,41 @@ onBeforeUnmount(() => {
   .welcome-card,
   .panel-card,
   .compact-card {
-    padding: 18px;
-    border-radius: 18px;
+    padding: 15px;
+    border-radius: 16px;
+  }
+
+  .welcome-badge {
+    padding: 3px 9px;
+    font-size: 11px;
   }
 
   .welcome-title {
-    font-size: 26px;
+    margin: 10px 0 6px;
+    font-size: 23px;
+    line-height: 1.25;
+  }
+
+  .status-pills {
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .status-pill {
+    padding: 6px 10px;
+    font-size: 12px;
   }
 
   .welcome-actions {
     flex-direction: column;
+    gap: 10px;
+    margin-top: 16px;
   }
 
   .welcome-actions :deep(.el-button) {
     width: 100%;
+    min-height: 40px;
+    border-radius: 14px;
   }
 
   .welcome-actions :deep(.el-button + .el-button) {
@@ -2394,7 +2423,7 @@ onBeforeUnmount(() => {
   .support-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: 10px;
     width: 100%;
   }
 
@@ -2408,8 +2437,8 @@ onBeforeUnmount(() => {
 
   .guide-button {
     position: absolute;
-    top: 18px;
-    right: 18px;
+    top: 15px;
+    right: 15px;
     display: inline-flex !important;
     flex: 0 0 auto !important;
     width: fit-content !important;
@@ -2447,7 +2476,7 @@ onBeforeUnmount(() => {
 
   .subscription-head-actions {
     align-items: flex-end;
-    gap: 6px;
+    gap: 5px;
   }
 
   .subscription-head-actions .guide-button {
@@ -2464,24 +2493,62 @@ onBeforeUnmount(() => {
 
   .step-actions {
     grid-template-columns: 1fr;
+    gap: 10px;
   }
 
   .step-action-card {
-    padding: 10px 48px;
+    min-height: 44px;
+    padding: 8px 42px;
+    border-radius: 12px;
+  }
+
+  .step-action-index {
+    left: 16px;
+    min-width: 22px;
+    padding-right: 12px;
+    font-size: 16px;
   }
 
   .step-action-name {
-    font-size: 16px;
+    font-size: 15px;
+  }
+
+  .panel-head {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .panel-title {
+    font-size: 18px;
+  }
+
+  .panel-subtitle {
+    margin-top: 6px;
+    line-height: 1.45;
+  }
+
+  .overview-list {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .overview-label,
+  .overview-value,
+  .link-tip,
+  .announcement-time,
+  .announcement-content {
+    font-size: 13px;
   }
 
   .announcement-head,
   .overview-item {
     flex-direction: column;
     align-items: flex-start;
+    gap: 5px;
   }
 
   .overview-inline-row {
-    gap: 8px;
+    gap: 7px;
   }
 
   .overview-inline-row .overview-item {
@@ -2491,6 +2558,68 @@ onBeforeUnmount(() => {
   .announcement-time,
   .overview-value {
     text-align: left;
+  }
+
+  .subscription-links {
+    margin-top: 16px;
+  }
+
+  .link-group + .link-group {
+    margin-top: 14px;
+  }
+
+  .link-label {
+    margin-bottom: 6px;
+  }
+
+  .link-tip {
+    margin-top: 6px;
+    line-height: 1.45;
+  }
+
+  .inline-tip {
+    gap: 6px;
+    margin-top: 12px;
+    padding: 11px 12px;
+    border-radius: 12px;
+    line-height: 1.45;
+  }
+
+  .announcement-list {
+    gap: 14px;
+  }
+
+  .announcement-item {
+    padding-bottom: 14px;
+  }
+
+  .announcement-head {
+    margin-bottom: 8px;
+  }
+
+  .announcement-title-row {
+    gap: 8px;
+  }
+
+  .announcement-title {
+    font-size: 16px;
+  }
+
+  .announcement-content {
+    line-height: 1.55;
+  }
+
+  .announcement-content :deep(h1),
+  .announcement-content :deep(h2),
+  .announcement-content :deep(h3),
+  .announcement-content :deep(h4),
+  .announcement-content :deep(h5),
+  .announcement-content :deep(h6) {
+    margin: 10px 0 7px;
+  }
+
+  .announcement-content :deep(p) {
+    margin-bottom: 8px;
   }
 
   .optimize-dialog :deep(.el-dialog) {

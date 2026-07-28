@@ -743,12 +743,12 @@ onMounted(() => {
 
 @media (max-width: 768px) {
   .header-content {
-    padding: 0 16px;
-    min-height: 58px;
+    padding: 0 14px;
+    min-height: 52px;
   }
 
   .logo {
-    font-size: 20px;
+    font-size: 19px;
   }
 
   .nav {
@@ -756,47 +756,110 @@ onMounted(() => {
   }
 
   .nav-item {
-    padding: 8px 10px;
-    font-size: 14px;
+    padding: 7px 10px;
+    font-size: 13px;
   }
 
   .main {
-    padding: 18px 16px 44px;
+    padding: 14px 14px 34px;
+  }
+
+  .section-head {
+    gap: 10px;
+    margin-bottom: 14px;
   }
 
   .section-title {
-    font-size: 28px;
+    font-size: 25px;
   }
 
   .plan-filter {
     display: flex;
     width: 100%;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 14px;
   }
 
   .filter-button {
     flex: 1;
     min-width: 0;
+    padding: 7px 10px;
+    font-size: 13px;
   }
 
   .plans-grid {
     grid-template-columns: 1fr;
+    gap: 14px;
   }
 
   .plan-card {
-    padding: 18px;
-    border-radius: 22px;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 20px;
+  }
+
+  .plan-badges {
+    gap: 6px;
+    min-height: 24px;
+  }
+
+  .plan-badge {
+    padding: 5px 9px;
+  }
+
+  .plan-name {
+    font-size: 22px;
   }
 
   .plan-top {
     flex-direction: column;
+    gap: 8px;
   }
 
   .price-value {
-    font-size: 32px;
+    font-size: 29px;
+  }
+
+  .plan-metrics {
+    gap: 10px;
   }
 
   .metric-card {
-    padding: 12px 14px;
+    padding: 10px 12px;
+    border-radius: 15px;
+  }
+
+  .metric-label {
+    margin-bottom: 5px;
+  }
+
+  .metric-value {
+    font-size: 17px;
+  }
+
+  .plan-summary {
+    padding: 12px;
+    border-radius: 15px;
+  }
+
+  .summary-row {
+    margin-bottom: 7px;
+  }
+
+  .plan-summary p,
+  .plan-highlight {
+    line-height: 1.55;
+  }
+
+  .plan-footer {
+    gap: 10px;
+  }
+
+  .buy-btn {
+    height: 44px;
+    border-radius: 14px;
+    font-size: 15px;
   }
 
 }
