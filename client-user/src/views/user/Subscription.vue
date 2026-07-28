@@ -25,6 +25,19 @@
             {{ generatingSubscription ? '生成中...' : '生成订阅链接' }}
           </span>
         </button>
+
+        <button
+          type="button"
+          class="step-action-card qr-action"
+          :class="{ disabled: actionBusy }"
+          :disabled="actionBusy"
+          @click="showQrDialog"
+        >
+          <span class="step-action-index">3</span>
+          <span class="step-action-name">
+            {{ generatingQr ? '生成中...' : '查看订阅二维码' }}
+          </span>
+        </button>
       </div>
     </section>
 
@@ -171,6 +184,43 @@
         </div>
       </div>
     </el-dialog>
+
+    <el-dialog
+      v-model="qrDialogVisible"
+      title="订阅二维码"
+      :width="qrDialogWidth"
+      modal-class="subscription-qr-modal-overlay"
+      class="subscription-qr-dialog"
+    >
+      <div class="subscription-qr-content">
+        <div class="site-url-row">
+          <span class="site-url-label">官网地址</span>
+          <span class="site-url-text">{{ websiteUrl }}</span>
+        </div>
+
+        <div class="qr-list">
+          <section class="qr-item">
+            <img
+              v-if="generalQrDataUrl"
+              class="qr-image"
+              :src="generalQrDataUrl"
+              alt="通用订阅二维码"
+            >
+            <span class="qr-caption">通用二维码</span>
+          </section>
+
+          <section class="qr-item">
+            <img
+              v-if="clashQrDataUrl"
+              class="qr-image"
+              :src="clashQrDataUrl"
+              alt="Clash 订阅二维码"
+            >
+            <span class="qr-caption">Clash 订阅二维码</span>
+          </section>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -178,6 +228,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
+import QRCode from 'qrcode'
 import { useUserStore } from '@/stores/user'
 import api from '@/api'
 import {
@@ -187,6 +238,7 @@ import {
 import { createCfLatencySample } from '@/utils/cf-ip-browser-test.js'
 import { selectFallbackCfIp, selectRecommendedCfIps } from '@/utils/cf-ip-optimizer'
 import { getSubscriptionGenerationErrorMessage } from '@/utils/subscription-error'
+import { SUBSCRIPTION_QR_OPTIONS } from '@/utils/subscription-qr-options'
 
 const userStore = useUserStore()
 
@@ -199,13 +251,19 @@ const optimizeProgress = ref(0)
 const optimizeStatusText = ref('')
 const windowWidth = ref(window.innerWidth)
 const optimizeFailureCount = ref(0)
+const qrDialogVisible = ref(false)
+const generatingQr = ref(false)
+const generalQrDataUrl = ref('')
+const clashQrDataUrl = ref('')
 
 const MAX_OPTIMIZE_FAILURE_COUNT = 3
 
 const hasNodes = computed(() => Array.isArray(subscription.value.nodes) && subscription.value.nodes.length > 0)
 const subscriptionReady = computed(() => !!subscription.value.subscription_ready)
-const actionBusy = computed(() => optimizing.value || generatingSubscription.value)
+const actionBusy = computed(() => optimizing.value || generatingSubscription.value || generatingQr.value)
 const optimizeDialogWidth = computed(() => (windowWidth.value <= 768 ? '94%' : '420px'))
+const qrDialogWidth = computed(() => (windowWidth.value <= 768 ? 'calc(100vw - 20px)' : '740px'))
+const websiteUrl = computed(() => getWebsiteUrl(subscription.value.subscription_url))
 
 async function fetchPageData() {
   try {
@@ -272,6 +330,55 @@ function fallbackCopyText(text) {
 
   if (!copied) {
     throw new Error('execCommand copy failed')
+  }
+}
+
+/**
+ * 从订阅链接提取官网地址。
+ * 核心分支语义：优先使用订阅链接的 origin，链接异常时退回当前站点地址。
+ *
+ * @param {string} link - 后端返回的完整订阅链接
+ * @returns {string} 官网地址
+ */
+function getWebsiteUrl(link) {
+  try {
+    return new URL(link).origin
+  } catch {
+    return window.location.origin
+  }
+}
+
+/**
+ * 生成并打开订阅二维码弹窗。
+ * 核心分支语义：两个订阅链接都存在时才生成二维码，否则提示用户先生成订阅链接。
+ *
+ * @returns {Promise<void>}
+ */
+async function showQrDialog() {
+  if (generatingQr.value || optimizing.value || generatingSubscription.value) {
+    return
+  }
+
+  if (!subscription.value.subscription_url || !subscription.value.clash_url) {
+    ElMessage.warning('请先生成订阅链接')
+    return
+  }
+
+  try {
+    generatingQr.value = true
+    const [generalQr, clashQr] = await Promise.all([
+      QRCode.toDataURL(subscription.value.subscription_url, SUBSCRIPTION_QR_OPTIONS.general),
+      QRCode.toDataURL(subscription.value.clash_url, SUBSCRIPTION_QR_OPTIONS.clash)
+    ])
+
+    generalQrDataUrl.value = generalQr
+    clashQrDataUrl.value = clashQr
+    qrDialogVisible.value = true
+  } catch (error) {
+    console.error('生成订阅二维码失败:', error)
+    ElMessage.error('生成订阅二维码失败，请稍后重试')
+  } finally {
+    generatingQr.value = false
   }
 }
 
@@ -509,7 +616,7 @@ onBeforeUnmount(() => {
 
 .step-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -576,6 +683,18 @@ onBeforeUnmount(() => {
 .generate-action:hover:not(:disabled) {
   background: linear-gradient(180deg, #e9fbf0 0%, #d9f4e4 100%);
   box-shadow: 0 6px 14px rgba(22, 163, 74, 0.12);
+}
+
+.qr-action {
+  color: #b45309;
+  border-color: #f8c96c;
+  border-bottom: 3px solid #f59e0b;
+  background: linear-gradient(180deg, #fffaf0 0%, #fff1c7 100%);
+}
+
+.qr-action:hover:not(:disabled) {
+  background: linear-gradient(180deg, #fff6dc 0%, #ffe8a3 100%);
+  box-shadow: 0 6px 14px rgba(245, 158, 11, 0.14);
 }
 
 .step-action-index {
@@ -822,6 +941,94 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
+:global(.subscription-qr-dialog.el-dialog) {
+  border-radius: 18px;
+  box-sizing: border-box;
+  min-height: 480px;
+}
+
+:global(.subscription-qr-dialog.el-dialog .el-dialog__body) {
+  padding: 30px 48px 38px;
+}
+
+:global(.subscription-qr-dialog.el-dialog .el-dialog__headerbtn) {
+  top: 12px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+:global(.subscription-qr-dialog.el-dialog .el-dialog__headerbtn:hover) {
+  background: #f8fafc;
+}
+
+.subscription-qr-content {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+}
+
+.site-url-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px 18px;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.site-url-label {
+  flex-shrink: 0;
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.site-url-text {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 16px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qr-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 30px;
+}
+
+.qr-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.qr-image {
+  width: min(100%, 280px);
+  aspect-ratio: 1;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.qr-caption {
+  color: #0f172a;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+}
+
 @keyframes spin {
   from {
     transform: rotate(0deg);
@@ -986,6 +1193,75 @@ onBeforeUnmount(() => {
 
   .generate-dialog-content {
     padding: 4px 0 0;
+  }
+
+  :global(.subscription-qr-modal-overlay) {
+    bottom: calc(64px + env(safe-area-inset-bottom)) !important;
+    height: auto !important;
+  }
+
+  :global(.subscription-qr-modal-overlay .el-overlay-dialog) {
+    inset: 0 !important;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    overflow: hidden;
+    padding-top: 8px;
+  }
+
+  :global(.subscription-qr-dialog.el-dialog) {
+    display: flex;
+    flex-direction: column;
+    margin: 0 auto !important;
+    max-height: calc(100vh - 72px - env(safe-area-inset-bottom));
+    min-height: 0;
+  }
+
+  :global(.subscription-qr-dialog.el-dialog .el-dialog__header) {
+    padding: 8px 14px 0 !important;
+  }
+
+  :global(.subscription-qr-dialog.el-dialog .el-dialog__body) {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: 10px 14px 12px !important;
+  }
+
+  .subscription-qr-content {
+    gap: 8px;
+  }
+
+  .site-url-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+  }
+
+  .site-url-text {
+    width: 100%;
+    line-height: 1.25;
+  }
+
+  .qr-list {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .qr-item {
+    gap: 5px;
+  }
+
+  .qr-image {
+    box-sizing: border-box;
+    width: min(60vw, 216px, calc((100vh - 300px - env(safe-area-inset-bottom)) / 2));
+    padding: 6px;
+  }
+
+  .qr-caption {
+    font-size: 14px;
+    line-height: 1.25;
   }
 }
 </style>
