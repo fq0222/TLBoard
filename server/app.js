@@ -12,6 +12,7 @@ const createAdminApp = require('./bootstrap/create-admin-app');
 const registerShutdown = require('./bootstrap/register-shutdown');
 const { registerAdminBatchSubscriptionWs } = require('./websocket/admin-batch-subscription-ws');
 const { registerAdminXuiBackupWs } = require('./websocket/admin-xui-backup-ws');
+const { registerAdminTrafficUsageWs } = require('./websocket/admin-traffic-usage-ws');
 const { createLogger } = require('./utils/logger');
 
 const logger = createLogger('APP');
@@ -57,6 +58,7 @@ async function startApp() {
   // 管理端长任务通过 WebSocket 推送实时进度，不影响普通 HTTP API。
   registerAdminBatchSubscriptionWs(adminServer, db);
   registerAdminXuiBackupWs(adminServer);
+  registerAdminTrafficUsageWs(adminServer, db);
 }
 
 startApp();

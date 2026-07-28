@@ -12,6 +12,7 @@ const { runWithConcurrency } = require('../../utils/concurrency');
 const trafficRepository = require('../../repositories/traffic-repository');
 const trafficUsageStatsRepository = require('../../repositories/traffic-usage-stats-repository');
 const trafficUsageStatsService = require('../admin/traffic-usage-stats-service');
+const trafficUsagePushService = require('../admin/traffic-usage-push-service');
 const renewalRequiredEmailService = require('./renewal-required-email-service');
 
 const logger = createLogger('TRAFFIC-MANAGER');
@@ -1035,6 +1036,11 @@ async function syncTrafficAndHandleDisable(db) {
       logger.info('没有获取到服务器流量数据，跳过后续步骤');
     } else {
       const userTrafficData = await calculateUserTotalTraffic(db, serverTrafficData);
+      try {
+        await trafficUsagePushService.publishCurrentStats(db);
+      } catch (error) {
+        logger.warn(`推送当前流量统计失败: ${error.message}`);
+      }
 
       if (Object.keys(userTrafficData).length === 0) {
         logger.info('没有计算到用户流量数据，跳过流量禁用步骤');

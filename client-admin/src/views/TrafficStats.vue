@@ -104,6 +104,7 @@ const SERVER_BAR_COLORS = [
   '#13c2c2',
   '#eb2f96'
 ]
+const TRAFFIC_USAGE_WS_PATH = '/api/admin/dashboard/traffic-usage/ws'
 
 const servers = computed(() => stats.value.servers || [])
 const syncTimeText = computed(() => {
@@ -114,6 +115,8 @@ const syncTimeText = computed(() => {
   return new Date(Number(stats.value.syncAt) * 1000).toLocaleString('zh-CN')
 })
 
+let trafficUsageSocket = null
+
 /**
  * 拉取最近一轮服务器流量统计。
  *
@@ -123,14 +126,88 @@ async function loadStats() {
   loading.value = true
   try {
     const response = await api.admin.getTrafficUsageStats()
-    stats.value = response.data || { syncAt: null, unit: 'MB', servers: [] }
-    await nextTick()
-    renderChart()
+    await applyStats(response.data)
   } catch (error) {
     ElMessage.error(error?.message || '获取数据统计失败')
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 应用后端返回的流量统计快照，并重新渲染统计图表。
+ *
+ * @param {Object} nextStats - HTTP 或 WebSocket 返回的统计数据。
+ * @returns {Promise<void>}
+ */
+async function applyStats(nextStats) {
+  stats.value = nextStats || { syncAt: null, unit: 'MB', servers: [] }
+  if (selectedServer.value) {
+    const matchedServer = servers.value.find(server => server.serverId === selectedServer.value.serverId)
+    selectedServer.value = matchedServer || null
+    userDialogVisible.value = !!matchedServer && userDialogVisible.value
+  }
+  await nextTick()
+  renderChart()
+}
+
+/**
+ * 构造管理端流量统计 WebSocket 地址。
+ *
+ * @returns {string} WebSocket 地址。
+ */
+function buildTrafficUsageWsUrl() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const token = encodeURIComponent(localStorage.getItem('admin_token') || '')
+  return `${protocol}//${window.location.host}${TRAFFIC_USAGE_WS_PATH}?token=${token}`
+}
+
+/**
+ * 建立数据统计页面的 WebSocket 连接。
+ * 组件卸载时会关闭连接，因此只有停留在该路由页面时才占用服务端资源。
+ *
+ * @returns {void}
+ */
+function connectTrafficUsageWebSocket() {
+  disconnectTrafficUsageWebSocket()
+
+  const socket = new WebSocket(buildTrafficUsageWsUrl())
+  trafficUsageSocket = socket
+
+  socket.onmessage = async (event) => {
+    try {
+      const message = JSON.parse(event.data)
+      if (message.type === 'traffic-usage') {
+        await applyStats(message.data)
+      }
+    } catch (error) {
+      console.error('解析流量统计推送失败:', error)
+    }
+  }
+
+  socket.onerror = (error) => {
+    console.error('流量统计 WebSocket 连接异常:', error)
+  }
+
+  socket.onclose = () => {
+    if (trafficUsageSocket === socket) {
+      trafficUsageSocket = null
+    }
+  }
+}
+
+/**
+ * 关闭数据统计页面的 WebSocket 连接。
+ *
+ * @returns {void}
+ */
+function disconnectTrafficUsageWebSocket() {
+  if (!trafficUsageSocket) {
+    return
+  }
+
+  trafficUsageSocket.close()
+  trafficUsageSocket = null
 }
 
 /**
@@ -387,10 +464,12 @@ function handleResize() {
 onMounted(() => {
   window.addEventListener('resize', handleResize)
   loadStats()
+  connectTrafficUsageWebSocket()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  disconnectTrafficUsageWebSocket()
   chartInstance?.dispose()
   chartInstance = null
   labelButtons.value = []
