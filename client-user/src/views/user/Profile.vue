@@ -56,7 +56,7 @@
             <el-button
               v-if="onlineCustomerServiceUrl"
               tag="a"
-              :href="onlineCustomerServiceUrl"
+              :href="onlineCustomerServiceHref"
               target="_blank"
               rel="noopener noreferrer"
               size="large"
@@ -512,6 +512,21 @@ const displayName = computed(() => {
 
 const telegramChannelUrl = computed(() => {
   return String(userInfo.value.telegram_channel_url || '').trim()
+})
+
+const onlineCustomerServiceHref = computed(() => {
+  const serviceUrl = onlineCustomerServiceUrl.value
+  const userEmail = String(userInfo.value.email || '').trim()
+  if (!serviceUrl || !userEmail) return serviceUrl
+
+  try {
+    const url = new URL(serviceUrl)
+    url.searchParams.set('user', userEmail)
+    return url.toString()
+  } catch (error) {
+    const separator = serviceUrl.includes('?') ? '&' : '?'
+    return `${serviceUrl}${separator}user=${encodeURIComponent(userEmail)}`
+  }
 })
 
 const greetingText = computed(() => {
