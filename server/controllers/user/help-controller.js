@@ -102,6 +102,10 @@ async function getHelpArticleDetail(req, res) {
       return legacyNotFound(res, { message: '文章不存在' });
     }
 
+    logger.info(
+      `用户访问帮助文章: articleId=${article.id}, articleTitle=${JSON.stringify(article.title || '')}, user=${req.user?.email || req.user?.id || 'unknown'}`
+    );
+
     return legacySuccess(res, article);
   } catch (error) {
     logger.error(`获取帮助文章详情错误: ${error.message}`);
