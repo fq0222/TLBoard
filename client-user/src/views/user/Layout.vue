@@ -82,7 +82,7 @@ const contentLoading = ref(false)
 const navItems = [
   { key: 'home', label: '首页', to: '/user', icon: House },
   { key: 'subscription', label: '订阅', to: '/user/subscription', icon: Link },
-  { key: 'help', label: '帮助', to: '/user/help', icon: QuestionFilled },
+  { key: 'help', label: '教程', to: '/user/help', icon: QuestionFilled },
   { key: 'my', label: '我的', to: '/user/my', icon: User }
 ]
 const mobileNavItems = navItems
