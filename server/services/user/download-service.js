@@ -343,7 +343,8 @@ function buildDownloadResponse(downloadInfo, rangeHeader) {
       },
       streamOptions: {},
       isPartial: false,
-      shouldCountDownload: true
+      shouldCountDownload: true,
+      shouldLogCompletion: true
     };
   }
 
@@ -356,7 +357,8 @@ function buildDownloadResponse(downloadInfo, rangeHeader) {
     },
     streamOptions: range,
     isPartial: true,
-    shouldCountDownload: range.start === 0
+    shouldCountDownload: range.start === 0,
+    shouldLogCompletion: range.end === Number(downloadInfo.fileSize) - 1
   };
 }
 

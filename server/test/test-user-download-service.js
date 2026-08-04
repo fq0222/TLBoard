@@ -77,6 +77,19 @@ async function testFirstRangeCountsAsOneDownload() {
   assert.strictEqual(response.statusCode, 206);
   assert.strictEqual(response.isPartial, true);
   assert.strictEqual(response.shouldCountDownload, true);
+  assert.strictEqual(response.shouldLogCompletion, false);
+}
+
+async function testFinalRangeLogsCompletion() {
+  const response = downloadService.buildDownloadResponse(
+    createDownloadInfo({ fileSize: 100 }),
+    'bytes=90-99'
+  );
+
+  assert.strictEqual(response.statusCode, 206);
+  assert.strictEqual(response.isPartial, true);
+  assert.strictEqual(response.shouldCountDownload, false);
+  assert.strictEqual(response.shouldLogCompletion, true);
 }
 
 async function testIncrementPreparedDownloadCountUsesTarget() {
@@ -125,6 +138,7 @@ async function testCleanupUnregistersThrottledStream() {
 async function main() {
   await testBuildPartialDownloadResponse();
   await testFirstRangeCountsAsOneDownload();
+  await testFinalRangeLogsCompletion();
   await testIncrementPreparedDownloadCountUsesTarget();
   await testRejectUnsatisfiableRange();
   await testCleanupUnregistersThrottledStream();

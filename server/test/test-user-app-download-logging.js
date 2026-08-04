@@ -23,6 +23,16 @@ function testSkipsSuccessfulRangeDownloadLog() {
   );
 }
 
+function testSkipsSuccessfulRangeDownloadLogByOriginalUrl() {
+  assert.strictEqual(
+    shouldSkipSuccessfulRangeDownloadLog(createReq({
+      path: undefined,
+      originalUrl: '/api/user/download/95e12191eb8c1c466b1e42194bf73726'
+    }), createRes(206)),
+    true
+  );
+}
+
 function testKeepsFailedRangeDownloadLog() {
   assert.strictEqual(
     shouldSkipSuccessfulRangeDownloadLog(createReq(), createRes(404)),
@@ -39,6 +49,7 @@ function testKeepsNormalDownloadLog() {
 
 function main() {
   testSkipsSuccessfulRangeDownloadLog();
+  testSkipsSuccessfulRangeDownloadLogByOriginalUrl();
   testKeepsFailedRangeDownloadLog();
   testKeepsNormalDownloadLog();
   console.log('user app download logging tests passed');

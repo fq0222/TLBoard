@@ -157,13 +157,14 @@ async function downloadFile(req, res) {
     });
 
     res.on('finish', () => {
-      if (responseInfo.isPartial) {
+      if (!responseInfo.shouldLogCompletion) {
         return;
       }
 
       const durationMs = Date.now() - downloadStartTime;
+      const finishAction = responseInfo.isPartial ? '分片下载完成' : '下载完成';
       logger.info(
-        `下载完成(${downloadLimitText}, 耗时 ${durationMs}ms): ${downloadInfo.resourceName} (ID: ${downloadInfo.resourceId})`
+        `${finishAction}(${downloadLimitText}, 耗时 ${durationMs}ms): ${downloadInfo.resourceName} (ID: ${downloadInfo.resourceId})`
       );
     });
 

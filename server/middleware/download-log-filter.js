@@ -15,8 +15,10 @@
  * @returns {boolean} 成功分片请求返回 true，错误请求和普通下载返回 false
  */
 function shouldSkipSuccessfulRangeDownloadLog(req, res) {
+  const requestPath = req.path || req.originalUrl || req.url || '';
+
   return req.method === 'GET' &&
-    req.path?.startsWith('/api/user/download/') &&
+    requestPath.startsWith('/api/user/download/') &&
     Boolean(req.headers?.range) &&
     res.statusCode < 400;
 }
