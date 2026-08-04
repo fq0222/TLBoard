@@ -13,6 +13,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const config = require('../config');
 const registerUserRoutes = require('./register-user-routes');
+const { shouldSkipSuccessfulRangeDownloadLog } = require('../middleware/download-log-filter');
 
 function createUserApp({ db, logger }) {
   const app = express();
@@ -22,7 +23,10 @@ function createUserApp({ db, logger }) {
 
   app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
   app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'], allowedHeaders: ['Content-Type', 'Authorization'] }));
-  app.use(morgan('short', { stream: { write: (msg) => logger.info(`[USER] ${msg.trim()}`) } }));
+  app.use(morgan('short', {
+    skip: shouldSkipSuccessfulRangeDownloadLog,
+    stream: { write: (msg) => logger.info(`[USER] ${msg.trim()}`) }
+  }));
   app.use(express.json({ limit: config.security.maxRequestBodySize }));
   app.use(express.urlencoded({ extended: true, limit: config.security.maxRequestBodySize }));
 

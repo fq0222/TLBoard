@@ -18,6 +18,11 @@ const logger = createLogger('USER-DOWNLOAD');
 function handleControllerError(res, action, error) {
   if (error && error.isLegacyBusinessError) {
     logger.warn(`${action}失败: ${error.message}`);
+    if (error.headers) {
+      Object.entries(error.headers).forEach(([key, value]) => {
+        res.setHeader(key, value);
+      });
+    }
     return res.status(error.statusCode).json({
       code: error.code,
       message: error.message,
@@ -116,17 +121,29 @@ async function downloadFile(req, res) {
     }
 
     const downloadInfo = await downloadService.prepareDownload(req.app.locals.db, req.params.token);
-    const { stream, activeStreamCount } = downloadService.createDownloadStream(downloadInfo);
+    const responseInfo = downloadService.buildDownloadResponse(downloadInfo, req.headers.range);
+    if (responseInfo.shouldCountDownload) {
+      await downloadService.incrementPreparedDownloadCount(req.app.locals.db, downloadInfo);
+    }
 
-    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(downloadInfo.fileName)}`);
-    res.setHeader('Content-Type', downloadInfo.fileMimetype || 'application/octet-stream');
-    res.setHeader('Content-Length', downloadInfo.fileSize);
+    const { stream, activeStreamCount, cleanup } = downloadService.createDownloadStream(
+      downloadInfo,
+      responseInfo.streamOptions
+    );
+
+    res.status(responseInfo.statusCode);
+    Object.entries(responseInfo.headers).forEach(([key, value]) => {
+      res.setHeader(key, value);
+    });
 
     const downloadStartTime = Date.now();
     const downloadLimitText = downloadInfo.speedLimit > 0
       ? `全局限速 ${downloadInfo.speedLimit / 1024}KB/s, 当前活跃流 ${activeStreamCount}`
       : '不限速';
-    logger.info(`开始下载(${downloadLimitText}): ${downloadInfo.resourceName} (ID: ${downloadInfo.resourceId})`);
+    if (!responseInfo.isPartial || responseInfo.shouldCountDownload) {
+      const startAction = responseInfo.isPartial ? '开始分片下载' : '开始下载';
+      logger.info(`${startAction}(${downloadLimitText}): ${downloadInfo.resourceName} (ID: ${downloadInfo.resourceId})`);
+    }
 
     stream.on('error', (error) => {
       logger.error(`文件读取错误: ${error.message}`);
@@ -140,6 +157,10 @@ async function downloadFile(req, res) {
     });
 
     res.on('finish', () => {
+      if (responseInfo.isPartial) {
+        return;
+      }
+
       const durationMs = Date.now() - downloadStartTime;
       logger.info(
         `下载完成(${downloadLimitText}, 耗时 ${durationMs}ms): ${downloadInfo.resourceName} (ID: ${downloadInfo.resourceId})`
@@ -148,6 +169,7 @@ async function downloadFile(req, res) {
 
     res.on('close', () => {
       if (!res.writableEnded) {
+        cleanup();
         const durationMs = Date.now() - downloadStartTime;
         logger.warn(
           `下载中断(${downloadLimitText}, 已传输 ${durationMs}ms): ${downloadInfo.resourceName} (ID: ${downloadInfo.resourceId})`

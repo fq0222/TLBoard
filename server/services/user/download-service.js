@@ -28,6 +28,9 @@ class GlobalThrottle {
       } else if (bytesPerSecond <= 0 && this.refillInterval) {
         this.stopRefill();
       }
+    } else if (bytesPerSecond > 0 && !this.refillInterval) {
+      this.availableTokens = bytesPerSecond;
+      this.startRefill();
     }
   }
 
@@ -71,6 +74,9 @@ class GlobalThrottle {
 
   unregisterStream(stream) {
     this.activeStreams.delete(stream);
+    if (this.activeStreams.size === 0) {
+      this.stopRefill();
+    }
   }
 
   getActiveStreamCount() {
@@ -82,6 +88,7 @@ class GlobalThrottleStream extends Transform {
   constructor(globalThrottle) {
     super();
     this.globalThrottle = globalThrottle;
+    this.unregistered = false;
     this.globalThrottle.registerStream(this);
   }
 
@@ -102,8 +109,22 @@ class GlobalThrottleStream extends Transform {
   }
 
   _flush(callback) {
-    this.globalThrottle.unregisterStream(this);
+    this.unregister();
     callback();
+  }
+
+  _destroy(error, callback) {
+    this.unregister();
+    callback(error);
+  }
+
+  unregister() {
+    if (this.unregistered) {
+      return;
+    }
+
+    this.unregistered = true;
+    this.globalThrottle.unregisterStream(this);
   }
 }
 
@@ -115,7 +136,58 @@ function createLegacyBusinessError(message, options = {}) {
   error.statusCode = options.statusCode || 400;
   error.code = options.code || 1001;
   error.data = options.data === undefined ? null : options.data;
+  error.headers = options.headers;
   return error;
+}
+
+/**
+ * 解析浏览器 Range 头，生成断点续传需要的文件读取范围。
+ *
+ * @param {string} rangeHeader - HTTP Range 请求头
+ * @param {number} fileSize - 文件总字节数
+ * @returns {{start:number,end:number}|null} 可读取范围；无 Range 时返回 null
+ */
+function parseDownloadRange(rangeHeader, fileSize) {
+  if (!rangeHeader) {
+    return null;
+  }
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(String(rangeHeader).trim());
+  if (!match) {
+    return null;
+  }
+
+  let start = match[1] === '' ? null : Number(match[1]);
+  let end = match[2] === '' ? null : Number(match[2]);
+
+  if (start === null && end === null) {
+    return null;
+  }
+
+  if (start === null) {
+    start = Math.max(fileSize - end, 0);
+    end = fileSize - 1;
+  } else if (end === null || end >= fileSize) {
+    end = fileSize - 1;
+  }
+
+  if (
+    !Number.isInteger(start) ||
+    !Number.isInteger(end) ||
+    start < 0 ||
+    end < start ||
+    start >= fileSize
+  ) {
+    throw createLegacyBusinessError('请求的下载范围无效', {
+      statusCode: 416,
+      code: 7006,
+      headers: {
+        'Content-Range': `bytes */${fileSize}`
+      }
+    });
+  }
+
+  return { start, end };
 }
 
 function formatExpireTime(timestamp) {
@@ -215,12 +287,6 @@ async function prepareDownload(db, token) {
   const config = await getResourceConfig(db);
   const speedLimit = Number(config.download_speed_limit || 0) * 1024;
 
-  if (isDistribution) {
-    await downloadRepository.incrementDistributionDownloadCount(db, distribution.id);
-  } else {
-    await downloadRepository.incrementResourceDownloadCount(db, resource.id);
-  }
-
   return {
     filePath,
     fileName: isDistribution ? distribution.original_name : resource.original_name,
@@ -228,8 +294,69 @@ async function prepareDownload(db, token) {
     fileMimetype: isDistribution ? distribution.mimetype : resource.mimetype,
     resourceName: isDistribution ? distribution.name : resource.name,
     resourceId: isDistribution ? distribution.resource_id : resource.id,
+    downloadCountTarget: {
+      type: isDistribution ? 'distribution' : 'resource',
+      id: isDistribution ? distribution.id : resource.id
+    },
     speedLimit,
     expireText: formatExpireTime(isDistribution ? distribution.expire_at : resource.expire_at)
+  };
+}
+
+/**
+ * 按准备结果增加一次业务下载次数，Range 后续分片不会重复调用。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} downloadInfo - 下载准备结果
+ * @returns {Promise<void>}
+ */
+async function incrementPreparedDownloadCount(db, downloadInfo) {
+  if (downloadInfo.downloadCountTarget?.type === 'distribution') {
+    await downloadRepository.incrementDistributionDownloadCount(db, downloadInfo.downloadCountTarget.id);
+    return;
+  }
+
+  await downloadRepository.incrementResourceDownloadCount(db, downloadInfo.downloadCountTarget.id);
+}
+
+/**
+ * 构建文件下载响应元数据，Range 请求返回 206 以支持手机端断点续传。
+ *
+ * @param {Object} downloadInfo - 下载准备结果
+ * @param {string} rangeHeader - HTTP Range 请求头
+ * @returns {{statusCode:number,headers:Object,streamOptions:Object}} 响应状态、头和读取范围
+ */
+function buildDownloadResponse(downloadInfo, rangeHeader) {
+  const range = parseDownloadRange(rangeHeader, Number(downloadInfo.fileSize));
+  const baseHeaders = {
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(downloadInfo.fileName)}`,
+    'Content-Type': downloadInfo.fileMimetype || 'application/octet-stream',
+    'Accept-Ranges': 'bytes'
+  };
+
+  if (!range) {
+    return {
+      statusCode: 200,
+      headers: {
+        ...baseHeaders,
+        'Content-Length': downloadInfo.fileSize
+      },
+      streamOptions: {},
+      isPartial: false,
+      shouldCountDownload: true
+    };
+  }
+
+  return {
+    statusCode: 206,
+    headers: {
+      ...baseHeaders,
+      'Content-Length': range.end - range.start + 1,
+      'Content-Range': `bytes ${range.start}-${range.end}/${downloadInfo.fileSize}`
+    },
+    streamOptions: range,
+    isPartial: true,
+    shouldCountDownload: range.start === 0
   };
 }
 
@@ -237,28 +364,49 @@ async function prepareDownload(db, token) {
  * 创建下载文件流，必要时挂接全局限速流。
  *
  * @param {Object} downloadInfo - 下载准备结果
- * @returns {{stream: import('stream').Readable, activeStreamCount: number}} 流结果
+ * @param {Object} streamOptions - fs.createReadStream 读取范围选项
+ * @returns {{stream: import('stream').Readable, activeStreamCount: number, cleanup: Function}} 流结果
  */
-function createDownloadStream(downloadInfo) {
-  const fileStream = fs.createReadStream(downloadInfo.filePath);
+function createDownloadStream(downloadInfo, streamOptions = {}) {
+  const fileStream = fs.createReadStream(downloadInfo.filePath, streamOptions);
 
   if (downloadInfo.speedLimit > 0) {
     globalThrottle.updateSpeed(downloadInfo.speedLimit);
     const throttleStream = new GlobalThrottleStream(globalThrottle);
+    const stream = fileStream.pipe(throttleStream);
     return {
-      stream: fileStream.pipe(throttleStream),
-      activeStreamCount: globalThrottle.getActiveStreamCount()
+      stream,
+      activeStreamCount: globalThrottle.getActiveStreamCount(),
+      cleanup() {
+        fileStream.destroy();
+        throttleStream.destroy();
+      }
     };
   }
 
   return {
     stream: fileStream,
-    activeStreamCount: 0
+    activeStreamCount: 0,
+    cleanup() {
+      fileStream.destroy();
+    }
   };
+}
+
+/**
+ * 返回当前受全局限速管理的活跃下载流数量，供日志和测试确认清理效果。
+ *
+ * @returns {number} 活跃限速流数量
+ */
+function getActiveDownloadStreamCount() {
+  return globalThrottle.getActiveStreamCount();
 }
 
 module.exports = {
   getResourceConfig,
   prepareDownload,
-  createDownloadStream
+  incrementPreparedDownloadCount,
+  buildDownloadResponse,
+  createDownloadStream,
+  getActiveDownloadStreamCount
 };
