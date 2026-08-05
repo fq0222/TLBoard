@@ -20,6 +20,7 @@ function createAdminApp({ db, logger }) {
   const app = express();
 
   app.locals.db = db;
+  app.set('trust proxy', true);
 
   app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
   app.use(cors({
