@@ -19,7 +19,7 @@ function createUserApp({ db, logger }) {
   const app = express();
 
   app.locals.db = db;
-  app.set('trust proxy', true);
+  app.set('trust proxy', 2);
 
   app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
   app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'], allowedHeaders: ['Content-Type', 'Authorization'] }));
