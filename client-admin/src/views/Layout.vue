@@ -43,6 +43,10 @@
           <el-icon><ChatDotRound /></el-icon>
           <span v-if="!isCollapsed">工单管理</span>
         </router-link>
+        <router-link to="/admin/feedback" class="nav-item" active-class="active">
+          <el-icon><ChatLineRound /></el-icon>
+          <span v-if="!isCollapsed">留言板管理</span>
+        </router-link>
         <router-link to="/admin/email" class="nav-item" active-class="active">
           <el-icon><Message /></el-icon>
           <span v-if="!isCollapsed">邮件管理</span>
@@ -125,6 +129,7 @@ import {
   ArrowDown,
   Bell,
   ChatDotRound,
+  ChatLineRound,
   Connection,
   DataAnalysis,
   DataBoard,

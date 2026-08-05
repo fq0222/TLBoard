@@ -64,6 +64,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import {
+  ChatDotRound,
   House,
   Link,
   Loading,
@@ -82,6 +83,7 @@ const contentLoading = ref(false)
 const navItems = [
   { key: 'home', label: '首页', to: '/user', icon: House },
   { key: 'subscription', label: '订阅', to: '/user/subscription', icon: Link },
+  { key: 'feedback', label: '留言', to: '/user/feedback', icon: ChatDotRound },
   { key: 'help', label: '教程', to: '/user/help', icon: QuestionFilled },
   { key: 'my', label: '我的', to: '/user/my', icon: User }
 ]
@@ -113,6 +115,7 @@ function preloadNavPages() {
   const preloadTasks = [
     () => import('@/views/user/Profile.vue'),
     () => import('@/views/user/Subscription.vue'),
+    () => import('@/views/user/Feedback.vue'),
     () => import('@/views/user/HelpCenter.vue'),
     () => import('@/views/user/My.vue')
   ]
@@ -321,12 +324,12 @@ onMounted(() => {
 
   .bottom-nav {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
-    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
     background: rgba(255, 255, 255, 0.96);
     border-top: 1px solid #e4e7ed;
     backdrop-filter: blur(12px);
@@ -339,10 +342,10 @@ onMounted(() => {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    min-height: 52px;
+    gap: 3px;
+    min-height: 50px;
     border: 0;
-    border-radius: 12px;
+    border-radius: 10px;
     background: transparent;
     color: #606266;
     font: inherit;
@@ -351,7 +354,7 @@ onMounted(() => {
   }
 
   .bottom-nav-item span {
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1;
   }
 

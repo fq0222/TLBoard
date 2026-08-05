@@ -572,6 +572,42 @@ const adminApi = {
     return apiClient.delete(`/tickets/${id}`)
   },
 
+  /**
+   * 获取留言板统计。
+   * @returns {Promise<Object>} 留言总数、精选数和投票数
+   */
+  getFeedbackStats() {
+    return apiClient.get('/feedback/stats')
+  },
+
+  /**
+   * 获取留言板管理列表。
+   * @param {Object} params - 分页参数
+   * @returns {Promise<Object>} 留言分页列表
+   */
+  getFeedbackMessages(params) {
+    return apiClient.get('/feedback', { params })
+  },
+
+  /**
+   * 设置留言是否在用户端精选展示。
+   * @param {number|string} id - 留言 ID
+   * @param {boolean} featured - 是否精选展示
+   * @returns {Promise<Object>} 更新结果
+   */
+  updateFeedbackFeatured(id, featured) {
+    return apiClient.put(`/feedback/${id}/featured`, { featured })
+  },
+
+  /**
+   * 删除留言并清理投票。
+   * @param {number|string} id - 留言 ID
+   * @returns {Promise<Object>} 删除结果
+   */
+  deleteFeedbackMessage(id) {
+    return apiClient.delete(`/feedback/${id}`)
+  },
+
   // ========== 邮件管理 ==========
 
   // 邮件配置

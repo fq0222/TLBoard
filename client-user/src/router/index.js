@@ -68,6 +68,12 @@ const routes = [
         meta: { title: '订阅信息' }
       },
       {
+        path: 'feedback',
+        name: 'UserFeedback',
+        component: () => import('@/views/user/Feedback.vue'),
+        meta: { title: '留言' }
+      },
+      {
         path: 'cf-optimize',
         name: 'CfOptimize',
         component: () => import('@/views/user/CfOptimize.vue'),

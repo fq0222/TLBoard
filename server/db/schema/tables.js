@@ -407,6 +407,31 @@ const tableDefinitions = [
     `
   },
   {
+    logMessage: '留言板留言表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS feedback_messages (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        featured INTEGER DEFAULT 0,
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+      )
+    `
+  },
+  {
+    logMessage: '留言板投票表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS feedback_votes (
+        id SERIAL PRIMARY KEY,
+        message_id INTEGER NOT NULL REFERENCES feedback_messages(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        UNIQUE(message_id, user_id)
+      )
+    `
+  },
+  {
     logMessage: 'Cloudflare优选IP池表初始化完成',
     sql: `
       CREATE TABLE IF NOT EXISTS cf_ip_pool (

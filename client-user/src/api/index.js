@@ -60,7 +60,9 @@ apiClient.interceptors.response.use(
           ElMessage.error('请求的资源不存在')
           break
         case 429:
-          ElMessage.error('请求过于频繁，请稍后再试')
+          if (Number(data?.code) !== 1003) {
+            ElMessage.error('请求过于频繁，请稍后再试')
+          }
           break
         case 500:
           ElMessage.error('服务器内部错误')
@@ -241,6 +243,33 @@ const userApi = {
    */
   replaceSubscriptionLink() {
     return apiClient.post('/subscription/replace-link', {}, { timeout: 120000 })
+  },
+
+  /**
+   * 获取留言板精选留言。
+   * @returns {Promise<Object>} 精选留言和当前用户投票状态
+   */
+  getFeedbackFeatured() {
+    return apiClient.get('/feedback/featured')
+  },
+
+  /**
+   * 提交留言板建议。
+   * @param {Object} data - 留言数据
+   * @param {string} data.content - 150字以内建议内容
+   * @returns {Promise<Object>} 新留言
+   */
+  createFeedbackMessage(data) {
+    return apiClient.post('/feedback', data)
+  },
+
+  /**
+   * 给精选留言投票。
+   * @param {number|string} id - 留言 ID
+   * @returns {Promise<Object>} 投票结果
+   */
+  voteFeedbackMessage(id) {
+    return apiClient.post(`/feedback/${id}/vote`)
   },
 
   /**

@@ -80,6 +80,12 @@ const routes = [
         meta: { title: '工单管理' }
       },
       {
+        path: 'feedback',
+        name: 'Feedback',
+        component: () => import('@/views/Feedback.vue'),
+        meta: { title: '留言板管理' }
+      },
+      {
         path: 'tickets/:id',
         name: 'TicketDetail',
         component: () => import('@/views/TicketDetail.vue'),

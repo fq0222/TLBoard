@@ -20,6 +20,7 @@ const userSyncStatusRoutes = require('../routes/user/sync-status');
 const userHelpRoutes = require('../routes/user/help');
 const userReferralRoutes = require('../routes/user/referral');
 const userPublicSettingsRoutes = require('../routes/user/public-settings');
+const userFeedbackRoutes = require('../routes/user/feedback');
 
 function registerUserRoutes(app, logger) {
   const userPrefix = '/api/user';
@@ -39,6 +40,7 @@ function registerUserRoutes(app, logger) {
   app.use(`${userPrefix}/help`, userHelpRoutes);
   app.use(`${userPrefix}/referral`, userReferralRoutes);
   app.use(`${userPrefix}/public-settings`, userPublicSettingsRoutes);
+  app.use(`${userPrefix}/feedback`, userFeedbackRoutes);
 
   app.use((req, res) => {
     res.status(404).json({ code: 404, message: '接口不存在', data: null });
