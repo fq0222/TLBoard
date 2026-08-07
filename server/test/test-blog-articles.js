@@ -97,6 +97,11 @@ async function main() {
     const categories = await blogService.listPublishedCategories(db);
     assertOk(categories.includes('Clash') && !categories.includes('订阅教程'), '分类列表只统计已发布文章分类');
 
+    assertOk(
+      blogService.getBlogMediaBaseUrl() === getExpectedSiteBaseUrl(),
+      '博客媒体基础地址与站点基础地址一致'
+    );
+
     const uploadedImageFilename = '44444444-4444-4444-8444-444444444444.png';
     const imageMarkdown = blogService.buildBlogImageMarkdown(uploadedImageFilename);
     assertOk(

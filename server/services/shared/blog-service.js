@@ -16,6 +16,15 @@ function buildBlogImageUrl(filename) {
   return baseUrl ? `${baseUrl}${imagePath}` : imagePath;
 }
 
+/**
+ * 获取博客媒体资源的用户端基础地址。
+ *
+ * @returns {string} 用户端媒体基础 URL，为空时由浏览器按相对路径解析
+ */
+function getBlogMediaBaseUrl() {
+  return getSiteBaseUrl();
+}
+
 function buildBlogImageMarkdown(filename, alt = '\u56fe\u7247\u8bf4\u660e') {
   return `![${alt}](${buildBlogImageUrl(filename)})`;
 }
@@ -370,6 +379,7 @@ async function deleteArticle(db, id, options = {}) {
 module.exports = {
   BLOG_IMAGE_PREFIX,
   BLOG_VIDEO_PREFIX,
+  getBlogMediaBaseUrl,
   isAllowedBlogImageMimeType,
   isAllowedBlogVideoMimeType,
   buildBlogImageUrl,

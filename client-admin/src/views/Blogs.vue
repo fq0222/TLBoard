@@ -180,6 +180,7 @@ const editorVisible = ref(false)
 const previewVisible = ref(false)
 const previewArticle = ref(null)
 const previewArticleRef = ref(null)
+const helpMediaBaseUrl = ref('')
 const contentInput = ref(null)
 const editingId = ref(null)
 const total = ref(0)
@@ -195,11 +196,41 @@ const form = reactive({
   pinned: false
 })
 
+function normalizeHelpMediaUrl(value) {
+  const rawValue = String(value || '').trim()
+  const baseUrl = helpMediaBaseUrl.value
+  if (!rawValue || !baseUrl) return rawValue
+
+  try {
+    const url = new URL(rawValue, window.location.origin)
+    const isHelpMedia = url.pathname.startsWith('/api/user/help/images/')
+      || url.pathname.startsWith('/api/user/help/videos/')
+    if (!isHelpMedia) return rawValue
+
+    if (rawValue.startsWith('/') || url.origin === window.location.origin) {
+      return `${baseUrl}${url.pathname}${url.search}${url.hash}`
+    }
+  } catch (error) {
+    return rawValue
+  }
+
+  return rawValue
+}
+
 function sanitizeHtml(html) {
   const template = document.createElement('template')
   template.innerHTML = html
   template.content.querySelectorAll('script, iframe, object, embed, style, link').forEach((node) => node.remove())
+  template.content.querySelectorAll('img').forEach((node) => {
+    const src = normalizeHelpMediaUrl(node.getAttribute('src'))
+    if (src) node.setAttribute('src', src)
+    node.setAttribute('loading', 'lazy')
+    node.setAttribute('decoding', 'async')
+    node.setAttribute('fetchpriority', 'low')
+  })
   template.content.querySelectorAll('video').forEach((node) => {
+    const src = normalizeHelpMediaUrl(node.getAttribute('src'))
+    if (src) node.setAttribute('src', src)
     node.setAttribute('controls', 'controls')
     node.setAttribute('preload', 'metadata')
     node.setAttribute('playsinline', 'playsinline')
@@ -292,6 +323,7 @@ async function showEditor(row) {
   if (row) {
     const response = await api.admin.getBlog(row.id)
     if (response.code === 0) {
+      helpMediaBaseUrl.value = String(response.data.media_base_url || '').replace(/\/+$/, '')
       editingId.value = row.id
       form.title = response.data.title
       form.summary = response.data.summary
@@ -308,6 +340,7 @@ async function showPreview(row) {
   try {
     const response = await api.admin.getBlog(row.id)
     if (response.code === 0) {
+      helpMediaBaseUrl.value = String(response.data.media_base_url || '').replace(/\/+$/, '')
       previewArticle.value = response.data
       previewVisible.value = true
     }

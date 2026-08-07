@@ -160,7 +160,10 @@ async function getArticle(req, res) {
       return handleBusinessError(res, '文章不存在');
     }
 
-    return legacySuccess(res, article);
+    return legacySuccess(res, {
+      ...article,
+      media_base_url: blogService.getBlogMediaBaseUrl()
+    });
   } catch (error) {
     return handleControllerError(res, '获取博客详情', error);
   }
