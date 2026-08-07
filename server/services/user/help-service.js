@@ -7,7 +7,9 @@ const path = require('path');
 const blogReadRepository = require('../../repositories/blog-read-repository');
 
 const HELP_IMAGE_UPLOAD_DIR = path.join(__dirname, '../../uploads/blog-images');
+const HELP_VIDEO_UPLOAD_DIR = path.join(__dirname, '../../uploads/blog-videos');
 const HELP_IMAGE_FILENAME_PATTERN = /^[a-f0-9-]+\.(jpg|jpeg|png|gif|webp)$/i;
+const HELP_VIDEO_FILENAME_PATTERN = /^[a-f0-9-]+\.mp4$/i;
 
 /**
  * 获取帮助文章列表
@@ -52,6 +54,16 @@ function isSafeHelpImageFilename(filename) {
 }
 
 /**
+ * 校验帮助中心视频文件名是否合法。
+ *
+ * @param {string} filename - 视频文件名
+ * @returns {boolean} 是否通过校验
+ */
+function isSafeHelpVideoFilename(filename) {
+  return HELP_VIDEO_FILENAME_PATTERN.test(filename);
+}
+
+/**
  * 解析帮助中心图片文件路径，并返回是否仍在上传目录内
  *
  * @param {string} filename - 请求中的图片文件名
@@ -70,10 +82,31 @@ function resolveHelpImageFile(filename) {
   };
 }
 
+/**
+ * 解析帮助中心视频文件路径，并返回是否仍在上传目录内。
+ *
+ * @param {string} filename - 请求中的视频文件名
+ * @returns {{ filename: string, filePath: string, uploadRoot: string, isInsideUploadRoot: boolean }} 解析结果
+ */
+function resolveHelpVideoFile(filename) {
+  const safeFilename = path.basename(filename);
+  const filePath = path.resolve(HELP_VIDEO_UPLOAD_DIR, safeFilename);
+  const uploadRoot = path.resolve(HELP_VIDEO_UPLOAD_DIR);
+
+  return {
+    filename: safeFilename,
+    filePath,
+    uploadRoot,
+    isInsideUploadRoot: filePath.startsWith(uploadRoot + path.sep)
+  };
+}
+
 module.exports = {
   listHelpArticles,
   listHelpCategories,
   getHelpArticleById,
   isSafeHelpImageFilename,
-  resolveHelpImageFile
+  isSafeHelpVideoFilename,
+  resolveHelpImageFile,
+  resolveHelpVideoFile
 };

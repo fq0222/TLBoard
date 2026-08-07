@@ -119,6 +119,10 @@
               <el-input-number v-model="resourceForm.download_speed_limit" :min="0" />
               <span class="form-hint">KB/s，0 表示不限速</span>
             </el-form-item>
+            <el-form-item label="博客视频限速">
+              <el-input-number v-model="resourceForm.blog_video_speed_limit" :min="0" />
+              <span class="form-hint">KB/s，所有博客视频播放/下载共享，0 表示不限速</span>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="resourceSaving" @click="saveResourceConfig">保存配置</el-button>
             </el-form-item>
@@ -359,7 +363,8 @@ const testSending = ref(false)
 
 const resourceForm = ref({
   max_file_size: 100,
-  download_speed_limit: 0
+  download_speed_limit: 0,
+  blog_video_speed_limit: 300
 })
 const resourceSaving = ref(false)
 

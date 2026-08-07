@@ -12,6 +12,7 @@ const {
 } = require('../../shared/response/api-response');
 const { createLogger } = require('../../utils/logger');
 const helpService = require('../../services/user/help-service');
+const helpVideoService = require('../../services/user/help-video-service');
 
 const logger = createLogger('USER-HELP');
 
@@ -42,6 +43,82 @@ function getHelpImage(req, res) {
     });
   } catch (error) {
     logger.error(`读取帮助中心图片错误: ${error.message}`);
+    return legacyFail(res);
+  }
+}
+
+/**
+ * 返回帮助中心视频。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Object} Express 响应结果
+ */
+async function getHelpVideo(req, res) {
+  try {
+    if (!validationResult(req).isEmpty()) {
+      return legacyNotFound(res, { message: '视频不存在' });
+    }
+
+    const videoFile = helpService.resolveHelpVideoFile(req.params.filename);
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+    if (!videoFile.isInsideUploadRoot) {
+      return legacyNotFound(res, { message: '视频不存在' });
+    }
+
+    let videoInfo;
+    try {
+      videoInfo = helpVideoService.buildVideoInfo(videoFile);
+    } catch {
+      return legacyNotFound(res, { message: '视频不存在' });
+    }
+
+    const videoConfig = await helpVideoService.getBlogVideoConfig(req.app.locals.db);
+    const responseInfo = helpVideoService.buildVideoResponse(videoInfo, req.headers.range);
+    const { stream, activeStreamCount, cleanup } = helpVideoService.createVideoStream(
+      videoInfo,
+      responseInfo.streamOptions,
+      videoConfig.speedLimit
+    );
+    const limitText = videoConfig.speedLimit > 0
+      ? `全局限速 ${videoConfig.speedLimitKb}KB/s, 当前活跃视频流 ${activeStreamCount}`
+      : '不限速';
+
+    res.status(responseInfo.statusCode);
+    Object.entries(responseInfo.headers).forEach(([key, value]) => {
+      res.setHeader(key, value);
+    });
+
+    stream.on('error', (streamError) => {
+      logger.error(`读取帮助中心视频文件错误: ${streamError.message}`);
+      if (!res.headersSent) {
+        legacyNotFound(res, { message: '视频不存在' });
+      }
+    });
+
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        cleanup();
+        logger.warn(`帮助中心视频传输中断(${limitText}): ${videoInfo.filename}`);
+      }
+    });
+
+    logger.info(`读取帮助中心视频(${limitText}): ${videoInfo.filename}`);
+    return stream.pipe(res);
+  } catch (error) {
+    if (error?.isLegacyBusinessError) {
+      if (error.headers) {
+        Object.entries(error.headers).forEach(([key, value]) => res.setHeader(key, value));
+      }
+      return res.status(error.statusCode).json({
+        code: error.code,
+        message: error.message,
+        data: error.data
+      });
+    }
+
+    logger.error(`读取帮助中心视频错误: ${error.message}`);
     return legacyFail(res);
   }
 }
@@ -115,6 +192,7 @@ async function getHelpArticleDetail(req, res) {
 
 module.exports = {
   getHelpImage,
+  getHelpVideo,
   listHelpArticles,
   listHelpCategories,
   getHelpArticleDetail

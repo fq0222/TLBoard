@@ -449,6 +449,18 @@ const adminApi = {
   },
 
   /**
+   * 上传博客视频
+   * @param {FormData} formData - 视频表单
+   * @returns {Promise<Object>} 响应数据
+   */
+  uploadBlogVideo(formData) {
+    return apiClient.post('/blogs/upload-video', formData, {
+      timeout: 60000,
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  },
+
+  /**
    * 获取博客分类列表
    * @returns {Promise<Object>} 响应数据
    */

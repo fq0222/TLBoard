@@ -1,7 +1,7 @@
 const fs = require('fs');
-const { Transform } = require('stream');
 const { createLogger } = require('../../utils/logger');
 const downloadRepository = require('../../repositories/download-repository');
+const { createGlobalThrottle } = require('../shared/global-throttle-stream');
 
 const logger = createLogger('USER-DOWNLOAD');
 
@@ -10,125 +10,7 @@ const logger = createLogger('USER-DOWNLOAD');
  * 负责下载鉴权后的资源解析、限速配置与文件流编排，保持旧接口语义不变。
  */
 
-class GlobalThrottle {
-  constructor() {
-    this.bytesPerSecond = 0;
-    this.availableTokens = 0;
-    this.activeStreams = new Set();
-    this.refillInterval = null;
-  }
-
-  updateSpeed(bytesPerSecond) {
-    if (this.bytesPerSecond !== bytesPerSecond) {
-      this.bytesPerSecond = bytesPerSecond;
-      this.availableTokens = bytesPerSecond;
-
-      if (bytesPerSecond > 0 && !this.refillInterval) {
-        this.startRefill();
-      } else if (bytesPerSecond <= 0 && this.refillInterval) {
-        this.stopRefill();
-      }
-    } else if (bytesPerSecond > 0 && !this.refillInterval) {
-      this.availableTokens = bytesPerSecond;
-      this.startRefill();
-    }
-  }
-
-  startRefill() {
-    this.refillInterval = setInterval(() => {
-      if (this.bytesPerSecond > 0) {
-        this.availableTokens = Math.min(
-          this.bytesPerSecond * 2,
-          this.availableTokens + this.bytesPerSecond
-        );
-      }
-    }, 1000);
-  }
-
-  stopRefill() {
-    if (this.refillInterval) {
-      clearInterval(this.refillInterval);
-      this.refillInterval = null;
-    }
-  }
-
-  async acquireTokens(bytes) {
-    if (this.bytesPerSecond <= 0) {
-      return;
-    }
-
-    while (bytes > 0) {
-      if (this.availableTokens >= bytes) {
-        this.availableTokens -= bytes;
-        return;
-      }
-
-      const waitTime = Math.ceil((bytes - this.availableTokens) / this.bytesPerSecond * 1000);
-      await new Promise((resolve) => setTimeout(resolve, Math.min(waitTime, 100)));
-    }
-  }
-
-  registerStream(stream) {
-    this.activeStreams.add(stream);
-  }
-
-  unregisterStream(stream) {
-    this.activeStreams.delete(stream);
-    if (this.activeStreams.size === 0) {
-      this.stopRefill();
-    }
-  }
-
-  getActiveStreamCount() {
-    return this.activeStreams.size;
-  }
-}
-
-class GlobalThrottleStream extends Transform {
-  constructor(globalThrottle) {
-    super();
-    this.globalThrottle = globalThrottle;
-    this.unregistered = false;
-    this.globalThrottle.registerStream(this);
-  }
-
-  async _transform(chunk, encoding, callback) {
-    if (this.globalThrottle.bytesPerSecond <= 0) {
-      this.push(chunk);
-      callback();
-      return;
-    }
-
-    try {
-      await this.globalThrottle.acquireTokens(chunk.length);
-      this.push(chunk);
-      callback();
-    } catch (error) {
-      callback(error);
-    }
-  }
-
-  _flush(callback) {
-    this.unregister();
-    callback();
-  }
-
-  _destroy(error, callback) {
-    this.unregister();
-    callback(error);
-  }
-
-  unregister() {
-    if (this.unregistered) {
-      return;
-    }
-
-    this.unregistered = true;
-    this.globalThrottle.unregisterStream(this);
-  }
-}
-
-const globalThrottle = new GlobalThrottle();
+const globalThrottle = createGlobalThrottle();
 
 function createLegacyBusinessError(message, options = {}) {
   const error = new Error(message);
@@ -374,7 +256,7 @@ function createDownloadStream(downloadInfo, streamOptions = {}) {
 
   if (downloadInfo.speedLimit > 0) {
     globalThrottle.updateSpeed(downloadInfo.speedLimit);
-    const throttleStream = new GlobalThrottleStream(globalThrottle);
+    const throttleStream = globalThrottle.createStream();
     const stream = fileStream.pipe(throttleStream);
     return {
       stream,

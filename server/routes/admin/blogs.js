@@ -14,13 +14,26 @@ const blogsController = require('../../controllers/admin/blogs-controller');
 
 const router = express.Router();
 const UPLOAD_DIR = path.join(__dirname, '../../uploads/blog-images');
+const VIDEO_UPLOAD_DIR = path.join(__dirname, '../../uploads/blog-videos');
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
+if (!fs.existsSync(VIDEO_UPLOAD_DIR)) {
+  fs.mkdirSync(VIDEO_UPLOAD_DIR, { recursive: true });
+}
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `${crypto.randomUUID()}${ext}`);
+  }
+});
+
+const videoStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, VIDEO_UPLOAD_DIR),
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     cb(null, `${crypto.randomUUID()}${ext}`);
@@ -38,7 +51,8 @@ const articleValidators = [
 
 function attachBlogDeleteOptions(req, _res, next) {
   req.blogDeleteOptions = {
-    uploadDir: UPLOAD_DIR
+    uploadDir: UPLOAD_DIR,
+    videoUploadDir: VIDEO_UPLOAD_DIR
   };
   next();
 }
@@ -56,6 +70,7 @@ router.get('/categories', authenticateAdmin, blogsController.listCategories);
 router.post('/', authenticateAdmin, articleValidators, blogsController.createArticle);
 
 router.post('/upload-image', authenticateAdmin, blogsController.createImageUploadHandler({ storage }));
+router.post('/upload-video', authenticateAdmin, blogsController.createVideoUploadHandler({ storage: videoStorage }));
 
 router.get('/:id', authenticateAdmin, [
   param('id').isInt({ min: 1 })

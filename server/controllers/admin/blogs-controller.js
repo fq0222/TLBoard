@@ -1,4 +1,5 @@
 const multer = require('multer');
+const path = require('path');
 const { validationResult } = require('express-validator');
 const {
   legacySuccess,
@@ -108,6 +109,46 @@ function createImageUploadHandler({ storage }) {
   };
 }
 
+/**
+ * 创建博客视频上传处理器。
+ *
+ * @param {Object} options - 上传配置
+ * @param {Object} options.storage - multer 磁盘存储配置
+ * @returns {Function} Express 处理函数
+ */
+function createVideoUploadHandler({ storage }) {
+  return function uploadVideo(req, res) {
+    const upload = multer({
+      storage,
+      limits: { fileSize: 50 * 1024 * 1024 },
+      fileFilter(_req, file, cb) {
+        const ext = path.extname(file.originalname).toLowerCase();
+        if (ext !== '.mp4' || !blogService.isAllowedBlogVideoMimeType(file.mimetype)) {
+          return cb(new Error('只允许上传 MP4 视频'));
+        }
+        cb(null, true);
+      }
+    }).single('file');
+
+    upload(req, res, (error) => {
+      if (error) {
+        const message = error.code === 'LIMIT_FILE_SIZE'
+          ? '视频大小不能超过 50MB'
+          : error.message;
+        return handleBusinessError(res, message);
+      }
+
+      if (!req.file) {
+        return handleBusinessError(res, '请选择要上传的视频');
+      }
+
+      const data = blogService.buildUploadedVideoPayload(req.file.filename);
+      logger.info(`上传博客视频成功: ${req.file.filename}`);
+      return legacySuccess(res, data);
+    });
+  };
+}
+
 async function getArticle(req, res) {
   try {
     if (handleValidationFailure(req, res)) {
@@ -167,6 +208,7 @@ module.exports = {
   listCategories,
   createArticle,
   createImageUploadHandler,
+  createVideoUploadHandler,
   getArticle,
   updateArticle,
   deleteArticle

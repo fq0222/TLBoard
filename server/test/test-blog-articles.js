@@ -5,7 +5,8 @@ const config = require('../config');
 const databaseManager = require('../db/init');
 const blogService = require('../services/shared/blog-service');
 
-const uploadDir = path.join(__dirname, '../uploads/blog-images');
+const imageUploadDir = path.join(__dirname, '../uploads/blog-images');
+const videoUploadDir = path.join(__dirname, '../uploads/blog-videos');
 
 function assertOk(condition, message) {
   assert.strictEqual(Boolean(condition), true, message);
@@ -30,7 +31,8 @@ async function main() {
     await blogService.ensureBlogArticlesTable(db);
     await cleanupTestArticles(db);
 
-    fs.mkdirSync(uploadDir, { recursive: true });
+    fs.mkdirSync(imageUploadDir, { recursive: true });
+    fs.mkdirSync(videoUploadDir, { recursive: true });
 
     console.log('=== 博客文章服务测试 ===');
 
@@ -102,12 +104,22 @@ async function main() {
       '博客图片 Markdown 会生成用户端可访问的绝对 URL'
     );
 
+    assertOk(blogService.isAllowedBlogVideoMimeType('video/mp4'), '允许上传 MP4 博客视频');
+    assertOk(!blogService.isAllowedBlogVideoMimeType('video/webm'), '第一版不允许上传非 MP4 博客视频');
+
+    const uploadedVideoFilename = '55555555-5555-4555-8555-555555555555.mp4';
+    const videoMarkdown = blogService.buildBlogVideoMarkdown(uploadedVideoFilename);
+    assertOk(
+      videoMarkdown === `<video controls preload="metadata" src="${getExpectedSiteBaseUrl()}/api/user/help/videos/${uploadedVideoFilename}"></video>`,
+      '博客视频 HTML 会生成用户端可访问的绝对 URL'
+    );
+
     const localImageA = '11111111-1111-4111-8111-111111111111.png';
     const localImageB = '22222222-2222-4222-8222-222222222222.webp';
     const localImageC = '33333333-3333-4333-8333-333333333333.gif';
-    fs.writeFileSync(path.join(uploadDir, localImageA), 'image-a');
-    fs.writeFileSync(path.join(uploadDir, localImageB), 'image-b');
-    fs.writeFileSync(path.join(uploadDir, localImageC), 'image-c');
+    fs.writeFileSync(path.join(imageUploadDir, localImageA), 'image-a');
+    fs.writeFileSync(path.join(imageUploadDir, localImageB), 'image-b');
+    fs.writeFileSync(path.join(imageUploadDir, localImageC), 'image-c');
 
     const articleWithImages = await blogService.createArticle(db, {
       title: '测试博客-待删除图片',
@@ -132,14 +144,56 @@ async function main() {
     const extracted = blogService.extractLocalBlogImageFilenames(articleWithImages.content);
     assertOk(extracted.includes(localImageA) && extracted.includes(localImageB), '可以解析 Markdown 中的本地博客图片引用');
 
-    await blogService.deleteArticle(db, articleWithImages.id, { uploadDir });
-    assertOk(!fs.existsSync(path.join(uploadDir, localImageA)), '删除文章会清理不再被引用的本地图片');
-    assertOk(fs.existsSync(path.join(uploadDir, localImageB)), '删除文章不会清理仍被其他文章引用的本地图片');
-    assertOk(fs.existsSync(path.join(uploadDir, localImageC)), '删除文章不会清理未被该文章引用的本地图片');
+    await blogService.deleteArticle(db, articleWithImages.id, { uploadDir: imageUploadDir });
+    assertOk(!fs.existsSync(path.join(imageUploadDir, localImageA)), '删除文章会清理不再被引用的本地图片');
+    assertOk(fs.existsSync(path.join(imageUploadDir, localImageB)), '删除文章不会清理仍被其他文章引用的本地图片');
+    assertOk(fs.existsSync(path.join(imageUploadDir, localImageC)), '删除文章不会清理未被该文章引用的本地图片');
+
+    const localVideoA = '66666666-6666-4666-8666-666666666666.mp4';
+    const localVideoB = '77777777-7777-4777-8777-777777777777.mp4';
+    const localVideoC = '88888888-8888-4888-8888-888888888888.mp4';
+    fs.writeFileSync(path.join(videoUploadDir, localVideoA), 'video-a');
+    fs.writeFileSync(path.join(videoUploadDir, localVideoB), 'video-b');
+    fs.writeFileSync(path.join(videoUploadDir, localVideoC), 'video-c');
+
+    const articleWithVideos = await blogService.createArticle(db, {
+      title: '测试博客-待删除视频',
+      summary: '视频简介',
+      category: '视频',
+      content: [
+        `<video controls src="/api/user/help/videos/${localVideoA}"></video>`,
+        `<video controls preload="metadata" src="http://localhost:30000/api/user/help/videos/${localVideoB}"></video>`,
+        '<video controls src="https://example.com/outside.mp4"></video>'
+      ].join('\n'),
+      status: 'published'
+    });
+
+    await blogService.createArticle(db, {
+      title: '测试博客-共享视频',
+      summary: '共享简介',
+      category: '视频',
+      content: `<video controls src="/api/user/help/videos/${localVideoB}"></video>`,
+      status: 'published'
+    });
+
+    const extractedVideos = blogService.extractLocalBlogVideoFilenames(articleWithVideos.content);
+    assertOk(
+      extractedVideos.includes(localVideoA) && extractedVideos.includes(localVideoB),
+      '可以解析文章内容中的本地博客视频引用'
+    );
+
+    await blogService.deleteArticle(db, articleWithVideos.id, { videoUploadDir });
+    assertOk(!fs.existsSync(path.join(videoUploadDir, localVideoA)), '删除文章会清理不再被引用的本地视频');
+    assertOk(fs.existsSync(path.join(videoUploadDir, localVideoB)), '删除文章不会清理仍被其他文章引用的视频');
+    assertOk(fs.existsSync(path.join(videoUploadDir, localVideoC)), '删除文章不会清理未被该文章引用的视频');
 
     await cleanupTestArticles(db);
     for (const filename of [localImageB, localImageC]) {
-      const filePath = path.join(uploadDir, filename);
+      const filePath = path.join(imageUploadDir, filename);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+    for (const filename of [localVideoB, localVideoC]) {
+      const filePath = path.join(videoUploadDir, filename);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
 

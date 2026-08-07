@@ -45,6 +45,11 @@ function sanitizeHtml(html) {
     node.setAttribute('decoding', 'async')
     node.setAttribute('fetchpriority', 'low')
   })
+  template.content.querySelectorAll('video').forEach((node) => {
+    node.setAttribute('controls', 'controls')
+    node.setAttribute('preload', 'metadata')
+    node.setAttribute('playsinline', 'playsinline')
+  })
   template.content.querySelectorAll('*').forEach((node) => {
     Array.from(node.attributes).forEach((attr) => {
       const name = attr.name.toLowerCase()
@@ -213,7 +218,25 @@ onMounted(() => {
   border: 1px solid #ebeef5;
 }
 
+.markdown-body :deep(video) {
+  display: block;
+  max-width: 100%;
+  width: 100%;
+  height: auto;
+  max-height: 80vh;
+  max-height: 80dvh;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #000;
+  margin: 0 0 16px;
+}
+
 @media (max-width: 768px) {
+  .markdown-body :deep(video) {
+    max-height: 70vh;
+    max-height: 70dvh;
+  }
+
   .content-card {
     padding: 18px;
   }

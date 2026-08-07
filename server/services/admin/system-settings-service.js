@@ -27,7 +27,8 @@ const DEFAULT_EMAIL_CONFIG = {
 };
 const DEFAULT_RESOURCE_CONFIG = {
   max_file_size: 100,
-  download_speed_limit: 0
+  download_speed_limit: 0,
+  blog_video_speed_limit: 300
 };
 
 /**
@@ -207,7 +208,7 @@ async function saveEmailConfig(db, payload) {
  * 读取资源管理配置。
  *
  * @param {Object} db - 数据库实例
- * @returns {Promise<{max_file_size:number,download_speed_limit:number}>} 资源配置
+ * @returns {Promise<{max_file_size:number,download_speed_limit:number,blog_video_speed_limit:number}>} 资源配置
  */
 async function getResourceConfig(db) {
   const value = await getSystemSettingValue(db, RESOURCE_CONFIG_KEY);
@@ -225,6 +226,10 @@ async function getResourceConfig(db) {
       download_speed_limit: normalizeNonNegativeInteger(
         parsedConfig.download_speed_limit,
         DEFAULT_RESOURCE_CONFIG.download_speed_limit
+      ),
+      blog_video_speed_limit: normalizeNonNegativeInteger(
+        parsedConfig.blog_video_speed_limit,
+        DEFAULT_RESOURCE_CONFIG.blog_video_speed_limit
       )
     };
   } catch (error) {
@@ -237,7 +242,7 @@ async function getResourceConfig(db) {
  *
  * @param {Object} db - 数据库实例
  * @param {Object} payload - 资源配置表单
- * @returns {Promise<{max_file_size:number,download_speed_limit:number}>} 保存后的资源配置
+ * @returns {Promise<{max_file_size:number,download_speed_limit:number,blog_video_speed_limit:number}>} 保存后的资源配置
  */
 async function saveResourceConfig(db, payload) {
   const config = {
@@ -245,6 +250,10 @@ async function saveResourceConfig(db, payload) {
     download_speed_limit: normalizeNonNegativeInteger(
       payload.download_speed_limit,
       DEFAULT_RESOURCE_CONFIG.download_speed_limit
+    ),
+    blog_video_speed_limit: normalizeNonNegativeInteger(
+      payload.blog_video_speed_limit,
+      DEFAULT_RESOURCE_CONFIG.blog_video_speed_limit
     )
   };
 

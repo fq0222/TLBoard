@@ -45,7 +45,10 @@ router.put(
       .withMessage('最大文件大小必须是1-1024之间的整数'),
     body('download_speed_limit')
       .isInt({ min: 0 })
-      .withMessage('下载速度限制必须是大于等于0的整数')
+      .withMessage('下载速度限制必须是大于等于0的整数'),
+    body('blog_video_speed_limit')
+      .isInt({ min: 0 })
+      .withMessage('博客视频速度限制必须是大于等于0的整数')
   ],
   resourcesController.saveConfig
 );

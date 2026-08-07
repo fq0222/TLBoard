@@ -40,6 +40,14 @@ router.get('/images/:filename', [
 ], helpController.getHelpImage);
 
 /**
+ * GET /api/user/help/videos/:filename
+ * 读取帮助中心视频。
+ */
+router.get('/videos/:filename', [
+  param('filename').custom((value) => helpService.isSafeHelpVideoFilename(value))
+], helpController.getHelpVideo);
+
+/**
  * GET /api/user/help/articles
  * 获取帮助文章列表。
  */

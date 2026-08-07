@@ -5,7 +5,9 @@ const blogRepository = require('../../repositories/blog-repository');
 
 const ALLOWED_STATUSES = ['draft', 'published'];
 const BLOG_IMAGE_PREFIX = '/api/user/help/images/';
+const BLOG_VIDEO_PREFIX = '/api/user/help/videos/';
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const ALLOWED_VIDEO_MIME_TYPES = ['video/mp4'];
 
 function buildBlogImageUrl(filename) {
   const baseUrl = getSiteBaseUrl();
@@ -19,6 +21,29 @@ function buildBlogImageMarkdown(filename, alt = '\u56fe\u7247\u8bf4\u660e') {
 }
 
 /**
+ * 构造博客视频的用户端访问地址。
+ *
+ * @param {string} filename - 视频文件名
+ * @returns {string} 视频访问 URL
+ */
+function buildBlogVideoUrl(filename) {
+  const baseUrl = getSiteBaseUrl();
+  const videoPath = `${BLOG_VIDEO_PREFIX}${filename}`;
+
+  return baseUrl ? `${baseUrl}${videoPath}` : videoPath;
+}
+
+/**
+ * 构造博客视频插入片段，使用浏览器原生 video 播放器。
+ *
+ * @param {string} filename - 视频文件名
+ * @returns {string} 可插入文章内容的视频 HTML
+ */
+function buildBlogVideoMarkdown(filename) {
+  return `<video controls preload="metadata" src="${buildBlogVideoUrl(filename)}"></video>`;
+}
+
+/**
  * 判断博客图片 MIME 类型是否允许上传。
  *
  * @param {string} mimetype - 文件 MIME 类型
@@ -26,6 +51,16 @@ function buildBlogImageMarkdown(filename, alt = '\u56fe\u7247\u8bf4\u660e') {
  */
 function isAllowedBlogImageMimeType(mimetype) {
   return ALLOWED_MIME_TYPES.includes(mimetype);
+}
+
+/**
+ * 判断博客视频 MIME 类型是否允许上传。
+ *
+ * @param {string} mimetype - 文件 MIME 类型
+ * @returns {boolean} 是否允许上传
+ */
+function isAllowedBlogVideoMimeType(mimetype) {
+  return ALLOWED_VIDEO_MIME_TYPES.includes(mimetype);
 }
 
 /**
@@ -39,6 +74,20 @@ function buildUploadedImagePayload(filename) {
     filename,
     url: buildBlogImageUrl(filename),
     markdown: buildBlogImageMarkdown(filename)
+  };
+}
+
+/**
+ * 构造视频上传成功后的旧接口返回结构。
+ *
+ * @param {string} filename - 视频文件名
+ * @returns {{filename:string,url:string,markdown:string}} 上传结果
+ */
+function buildUploadedVideoPayload(filename) {
+  return {
+    filename,
+    url: buildBlogVideoUrl(filename),
+    markdown: buildBlogVideoMarkdown(filename)
   };
 }
 
@@ -149,6 +198,16 @@ function isSafeBlogImageFilename(filename) {
   return /^[a-f0-9-]+\.(jpg|jpeg|png|gif|webp)$/i.test(filename);
 }
 
+/**
+ * 判断本地博客视频文件名是否安全。
+ *
+ * @param {string} filename - 视频文件名
+ * @returns {boolean} 是否为 UUID 风格 MP4 文件名
+ */
+function isSafeBlogVideoFilename(filename) {
+  return /^[a-f0-9-]+\.mp4$/i.test(filename);
+}
+
 function extractLocalBlogImageFilenames(content = '') {
   const filenames = new Set();
   const markdownImageRegex = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
@@ -175,9 +234,54 @@ function extractLocalBlogImageFilenames(content = '') {
   return Array.from(filenames);
 }
 
+/**
+ * 从文章 HTML 内容中提取本地博客视频文件名。
+ *
+ * @param {string} content - 文章内容
+ * @returns {string[]} 本地视频文件名列表
+ */
+function extractLocalBlogVideoFilenames(content = '') {
+  const filenames = new Set();
+  const videoSrcRegex = /<video\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi;
+  let match;
+
+  while ((match = videoSrcRegex.exec(content))) {
+    const rawUrl = match[1];
+    let pathname = rawUrl;
+
+    try {
+      pathname = new URL(rawUrl, 'http://local.test').pathname;
+    } catch {
+      pathname = rawUrl;
+    }
+
+    if (pathname.startsWith(BLOG_VIDEO_PREFIX)) {
+      const filename = decodeURIComponent(path.basename(pathname));
+      if (isSafeBlogVideoFilename(filename)) {
+        filenames.add(filename);
+      }
+    }
+  }
+
+  return Array.from(filenames);
+}
+
 async function isImageReferencedByOtherArticles(db, filename, excludeArticleId) {
   const rows = await blogRepository.listOtherArticleContents(db, excludeArticleId);
   return rows.some((row) => extractLocalBlogImageFilenames(row.content).includes(filename));
+}
+
+/**
+ * 判断视频是否仍被其他文章引用。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {string} filename - 视频文件名
+ * @param {number} excludeArticleId - 当前删除文章 ID
+ * @returns {Promise<boolean>} 是否仍被其他文章引用
+ */
+async function isVideoReferencedByOtherArticles(db, filename, excludeArticleId) {
+  const rows = await blogRepository.listOtherArticleContents(db, excludeArticleId);
+  return rows.some((row) => extractLocalBlogVideoFilenames(row.content).includes(filename));
 }
 
 async function cleanupUnreferencedBlogImages(db, deletedArticle, { uploadDir, logger } = {}) {
@@ -208,6 +312,44 @@ async function cleanupUnreferencedBlogImages(db, deletedArticle, { uploadDir, lo
   return deleted;
 }
 
+/**
+ * 清理删除文章后不再被引用的本地博客视频。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} deletedArticle - 已删除文章快照
+ * @param {Object} options - 清理配置
+ * @param {string} options.videoUploadDir - 视频上传目录
+ * @param {Object} options.logger - 可选日志器
+ * @returns {Promise<string[]>} 已删除的视频文件名
+ */
+async function cleanupUnreferencedBlogVideos(db, deletedArticle, { videoUploadDir, logger } = {}) {
+  const filenames = extractLocalBlogVideoFilenames(deletedArticle.content);
+  const deleted = [];
+
+  for (const filename of filenames) {
+    const stillReferenced = await isVideoReferencedByOtherArticles(db, filename, deletedArticle.id);
+    if (stillReferenced) continue;
+
+    const filePath = path.resolve(videoUploadDir, filename);
+    const resolvedUploadDir = path.resolve(videoUploadDir);
+
+    if (!filePath.startsWith(resolvedUploadDir + path.sep)) continue;
+
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        deleted.push(filename);
+      }
+    } catch (error) {
+      if (logger) {
+        logger.error(`删除博客视频失败: ${filename} - ${error.message}`);
+      }
+    }
+  }
+
+  return deleted;
+}
+
 async function deleteArticle(db, id, options = {}) {
   const existing = await getAdminArticle(db, id);
   if (!existing) return null;
@@ -218,15 +360,24 @@ async function deleteArticle(db, id, options = {}) {
     await cleanupUnreferencedBlogImages(db, existing, options);
   }
 
+  if (options.videoUploadDir) {
+    await cleanupUnreferencedBlogVideos(db, existing, options);
+  }
+
   return existing;
 }
 
 module.exports = {
   BLOG_IMAGE_PREFIX,
+  BLOG_VIDEO_PREFIX,
   isAllowedBlogImageMimeType,
+  isAllowedBlogVideoMimeType,
   buildBlogImageUrl,
+  buildBlogVideoUrl,
   buildBlogImageMarkdown,
+  buildBlogVideoMarkdown,
   buildUploadedImagePayload,
+  buildUploadedVideoPayload,
   ensureBlogArticlesTable,
   createArticle,
   updateArticle,
@@ -238,6 +389,9 @@ module.exports = {
   listAdminCategories,
   listPublishedCategories,
   extractLocalBlogImageFilenames,
+  extractLocalBlogVideoFilenames,
   isSafeBlogImageFilename,
-  cleanupUnreferencedBlogImages
+  isSafeBlogVideoFilename,
+  cleanupUnreferencedBlogImages,
+  cleanupUnreferencedBlogVideos
 };

@@ -112,6 +112,18 @@
                   上传图片
                 </el-button>
               </el-upload>
+              <el-upload
+                action="#"
+                :show-file-list="false"
+                :auto-upload="false"
+                accept="video/mp4"
+                :on-change="handleVideoSelected"
+              >
+                <el-button :loading="videoUploading">
+                  <el-icon><Upload /></el-icon>
+                  上传视频
+                </el-button>
+              </el-upload>
             </div>
             <div class="editor-columns">
               <el-input
@@ -136,8 +148,8 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="previewVisible" title="文章预览" width="860px">
-      <article v-if="previewArticle" class="preview-article">
+    <el-dialog v-model="previewVisible" title="文章预览" width="860px" @close="handlePreviewClose" @closed="handlePreviewClosed">
+      <article v-if="previewArticle" ref="previewArticleRef" class="preview-article">
         <h1>{{ previewArticle.title }}</h1>
         <div class="preview-meta">
           <el-tag v-if="previewArticle.category" effect="plain">{{ previewArticle.category }}</el-tag>
@@ -163,9 +175,11 @@ const categories = ref([])
 const loading = ref(false)
 const submitting = ref(false)
 const uploading = ref(false)
+const videoUploading = ref(false)
 const editorVisible = ref(false)
 const previewVisible = ref(false)
 const previewArticle = ref(null)
+const previewArticleRef = ref(null)
 const contentInput = ref(null)
 const editingId = ref(null)
 const total = ref(0)
@@ -185,6 +199,11 @@ function sanitizeHtml(html) {
   const template = document.createElement('template')
   template.innerHTML = html
   template.content.querySelectorAll('script, iframe, object, embed, style, link').forEach((node) => node.remove())
+  template.content.querySelectorAll('video').forEach((node) => {
+    node.setAttribute('controls', 'controls')
+    node.setAttribute('preload', 'metadata')
+    node.setAttribute('playsinline', 'playsinline')
+  })
   template.content.querySelectorAll('*').forEach((node) => {
     Array.from(node.attributes).forEach((attr) => {
       const name = attr.name.toLowerCase()
@@ -297,6 +316,20 @@ async function showPreview(row) {
   }
 }
 
+function handlePreviewClose() {
+  const root = previewArticleRef.value
+  if (!root) return
+
+  root.querySelectorAll('video').forEach((video) => {
+    video.pause()
+    video.currentTime = 0
+  })
+}
+
+function handlePreviewClosed() {
+  previewArticle.value = null
+}
+
 function validateForm() {
   if (!form.title.trim()) return '请填写标题'
   if (!form.summary.trim()) return '请填写简介'
@@ -403,6 +436,25 @@ async function handleImageSelected(uploadFile) {
     console.error('上传图片失败:', error)
   } finally {
     uploading.value = false
+  }
+}
+
+async function handleVideoSelected(uploadFile) {
+  if (!uploadFile?.raw) return
+  const formData = new FormData()
+  formData.append('file', uploadFile.raw)
+
+  try {
+    videoUploading.value = true
+    const response = await api.admin.uploadBlogVideo(formData)
+    if (response.code === 0) {
+      insertAtCursor(response.data.markdown)
+      ElMessage.success('视频上传成功')
+    }
+  } catch (error) {
+    console.error('上传视频失败:', error)
+  } finally {
+    videoUploading.value = false
   }
 }
 
@@ -627,6 +679,19 @@ onMounted(() => {
   border-radius: 8px;
 }
 
+.markdown-body :deep(video) {
+  display: block;
+  max-width: 100%;
+  width: 100%;
+  height: auto;
+  max-height: 80vh;
+  max-height: 80dvh;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #000;
+  margin: 0 0 14px;
+}
+
 .empty-preview {
   color: #909399;
 }
@@ -665,6 +730,11 @@ onMounted(() => {
   .search-input,
   .filter-select {
     width: 100%;
+  }
+
+  .markdown-body :deep(video) {
+    max-height: 70vh;
+    max-height: 70dvh;
   }
 }
 </style>
