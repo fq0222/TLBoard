@@ -18,33 +18,32 @@
           <p>{{ article.summary }}</p>
         </header>
 
-        <div class="markdown-body" v-html="renderedContent"></div>
+        <div ref="markdownBodyRef" class="markdown-body" v-html="renderedContent"></div>
       </article>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import api from '@/api'
+import { loadManualLazyImage, prepareManualLazyImages } from '@/utils/manual-lazy-images'
 
 const route = useRoute()
 const article = ref(null)
 const loading = ref(false)
+const markdownBodyRef = ref(null)
+let imageObserver = null
 
 function sanitizeHtml(html) {
   const template = document.createElement('template')
   template.innerHTML = html
   template.content.querySelectorAll('script, iframe, object, embed, style, link').forEach((node) => node.remove())
-  template.content.querySelectorAll('img').forEach((node) => {
-    node.setAttribute('loading', 'lazy')
-    node.setAttribute('decoding', 'async')
-    node.setAttribute('fetchpriority', 'low')
-  })
+  prepareManualLazyImages(template.content)
   template.content.querySelectorAll('video').forEach((node) => {
     node.setAttribute('controls', 'controls')
     node.setAttribute('preload', 'metadata')
@@ -60,6 +59,38 @@ function sanitizeHtml(html) {
     })
   })
   return template.innerHTML
+}
+
+function disconnectImageObserver() {
+  if (imageObserver) {
+    imageObserver.disconnect()
+    imageObserver = null
+  }
+}
+
+function setupManualLazyImages() {
+  disconnectImageObserver()
+
+  const images = Array.from(markdownBodyRef.value?.querySelectorAll('img[data-src]') || [])
+  if (images.length === 0) return
+
+  if (!window.IntersectionObserver) {
+    images.forEach((image) => loadManualLazyImage(image))
+    return
+  }
+
+  imageObserver = new IntersectionObserver((entries, observer) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return
+
+      loadManualLazyImage(entry.target)
+      observer.unobserve(entry.target)
+    })
+  }, {
+    rootMargin: '300px 0px'
+  })
+
+  images.forEach((image) => imageObserver.observe(image))
 }
 
 const renderedContent = computed(() => {
@@ -95,6 +126,15 @@ async function fetchArticle() {
 
 onMounted(() => {
   fetchArticle()
+})
+
+watch(renderedContent, async () => {
+  await nextTick()
+  setupManualLazyImages()
+})
+
+onBeforeUnmount(() => {
+  disconnectImageObserver()
 })
 </script>
 
@@ -216,6 +256,11 @@ onMounted(() => {
   height: auto;
   border-radius: 8px;
   border: 1px solid #ebeef5;
+}
+
+.markdown-body :deep(.manual-lazy-image) {
+  min-height: 180px;
+  background: #f5f7fa;
 }
 
 .markdown-body :deep(video) {
