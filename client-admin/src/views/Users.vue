@@ -32,7 +32,7 @@
       <el-table :data="users" style="width: 100%" @sort-change="handleSortChange">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="email" label="邮箱" />
-        <el-table-column prop="ip_location_text" label="IP归属地" min-width="150" />
+        <el-table-column prop="ip_location_text" label="IP归属地" />
         <el-table-column prop="plan_name" label="套餐" />
         <el-table-column
           prop="traffic_used"
