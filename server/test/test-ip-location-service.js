@@ -30,7 +30,8 @@ test('formatIpLocationText prefers login location and joins province city distri
     login: {
       province: '广东省',
       city: '广州市',
-      district: '天河区'
+      district: '天河区',
+      isp: '移动'
     },
     subscription: {
       province: '河南省',
@@ -39,7 +40,7 @@ test('formatIpLocationText prefers login location and joins province city distri
     }
   }));
 
-  assert.equal(text, '广东省 广州市 天河区');
+  assert.equal(text, '广东省 广州市 天河区 [移动]');
 });
 
 test('formatIpLocationText falls back to subscription then default text', () => {
@@ -47,9 +48,10 @@ test('formatIpLocationText falls back to subscription then default text', () => 
     subscription: {
       province: '河南省',
       city: '郑州市',
-      district: ''
+      district: '',
+      isp: '联通'
     }
-  })), '河南省 郑州市');
+  })), '河南省 郑州市 [联通]');
 
   assert.equal(ipLocationService.formatIpLocationText('{}'), '暂未获取');
   assert.equal(ipLocationService.formatIpLocationText('not-json'), '暂未获取');

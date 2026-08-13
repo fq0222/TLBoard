@@ -161,7 +161,7 @@ async function recordUserIpLocation(db, userId, source, rawIp, options = {}) {
  * 管理端格式化展示用户归属地。
  *
  * @param {string|Object|undefined} value - users.ip_location 原始值
- * @returns {string} 省市区文本或“暂未获取”
+ * @returns {string} 省市区与运营商文本或“暂未获取”
  */
 function formatIpLocationText(value) {
   try {
@@ -172,7 +172,9 @@ function formatIpLocationText(value) {
       .map((item) => String(item || '').trim())
       .filter(Boolean)
       .join(' ');
-    return text || '暂未获取';
+    const ispText = String(location.isp || '').trim();
+    if (!text) return '暂未获取';
+    return ispText ? `${text} [${ispText}]` : text;
   } catch (error) {
     return '暂未获取';
   }
