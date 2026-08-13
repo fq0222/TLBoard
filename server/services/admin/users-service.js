@@ -1,6 +1,7 @@
 const XuiService = require('../../integrations/xui/xui-service');
 const userSubscriptionService = require('../user/subscription-service');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
+const ipLocationService = require('../shared/ip-location-service');
 const { parsePagination } = require('../../shared/utils/pagination');
 const userRepository = require('../../repositories/user-repository');
 const subscriptionRepository = require('../../repositories/subscription-repository');
@@ -252,6 +253,7 @@ async function listUsers(db, query) {
       enabled: user.enabled,
       disable_reason: user.disable_reason,
       created_at: user.created_at,
+      ip_location_text: ipLocationService.formatIpLocationText(user.ip_location),
       ...buildUserStatus(user)
     }))
   };

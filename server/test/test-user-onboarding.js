@@ -165,6 +165,49 @@ test('admin user list sorts traffic used before pagination when requested', asyn
   assert.match(getListSql(), /ORDER BY COALESCE\(u\.traffic_used, 0\) DESC, u\.created_at DESC\s+LIMIT \? OFFSET \?/);
 });
 
+test('admin user list returns formatted ip location text', async () => {
+  const { db, getListSql } = createListUsersDb([
+    {
+      id: 1,
+      email: 'located@example.com',
+      plan_id: 1,
+      plan_name: '基础套餐',
+      traffic_used: 0,
+      traffic_limit: 1024,
+      expire_at: 0,
+      enabled: 1,
+      disable_reason: null,
+      ip_location: JSON.stringify({
+        login: {
+          province: '广东省',
+          city: '广州市',
+          district: '天河区'
+        }
+      }),
+      created_at: 1
+    },
+    {
+      id: 2,
+      email: 'unknown@example.com',
+      plan_id: 1,
+      plan_name: '基础套餐',
+      traffic_used: 0,
+      traffic_limit: 1024,
+      expire_at: 0,
+      enabled: 1,
+      disable_reason: null,
+      ip_location: '{}',
+      created_at: 2
+    }
+  ]);
+
+  const result = await usersService.listUsers(db, { page: 1, limit: 15 });
+
+  assert.match(getListSql(), /u\.ip_location/);
+  assert.equal(result.list[0].ip_location_text, '广东省 广州市 天河区');
+  assert.equal(result.list[1].ip_location_text, '暂未获取');
+});
+
 test('admin user update preserves disable reason when enabled value is unchanged and updates traffic used', async () => {
   const originalUser = {
     id: 10,

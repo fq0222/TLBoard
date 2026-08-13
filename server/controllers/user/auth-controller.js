@@ -2,6 +2,7 @@ const { validationResult } = require('express-validator');
 const { createLogger } = require('../../utils/logger');
 const { generateSubscriptionUrls, getUserAppBaseUrl } = require('../../utils/site-url');
 const authService = require('../../services/user/auth-service');
+const ipLocationService = require('../../services/shared/ip-location-service');
 
 const logger = createLogger('USER-AUTH');
 
@@ -92,6 +93,8 @@ async function login(req, res) {
   try {
     const data = await authService.login(req.app.locals.db, req.body);
     logger.info(`用户登录成功: ${req.body.email}`);
+    ipLocationService.recordUserIpLocation(req.app.locals.db, data.user.id, 'login', req.ip || req.socket.remoteAddress)
+      .catch((error) => logger.warn(`记录登录 IP 归属地失败: ${error.message}`));
     return res.json({
       code: 0,
       message: 'ok',

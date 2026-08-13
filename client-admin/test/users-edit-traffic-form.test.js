@@ -20,3 +20,8 @@ test('编辑用户弹窗提供已用流量、倍数步进和重置基本信息�
   assert.match(source, /resetBasicInfoChanges/)
   assert.match(source, /@click="resetBasicInfoChanges"/)
 })
+
+test('用户列表展示 IP 归属地列', () => {
+  assert.match(source, /prop="ip_location_text"/)
+  assert.match(source, /label="IP归属地"/)
+})

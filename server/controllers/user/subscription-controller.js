@@ -3,6 +3,7 @@ const { legacySuccess, legacyFail, legacyValidationError } = require('../../shar
 const { createLogger } = require('../../utils/logger');
 const { generateSubscriptionUrls } = require('../../utils/site-url');
 const subscriptionService = require('../../services/user/subscription-service');
+const ipLocationService = require('../../services/shared/ip-location-service');
 
 const logger = createLogger('USER-SUB');
 
@@ -161,6 +162,11 @@ async function getSubscriptionContent(req, res) {
       req.params.token,
       req.query
     );
+
+    if (result.userId) {
+      ipLocationService.recordUserIpLocation(req.app.locals.db, result.userId, 'subscription', req.ip || req.socket.remoteAddress)
+        .catch((error) => logger.warn(`记录订阅 IP 归属地失败: ${error.message}`));
+    }
 
     res.setHeader('Content-Type', result.contentType);
     Object.entries(result.headers).forEach(([key, value]) => {

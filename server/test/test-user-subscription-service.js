@@ -109,6 +109,7 @@ function createSystemSettingsFakeDb(initialSettings = {}) {
  */
 async function testDefaultSubscriptionContentShouldReturnBase64AndUserinfo() {
   const subscription = {
+    user_id: 12,
     sub_id: 'sub-token',
     email: 'user@example.com',
     enabled: 1,
@@ -130,6 +131,7 @@ async function testDefaultSubscriptionContentShouldReturnBase64AndUserinfo() {
   );
 
   assert.strictEqual(result.contentType, 'text/plain; charset=utf-8');
+  assert.strictEqual(result.userId, 12);
   assert.strictEqual(
     result.headers['Subscription-Userinfo'],
     'upload=0; download=1024; total=2048; expire=1700000000'

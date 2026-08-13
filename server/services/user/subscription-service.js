@@ -1215,6 +1215,7 @@ function buildFallbackSubscriptionNodes(reason, siteUrl = '') {
  */
 async function buildFallbackSubscriptionContent(db, query, reason, subscription = {}) {
   const fallbackSubscription = {
+    user_id: subscription.user_id || subscription.id,
     email: subscription.email || '',
     traffic_used: subscription.traffic_used || 0,
     traffic_limit: subscription.traffic_limit || 0,
@@ -1226,6 +1227,7 @@ async function buildFallbackSubscriptionContent(db, query, reason, subscription 
   if (query.clash === '1') {
     const clashHeaderConfig = await getClashSubscriptionHeaderConfig(db);
     return {
+      userId: fallbackSubscription.user_id,
       email: fallbackSubscription.email,
       contentType: 'text/yaml; charset=utf-8',
       headers: buildClashSubscriptionHeaders(fallbackSubscription, clashHeaderConfig),
@@ -1234,6 +1236,7 @@ async function buildFallbackSubscriptionContent(db, query, reason, subscription 
   }
 
   return {
+    userId: fallbackSubscription.user_id,
     email: fallbackSubscription.email,
     contentType: 'text/plain; charset=utf-8',
     headers: buildSubscriptionUserinfoHeaders(fallbackSubscription),
@@ -1849,6 +1852,7 @@ async function getSubscriptionContent(db, token, query) {
   if (query.clash === '1') {
     const clashHeaderConfig = await getClashSubscriptionHeaderConfig(db);
     return {
+      userId: subscription.user_id,
       email: subscription.email,
       contentType: 'text/yaml; charset=utf-8',
       headers: buildClashSubscriptionHeaders(subscription, clashHeaderConfig),
@@ -1859,6 +1863,7 @@ async function getSubscriptionContent(db, token, query) {
   const v2rayConfig = generateV2RayConfig(nodes, subscription);
   if (query.v2ray === '1') {
     return {
+      userId: subscription.user_id,
       email: subscription.email,
       contentType: 'text/plain; charset=utf-8',
       headers: {},
@@ -1867,6 +1872,7 @@ async function getSubscriptionContent(db, token, query) {
   }
 
   return {
+    userId: subscription.user_id,
     email: subscription.email,
     contentType: 'text/plain; charset=utf-8',
     headers: buildSubscriptionUserinfoHeaders(subscription),

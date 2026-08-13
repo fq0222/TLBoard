@@ -417,7 +417,7 @@ async function listUsers(db, whereClause, params, limit, offset, sort) {
   return db.prepare(`
     SELECT
       u.id, u.email, u.plan_id, u.traffic_used, u.traffic_limit,
-      u.expire_at, u.enabled, u.disable_reason, u.created_at,
+      u.expire_at, u.enabled, u.disable_reason, u.ip_location, u.created_at,
       p.name as plan_name
     FROM users u
     LEFT JOIN plans p ON u.plan_id = p.id
@@ -498,6 +498,42 @@ async function listUserCfIps(db, userId) {
  */
 async function updateUserFields(db, userId, updates, values) {
   await db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values, userId);
+}
+
+/**
+ * 查询用户 IP 归属地 JSON。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<Object|undefined>} 用户 IP 归属地快照
+ */
+async function findUserIpLocationById(db, userId) {
+  return db.prepare('SELECT ip_location FROM users WHERE id = ?').get(userId);
+}
+
+/**
+ * 更新用户指定来源的 IP 归属地 JSON。
+ * 职责：只更新 login/subscription 中的一个来源，保留另一个来源已有数据。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {'login'|'subscription'} source - 归属地来源
+ * @param {Object} location - 已确认属于中国大陆的归属地结构
+ * @returns {Promise<void>}
+ */
+async function updateUserIpLocation(db, userId, source, location) {
+  const current = await findUserIpLocationById(db, userId);
+  let data = {};
+
+  try {
+    data = JSON.parse(current?.ip_location || '{}');
+  } catch (error) {
+    data = {};
+  }
+
+  data[source] = location;
+  await db.prepare('UPDATE users SET ip_location = ?, updated_at = EXTRACT(EPOCH FROM NOW()) WHERE id = ?')
+    .run(JSON.stringify(data), userId);
 }
 
 /**
@@ -826,6 +862,8 @@ module.exports = {
   listUserOrders,
   listUserCfIps,
   updateUserFields,
+  findUserIpLocationById,
+  updateUserIpLocation,
   deleteUserLocalRelatedData,
   findEnabledCfIpsByIds,
   replaceUserCfIps,

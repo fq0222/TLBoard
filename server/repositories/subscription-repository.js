@@ -243,7 +243,7 @@ async function findSubscriptionContentByToken(db, token) {
 async function findSubscriptionUserBySubId(db, subId) {
   return db.prepare(`
     SELECT
-      u.id, u.email, u.sub_id,
+      u.id, u.id AS user_id, u.email, u.sub_id,
       u.traffic_used, u.traffic_limit, u.referral_traffic_limit, u.expire_at, u.enabled, u.disable_reason,
       p.plan_type
     FROM users u

@@ -27,6 +27,7 @@ const tableDefinitions = [
         payment_count INTEGER DEFAULT 0,
         sync_status INTEGER DEFAULT 0,
         onboarding_completed INTEGER DEFAULT 0,
+        ip_location TEXT DEFAULT '{}',
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
         updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
       )
