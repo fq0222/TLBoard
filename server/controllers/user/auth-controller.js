@@ -118,6 +118,8 @@ async function getProfile(req, res) {
     const urls = generateSubscriptionUrls(req, profile.sub_id);
 
     logger.info(`获取用户信息成功: ${profile.email}`);
+    ipLocationService.recordUserIpLocation(req.app.locals.db, profile.id, 'login', req.ip || req.socket.remoteAddress)
+      .catch((error) => logger.warn(`记录个人中心 IP 归属地失败: ${error.message}`));
     return res.json({
       code: 0,
       message: 'ok',
