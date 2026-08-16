@@ -4,12 +4,18 @@
  */
 
 const net = require('net');
-const Searcher = require('ip2region-ts');
+const fs = require('fs');
+const path = require('path');
+const maxmind = require('maxmind');
 const userRepository = require('../../repositories/user-repository');
 
 const MAINLAND_EXCLUDED_PROVINCES = ['香港', '澳门', '台湾', '香港特别行政区', '澳门特别行政区'];
 
-let searcher;
+const DEFAULT_CITY_DB_PATH = path.join(__dirname, '..', '..', 'ipData', 'GeoLite2-City.mmdb');
+const DEFAULT_ASN_DB_PATH = path.join(__dirname, '..', '..', 'ipData', 'GeoLite2-ASN.mmdb');
+
+let cityLookupPromise;
+let asnLookupPromise;
 
 /**
  * 获取秒级 Unix 时间戳。
@@ -44,47 +50,96 @@ function normalizeIp(value) {
  * @returns {boolean} 是否应跳过
  */
 function shouldSkipIp(ip) {
-  if (!ip || net.isIP(ip) === 0) return true;
-  if (net.isIP(ip) !== 4) return true;
+  const ipVersion = net.isIP(ip);
+  if (!ip || ipVersion === 0) return true;
   if (ip === '127.0.0.1' || ip === '::1') return true;
-  if (ip.startsWith('10.') || ip.startsWith('192.168.')) return true;
-  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) return true;
-  if (ip.startsWith('169.254.')) return true;
-  if (ip.toLowerCase().startsWith('fe80:')) return true;
-  if (ip.toLowerCase().startsWith('fc') || ip.toLowerCase().startsWith('fd')) return true;
+  if (ipVersion === 4) {
+    if (ip.startsWith('10.') || ip.startsWith('192.168.')) return true;
+    if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) return true;
+    if (ip.startsWith('169.254.')) return true;
+  }
+  if (ipVersion === 6) {
+    const lowerIp = ip.toLowerCase();
+    if (lowerIp.startsWith('fe80:')) return true;
+    if (lowerIp.startsWith('fc') || lowerIp.startsWith('fd')) return true;
+  }
   return false;
 }
 
 /**
- * 懒加载 ip2region 查询器，避免模块加载时立即做文件 IO。
+ * 读取 MaxMind 数据库路径，支持环境变量覆盖生产环境文件位置。
  *
- * @returns {Object} ip2region 查询器
+ * @param {'city'|'asn'} type - 数据库类型
+ * @returns {string} mmdb 文件路径
  */
-function getSearcher() {
-  if (!searcher) {
-    const buffer = Searcher.loadContentFromFile(Searcher.defaultDbFile);
-    searcher = Searcher.newWithBuffer(buffer);
+function getMaxMindDbPath(type) {
+  if (type === 'asn') {
+    return process.env.MAXMIND_ASN_DB_PATH || DEFAULT_ASN_DB_PATH;
   }
-  return searcher;
+  return process.env.MAXMIND_CITY_DB_PATH || DEFAULT_CITY_DB_PATH;
 }
 
 /**
- * 将 ip2region 的 region 字符串解析成统一结构。
+ * 懒加载 MaxMind City 查询器，避免模块加载时立即做文件 IO。
+ *
+ * @returns {Promise<Object|undefined>} City 查询器；文件缺失时返回 undefined
+ */
+async function getCityLookup() {
+  if (!cityLookupPromise) {
+    const dbPath = getMaxMindDbPath('city');
+    cityLookupPromise = fs.existsSync(dbPath)
+      ? maxmind.open(dbPath)
+      : Promise.resolve(undefined);
+  }
+  return cityLookupPromise;
+}
+
+/**
+ * 懒加载 MaxMind ASN 查询器。ASN 数据库可选，缺失时不影响省市查询。
+ *
+ * @returns {Promise<Object|undefined>} ASN 查询器；文件缺失时返回 undefined
+ */
+async function getAsnLookup() {
+  if (!asnLookupPromise) {
+    const dbPath = getMaxMindDbPath('asn');
+    asnLookupPromise = fs.existsSync(dbPath)
+      ? maxmind.open(dbPath)
+      : Promise.resolve(undefined);
+  }
+  return asnLookupPromise;
+}
+
+/**
+ * 按中文优先级读取 MaxMind 多语言名称。
+ *
+ * @param {Object|undefined} item - MaxMind 名称对象容器
+ * @returns {string} 可展示名称
+ */
+function getLocalizedName(item) {
+  const names = item && item.names ? item.names : {};
+  return names['zh-CN'] || names.zh || names.en || '';
+}
+
+/**
+ * 将 MaxMind City/ASN 查询结果解析成统一结构。
  *
  * @param {string} ip - 查询 IP
- * @param {string} region - ip2region 返回的 region 字符串
+ * @param {Object|undefined} cityResult - MaxMind City 结果
+ * @param {Object|undefined} asnResult - MaxMind ASN 结果
  * @returns {Object|undefined} 归属地结构
  */
-function parseRegion(ip, region) {
-  if (!region) return undefined;
-  const [country = '', , province = '', city = '', isp = ''] = String(region).split('|');
+function parseMaxMindLocation(ip, cityResult, asnResult) {
+  if (!cityResult) return undefined;
+  const countryItem = cityResult.country || cityResult.registered_country;
+  const subdivision = Array.isArray(cityResult.subdivisions) ? cityResult.subdivisions[0] : undefined;
+
   return {
     ip,
-    country,
-    province: province === '0' ? '' : province,
-    city: city === '0' ? '' : city,
+    country: getLocalizedName(countryItem),
+    province: getLocalizedName(subdivision),
+    city: getLocalizedName(cityResult.city),
     district: '',
-    isp: isp === '0' ? '' : isp,
+    isp: asnResult?.autonomous_system_organization || '',
     updated_at: getNowTimestamp()
   };
 }
@@ -99,8 +154,15 @@ async function lookupIpLocation(rawIp) {
   const ip = normalizeIp(rawIp);
   if (shouldSkipIp(ip)) return undefined;
 
-  const result = await getSearcher().search(ip);
-  return parseRegion(ip, result && result.region);
+  const cityLookup = await getCityLookup();
+  if (!cityLookup) return undefined;
+
+  const asnLookup = await getAsnLookup();
+  return parseMaxMindLocation(
+    ip,
+    cityLookup.get(ip),
+    asnLookup ? asnLookup.get(ip) : undefined
+  );
 }
 
 /**
@@ -125,8 +187,19 @@ function isMainlandChinaLocation(location) {
  * @returns {boolean} 是否有可展示位置
  */
 function hasDisplayLocation(location) {
-  return [location.province, location.city, location.district]
+  return [location.province, location.city, location.district, location.country]
     .some((item) => String(item || '').trim());
+}
+
+/**
+ * 精简 ASN 组织名称里对管理端展示价值较低的尾缀。
+ *
+ * @param {string} value - MaxMind ASN 组织名称
+ * @returns {string} 管理端展示名称
+ */
+function formatIspText(value) {
+  return String(value || '').trim()
+    .replace(/\s+communications corporation$/i, '');
 }
 
 /**
@@ -171,8 +244,8 @@ function formatIpLocationText(value) {
     const text = [location.province, location.city, location.district]
       .map((item) => String(item || '').trim())
       .filter(Boolean)
-      .join(' ');
-    const ispText = String(location.isp || '').trim();
+      .join(' ') || String(location.country || '').trim();
+    const ispText = formatIspText(location.isp);
     if (!text) return '暂未获取';
     return ispText ? `${text} [${ispText}]` : text;
   } catch (error) {
@@ -189,6 +262,8 @@ module.exports = {
   recordUserIpLocation,
   formatIpLocationText,
   __testables: {
-    parseRegion
+    parseMaxMindLocation,
+    getMaxMindDbPath,
+    formatIspText
   }
 };

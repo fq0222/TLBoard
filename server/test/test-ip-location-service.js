@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const ipLocationService = require('../services/shared/ip-location-service');
 const userRepository = require('../repositories/user-repository');
@@ -85,6 +87,30 @@ test('formatIpLocationText falls back to subscription then default text', () => 
   assert.equal(ipLocationService.formatIpLocationText('not-json'), '暂未获取');
 });
 
+test('formatIpLocationText shows country when MaxMind has no province or city', () => {
+  assert.equal(ipLocationService.formatIpLocationText(JSON.stringify({
+    login: {
+      country: '中国',
+      province: '',
+      city: '',
+      district: '',
+      isp: 'China Mobile Group JiLin communications corporation'
+    }
+  })), '中国 [China Mobile Group JiLin]');
+});
+
+test('formatIpLocationText trims verbose ASN organization suffix', () => {
+  assert.equal(ipLocationService.formatIpLocationText(JSON.stringify({
+    login: {
+      country: '中国',
+      province: '',
+      city: '',
+      district: '',
+      isp: 'China Mobile Group JiLin communications corporation'
+    }
+  })), '中国 [China Mobile Group JiLin]');
+});
+
 test('isMainlandChinaLocation rejects overseas and Hong Kong Macau Taiwan', () => {
   assert.equal(ipLocationService.isMainlandChinaLocation({
     country: '中国',
@@ -102,11 +128,24 @@ test('isMainlandChinaLocation rejects overseas and Hong Kong Macau Taiwan', () =
   }), false);
 });
 
-test('shouldSkipIp skips IPv6 because current xdb lookup only accepts IPv4', () => {
+test('shouldSkipIp keeps public IPv6 for MaxMind lookup', () => {
   assert.equal(
     ipLocationService.shouldSkipIp('2409:8931:a91:1598:41a8:2084:ab64:7a63'),
-    true
+    false
   );
+});
+
+test('lookupIpLocation resolves mainland IPv6 with MaxMind country and ASN data', async () => {
+  const cityDbPath = path.join(__dirname, '..', 'ipData', 'GeoLite2-City.mmdb');
+  if (!fs.existsSync(cityDbPath)) {
+    assert.fail(`缺少 MaxMind City 数据库文件: ${cityDbPath}`);
+  }
+
+  const location = await ipLocationService.lookupIpLocation('2409:8918:90fa:1d81:d8c3:31ff:fe7d:16f0');
+
+  assert.equal(location.ip, '2409:8918:90fa:1d81:d8c3:31ff:fe7d:16f0');
+  assert.equal(location.country, '中国');
+  assert.match(location.isp, /China Mobile/i);
 });
 
 test('recordUserIpLocation skips non-mainland lookup result', async () => {
@@ -137,11 +176,11 @@ test('recordUserIpLocation skips non-mainland lookup result', async () => {
   }
 });
 
-test('recordUserIpLocation skips mainland result without province city or district', async () => {
+test('recordUserIpLocation writes mainland country-only result', async () => {
   const calls = [];
   const restore = replaceMethods(userRepository, {
-    async updateUserIpLocation() {
-      calls.push('update');
+    async updateUserIpLocation(db, userId, source, location) {
+      calls.push({ db, userId, source, location });
     }
   });
 
@@ -158,8 +197,9 @@ test('recordUserIpLocation skips mainland result without province city or distri
       })
     });
 
-    assert.deepEqual(result, { recorded: false, reason: 'empty_display_location' });
-    assert.deepEqual(calls, []);
+    assert.deepEqual(result, { recorded: true });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].location.country, '中国');
   } finally {
     restore();
   }

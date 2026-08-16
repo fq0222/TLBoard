@@ -157,6 +157,7 @@ server/test/*
 server/config.js
 server/uploads/
 server/backupDB/
+server/ipData/*.mmdb
 
 .vscode/
 .codegraph/
