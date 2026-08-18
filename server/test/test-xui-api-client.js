@@ -54,8 +54,13 @@ async function run() {
     timeout: 8901,
     apiVersion: '3.4.2'
   });
+  const v360FactoryResult = createXuiApiClient('https://xui.example.com/', 'secret-token', {
+    timeout: 9012,
+    apiVersion: '3.6.0'
+  });
   const v331ResolvedResult = resolveClientVersion('3.3.1');
   const v342ResolvedResult = resolveClientVersion('3.4.2');
+  const v360ResolvedResult = resolveClientVersion('3.6.0');
   const fallbackResult = resolveClientVersion('9.9.9');
   const v325Client = new XuiApiClientV325('https://xui.example.com/', 'secret-token', { timeout: 4321 });
 
@@ -80,6 +85,12 @@ async function run() {
   assert.strictEqual(v342FactoryResult.resolvedVersion, '3.4.2');
   assert.strictEqual(v342ResolvedResult.requestedVersion, '3.4.2');
   assert.strictEqual(v342ResolvedResult.resolvedVersion, '3.4.2');
+  assert.strictEqual(v360FactoryResult.client.version, '3.4.2');
+  assert.strictEqual(v360FactoryResult.client.supportsClientApi, true);
+  assert.strictEqual(v360FactoryResult.requestedVersion, '3.6.0');
+  assert.strictEqual(v360FactoryResult.resolvedVersion, '3.6.0');
+  assert.strictEqual(v360ResolvedResult.requestedVersion, '3.6.0');
+  assert.strictEqual(v360ResolvedResult.resolvedVersion, '3.6.0');
   assert.strictEqual(fallbackResult.requestedVersion, '9.9.9');
   assert.strictEqual(fallbackResult.resolvedVersion, '3.0.2');
 

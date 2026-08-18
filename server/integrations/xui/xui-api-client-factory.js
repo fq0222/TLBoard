@@ -13,7 +13,9 @@ const CLIENT_REGISTRY = {
   '3.2.5': XuiApiClientV325,
   // 3.3.1 延续 3.2.5 的 clients API 路由族，复用新版客户端适配器。
   '3.3.1': XuiApiClientV325,
-  '3.4.2': XuiApiClientV342
+  '3.4.2': XuiApiClientV342,
+  // 3.6.0 保留 3.4.2 已适配的 clients/server 路由族，复用迁移备份客户端。
+  '3.6.0': XuiApiClientV342
 };
 
 /**
