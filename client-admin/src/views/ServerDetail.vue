@@ -203,6 +203,12 @@ function getStrategyFromRemark(remark) {
   if (lowerRemark.includes('cf')) {
     return 'CF策略'
   }
+  if (lowerRemark.includes('hy2')) {
+    return 'HY2策略'
+  }
+  if (lowerRemark.includes('ws')) {
+    return 'WS策略'
+  }
   return 'Direct策略'
 }
 
@@ -214,6 +220,12 @@ function getStrategyTagType(remark) {
   const lowerRemark = remark.toLowerCase()
   if (lowerRemark.includes('cf')) {
     return 'warning'  // 橙色
+  }
+  if (lowerRemark.includes('hy2')) {
+    return 'primary'
+  }
+  if (lowerRemark.includes('ws')) {
+    return 'info'
   }
   return 'success'  // 绿色
 }

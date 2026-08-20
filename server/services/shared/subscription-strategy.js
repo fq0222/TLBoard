@@ -1,15 +1,16 @@
 /**
  * 订阅策略处理服务
  * 
- * 支持两种策略：
+ * 支持多种策略：
  * - cf: 替换地址为 CF 优选 IP，端口为 client_port，host 为 host
  * - direct: 完全不修改，直接使用原始节点信息
+ * - ws: 完全不修改，且同步 3X-UI 时不写入 VLESS Vision flow
  */
 
 /**
  * 从节点备注中判断策略类型
  * @param {string} remark - 节点备注
- * @returns {string} 'cf' 或 'direct'
+ * @returns {string} 'cf'、'hy2'、'ws' 或 'direct'
  */
 function getStrategyFromRemark(remark) {
   if (!remark) return 'direct';
@@ -19,6 +20,9 @@ function getStrategyFromRemark(remark) {
   }
   if (lowerRemark.includes('hy2')) {
     return 'hy2';
+  }
+  if (lowerRemark.includes('ws')) {
+    return 'ws';
   }
   return 'direct';
 }

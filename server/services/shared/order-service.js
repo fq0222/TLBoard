@@ -338,6 +338,7 @@ async function legacySyncUserToXuiServers(db, user, plan = {}) {
 
         for (const inbound of inboundsResult.data) {
           try {
+            const strategy = getStrategyFromRemark(inbound.remark);
             // 每个 inbound 使用“邮箱-节点备注”作为 3X-UI 客户端标识
             const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
             const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
@@ -354,7 +355,7 @@ async function legacySyncUserToXuiServers(db, user, plan = {}) {
                 subId: config.subId
               };
 
-              if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+              if (strategy === 'direct') {
                 updateOpts.flow = 'xtls-rprx-vision';
               }
 
@@ -383,7 +384,7 @@ async function legacySyncUserToXuiServers(db, user, plan = {}) {
                 subId: config.subId
               };
 
-              if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+              if (strategy === 'direct') {
                 addOpts.flow = 'xtls-rprx-vision';
               }
 
@@ -476,6 +477,7 @@ async function syncUserToSingleServer(db, user, server, plan = {}) {
       const existingClient = existing.success ? existing.client : null;
       const config = await ensureServerNodeConfigs(db, user, server, inbounds, existingClient);
       const totalBytes = getXuiTotalTrafficLimit(user, plan);
+      const requiresFlow = inbounds.some((inbound) => getStrategyFromRemark(inbound.remark) === 'direct');
       const client = {
         id: config.uuid,
         password: config.password,
@@ -486,9 +488,11 @@ async function syncUserToSingleServer(db, user, server, plan = {}) {
         totalGB: totalBytes,
         limitIp: 0,
         tgId: 0,
-        subId: config.subId,
-        flow: 'xtls-rprx-vision'
+        subId: config.subId
       };
+      if (requiresFlow) {
+        client.flow = 'xtls-rprx-vision';
+      }
 
       for (const inbound of inbounds) {
         logger.info(
@@ -545,9 +549,7 @@ async function syncUserToSingleServer(db, user, server, plan = {}) {
             const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
             const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
             const totalBytes = getXuiTotalTrafficLimit(user, plan);
-            const strategy = inbound.remark && inbound.remark.toLowerCase().includes('hy2')
-              ? 'hy2'
-              : (inbound.remark && inbound.remark.toLowerCase().includes('direct') ? 'direct' : 'cf');
+            const strategy = getStrategyFromRemark(inbound.remark);
             const existingClientsSnapshot = xuiService.extractClientsFromSettings(inbound.settings);
             const canUseClientsSnapshot = existingClientsSnapshot.length > 0;
             const existingClientsResult = canUseClientsSnapshot

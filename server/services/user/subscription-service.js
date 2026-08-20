@@ -1744,7 +1744,7 @@ async function getSubscriptionInfo(db, userId) {
   for (const server of servers) {
     const serverNodes = await subscriptionRepository.listServerNodes(db, server.id);
     for (const node of serverNodes) {
-      const strategy = node.remark && node.remark.toLowerCase().includes('cf') ? 'cf' : 'direct';
+      const strategy = getStrategyFromRemark(node.remark);
       const config = parseNodeConfig(node, node.settings, node.stream_settings, user.email);
       const protocolDetail = `${node.protocol}+${config.network}+${config.security}`;
       const nodeHost = server.host || '';

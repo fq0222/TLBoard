@@ -236,6 +236,7 @@ async function legacySyncUsersToServer(db, server, users) {
     let syncCount = 0;
 
     for (const inbound of inboundsResult.data) {
+      const strategy = getStrategyFromRemark(inbound.remark);
       let existingClients = [];
       try {
         const settings = JSON.parse(inbound.settings || '{}');
@@ -294,7 +295,7 @@ async function legacySyncUsersToServer(db, server, users) {
             subId: configSubId
           };
 
-          if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+          if (strategy === 'direct') {
             addOpts.flow = 'xtls-rprx-vision';
           }
 
@@ -313,6 +314,7 @@ async function legacySyncUsersToServer(db, server, users) {
     }
 
     for (const inbound of inboundsResult.data) {
+      const strategy = getStrategyFromRemark(inbound.remark);
       let existingClients = [];
       try {
         const settings = JSON.parse(inbound.settings || '{}');
@@ -360,7 +362,7 @@ async function legacySyncUsersToServer(db, server, users) {
           logger.info(`为已存在用户创建配置: user=${user.email}, server=${server.id}, inbound=${inbound.id}, uuid=${xuiClient.id}, sub_id=${newSubId}`);
 
           const updateOpts = { subId: newSubId };
-          if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+          if (strategy === 'direct') {
             updateOpts.flow = 'xtls-rprx-vision';
           }
 
@@ -377,7 +379,7 @@ async function legacySyncUsersToServer(db, server, users) {
         if (xuiClient.subId !== dbConfig.sub_id) {
           logger.info(`sub_id 不一致，更新 3X-UI: user=${user.email}, inbound=${inbound.id}, db=${dbConfig.sub_id}, xui=${xuiClient.subId || '空'}`);
           const updateOpts = { subId: dbConfig.sub_id };
-          if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+          if (strategy === 'direct') {
             updateOpts.flow = 'xtls-rprx-vision';
           }
 
@@ -390,7 +392,7 @@ async function legacySyncUsersToServer(db, server, users) {
           }
         }
 
-        if (inbound.remark && inbound.remark.toLowerCase().includes('direct') && !xuiClient.flow) {
+        if (strategy === 'direct' && !xuiClient.flow) {
           logger.info(`direct 节点缺少 flow，补齐: user=${user.email}, inbound=${inbound.id}`);
           const updateResult = await xuiService.updateClient(inbound.id, nodeEmail, {
             subId: dbConfig.sub_id,
@@ -422,7 +424,7 @@ async function legacySyncUsersToServer(db, server, users) {
             enabled: expectedEnabled
           };
 
-          if (inbound.remark && inbound.remark.toLowerCase().includes('direct')) {
+          if (strategy === 'direct') {
             updateOpts.flow = xuiClient.flow || 'xtls-rprx-vision';
           }
 
@@ -482,6 +484,7 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
       const crypto = require('crypto');
       const inbounds = inboundsResult.data || [];
       const inboundIds = inbounds.map((inbound) => inbound.id);
+      const requiresFlow = inbounds.some((inbound) => getStrategyFromRemark(inbound.remark) === 'direct');
 
       for (const user of users) {
         try {
@@ -516,9 +519,11 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
             totalGB: getXuiTotalTrafficLimit(user),
             limitIp: 0,
             tgId: 0,
-            subId,
-            flow: 'xtls-rprx-vision'
+            subId
           };
+          if (requiresFlow) {
+            desiredClient.flow = 'xtls-rprx-vision';
+          }
 
           for (const inbound of inbounds) {
             await repository.saveUserNodeConfig(db, {
@@ -574,9 +579,7 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
           const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
           const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
           const totalBytes = getXuiTotalTrafficLimit(user);
-          const strategy = inbound.remark && inbound.remark.toLowerCase().includes('hy2')
-            ? 'hy2'
-            : (inbound.remark && inbound.remark.toLowerCase().includes('direct') ? 'direct' : 'cf');
+          const strategy = getStrategyFromRemark(inbound.remark);
           const existingConfig = await xuiSyncRepository.findUserNodeConfig(
             db,
             user.id,

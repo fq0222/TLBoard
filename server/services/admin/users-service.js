@@ -2,6 +2,7 @@ const XuiService = require('../../integrations/xui/xui-service');
 const userSubscriptionService = require('../user/subscription-service');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
 const ipLocationService = require('../shared/ip-location-service');
+const { getStrategyFromRemark } = require('../shared/subscription-strategy');
 const { parsePagination } = require('../../shared/utils/pagination');
 const userRepository = require('../../repositories/user-repository');
 const subscriptionRepository = require('../../repositories/subscription-repository');
@@ -324,12 +325,15 @@ async function syncUserToXuiServers(db, user) {
 
   const userNodes = await userRepository.listNodeSyncTargetsByServer(db);
   const nodesByServer = {};
+  const nodeDetailsByServer = {};
 
   for (const node of userNodes) {
     if (!nodesByServer[node.server_id]) {
       nodesByServer[node.server_id] = [];
+      nodeDetailsByServer[node.server_id] = [];
     }
     nodesByServer[node.server_id].push(node.inbound_id);
+    nodeDetailsByServer[node.server_id].push(node);
   }
 
   const expireAt = Number(user.expire_at) || 0;
@@ -350,6 +354,8 @@ async function syncUserToXuiServers(db, user) {
       if (isPanelVersionAtLeast(server.panel_version, '3.4.2')) {
         const existing = await xuiService.getServerClientByEmail(user.email);
         if (existing.success) {
+          const requiresFlow = (nodeDetailsByServer[server.id] || [])
+            .some((node) => getStrategyFromRemark(node.remark) === 'direct');
           await xuiService.upsertServerClient({
             email: user.email,
             inboundIds,
@@ -364,7 +370,7 @@ async function syncUserToXuiServers(db, user) {
               limitIp: 0,
               tgId: 0,
               subId: existing.client.subId || '',
-              flow: 'xtls-rprx-vision'
+              ...(requiresFlow ? { flow: 'xtls-rprx-vision' } : {})
             }
           });
         }
@@ -554,16 +560,12 @@ async function generateSubscription(db, userId, logger, options = {}) {
  * @returns {string} 策略类型：hy2 / direct / cf
  */
 function getNodeUpdateStrategy(node = {}) {
-  const remark = String(node.remark || '').toLowerCase();
   const protocol = String(node.protocol || '').toLowerCase();
 
-  if (remark.includes('hy2') || protocol === 'hysteria' || protocol === 'hysteria2') {
+  if (protocol === 'hysteria' || protocol === 'hysteria2') {
     return 'hy2';
   }
-  if (remark.includes('direct')) {
-    return 'direct';
-  }
-  return 'cf';
+  return getStrategyFromRemark(node.remark);
 }
 
 function isPanelVersionAtLeast(version, minimum) {

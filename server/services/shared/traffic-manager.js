@@ -14,6 +14,7 @@ const trafficUsageStatsRepository = require('../../repositories/traffic-usage-st
 const trafficUsageStatsService = require('../admin/traffic-usage-stats-service');
 const trafficUsagePushService = require('../admin/traffic-usage-push-service');
 const renewalRequiredEmailService = require('./renewal-required-email-service');
+const { getStrategyFromRemark } = require('./subscription-strategy');
 
 const logger = createLogger('TRAFFIC-MANAGER');
 
@@ -197,19 +198,15 @@ function extractInboundClients(inbound) {
  * 根据节点协议和备注判断更新客户端时应使用的策略。
  *
  * @param {Object} inbound - 3X-UI inbound 快照
- * @returns {string} 更新策略：hy2 / direct / cf
+ * @returns {string} 更新策略：hy2 / direct / ws / cf
  */
 function getInboundUpdateStrategy(inbound = {}) {
-  const remark = String(inbound.remark || '').toLowerCase();
   const protocol = String(inbound.protocol || '').toLowerCase();
 
-  if (remark.includes('hy2') || protocol === 'hysteria' || protocol === 'hysteria2') {
+  if (protocol === 'hysteria' || protocol === 'hysteria2') {
     return 'hy2';
   }
-  if (remark.includes('direct')) {
-    return 'direct';
-  }
-  return 'cf';
+  return getStrategyFromRemark(inbound.remark);
 }
 
 /**
@@ -874,22 +871,28 @@ async function syncDisableStatusToXui(db, userId, disable, options = {}) {
             continue;
           }
 
+          const inbounds = inboundsResult.data || [];
+          const requiresFlow = inbounds.some((inbound) => getInboundUpdateStrategy(inbound) === 'direct');
+          const updateClient = {
+            id: existing.client.uuid,
+            password: existing.client.password || '',
+            auth: existing.client.auth || '',
+            email: user.email,
+            enable: desiredEnabled,
+            expiryTime: existing.client.expiryTime || 0,
+            totalGB: existing.client.totalGB || 0,
+            limitIp: 0,
+            tgId: 0,
+            subId: existing.client.subId || ''
+          };
+          if (requiresFlow) {
+            updateClient.flow = 'xtls-rprx-vision';
+          }
+
           const updateResult = await xuiService.upsertServerClient({
             email: user.email,
-            inboundIds: (inboundsResult.data || []).map((inbound) => inbound.id),
-            client: {
-              id: existing.client.uuid,
-              password: existing.client.password || '',
-              auth: existing.client.auth || '',
-              email: user.email,
-              enable: desiredEnabled,
-              expiryTime: existing.client.expiryTime || 0,
-              totalGB: existing.client.totalGB || 0,
-              limitIp: 0,
-              tgId: 0,
-              subId: existing.client.subId || '',
-              flow: 'xtls-rprx-vision'
-            }
+            inboundIds: inbounds.map((inbound) => inbound.id),
+            client: updateClient
           });
 
           if (updateResult.success) {
