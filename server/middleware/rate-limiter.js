@@ -12,7 +12,7 @@ function createAuthLimiter(options = {}) {
   const {
     windowMs = config.security.rateLimitWindow,
     max = config.security.rateLimitMax,
-    message = { code: 429, message: '登录尝试次数过多，请稍后再试', data: null }
+    message = { code: 1003, message: '您已连续输入3次错误密码，请15分钟后重试', data: null }
   } = options;
 
   return rateLimit({
