@@ -30,12 +30,12 @@ function registerCleanZombieUsersJob({ db, intervals, registerTimeout }) {
 
 /**
  * 执行清理僵尸用户
- * 删除未支付且超过 30 分钟的用户（enabled=0, payment_count=0）。
+ * 删除未支付且超过 12 小时的用户（enabled=0, payment_count=0）。
  * @param {Object} db - 数据库实例
  */
 async function runCleanZombieUsers(db) {
   try {
-    const expireTime = Math.floor(Date.now() / 1000) - 30 * 60;
+    const expireTime = Math.floor(Date.now() / 1000) - 12 * 60 * 60;
     const result = await db.prepare(`
       DELETE FROM users
       WHERE enabled = 0
@@ -52,5 +52,6 @@ async function runCleanZombieUsers(db) {
 }
 
 module.exports = {
-  registerCleanZombieUsersJob
+  registerCleanZombieUsersJob,
+  runCleanZombieUsers
 };

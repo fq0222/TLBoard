@@ -30,12 +30,12 @@ function registerDeleteExpiredJob({ db, intervals, registerTimeout }) {
 
 /**
  * 执行删除过期订单
- * 删除超过 1 小时的 expired 订单。
+ * 删除超过 12 小时的 expired 订单。
  * @param {Object} db - 数据库实例
  */
 async function runDeleteExpired(db) {
   try {
-    const deleteTime = Math.floor(Date.now() / 1000) - 1 * 60 * 60;
+    const deleteTime = Math.floor(Date.now() / 1000) - 12 * 60 * 60;
     const result = await db.prepare(`
       DELETE FROM orders
       WHERE status = 'expired' AND created_at < ?
@@ -50,5 +50,6 @@ async function runDeleteExpired(db) {
 }
 
 module.exports = {
-  registerDeleteExpiredJob
+  registerDeleteExpiredJob,
+  runDeleteExpired
 };
