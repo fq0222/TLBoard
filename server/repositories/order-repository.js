@@ -139,7 +139,7 @@ async function findPaidOrderContextByOutTradeNo(db, outTradeNo) {
            u.traffic_used as current_traffic_used,
            u.email, u.subscription_token, u.plan_id as current_plan_id, u.enabled as current_enabled,
            u.disable_reason as current_disable_reason, u.payment_count as current_payment_count,
-           cp.plan_type as current_plan_type
+           cp.plan_type as current_plan_type, cp.name as current_plan_name
     FROM orders o
     LEFT JOIN users u ON o.user_id = u.id
     LEFT JOIN plans cp ON u.plan_id = cp.id

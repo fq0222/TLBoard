@@ -1269,6 +1269,175 @@ test('paid expired timed renew enqueues renew sync with enabled user snapshot', 
   }
 });
 
+test('renew switch plan records new plan historical sale without decreasing old plan', async () => {
+  const orderRepository = require('../repositories/order-repository');
+  const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
+  const orderActivationEmailService = require('../services/shared/order-activation-email-service');
+  const orderService = require('../services/shared/order-service');
+  const transactionDb = { name: 'transaction-db' };
+  const increments = [];
+  const decrements = [];
+  const logs = [];
+  const originalLog = console.log;
+
+  const originalRepository = {
+    findPaidOrderContextByOutTradeNo: orderRepository.findPaidOrderContextByOutTradeNo,
+    findPlanById: orderRepository.findPlanById,
+    markOrderPaid: orderRepository.markOrderPaid,
+    updateUserAfterPaidOrder: orderRepository.updateUserAfterPaidOrder,
+    incrementPlanSalesCount: orderRepository.incrementPlanSalesCount,
+    decrementPlanSalesCount: orderRepository.decrementPlanSalesCount
+  };
+  const originalXuiSyncTaskService = {
+    enqueueTask: xuiSyncTaskService.enqueueTask,
+    processTask: xuiSyncTaskService.processTask
+  };
+  const originalEmailService = {
+    sendOrderActivationEmail: orderActivationEmailService.sendOrderActivationEmail
+  };
+
+  orderRepository.findPaidOrderContextByOutTradeNo = async () => ({
+    id: 61,
+    out_trade_no: 'REN-SWITCH',
+    status: 'pending',
+    user_id: 31,
+    email: 'switch-renew@example.com',
+    subscription_token: 'sub-token',
+    plan_id: 8,
+    current_plan_id: 7,
+    current_traffic_limit: 4096,
+    current_traffic_used: 512,
+    current_expire_at: 1700000000,
+    current_enabled: 1,
+    current_disable_reason: null,
+    current_payment_count: 1,
+    current_plan_name: '尝鲜套餐',
+    trade_no: 'OLD-TRADE'
+  });
+  orderRepository.findPlanById = async () => ({
+    id: 8,
+    name: '年卡套餐',
+    plan_type: 'lifetime',
+    duration_days: 0,
+    traffic_limit: 8192
+  });
+  orderRepository.markOrderPaid = async () => {};
+  orderRepository.updateUserAfterPaidOrder = async () => {};
+  orderRepository.incrementPlanSalesCount = async (_db, planId) => {
+    increments.push(planId);
+  };
+  orderRepository.decrementPlanSalesCount = async (_db, planId) => {
+    decrements.push(planId);
+  };
+  xuiSyncTaskService.enqueueTask = async () => 91;
+  xuiSyncTaskService.processTask = () => Promise.resolve();
+  orderActivationEmailService.sendOrderActivationEmail = async () => {};
+
+  const db = {
+    transaction(callback) {
+      return async () => callback(transactionDb);
+    }
+  };
+
+  try {
+    console.log = (message) => {
+      logs.push(String(message));
+    };
+    await orderService.completePaidOrder(db, 'REN-SWITCH', 'TRADE-3');
+    assert.deepEqual(increments, [8]);
+    assert.deepEqual(decrements, []);
+    assert.match(
+      logs.join('\n'),
+      /续费切换套餐: 新套餐 年卡套餐 \+1，旧套餐 尝鲜套餐 保持历史销量不变/
+    );
+    assert.doesNotMatch(logs.join('\n'), /新套餐 8|旧套餐 7/);
+  } finally {
+    console.log = originalLog;
+    Object.assign(orderRepository, originalRepository);
+    Object.assign(xuiSyncTaskService, originalXuiSyncTaskService);
+    Object.assign(orderActivationEmailService, originalEmailService);
+  }
+});
+
+test('new purchase sales log uses plan name instead of plan id', async () => {
+  const orderRepository = require('../repositories/order-repository');
+  const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
+  const orderService = require('../services/shared/order-service');
+  const logs = [];
+  const originalLog = console.log;
+
+  const originalRepository = {
+    findPaidOrderContextByOutTradeNo: orderRepository.findPaidOrderContextByOutTradeNo,
+    findPlanById: orderRepository.findPlanById,
+    markOrderPaid: orderRepository.markOrderPaid,
+    updateUserAfterPaidOrder: orderRepository.updateUserAfterPaidOrder,
+    incrementPlanSalesCount: orderRepository.incrementPlanSalesCount
+  };
+  const originalXuiSyncTaskService = {
+    enqueueTask: xuiSyncTaskService.enqueueTask,
+    processTask: xuiSyncTaskService.processTask
+  };
+
+  orderRepository.findPaidOrderContextByOutTradeNo = async () => ({
+    id: 62,
+    out_trade_no: 'ORD-NEW',
+    status: 'pending',
+    user_id: 32,
+    email: 'new-order@example.com',
+    subscription_token: 'sub-token',
+    plan_id: 9,
+    current_plan_id: null,
+    current_traffic_limit: 0,
+    current_traffic_used: 0,
+    current_expire_at: 0,
+    current_payment_count: 1,
+    trade_no: 'OLD-TRADE'
+  });
+  orderRepository.findPlanById = async () => ({
+    id: 9,
+    name: '基础套餐',
+    plan_type: 'lifetime',
+    duration_days: 0,
+    traffic_limit: 4096
+  });
+  orderRepository.markOrderPaid = async () => {};
+  orderRepository.updateUserAfterPaidOrder = async () => {};
+  orderRepository.incrementPlanSalesCount = async () => {};
+  xuiSyncTaskService.enqueueTask = async () => 92;
+  xuiSyncTaskService.processTask = () => Promise.resolve();
+
+  const db = {
+    transaction(callback) {
+      return async () => callback({});
+    }
+  };
+
+  try {
+    console.log = (message) => {
+      logs.push(String(message));
+    };
+    await orderService.completePaidOrder(db, 'ORD-NEW', 'TRADE-4');
+    assert.match(logs.join('\n'), /新购订单: 基础套餐 \+1/);
+    assert.doesNotMatch(logs.join('\n'), /新购订单: 9 \+1/);
+  } finally {
+    console.log = originalLog;
+    Object.assign(orderRepository, originalRepository);
+    Object.assign(xuiSyncTaskService, originalXuiSyncTaskService);
+  }
+});
+
+test('jobs no longer register expired sales release because sales count is historical', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const jobsIndex = fs.readFileSync(
+    path.join(__dirname, '../jobs/index.js'),
+    'utf8'
+  );
+
+  assert.doesNotMatch(jobsIndex, /registerReleaseExpiredSalesJob/);
+  assert.doesNotMatch(jobsIndex, /release-expired-sales/);
+});
+
 test('repository paid user update can reset traffic used with valid params', async () => {
   const orderRepository = require('../repositories/order-repository');
   let capturedSql = '';

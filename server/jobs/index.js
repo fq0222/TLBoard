@@ -13,7 +13,6 @@
  * | 3X-UI 同步重试队列     | 是           | 30 秒              | 3 分钟               |
  * | 流量同步               | 是           | 10 分钟            | 30 分钟              |
  * | 工单自动关闭           | 是           | 3 分钟             | 1 小时               |
- * | 释放过期名额           | 否           | 无                 | 每天 5:00            |
  * | 邮件群发               | 否           | 无                 | 每天 9:00            |
  * | 清理邮件日志           | 否           | 无                 | 每天 3:00            |
  * | 3X-UI 数据库备份       | 否           | 无                 | 每天 4:00            |
@@ -29,7 +28,6 @@
  * - 3X-UI 同步重试队列：处理注册、续费、启用、禁用等同步失败后的补偿任务
  * - 流量同步：从 3X-UI 服务器同步用户流量数据到本地数据库
  * - 工单自动关闭：关闭用户已读后超过 24 小时无新回复的 pending 工单
- * - 释放过期名额：释放流量用完超过 3 天且未续费的用户名额
  * - 邮件群发：处理待发送的邮件群发任务，每日限额 200 封
  * - 清理邮件日志：清理超过 30 天的邮件发送日志
  * - 3X-UI 数据库备份：备份所有 3X-UI 服务器的 x-ui.db 到 server/backupDB
@@ -45,7 +43,6 @@ const { registerXuiSyncJob } = require('./handlers/sync-xui-users');
 const { registerXuiSyncTaskJob } = require('./handlers/sync-xui-tasks');
 const { registerTrafficSyncJob } = require('./handlers/sync-traffic');
 const { registerTicketAutoCloseJob } = require('./handlers/auto-close-tickets');
-const { registerReleaseExpiredSalesJob } = require('./handlers/release-expired-sales');
 const { registerEmailCampaignJob } = require('./handlers/process-email-campaigns');
 const { registerCleanEmailLogsJob } = require('./handlers/clean-email-logs');
 const { registerBackupXuiDbJob } = require('./handlers/backup-xui-db');
@@ -125,7 +122,6 @@ function startAllJobs(db) {
     registerXuiSyncTaskJob(context);
     registerTrafficSyncJob(context);
     registerTicketAutoCloseJob(context);
-    registerReleaseExpiredSalesJob(context);
     registerEmailCampaignJob(context);
     registerCleanEmailLogsJob(context);
     registerBackupXuiDbJob(context);

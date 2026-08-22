@@ -50,7 +50,6 @@ function loadJobsIndexForTest({ throwOnRegister }) {
     ['../jobs/handlers/sync-xui-tasks', 'registerXuiSyncTaskJob'],
     ['../jobs/handlers/sync-traffic', 'registerTrafficSyncJob'],
     ['../jobs/handlers/auto-close-tickets', 'registerTicketAutoCloseJob'],
-    ['../jobs/handlers/release-expired-sales', 'registerReleaseExpiredSalesJob'],
     ['../jobs/handlers/process-email-campaigns', 'registerEmailCampaignJob'],
     ['../jobs/handlers/clean-email-logs', 'registerCleanEmailLogsJob'],
     ['../jobs/handlers/backup-xui-db', 'registerBackupXuiDbJob'],
