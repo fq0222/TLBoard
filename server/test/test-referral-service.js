@@ -1096,6 +1096,59 @@ async function testRegisterAndPayKeepsOrderingWhenReferralCodeIsInvalid() {
 }
 
 /**
+ * 验证已存在账号不能再次通过注册购买入口创建新购订单。
+ *
+ * 职责：防止过期或禁用老账号绕过续费入口生成第二个 ORD 订单。
+ * 关键参数：findUserRegisterSnapshotByEmail 返回已存在用户快照。
+ * 核心分支：已存在账号直接抛出业务错误，不查询套餐、不调用 VMQ、不创建订单。
+ *
+ * @returns {Promise<void>}
+ */
+async function testRegisterAndPayRejectsAnyExistingUserBeforeCreatingOrdOrder() {
+  let planChecked = false;
+  let vmqChecked = false;
+  let pendingOrderCreated = false;
+
+  await withObjectMocks(userRepository, {
+    findUserRegisterSnapshotByEmail: async () => ({
+      id: 20,
+      enabled: 0,
+      expire_at: 0
+    }),
+    findEnabledPlanById: async () => {
+      planChecked = true;
+      return null;
+    },
+    createPendingOrder: async () => {
+      pendingOrderCreated = true;
+    }
+  }, async () => {
+    await withObjectMocks(vmqService, {
+      isMonitorOnline: async () => {
+        vmqChecked = true;
+        return true;
+      }
+    }, async () => {
+      await assert.rejects(
+        () => authService.registerAndPay({}, {
+          email: 'old@example.com',
+          password: 'abc12345',
+          plan_id: 3,
+          pay_type: 2
+        }),
+        (error) => error.isLegacyBusinessError
+          && error.code === 2001
+          && error.message === '该邮箱已注册，请登录后续费'
+      );
+    });
+  });
+
+  assert.strictEqual(planChecked, false);
+  assert.strictEqual(vmqChecked, false);
+  assert.strictEqual(pendingOrderCreated, false);
+}
+
+/**
  * Verifies register-and-pay validators keep the legacy flow compatible when referral_code is omitted.
  *
  * Responsibility: execute the auth route validator stack with a valid legacy payload.
@@ -1657,6 +1710,7 @@ async function main() {
   await testAdminSummaryFiltersIgnoreInvalidUserId();
   await testRegisterAndPayPassesResolvedReferrerToPendingOrder();
   await testRegisterAndPayKeepsOrderingWhenReferralCodeIsInvalid();
+  await testRegisterAndPayRejectsAnyExistingUserBeforeCreatingOrdOrder();
   await testRegisterAndPayValidatorAllowsMissingReferralCode();
   await testCompletePaidOrderIssuesRewardOnlyForFirstAttributedPurchase();
   await testCompletePaidOrderSendsAccountActivationEmail();

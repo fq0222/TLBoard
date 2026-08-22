@@ -386,13 +386,9 @@ async function registerAndPay(db, payload) {
   const existingUser = await userRepository.findUserRegisterSnapshotByEmail(db, email);
 
   if (existingUser) {
-    const now = getNowTimestamp();
-    const expireAt = Number(existingUser.expire_at) || 0;
-    if (existingUser.enabled && (expireAt === 0 || expireAt > now)) {
-      throw createLegacyBusinessError('该邮箱已注册，如需续费请先登录', {
-        code: 2001
-      });
-    }
+    throw createLegacyBusinessError('该邮箱已注册，请登录后续费', {
+      code: 2001
+    });
   }
 
   const plan = await userRepository.findEnabledPlanById(db, planId);
