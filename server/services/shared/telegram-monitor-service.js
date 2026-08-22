@@ -1,11 +1,13 @@
 const XuiService = require('../../integrations/xui/xui-service');
 const telegramRepository = require('../../repositories/telegram-repository');
 const trafficRepository = require('../../repositories/traffic-repository');
+const serversRepository = require('../../repositories/servers-repository');
 const { runWithConcurrency } = require('../../utils/concurrency');
 const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('TELEGRAM-MONITOR');
 const TELEGRAM_HEALTH_CHECK_CONCURRENCY = 10;
+const SERVER_OFFLINE_FAILURE_THRESHOLD = 3;
 
 /**
  * 归一化健康状态值，避免表中混入非预期文案。
@@ -86,6 +88,68 @@ function classifyPanelFailure(message) {
  */
 function getNowTimestamp() {
   return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * 读取单台服务器上一次连续失败次数，用于本轮失败后累加。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} serverId - 服务器 ID
+ * @returns {Promise<number>} 已记录的连续失败次数；无记录或读取失败时返回 0
+ */
+async function getPreviousConsecutiveFailures(db, serverId) {
+  try {
+    const detail = await telegramRepository.findServerHealthDetail(db, Number(serverId));
+    return Number(detail?.consecutive_failures) || 0;
+  } catch (error) {
+    logger.warn(`读取服务器 ${serverId} 连续失败次数失败，按 0 处理: ${error.message}`);
+    return 0;
+  }
+}
+
+/**
+ * 计算本轮失败后的连续失败次数。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} serverId - 服务器 ID
+ * @returns {Promise<number>} 本轮应写入的连续失败次数
+ */
+async function getNextConsecutiveFailures(db, serverId) {
+  return (await getPreviousConsecutiveFailures(db, serverId)) + 1;
+}
+
+/**
+ * 按健康巡检结果更新服务器在线状态。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} server - 服务器配置
+ * @param {number} status - 1 表示在线，0 表示离线
+ * @param {number} checkedAt - 本轮巡检时间戳
+ * @returns {Promise<void>}
+ */
+async function updateServerOnlineStatus(db, server, status, checkedAt) {
+  try {
+    await serversRepository.updateServerStatus(db, Number(server.id), status, checkedAt);
+  } catch (error) {
+    logger.warn(`更新服务器 ${server.name || server.id} 在线状态失败: ${error.message}`);
+  }
+}
+
+/**
+ * 连续失败达到阈值后才把服务器标记为离线，避免单次网络抖动影响订阅和同步。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} server - 服务器配置
+ * @param {number} consecutiveFailures - 本轮失败后累计次数
+ * @param {number} checkedAt - 本轮巡检时间戳
+ * @returns {Promise<void>}
+ */
+async function markServerOfflineIfThresholdReached(db, server, consecutiveFailures, checkedAt) {
+  if (consecutiveFailures < SERVER_OFFLINE_FAILURE_THRESHOLD) {
+    return;
+  }
+
+  await updateServerOnlineStatus(db, server, 0, checkedAt);
 }
 
 /**
@@ -199,6 +263,7 @@ async function checkSingleServerHealth(db, server) {
         failure_detail: ''
       });
 
+      await updateServerOnlineStatus(db, server, 1, checkedAt);
       await resolveAlert(db, server.id, 'panel_unreachable');
       logger.info(`服务器 ${server.name} 巡检结果: panel_api_status=healthy, panel_auth_status=healthy, xray_runtime_status=${xrayRuntimeStatus}`);
       return;
@@ -211,6 +276,7 @@ async function checkSingleServerHealth(db, server) {
     if (!inboundsResult.success) {
       const failure = classifyPanelFailure(inboundsResult.message || '');
       const detail = String(inboundsResult.message || '').trim();
+      const consecutiveFailures = await getNextConsecutiveFailures(db, server.id);
       logger.warn(`服务器 ${server.name} 面板探测失败: ${detail || '获取 inbounds 失败'}`);
 
       await recordServerHealthCheck(db, {
@@ -220,11 +286,12 @@ async function checkSingleServerHealth(db, server) {
         xray_runtime_status: 'unknown',
         last_failure_at: checkedAt,
         last_checked_at: checkedAt,
-        consecutive_failures: 1,
+        consecutive_failures: consecutiveFailures,
         failure_reason: failure.failureReason,
         failure_detail: detail
       });
 
+      await markServerOfflineIfThresholdReached(db, server, consecutiveFailures, checkedAt);
       await openOrUpdateAlert(db, {
         server_id: server.id,
         alert_type: 'panel_unreachable',
@@ -249,11 +316,13 @@ async function checkSingleServerHealth(db, server) {
       failure_detail: serverStatusFailureDetail
     });
 
+    await updateServerOnlineStatus(db, server, 1, checkedAt);
     await resolveAlert(db, server.id, 'panel_unreachable');
     logger.warn(`服务器 ${server.name} server/status 读取失败，已降级记录 xray_runtime_status=unknown`);
     logger.info(`服务器 ${server.name} 巡检结果: panel_api_status=healthy, panel_auth_status=healthy, xray_runtime_status=unknown`);
   } catch (error) {
     const detail = String(error.message || '').trim();
+    const consecutiveFailures = await getNextConsecutiveFailures(db, server.id);
     logger.error(`服务器 ${server.name} 巡检异常: ${detail}`);
 
     await recordServerHealthCheck(db, {
@@ -263,11 +332,12 @@ async function checkSingleServerHealth(db, server) {
       xray_runtime_status: 'unknown',
       last_failure_at: checkedAt,
       last_checked_at: checkedAt,
-      consecutive_failures: 1,
+      consecutive_failures: consecutiveFailures,
       failure_reason: 'server_health_check_exception',
       failure_detail: detail
     });
 
+    await markServerOfflineIfThresholdReached(db, server, consecutiveFailures, checkedAt);
     await openOrUpdateAlert(db, {
       server_id: server.id,
       alert_type: 'panel_unreachable',
