@@ -37,3 +37,10 @@ test('登录限流返回明确等待提示', () => {
     /message\s*=\s*\{\s*code:\s*1003,\s*message:\s*'您已连续输入3次错误密码，请15分钟后重试'/
   )
 })
+
+test('注册限流使用登录页单一提示通道', () => {
+  assert.match(
+    rateLimiterSource,
+    /userRegisterLimiter[\s\S]*message:\s*\{\s*code:\s*1003,\s*message:\s*'您已连续尝试3次，请15分钟后重试'/
+  )
+})

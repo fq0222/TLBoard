@@ -63,7 +63,7 @@ function createIpLimiter(options = {}) {
 const userLoginLimiter = createAuthLimiter();
 
 const userRegisterLimiter = createAuthLimiter({
-  message: { code: 429, message: '注册尝试次数过多，请稍后再试', data: null }
+  message: { code: 1003, message: '您已连续尝试3次，请15分钟后重试', data: null }
 });
 
 // 密码重置邮件发送限制：单 IP 每 15 分钟最多 3 次。
