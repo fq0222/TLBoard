@@ -39,6 +39,7 @@ async function createLoginUser(overrides = {}) {
     expire_at: 0,
     enabled: 0,
     disable_reason: DISABLE_REASONS.TRAFFIC_LIMIT,
+    payment_count: 1,
     ...overrides
   };
 }
@@ -66,12 +67,31 @@ async function assertAdminDisabledUserCannotLogin() {
       password: 'password123'
     }),
     (error) => error.code === 2003
+      && error.message === '账号已被禁用，请联系管理员'
+  );
+}
+
+async function assertUnpaidDisabledUserGetsActivationMessage() {
+  const user = await createLoginUser({
+    email: 'unpaid-disabled@example.com',
+    disable_reason: null,
+    payment_count: 0
+  });
+
+  await assert.rejects(
+    () => authService.login(createLoginDb(user), {
+      email: user.email,
+      password: 'password123'
+    }),
+    (error) => error.code === 2003
+      && error.message === '该账号需要完成支付激活后使用'
   );
 }
 
 async function main() {
   await assertTrafficDisabledUserCanLogin();
   await assertAdminDisabledUserCannotLogin();
+  await assertUnpaidDisabledUserGetsActivationMessage();
   console.log('登录禁用原因测试通过');
 }
 

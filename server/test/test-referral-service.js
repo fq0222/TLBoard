@@ -1096,15 +1096,15 @@ async function testRegisterAndPayKeepsOrderingWhenReferralCodeIsInvalid() {
 }
 
 /**
- * 验证已存在账号不能再次通过注册购买入口创建新购订单。
+ * 验证已付费账号不能再次通过注册购买入口创建新购订单。
  *
- * 职责：防止过期或禁用老账号绕过续费入口生成第二个 ORD 订单。
- * 关键参数：findUserRegisterSnapshotByEmail 返回已存在用户快照。
- * 核心分支：已存在账号直接抛出业务错误，不查询套餐、不调用 VMQ、不创建订单。
+ * 职责：防止已付费老账号绕过续费入口生成第二个 ORD 订单。
+ * 关键参数：findUserRegisterSnapshotByEmail 返回 payment_count > 0 的用户快照。
+ * 核心分支：已付费账号直接抛出业务错误，不查询套餐、不调用 VMQ、不创建订单。
  *
  * @returns {Promise<void>}
  */
-async function testRegisterAndPayRejectsAnyExistingUserBeforeCreatingOrdOrder() {
+async function testRegisterAndPayRejectsPaidExistingUserBeforeCreatingOrdOrder() {
   let planChecked = false;
   let vmqChecked = false;
   let pendingOrderCreated = false;
@@ -1113,7 +1113,8 @@ async function testRegisterAndPayRejectsAnyExistingUserBeforeCreatingOrdOrder() 
     findUserRegisterSnapshotByEmail: async () => ({
       id: 20,
       enabled: 0,
-      expire_at: 0
+      expire_at: 0,
+      payment_count: 1
     }),
     findEnabledPlanById: async () => {
       planChecked = true;
@@ -1146,6 +1147,87 @@ async function testRegisterAndPayRejectsAnyExistingUserBeforeCreatingOrdOrder() 
   assert.strictEqual(planChecked, false);
   assert.strictEqual(vmqChecked, false);
   assert.strictEqual(pendingOrderCreated, false);
+}
+
+/**
+ * 验证未支付账号可以再次通过注册入口复用同一用户并创建新订单。
+ *
+ * 职责：覆盖 payment_count=0 的邮箱占用恢复路径，避免 12 小时清理窗口阻塞重新下单。
+ * 关键参数：findUserRegisterSnapshotByEmail 返回未支付用户快照。
+ * 核心分支：复用旧 user_id 更新注册资料，不创建重复用户，并创建新的 pending 订单。
+ *
+ * @returns {Promise<void>}
+ */
+async function testRegisterAndPayReusesUnpaidExistingUserForNewOrder() {
+  const transactionDb = { name: 'transaction-db' };
+  const db = createTransactionDb(transactionDb);
+  let updatedUserPayload = null;
+  let createdUser = false;
+  let pendingOrderPayload = null;
+
+  await withRepositoryMocks({
+    findEnabledReferralCode: async () => null
+  }, async () => {
+    await withObjectMocks(userRepository, {
+      findUserRegisterSnapshotByEmail: async () => ({
+        id: 20,
+        enabled: 0,
+        expire_at: 0,
+        payment_count: 0
+      }),
+      findEnabledPlanById: async () => ({
+        id: 3,
+        price: 1200,
+        traffic_limit: 1024,
+        sales_limit: -1,
+        sales_count: 0
+      }),
+      updateRegisteredUserForPlan: async (receivedDb, payload) => {
+        assert.strictEqual(receivedDb, transactionDb);
+        updatedUserPayload = payload;
+      },
+      createRegisteredUser: async () => {
+        createdUser = true;
+        return { lastInsertRowid: 999 };
+      },
+      createPendingOrder: async (receivedDb, payload) => {
+        assert.strictEqual(receivedDb, transactionDb);
+        pendingOrderPayload = payload;
+        return { lastInsertRowid: 56 };
+      },
+      updateOrderPaymentInfo: async () => {},
+      markOrderExpiredByOutTradeNo: async () => {}
+    }, async () => {
+      await withObjectMocks(vmqService, {
+        isMonitorOnline: async () => true,
+        createOrder: async () => ({
+          code: 1,
+          data: {
+            orderId: 'VMQ-56',
+            payUrl: 'https://pay.example/56',
+            payType: 2,
+            reallyPrice: '12.00',
+            timeOut: 5
+          }
+        })
+      }, async () => {
+        const result = await authService.registerAndPay(db, {
+          email: 'retry@example.com',
+          password: 'abc12345',
+          plan_id: 3,
+          pay_type: 2
+        });
+
+        assert.strictEqual(updatedUserPayload.userId, 20);
+        assert.strictEqual(updatedUserPayload.planId, 3);
+        assert.strictEqual(createdUser, false);
+        assert.strictEqual(pendingOrderPayload.userId, 20);
+        assert.strictEqual(pendingOrderPayload.email, 'retry@example.com');
+        assert.strictEqual(result.user_id, 20);
+        assert.strictEqual(result.order_id, 56);
+      });
+    });
+  });
 }
 
 /**
@@ -1710,7 +1792,8 @@ async function main() {
   await testAdminSummaryFiltersIgnoreInvalidUserId();
   await testRegisterAndPayPassesResolvedReferrerToPendingOrder();
   await testRegisterAndPayKeepsOrderingWhenReferralCodeIsInvalid();
-  await testRegisterAndPayRejectsAnyExistingUserBeforeCreatingOrdOrder();
+  await testRegisterAndPayRejectsPaidExistingUserBeforeCreatingOrdOrder();
+  await testRegisterAndPayReusesUnpaidExistingUserForNewOrder();
   await testRegisterAndPayValidatorAllowsMissingReferralCode();
   await testCompletePaidOrderIssuesRewardOnlyForFirstAttributedPurchase();
   await testCompletePaidOrderSendsAccountActivationEmail();

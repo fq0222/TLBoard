@@ -293,8 +293,29 @@ function shouldBlockDisabledUserLogin(user) {
     return false;
   }
 
+  if (Number(user.payment_count || 0) === 0) {
+    return true;
+  }
+
   return user.disable_reason !== DISABLE_REASONS.TRAFFIC_LIMIT
     && user.disable_reason !== DISABLE_REASONS.EXPIRED;
+}
+
+/**
+ * 生成禁用用户登录入口的业务提示。
+ * 职责：优先区分未支付待激活账号，已付费禁用账号沿用管理员联系提示。
+ * 关键参数：user.payment_count 为 0 时说明账号未完成首单激活。
+ * 核心分支：未支付禁用账号提示完成支付；其他被拦截禁用账号提示联系管理员。
+ *
+ * @param {Object} user - 登录查询返回的用户记录
+ * @returns {string} 禁用登录提示
+ */
+function getDisabledLoginMessage(user) {
+  if (!user.enabled && Number(user.payment_count || 0) === 0) {
+    return '该账号需要完成支付激活后使用';
+  }
+
+  return '账号已被禁用，请联系管理员';
 }
 
 /**
@@ -385,7 +406,7 @@ async function registerAndPay(db, payload) {
   const payType = Number(payload.pay_type || config.payment.vmqDefaultType || 2);
   const existingUser = await userRepository.findUserRegisterSnapshotByEmail(db, email);
 
-  if (existingUser) {
+  if (existingUser && Number(existingUser.payment_count || 0) > 0) {
     throw createLegacyBusinessError('该邮箱已注册，请登录后续费', {
       code: 2001
     });
@@ -540,7 +561,7 @@ async function login(db, payload) {
   }
 
   if (shouldBlockDisabledUserLogin(user)) {
-    throw createLegacyBusinessError('账号已被禁用，请联系管理员', {
+    throw createLegacyBusinessError(getDisabledLoginMessage(user), {
       code: 2003
     });
   }

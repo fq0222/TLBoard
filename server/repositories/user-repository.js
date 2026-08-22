@@ -23,7 +23,7 @@ async function findUserByEmail(db, email) {
  * @returns {Promise<Object|undefined>} 用户快照
  */
 async function findUserRegisterSnapshotByEmail(db, email) {
-  return db.prepare('SELECT id, enabled, expire_at FROM users WHERE email = ?').get(email);
+  return db.prepare('SELECT id, enabled, expire_at, payment_count FROM users WHERE email = ?').get(email);
 }
 
 /**
