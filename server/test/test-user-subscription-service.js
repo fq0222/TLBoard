@@ -1180,6 +1180,28 @@ async function testGenerateSubscriptionShouldKeepRefreshedHy2SourceCache() {
 }
 
 /**
+ * 验证节点名称会按 remark 策略在服务器名后追加显示标识。
+ *
+ * @returns {void}
+ */
+function testSubscriptionNodeNameShouldIncludeStrategyBadge() {
+  const { buildSubscriptionNodeName } = subscriptionService.__testables;
+
+  assert.strictEqual(
+    buildSubscriptionNodeName({ name: '测试' }, 'cf', 1),
+    '测试[AI]-cf-1'
+  );
+  assert.strictEqual(
+    buildSubscriptionNodeName({ name: '测试' }, 'hy2'),
+    '测试[4K]-hy2'
+  );
+  assert.strictEqual(
+    buildSubscriptionNodeName({ name: '测试' }, 'direct'),
+    '测试-direct'
+  );
+}
+
+/**
  * 验证未完成极速通道优选时，订阅生成返回面向用户的新提示文案。
  *
  * @returns {Promise<void>}
@@ -1237,6 +1259,7 @@ async function run() {
   await testGenerateSubscriptionShouldQueueFailedSourceRefreshRetry();
   await testSourceRefreshRetryShouldRegenerateSubscriptionCache();
   await testGenerateSubscriptionShouldKeepRefreshedHy2SourceCache();
+  testSubscriptionNodeNameShouldIncludeStrategyBadge();
   await testGenerateSubscriptionShouldAskForSpeedChannelOptimization();
   console.log('user subscription service tests passed');
 }

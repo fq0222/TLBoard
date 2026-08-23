@@ -97,6 +97,25 @@ function replaceNodeRemark(link, nodeName) {
 }
 
 /**
+ * 生成订阅节点展示名称。
+ *
+ * @param {Object} server - 3X-UI 服务器记录，name 为管理员设置的服务器名称
+ * @param {string} remark - 3X-UI inbound remark，用于判断策略和显示节点备注
+ * @param {number|null} sequence - 多个 CF 优选 IP 展开后的序号，空值表示不追加序号
+ * @returns {string} 形如 服务器名[AI]-cf-1 或 服务器名[4K]-hy2 的节点名称
+ */
+function buildSubscriptionNodeName(server, remark, sequence = null) {
+  const strategy = getStrategyFromRemark(remark);
+  const badge = strategy === 'cf'
+    ? '[AI]'
+    : strategy === 'hy2'
+      ? '[4K]'
+      : '';
+  const suffix = sequence ? `-${sequence}` : '';
+  return `${server.name}${badge}-${remark}${suffix}`;
+}
+
+/**
  * 从 inbound 的 settings 与 stream_settings 中解析节点连接信息。
  *
  * @param {Object} node - 节点基础信息
@@ -1019,8 +1038,11 @@ function composeSubscriptionNodes(nodeConfigs, sourceMap, serversById, cfIps, lo
     if (strategy === 'cf') {
       for (let i = 0; i < cfIps.length; i += 1) {
         const cfIp = getCfIpValue(cfIps[i]);
-        const nodeNameBase = `${server.name}-${config.remark}`;
-        const nodeName = cfIps.length > 1 ? `${nodeNameBase}-${i + 1}` : nodeNameBase;
+        const nodeName = buildSubscriptionNodeName(
+          server,
+          config.remark,
+          cfIps.length > 1 ? i + 1 : null
+        );
         const processedLink = replaceNodeRemark(
           processNodeLink(source.original_link, 'cf', {
             cfIp,
@@ -1042,7 +1064,7 @@ function composeSubscriptionNodes(nodeConfigs, sourceMap, serversById, cfIps, lo
       continue;
     }
 
-    const nodeName = `${server.name}-${config.remark}`;
+    const nodeName = buildSubscriptionNodeName(server, config.remark);
     const processedLink = replaceNodeRemark(
       processNodeLink(source.original_link, strategy),
       nodeName
@@ -1753,9 +1775,14 @@ async function getSubscriptionInfo(db, userId) {
         const nodePort = server.client_port || node.port;
         cfIps.forEach((cfIp, index) => {
           const ipRemark = cfIps.length > 1 ? `${node.remark}-${index + 1}` : node.remark;
+          const nodeName = buildSubscriptionNodeName(
+            server,
+            node.remark,
+            cfIps.length > 1 ? index + 1 : null
+          );
           nodes.push({
             server_name: server.name,
-            node_name: `${server.name}-${ipRemark}`,
+            node_name: nodeName,
             protocol: protocolDetail,
             strategy,
             uuid: config.uuid,
@@ -1771,7 +1798,7 @@ async function getSubscriptionInfo(db, userId) {
       const defaultIp = String(server.api_url || '').match(/\/\/([^:]+)/);
       nodes.push({
         server_name: server.name,
-        node_name: `${server.name}-${node.remark}`,
+        node_name: buildSubscriptionNodeName(server, node.remark),
         protocol: protocolDetail,
         strategy,
         uuid: config.uuid,
@@ -2107,6 +2134,7 @@ module.exports = {
     findServersRequiringSync,
     inspectUserInNodeSnapshot,
     formatServerNames,
+    buildSubscriptionNodeName,
     buildInboundRefreshPlan,
     refreshSubscriptionSources,
     enqueueFailedSourceRefreshRetry,
