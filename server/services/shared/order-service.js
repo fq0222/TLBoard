@@ -638,6 +638,7 @@ async function syncUserToXuiServers(db, user, plan = {}) {
   let successCount = 0;
   let failureCount = 0;
   let lastError = '';
+  const failedServerIds = [];
 
   try {
     const onlineServers = await xuiSyncRepository.listOnlineXuiServers(db);
@@ -664,15 +665,19 @@ async function syncUserToXuiServers(db, user, plan = {}) {
       ORDER_XUI_SYNC_CONCURRENCY,
       (server) => syncUserToSingleServer(db, user, server, plan)
     );
-    for (const result of results) {
+    for (const [index, result] of results.entries()) {
       if (result.status === 'fulfilled') {
         successCount += result.value.successCount;
         failureCount += result.value.failureCount;
         if (result.value.lastError) {
           lastError = result.value.lastError;
         }
+        if (result.value.failureCount > 0) {
+          failedServerIds.push(servers[index].id);
+        }
       } else {
         failureCount++;
+        failedServerIds.push(servers[index].id);
         lastError = result.reason?.message || String(result.reason);
       }
     }
@@ -683,14 +688,15 @@ async function syncUserToXuiServers(db, user, plan = {}) {
         success: false,
         message: lastError || '3X-UI 同步未完成',
         successCount,
-        failureCount
+        failureCount,
+        failedServerIds
       };
     }
 
     return { success: true, successCount, failureCount };
   } catch (error) {
     logger.error(`同步用户到 3X-UI 错误: ${error.message}`);
-    return { success: false, message: error.message, successCount, failureCount: failureCount + 1 };
+    return { success: false, message: error.message, successCount, failureCount: failureCount + 1, failedServerIds };
   } finally {
     await orderRepository.updateUserSyncStatus(db, user.id, 2);
     logger.info(`用户 ${user.email} 同步状态更新为 2（等待结束）`);

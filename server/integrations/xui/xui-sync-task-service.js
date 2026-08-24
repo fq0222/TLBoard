@@ -173,8 +173,9 @@ async function markSuccess(db, taskId) {
  * @param {number} taskId - 任务 ID
  * @param {number} attempts - 新的失败次数
  * @param {string} errorMessage - 最近一次错误信息
+ * @param {Object|null} [retryPayload] - 下一轮重试 payload；用户同步部分失败时用于缩小 serverIds
  */
-async function markRetry(db, taskId, attempts, errorMessage) {
+async function markRetry(db, taskId, attempts, errorMessage, retryPayload = null) {
   const now = Math.floor(Date.now() / 1000);
   const nextRetryAt = now + getRetryDelaySeconds(attempts);
   await xuiSyncRepository.markXuiSyncTaskRetry(db, {
@@ -182,8 +183,48 @@ async function markRetry(db, taskId, attempts, errorMessage) {
     attempts,
     nextRetryAt,
     errorMessage,
+    payloadText: retryPayload ? JSON.stringify(retryPayload) : undefined,
     updatedAt: now
   });
+}
+
+/**
+ * 构建用户同步任务的下一轮局部重试 payload。
+ *
+ * @param {Object} task - 当前任务记录
+ * @param {Object} result - handler 返回的同步结果
+ * @returns {Object|null} 缩小到失败服务器的 payload，无法缩小时返回 null
+ */
+function buildPartialRetryPayload(task, result) {
+  if (!isUserSyncTaskType(task.task_type) || !Array.isArray(result?.failedServerIds) || result.failedServerIds.length === 0) {
+    return null;
+  }
+
+  const serverIds = [];
+  const seen = new Set();
+  for (const serverId of result.failedServerIds) {
+    if (serverId === null || serverId === undefined || serverId === '') continue;
+    const key = String(serverId);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const numericId = Number(serverId);
+    serverIds.push(Number.isFinite(numericId) ? numericId : serverId);
+  }
+
+  if (serverIds.length === 0) {
+    return null;
+  }
+
+  const payload = {
+    ...parsePayload(task.payload),
+    ...(task.payload_data || {})
+  };
+  payload.plan = {
+    ...(payload.plan || {}),
+    serverIds
+  };
+
+  return payload;
 }
 
 /**
@@ -222,7 +263,9 @@ async function processTask(db, task, handler, options = {}) {
   try {
     const result = await handler(task);
     if (result && result.success === false) {
-      throw new Error(result.message || '同步任务执行失败');
+      const error = new Error(result.message || '同步任务执行失败');
+      error.retryPayload = buildPartialRetryPayload(task, result);
+      throw error;
     }
 
     await markSuccess(db, task.id);
@@ -235,7 +278,7 @@ async function processTask(db, task, handler, options = {}) {
       return { success: false, final: true, error: error.message };
     }
 
-    await markRetry(db, task.id, attempts, error.message);
+    await markRetry(db, task.id, attempts, error.message, error.retryPayload);
     logger.warn(`3X-UI 同步任务失败，已安排重试: task=${task.id}, attempts=${attempts}, error=${error.message}`);
     return { success: false, final: false, error: error.message };
   }

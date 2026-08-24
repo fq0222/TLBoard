@@ -68,12 +68,18 @@ function createFakeDb(initialTasks = []) {
           }
 
           if (sql.includes("SET status = 'pending'")) {
-            const task = tasks.find(item => item.id === params[4]);
+            const hasPayloadUpdate = sql.includes('payload = ?');
+            const task = tasks.find(item => item.id === (hasPayloadUpdate ? params[5] : params[4]));
             task.status = 'pending';
             task.attempts = params[0];
             task.next_retry_at = params[1];
             task.last_error = params[2];
-            task.updated_at = params[3];
+            if (hasPayloadUpdate) {
+              task.payload = params[3];
+              task.updated_at = params[4];
+            } else {
+              task.updated_at = params[3];
+            }
             return { changes: 1 };
           }
 
@@ -140,6 +146,40 @@ async function testFailedTaskSchedulesRetry() {
   assert.ok(db.tasks[0].next_retry_at >= before + 60);
 }
 
+/**
+ * 验证用户同步任务部分失败时，下一轮只重试失败服务器。
+ *
+ * 职责：覆盖 3X-UI 用户同步补偿队列的局部重试语义。
+ * 关键参数：handler 返回 failedServerIds，代表本轮未完成的服务器 ID。
+ * 核心分支：任务继续 pending，但 payload.plan.serverIds 被缩小到失败服务器集合。
+ *
+ * @returns {Promise<void>}
+ */
+async function testFailedUserSyncTaskNarrowsRetryServerIds() {
+  const db = createFakeDb([
+    {
+      id: 7,
+      task_type: 'renew_sync',
+      status: 'pending',
+      attempts: 0,
+      payload: JSON.stringify({
+        user: { id: 10, email: 'user@example.com' },
+        plan: { id: 3, serverIds: [1, 2, 3] }
+      }),
+      next_retry_at: Math.floor(Date.now() / 1000) - 1
+    }
+  ]);
+
+  await syncTaskService.processDueTasks(db, async () => ({
+    success: false,
+    message: 'server 2 timeout',
+    failedServerIds: [2]
+  }));
+
+  assert.strictEqual(db.tasks[0].status, 'pending');
+  assert.deepStrictEqual(JSON.parse(db.tasks[0].payload).plan.serverIds, [2]);
+}
+
 async function testExhaustedTaskIsMarkedFailed() {
   const db = createFakeDb([
     {
@@ -200,6 +240,7 @@ async function testNewUserSyncTaskSupersedesOldPendingTask() {
 async function run() {
   await testSuccessfulTaskIsMarkedSuccess();
   await testFailedTaskSchedulesRetry();
+  await testFailedUserSyncTaskNarrowsRetryServerIds();
   await testExhaustedTaskIsMarkedFailed();
   await testNewUserSyncTaskSupersedesOldPendingTask();
   console.log('xui sync task service tests passed');

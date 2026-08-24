@@ -242,7 +242,7 @@ async function markXuiSyncTaskSuccess(db, taskId, updatedAt) {
  * 标记同步任务等待重试。
  *
  * @param {Object} db - 数据库代理对象
- * @param {Object} payload - 重试数据
+ * @param {Object} payload - 重试数据，payloadText 存在时同步更新任务 JSON 快照
  * @returns {Promise<void>}
  */
 async function markXuiSyncTaskRetry(db, payload) {
@@ -251,8 +251,23 @@ async function markXuiSyncTaskRetry(db, payload) {
     attempts,
     nextRetryAt,
     errorMessage,
+    payloadText,
     updatedAt
   } = payload;
+
+  if (payloadText !== undefined) {
+    await db.prepare(`
+      UPDATE xui_sync_tasks
+      SET status = 'pending',
+          attempts = ?,
+          next_retry_at = ?,
+          last_error = ?,
+          payload = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(attempts, nextRetryAt, String(errorMessage || '').slice(0, 2000), payloadText, updatedAt, taskId);
+    return;
+  }
 
   await db.prepare(`
     UPDATE xui_sync_tasks
