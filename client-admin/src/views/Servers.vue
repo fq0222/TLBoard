@@ -161,7 +161,7 @@
           <el-input-number v-model="serverForm.client_port" :min="0" :max="65535" placeholder="客户端连接端口" />
         </el-form-item>
         <el-form-item label="HY2端口范围" prop="hy2_ports">
-          <el-input v-model="serverForm.hy2_ports" placeholder="如：40000-40010" />
+          <el-input v-model="serverForm.hy2_ports" placeholder="如：40000-40010，0-0 表示关闭端口跳跃" />
         </el-form-item>
         <el-form-item label="订阅地址" prop="sub_url">
           <el-input v-model="serverForm.sub_url" placeholder="如：https://example.com/sub/aaa333/" />
@@ -264,8 +264,12 @@ const serverRules = {
         }
         const startPort = Number(match[1])
         const endPort = Number(match[2])
+        if (startPort === 0 && endPort === 0) {
+          callback()
+          return
+        }
         if (startPort < 1 || endPort > 65535 || startPort > endPort) {
-          callback(new Error('端口范围必须在 1-65535 内，且起始端口不能大于结束端口'))
+          callback(new Error('端口范围必须在 1-65535 内，或填 0-0 关闭端口跳跃'))
           return
         }
         callback()

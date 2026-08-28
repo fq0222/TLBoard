@@ -28,7 +28,7 @@ function getUnixTimestamp() {
 
 /**
  * 规范化 hy2 UDP 端口范围。
- * 核心分支：空值使用默认范围；格式或端口边界非法时阻止写入服务器配置。
+ * 核心分支：空值使用默认范围；0-0 表示关闭端口跳跃；其它非法范围阻止写入。
  *
  * @param {string|undefined|null} value - 管理端提交的端口范围，格式如 40000-40010
  * @returns {string} 可写入数据库并输出到 Clash 的端口范围
@@ -46,8 +46,12 @@ function normalizeHy2Ports(value) {
 
   const startPort = Number(match[1]);
   const endPort = Number(match[2]);
+  if (startPort === 0 && endPort === 0) {
+    return '0-0';
+  }
+
   if (startPort < 1 || endPort > 65535 || startPort > endPort) {
-    throw createLegacyBusinessError('HY2 端口范围必须在 1-65535 内，且起始端口不能大于结束端口');
+    throw createLegacyBusinessError('HY2 端口范围必须在 1-65535 内，或填 0-0 关闭端口跳跃');
   }
 
   return `${startPort}-${endPort}`;

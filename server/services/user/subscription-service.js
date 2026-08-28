@@ -2074,8 +2074,13 @@ function generateClashConfig(nodes) {
     type: hysteria2
     server: ${serverAddress}
     port: ${port}
-    password: ${uuid}
-    ports: ${hy2Ports}
+    password: ${uuid}`;
+
+      if (hy2Ports !== '0-0') {
+        config += `\n    ports: ${hy2Ports}`;
+      }
+
+      config += `
     tls: true
     skip-cert-verify: false
     sni: ${sni}

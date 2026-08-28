@@ -1,6 +1,7 @@
 const assert = require('assert');
 const http = require('http');
 const subscriptionService = require('../services/user/subscription-service');
+const subscriptionStrategy = require('../services/shared/subscription-strategy');
 const sharedSubscriptionService = require('../services/shared/subscription-service');
 const adminUsersService = require('../services/admin/users-service');
 const systemSettingsRouter = require('../routes/admin/system-settings');
@@ -236,6 +237,40 @@ function testClashHy2SubscriptionShouldUseCachedPortsRange() {
   assert.ok(clash.includes('type: hysteria2'));
   assert.ok(clash.includes('ports: 40000-40010'));
   assert.ok(!clash.includes('ports: 40000-50000'));
+}
+
+/**
+ * 验证 HY2 端口范围配置为 0-0 时，Clash 节点不输出 ports 字段。
+ *
+ * @returns {void}
+ */
+function testClashHy2SubscriptionShouldOmitPortsWhenDisabled() {
+  const clash = subscriptionService.generateClashConfig([{
+    node_name: '测试[4K]-hy2',
+    link: 'hysteria2://secret@example.com:28905?security=tls&fp=chrome&alpn=h3&sni=example.com#hy2',
+    hy2_ports: '0-0'
+  }]);
+
+  assert.ok(clash.includes('type: hysteria2'));
+  assert.ok(clash.includes('port: 28905'));
+  assert.ok(!clash.includes('\n    ports:'));
+}
+
+/**
+ * 验证 HY2 端口范围配置为 0-0 时，通用订阅链接不输出 mport 参数。
+ *
+ * @returns {void}
+ */
+function testHy2StrategyShouldOmitMportWhenPortsDisabled() {
+  const link = subscriptionStrategy.processNodeLink(
+    'hysteria2://secret@example.com:28905?security=tls&mport=40000-50000&fp=chrome#hy2',
+    'hy2',
+    { hy2Ports: '0-0' }
+  );
+
+  assert.ok(link.startsWith('hysteria2://secret@example.com:28905?'));
+  assert.ok(link.includes('security=tls'));
+  assert.ok(!link.includes('mport='));
 }
 
 /**
@@ -1259,6 +1294,8 @@ async function run() {
   await testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgroundCooldown();
   await testClashSubscriptionShouldRenderYaml();
   testClashHy2SubscriptionShouldUseCachedPortsRange();
+  testClashHy2SubscriptionShouldOmitPortsWhenDisabled();
+  testHy2StrategyShouldOmitMportWhenPortsDisabled();
   await testClashSubscriptionShouldUseSystemSettingsHeaders();
   await testSubscriptionHeaderShouldIgnoreReferralTrafficLimit();
   await testSystemSettingsSubscriptionDefaults();

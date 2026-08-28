@@ -195,7 +195,11 @@ function applyHy2Strategy(originalLink, hy2Ports = '40000-50000') {
   }
 
   nodeInfo.params.security = 'tls';
-  nodeInfo.params.mport = hy2Ports || '40000-50000';
+  if (hy2Ports === '0-0') {
+    delete nodeInfo.params.mport;
+  } else {
+    nodeInfo.params.mport = hy2Ports || '40000-50000';
+  }
   nodeInfo.params.insecure = '0';
   nodeInfo.params.allowInsecure = '0';
 
