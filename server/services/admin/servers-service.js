@@ -6,6 +6,7 @@ const xuiNodeSnapshotService = require('../shared/xui-node-snapshot-service');
 const xuiBackupTaskService = require('./xui-backup-task-service');
 
 const logger = createLogger('ADMIN-SERVERS');
+const DEFAULT_HY2_PORTS = '40000-50000';
 
 /**
  * 管理端 3X-UI 服务器服务。
@@ -23,6 +24,33 @@ function createLegacyBusinessError(message, options = {}) {
 
 function getUnixTimestamp() {
   return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * 规范化 hy2 UDP 端口范围。
+ * 核心分支：空值使用默认范围；格式或端口边界非法时阻止写入服务器配置。
+ *
+ * @param {string|undefined|null} value - 管理端提交的端口范围，格式如 40000-40010
+ * @returns {string} 可写入数据库并输出到 Clash 的端口范围
+ */
+function normalizeHy2Ports(value) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return DEFAULT_HY2_PORTS;
+  }
+
+  const text = String(value).trim();
+  const match = text.match(/^(\d{1,5})-(\d{1,5})$/);
+  if (!match) {
+    throw createLegacyBusinessError('HY2 端口范围格式不正确，请使用 40000-40010 这样的格式');
+  }
+
+  const startPort = Number(match[1]);
+  const endPort = Number(match[2]);
+  if (startPort < 1 || endPort > 65535 || startPort > endPort) {
+    throw createLegacyBusinessError('HY2 端口范围必须在 1-65535 内，且起始端口不能大于结束端口');
+  }
+
+  return `${startPort}-${endPort}`;
 }
 
 /**
@@ -58,6 +86,7 @@ function formatServerSummary(server, stats = {}) {
     panel_version: server.panel_version || '3.0.2',
     host: server.host || '',
     client_port: server.client_port || 0,
+    hy2_ports: server.hy2_ports || DEFAULT_HY2_PORTS,
     sub_url: server.sub_url || '',
     status: server.status,
     status_text: server.status === 1 ? '在线' : '离线',
@@ -165,6 +194,7 @@ async function createServer(db, payload) {
     panelVersion,
     host: payload.host || '',
     clientPort: parseInt(payload.client_port, 10) || 0,
+    hy2Ports: normalizeHy2Ports(payload.hy2_ports),
     subUrl: payload.sub_url || '',
     lastCheckAt: getUnixTimestamp()
   });
@@ -216,6 +246,10 @@ async function updateServer(db, serverId, payload) {
   if (payload.client_port !== undefined) {
     updates.push('client_port = ?');
     values.push(parseInt(payload.client_port, 10) || 0);
+  }
+  if (payload.hy2_ports !== undefined) {
+    updates.push('hy2_ports = ?');
+    values.push(normalizeHy2Ports(payload.hy2_ports));
   }
   if (payload.sub_url !== undefined) {
     updates.push('sub_url = ?');
@@ -342,6 +376,7 @@ async function getServerDetail(db, serverId) {
       panel_version: server.panel_version || '3.0.2',
       host: server.host || '',
       client_port: server.client_port || 0,
+      hy2_ports: server.hy2_ports || DEFAULT_HY2_PORTS,
       sub_url: server.sub_url || '',
       status: server.status,
       last_check_at: server.last_check_at

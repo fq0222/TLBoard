@@ -60,6 +60,10 @@
               <el-icon><Odometer /></el-icon>
               <span class="url-text">客户端端口: {{ server.client_port }}</span>
             </div>
+            <div class="info-row hy2-row">
+              <el-icon><Odometer /></el-icon>
+              <span class="url-text">HY2 端口范围: {{ server.hy2_ports || DEFAULT_HY2_PORTS }}</span>
+            </div>
             <div v-if="server.sub_url" class="info-row sub-row">
               <el-icon><Tickets /></el-icon>
               <span class="url-text" :title="server.sub_url">订阅: {{ server.sub_url }}</span>
@@ -156,6 +160,9 @@
         <el-form-item label="客户端端口" prop="client_port">
           <el-input-number v-model="serverForm.client_port" :min="0" :max="65535" placeholder="客户端连接端口" />
         </el-form-item>
+        <el-form-item label="HY2端口范围" prop="hy2_ports">
+          <el-input v-model="serverForm.hy2_ports" placeholder="如：40000-40010" />
+        </el-form-item>
         <el-form-item label="订阅地址" prop="sub_url">
           <el-input v-model="serverForm.sub_url" placeholder="如：https://example.com/sub/aaa333/" />
         </el-form-item>
@@ -191,6 +198,7 @@ import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
 import api from '@/api'
 
 const DEFAULT_PANEL_VERSION = '3.0.2'
+const DEFAULT_HY2_PORTS = '40000-50000'
 const BACKUP_TASK_WS_PATH = '/api/admin/servers/backup/ws'
 const MAX_ONLINE_COUNT_CONCURRENCY = 10
 
@@ -218,6 +226,7 @@ const serverForm = reactive({
   panel_version: DEFAULT_PANEL_VERSION,
   host: '',
   client_port: 0,
+  hy2_ports: DEFAULT_HY2_PORTS,
   sub_url: ''
 })
 
@@ -243,6 +252,26 @@ const serverRules = {
   ],
   panel_version: [
     { required: true, message: '请输入 3X-UI 面板版本号', trigger: 'blur' }
+  ],
+  hy2_ports: [
+    {
+      validator: (rule, value, callback) => {
+        const text = String(value || '').trim()
+        const match = text.match(/^(\d{1,5})-(\d{1,5})$/)
+        if (!match) {
+          callback(new Error('请输入端口范围，如 40000-40010'))
+          return
+        }
+        const startPort = Number(match[1])
+        const endPort = Number(match[2])
+        if (startPort < 1 || endPort > 65535 || startPort > endPort) {
+          callback(new Error('端口范围必须在 1-65535 内，且起始端口不能大于结束端口'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur'
+    }
   ]
 }
 
@@ -274,6 +303,7 @@ function showEditDialog(server) {
   serverForm.panel_version = server.panel_version || DEFAULT_PANEL_VERSION
   serverForm.host = server.host || ''
   serverForm.client_port = server.client_port || 0
+  serverForm.hy2_ports = server.hy2_ports || DEFAULT_HY2_PORTS
   serverForm.sub_url = server.sub_url || ''
 
   dialogVisible.value = true
@@ -286,6 +316,7 @@ function resetForm() {
   serverForm.panel_version = DEFAULT_PANEL_VERSION
   serverForm.host = ''
   serverForm.client_port = 0
+  serverForm.hy2_ports = DEFAULT_HY2_PORTS
   serverForm.sub_url = ''
 }
 
@@ -295,7 +326,8 @@ async function handleSubmit() {
     submitting.value = true
     const payload = {
       ...serverForm,
-      panel_version: (serverForm.panel_version || DEFAULT_PANEL_VERSION).trim()
+      panel_version: (serverForm.panel_version || DEFAULT_PANEL_VERSION).trim(),
+      hy2_ports: (serverForm.hy2_ports || DEFAULT_HY2_PORTS).trim()
     }
 
     if (isEditing.value && !payload.api_token) {
@@ -667,6 +699,7 @@ onBeforeUnmount(() => {
 .url-row,
 .host-row,
 .port-row,
+.hy2-row,
 .sub-row,
 .version-row {
   display: flex;
@@ -692,6 +725,11 @@ onBeforeUnmount(() => {
 }
 
 .port-row {
+  background: #f0f9eb;
+  margin-bottom: 8px;
+}
+
+.hy2-row {
   background: #f0f9eb;
   margin-bottom: 8px;
 }

@@ -29,7 +29,11 @@ router.post('/', authenticateAdmin, [
   body('panel_version')
     .optional()
     .isString()
-    .withMessage('3X-UI 面板版本号格式不正确')
+    .withMessage('3X-UI 面板版本号格式不正确'),
+  body('hy2_ports')
+    .optional()
+    .isString()
+    .withMessage('HY2 端口范围格式不正确')
 ], serversController.createServer);
 
 router.put('/:id', authenticateAdmin, [
@@ -51,7 +55,11 @@ router.put('/:id', authenticateAdmin, [
   body('panel_version')
     .optional()
     .isString()
-    .withMessage('3X-UI 面板版本号格式不正确')
+    .withMessage('3X-UI 面板版本号格式不正确'),
+  body('hy2_ports')
+    .optional()
+    .isString()
+    .withMessage('HY2 端口范围格式不正确')
 ], serversController.updateServer);
 
 router.delete('/:id', authenticateAdmin, [

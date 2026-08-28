@@ -27,6 +27,7 @@ const CLASH_CONFIG_NAME_KEY = 'clash_config_name';
 const CLASH_PROFILE_UPDATE_INTERVAL_KEY = 'clash_profile_update_interval';
 const DEFAULT_CLASH_CONFIG_NAME = '天澜大陆';
 const DEFAULT_CLASH_PROFILE_UPDATE_INTERVAL_HOURS = '2';
+const DEFAULT_HY2_PORTS = '40000-50000';
 const FALLBACK_NODE_HOST = 'invalid.subscription.local';
 const FALLBACK_NODE_UUIDS = [
   '00000000-0000-0000-0000-000000000001',
@@ -1057,6 +1058,7 @@ function composeSubscriptionNodes(nodeConfigs, sourceMap, serversById, cfIps, lo
           node_name: nodeName,
           protocol: config.protocol,
           strategy,
+          hy2_ports: server.hy2_ports || DEFAULT_HY2_PORTS,
           link: processedLink,
           original_link: source.original_link
         });
@@ -1065,8 +1067,11 @@ function composeSubscriptionNodes(nodeConfigs, sourceMap, serversById, cfIps, lo
     }
 
     const nodeName = buildSubscriptionNodeName(server, config.remark);
+    const hy2Ports = server.hy2_ports || DEFAULT_HY2_PORTS;
     const processedLink = replaceNodeRemark(
-      processNodeLink(source.original_link, strategy),
+      processNodeLink(source.original_link, strategy, {
+        hy2Ports
+      }),
       nodeName
     );
 
@@ -1075,6 +1080,7 @@ function composeSubscriptionNodes(nodeConfigs, sourceMap, serversById, cfIps, lo
       node_name: nodeName,
       protocol: config.protocol,
       strategy,
+      hy2_ports: hy2Ports,
       link: processedLink,
       original_link: source.original_link
     });
@@ -2058,6 +2064,7 @@ function generateClashConfig(nodes) {
 
     if (protocol === 'hysteria2') {
       const sni = params.sni || serverAddress;
+      const hy2Ports = node.hy2_ports || DEFAULT_HY2_PORTS;
       const alpnValues = String(params.alpn || '')
         .split(',')
         .map((item) => item.trim())
@@ -2068,7 +2075,7 @@ function generateClashConfig(nodes) {
     server: ${serverAddress}
     port: ${port}
     password: ${uuid}
-    ports: 40000-50000
+    ports: ${hy2Ports}
     tls: true
     skip-cert-verify: false
     sni: ${sni}

@@ -222,6 +222,23 @@ async function testClashSubscriptionShouldRenderYaml() {
 }
 
 /**
+ * 验证 Clash hy2 节点会使用缓存中的端口范围，适配 LXC 等端口数量受限机器。
+ *
+ * @returns {void}
+ */
+function testClashHy2SubscriptionShouldUseCachedPortsRange() {
+  const clash = subscriptionService.generateClashConfig([{
+    node_name: '测试[4K]-hy2',
+    link: 'hysteria2://secret@example.com:28905?security=tls&fp=chrome&alpn=h3&sni=example.com#hy2',
+    hy2_ports: '40000-40010'
+  }]);
+
+  assert.ok(clash.includes('type: hysteria2'));
+  assert.ok(clash.includes('ports: 40000-40010'));
+  assert.ok(!clash.includes('ports: 40000-50000'));
+}
+
+/**
  * 验证 Clash 订阅响应头会优先使用系统设置中的订阅配置。
  *
  * @returns {Promise<void>}
@@ -1110,7 +1127,7 @@ async function testGenerateSubscriptionShouldKeepRefreshedHy2SourceCache() {
   };
   const { computeNodeFingerprint, computeServerFingerprint } = require('../services/shared/subscription-cache-service');
   const hy2Link = 'hysteria2://ps6ne77kxinlotaz@us00.bidding.dpdns.org:32458?security=tls&fp=chrome&alpn=h3&sni=us00.bidding.dpdns.org#hy2';
-  const server = { id: 2, name: '测试', sub_url: 'https://xui.example/sub/', host: 'us00.bidding.dpdns.org', client_port: 443 };
+  const server = { id: 2, name: '测试', sub_url: 'https://xui.example/sub/', host: 'us00.bidding.dpdns.org', client_port: 443, hy2_ports: '40000-40010' };
   const config = {
     user_id: 1,
     server_id: 2,
@@ -1174,7 +1191,10 @@ async function testGenerateSubscriptionShouldKeepRefreshedHy2SourceCache() {
 
   assert.strictEqual(fetchCount, 1);
   assert.strictEqual(savedNodes.length, 1);
+  assert.strictEqual(savedNodes[0].hy2_ports, '40000-40010');
   assert.ok(savedNodes[0].link.startsWith('hysteria2://ps6ne77kxinlotaz@us00.bidding.dpdns.org:32458?'));
+  assert.ok(savedNodes[0].link.includes('mport=40000-40010'));
+  assert.ok(!savedNodes[0].link.includes('mport=40000-50000'));
   assert.ok(savedNodes[0].link.includes('security=tls'));
   assert.ok(savedNodes[0].link.includes('alpn=h3'));
 }
@@ -1238,6 +1258,7 @@ async function run() {
   await testDefaultSubscriptionContentShouldReturnBase64AndUserinfo();
   await testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgroundCooldown();
   await testClashSubscriptionShouldRenderYaml();
+  testClashHy2SubscriptionShouldUseCachedPortsRange();
   await testClashSubscriptionShouldUseSystemSettingsHeaders();
   await testSubscriptionHeaderShouldIgnoreReferralTrafficLimit();
   await testSystemSettingsSubscriptionDefaults();

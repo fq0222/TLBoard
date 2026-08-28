@@ -66,7 +66,7 @@ async function listEnabledUserCfIps(db, userId) {
  */
 async function listOnlineServers(db) {
   return db.prepare(`
-    SELECT id, name, api_url, api_token, host, client_port, sub_url, panel_version
+    SELECT id, name, api_url, api_token, host, client_port, hy2_ports, sub_url, panel_version
     FROM xui_servers
     WHERE status = 1
   `).all();

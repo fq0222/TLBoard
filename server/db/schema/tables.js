@@ -138,6 +138,7 @@ const tableDefinitions = [
         api_token TEXT DEFAULT '',
         host VARCHAR(500) DEFAULT '',
         client_port INTEGER DEFAULT 0,
+        hy2_ports VARCHAR(20) DEFAULT '40000-50000',
         sub_url VARCHAR(500) DEFAULT '',
         status INTEGER DEFAULT 0,
         last_check_at BIGINT,

@@ -185,16 +185,17 @@ function applyDirectStrategy(originalLink) {
  * 1. 保留原始 hysteria2 链接中的认证、地址和大部分参数
  * 2. 统一补齐 V2RayN 等客户端需要的 TLS/证书校验/端口跳跃参数
  * @param {string} originalLink - 原始 hysteria2 节点链接
+ * @param {string} hy2Ports - hysteria2 端口跳跃范围，格式如 40000-40010
  * @returns {string} 处理后的 hysteria2 节点链接
  */
-function applyHy2Strategy(originalLink) {
+function applyHy2Strategy(originalLink, hy2Ports = '40000-50000') {
   const nodeInfo = parseNodeLink(originalLink);
   if (!nodeInfo || nodeInfo.protocol !== 'hysteria2') {
     return originalLink;
   }
 
   nodeInfo.params.security = 'tls';
-  nodeInfo.params.mport = '40000-50000';
+  nodeInfo.params.mport = hy2Ports || '40000-50000';
   nodeInfo.params.insecure = '0';
   nodeInfo.params.allowInsecure = '0';
 
@@ -205,7 +206,7 @@ function applyHy2Strategy(originalLink) {
  * 处理节点链接
  * @param {string} originalLink - 原始节点链接
  * @param {string} strategy - 策略类型（cf 或 direct）
- * @param {object} cfConfig - CF 配置（仅 cf 策略需要）
+ * @param {object} cfConfig - CF 配置或 hy2 配置（按策略使用）
  * @returns {string} 处理后的节点链接
  */
 function processNodeLink(originalLink, strategy, cfConfig = null) {
@@ -213,7 +214,7 @@ function processNodeLink(originalLink, strategy, cfConfig = null) {
     return applyCfStrategy(originalLink, cfConfig);
   }
   if (strategy === 'hy2') {
-    return applyHy2Strategy(originalLink);
+    return applyHy2Strategy(originalLink, cfConfig?.hy2Ports);
   }
   return applyDirectStrategy(originalLink);
 }
