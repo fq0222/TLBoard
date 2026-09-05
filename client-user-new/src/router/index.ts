@@ -15,11 +15,11 @@ const router = createRouter({
       },
     },
     {
-      path: '/calendar',
-      name: 'Calendar',
-      component: () => import('../views/Others/Calendar.vue'),
+      path: '/plans',
+      name: 'PlansSubscription',
+      component: () => import('../views/PlansSubscription.vue'),
       meta: {
-        title: 'Calendar',
+        title: '套餐订阅',
       },
     },
     {

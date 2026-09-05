@@ -248,9 +248,9 @@ const menuGroups = [
         path: "/",
       },
       {
-        icon: CalenderIcon,
-        name: "Calendar",
-        path: "/calendar",
+        icon: BoxCubeIcon,
+        name: "套餐订阅",
+        path: "/plans",
       },
       {
         icon: UserCircleIcon,
