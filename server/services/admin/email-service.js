@@ -122,7 +122,6 @@ async function sendTestEmail(db, email) {
     throw createLegacyBusinessError('请输入测试邮箱');
   }
 
-  await sharedEmailService.initClient(db);
   return sharedEmailService.sendTestEmail(db, { to: email });
 }
 

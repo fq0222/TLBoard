@@ -145,6 +145,7 @@ vite.config.ts.timestamp-*
 server/test/*
 !server/test/test-renewal-notice-state.js
 !server/test/test-renewal-required-email.js
+!server/test/test-email-service-retry.js
 !server/test/
 !server/test/test-blog-articles.js
 !server/test/migrate-xui-traffic.js
