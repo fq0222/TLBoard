@@ -244,8 +244,8 @@ const menuGroups = [
     items: [
       {
         icon: GridIcon,
-        name: "Dashboard",
-        subItems: [{ name: "Ecommerce", path: "/", pro: false }],
+        name: "属性面板",
+        path: "/",
       },
       {
         icon: CalenderIcon,
