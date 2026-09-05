@@ -94,6 +94,19 @@ async function updateServerStatus(db, serverId, status, lastCheckAt) {
 }
 
 /**
+ * 更新服务器最近检查时间，不修改在线状态。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} serverId - 服务器 ID
+ * @param {number} lastCheckAt - 最近检查时间戳
+ * @returns {Promise<void>}
+ */
+async function updateServerLastCheckAt(db, serverId, lastCheckAt) {
+  await db.prepare('UPDATE xui_servers SET last_check_at = ? WHERE id = ?')
+    .run(lastCheckAt, serverId);
+}
+
+/**
  * 删除服务器记录。
  *
  * @param {Object} db - 数据库实例
@@ -127,6 +140,7 @@ module.exports = {
   createServer,
   updateServerFields,
   updateServerStatus,
+  updateServerLastCheckAt,
   deleteServer,
   listCachedServerNodes
 };

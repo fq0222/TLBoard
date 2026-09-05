@@ -37,6 +37,26 @@ function restoreMocks() {
 
 test.afterEach(restoreMocks);
 
+test('服务器仓储可只更新最近检查时间而不修改在线状态', async () => {
+  const calls = [];
+  const db = {
+    prepare(sql) {
+      return {
+        async run(...params) {
+          calls.push({ sql, params });
+        }
+      };
+    }
+  };
+
+  await serversRepository.updateServerLastCheckAt(db, 9, 123456);
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /SET last_check_at = \?/);
+  assert.equal(calls[0].sql.includes('status'), false);
+  assert.deepEqual(calls[0].params, [123456, 9]);
+});
+
 test('健康巡检连续第三次失败时累加失败次数并标记服务器离线', async () => {
   const healthWrites = [];
   const statusWrites = [];

@@ -4,6 +4,7 @@
  */
 
 const XuiService = require('../../integrations/xui/xui-service');
+const serversRepository = require('../../repositories/servers-repository');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const xuiNodeSnapshotService = require('../../services/shared/xui-node-snapshot-service');
 const { getStrategyFromRemark } = require('../../services/shared/subscription-strategy');
@@ -459,6 +460,7 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
     const crypto = require('crypto');
     const activeLogger = dependencies.logger || logger;
     const repository = dependencies.repository || xuiSyncRepository;
+    const serverRepository = dependencies.serversRepository || serversRepository;
     const snapshotService = dependencies.snapshotService || xuiNodeSnapshotService;
     const xuiService = dependencies.xuiService
       || await XuiService.getInstance(server.api_url, server.api_token, {
@@ -476,6 +478,7 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
       server.id,
       inboundsResult.data
     );
+    await serverRepository.updateServerLastCheckAt(db, server.id, Math.floor(Date.now() / 1000));
     activeLogger.info(`服务器 ${server.name} 节点快照已刷新: ${refreshResult.nodeCount} 个节点`);
 
     let syncCount = 0;
