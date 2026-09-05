@@ -165,3 +165,6 @@ server/ipData/*.mmdb
 .codex/*
 .superpowers/*
 .worktrees/
+
+# TailAdmin Vue reference source for client-user-new refactor
+TailAdmin-vue-reference/
