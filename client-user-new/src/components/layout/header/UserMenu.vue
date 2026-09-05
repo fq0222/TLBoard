@@ -4,11 +4,7 @@
       class="flex items-center text-gray-700 dark:text-gray-400"
       @click.prevent="toggleDropdown"
     >
-      <span class="mr-3 overflow-hidden rounded-full h-11 w-11">
-        <img src="/images/user/owner.jpg" alt="User" />
-      </span>
-
-      <span class="block mr-1 font-medium text-theme-sm">Musharof </span>
+      <span class="block mr-1 font-medium text-theme-sm">{{ displayName }}</span>
 
       <ChevronDownIcon :class="{ 'rotate-180': dropdownOpen }" />
     </button>
@@ -20,10 +16,10 @@
     >
       <div>
         <span class="block font-medium text-gray-700 text-theme-sm dark:text-gray-400">
-          Musharof Chowdhury
+          {{ displayName }}
         </span>
         <span class="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">
-          randomuser@pimjo.com
+          {{ userEmail }}
         </span>
       </div>
 
@@ -50,7 +46,7 @@
         <LogoutIcon
           class="text-gray-500 group-hover:text-gray-700 dark:group-hover:text-gray-300"
         />
-        Sign out
+        退出登录
       </router-link>
     </div>
     <!-- Dropdown End -->
@@ -59,16 +55,25 @@
 
 <script setup>
 import { UserCircleIcon, ChevronDownIcon, LogoutIcon, SettingsIcon, InfoCircleIcon } from '@/icons'
-import { RouterLink } from 'vue-router'
-import { ref, onMounted, onUnmounted } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { useUserStore } from '@/stores/user'
 
 const dropdownOpen = ref(false)
 const dropdownRef = ref(null)
+const router = useRouter()
+const userStore = useUserStore()
+
+const userEmail = computed(() => userStore.userInfo.value?.email || '未加载邮箱')
+const displayName = computed(() => {
+  const email = userEmail.value
+  return email.includes('@') ? email.split('@')[0] : email
+})
 
 const menuItems = [
-  { href: '/profile', icon: UserCircleIcon, text: 'Edit profile' },
-  { href: '/chat', icon: SettingsIcon, text: 'Account settings' },
-  { href: '/profile', icon: InfoCircleIcon, text: 'Support' },
+  { href: '/profile', icon: UserCircleIcon, text: '属性面板' },
+  { href: '/plans', icon: SettingsIcon, text: '套餐订阅' },
+  { href: '/profile', icon: InfoCircleIcon, text: '账户信息' },
 ]
 
 const toggleDropdown = () => {
@@ -80,9 +85,9 @@ const closeDropdown = () => {
 }
 
 const signOut = () => {
-  // Implement sign out logic here
-  console.log('Signing out...')
+  userStore.logout()
   closeDropdown()
+  router.push('/')
 }
 
 const handleClickOutside = (event) => {

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useUserStore } from '@/stores/user'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -8,26 +9,28 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      name: 'AttributePanel',
-      component: () => import('../views/Ecommerce.vue'),
-      meta: {
-        title: '属性面板',
-      },
-    },
-    {
-      path: '/plans',
-      name: 'PlansSubscription',
-      component: () => import('../views/PlansSubscription.vue'),
+      name: 'PublicPlans',
+      component: () => import('../views/PublicPlans.vue'),
       meta: {
         title: '套餐订阅',
       },
     },
     {
+      path: '/plans',
+      name: 'PlansSubscriptionAlias',
+      component: () => import('../views/PlansSubscription.vue'),
+      meta: {
+        title: '套餐订阅',
+        requiresAuth: true,
+      },
+    },
+    {
       path: '/profile',
       name: 'Profile',
-      component: () => import('../views/Others/UserProfile.vue'),
+      component: () => import('../views/Ecommerce.vue'),
       meta: {
-        title: 'Profile',
+        title: '个人中心',
+        requiresAuth: true,
       },
     },
     {
@@ -129,15 +132,49 @@ const router = createRouter({
       name: 'Signin',
       component: () => import('../views/Auth/Signin.vue'),
       meta: {
-        title: 'Signin',
+        title: '登录',
+        guest: true,
       },
     },
     {
-      path: '/signup',
-      name: 'Signup',
-      component: () => import('../views/Auth/Signup.vue'),
+      path: '/login',
+      redirect: (to) => ({
+        name: 'Signin',
+        query: to.query,
+      }),
+    },
+    {
+      path: '/forgot-password',
+      name: 'ForgotPassword',
+      component: () => import('../views/Auth/ForgotPassword.vue'),
       meta: {
-        title: 'Signup',
+        title: '忘记密码',
+        guest: true,
+      },
+    },
+    {
+      path: '/reset-password',
+      name: 'ResetPassword',
+      component: () => import('../views/Auth/ResetPassword.vue'),
+      meta: {
+        title: '重置密码',
+        guest: true,
+      },
+    },
+    {
+      path: '/payment/callback',
+      name: 'PaymentCallback',
+      component: () => import('../views/PaymentCallback.vue'),
+      meta: {
+        title: '支付回调',
+      },
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'NotFound',
+      component: () => import('../views/Errors/FourZeroFour.vue'),
+      meta: {
+        title: '页面不存在',
       },
     },
   ],
@@ -146,6 +183,19 @@ const router = createRouter({
 export default router
 
 router.beforeEach((to, from, next) => {
-  document.title = `${to.meta.title || '属性面板'} - 天澜大陆`
+  document.title = `${to.meta.title || '套餐订阅'} - 天澜大陆`
+
+  const userStore = useUserStore()
+
+  if (to.meta.requiresAuth && !userStore.isLoggedIn.value) {
+    next({ name: 'Signin', query: { redirect: to.fullPath } })
+    return
+  }
+
+  if (to.meta.guest && userStore.isLoggedIn.value && !to.query.plan_id) {
+    next({ path: '/profile' })
+    return
+  }
+
   next()
 })
