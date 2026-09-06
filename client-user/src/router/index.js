@@ -69,6 +69,12 @@ const routes = [
         meta: { title: '订阅信息' }
       },
       {
+        path: 'plans',
+        name: 'UserPlans',
+        component: () => import('@/views/user/Plans.vue'),
+        meta: { title: '套餐页面' }
+      },
+      {
         path: 'feedback',
         name: 'UserFeedback',
         component: () => import('@/views/user/Feedback.vue'),

@@ -30,7 +30,7 @@
             type="info"
             size="large"
             class="renew-button"
-            @click="showRenewDialog = true"
+            @click="goToPlansPage"
             :disabled="!userInfo.plan_id"
           >
             <el-icon><Refresh /></el-icon>
@@ -264,13 +264,6 @@
       </div>
     </el-dialog>
 
-    <RenewDialog
-      v-model:visible="showRenewDialog"
-      :current-plan-id="userInfo.plan_id"
-      :submitting="renewSubmitting"
-      @renew="handleRenew"
-    />
-
     <el-dialog
       v-model="syncLoading"
       title="账户同步中"
@@ -446,7 +439,6 @@ import {
 } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { useUserStore } from '@/stores/user'
-import RenewDialog from '@/components/RenewDialog.vue'
 import ReferralPosterDialog from '@/components/ReferralPosterDialog.vue'
 import api from '@/api'
 import {
@@ -477,8 +469,6 @@ const optimizeProgress = ref(0)
 const optimizeStatusText = ref('')
 const generatingSubscription = ref(false)
 const replacingSubscription = ref(false)
-const showRenewDialog = ref(false)
-const renewSubmitting = ref(false)
 const announcementPopupVisible = ref(false)
 const popupAnnouncement = ref(null)
 const popupClosing = ref(false)
@@ -1227,6 +1217,16 @@ function pingIp(ip) {
   return createCfLatencySample(ip)
 }
 
+/**
+ * 跳转到独立套餐页面。
+ * 职责：把首页续费入口交给套餐页承载，保留当前按钮的未订阅禁用逻辑。
+ *
+ * @returns {Promise<void>}
+ */
+async function goToPlansPage() {
+  await router.push('/user/plans')
+}
+
 function formatDate(timestamp) {
   if (!timestamp) return ''
   const date = new Date(timestamp * 1000)
@@ -1235,149 +1235,6 @@ function formatDate(timestamp) {
     month: '2-digit',
     day: '2-digit'
   })
-}
-
-async function submitRenewRequest({ planId, payType, confirmReset = false }) {
-  try {
-    const response = await api.user.renew({
-      plan_id: planId,
-      pay_type: payType,
-      confirm_reset: confirmReset
-    })
-    if (response.code === 0) {
-      showRenewDialog.value = false
-      if (response.data?.paid && response.data?.payment_method === 'balance') {
-        ElMessage.success('余额支付成功，续费已完成')
-        await fetchUserInfo()
-        return
-      }
-
-      router.push({
-        path: '/payment/callback',
-        query: {
-          order_id: response.data.order_id,
-          out_trade_no: response.data.out_trade_no,
-          payment_url: response.data.payment_url,
-          expire_in: response.data.expire_in,
-          pay_type: payType
-        }
-      })
-    } else {
-      ElMessage.error(response.message || '续费失败')
-    }
-  } catch (error) {
-    console.error('续费失败:', error)
-    if (isRenewResetConfirmError(error)) {
-      try {
-        await confirmTimedRenewReset(error.response.data.data)
-      } catch {
-        return
-      }
-      await submitRenewRequest({ planId, payType, confirmReset: true })
-      return
-    }
-    ElMessage.error(getRenewErrorMessage(error))
-  }
-}
-
-/**
- * 处理续费提交并在父组件保持提交锁。
- * 职责：覆盖首次提交、409 确认和确认后重试的完整生命周期，避免重复订单。
- * 关键参数：planId/payType 来自续费弹窗当前选择。
- * 核心分支：提交中直接忽略新的点击，直到本轮请求/确认流程结束。
- *
- * @param {Object} payload - 续费提交参数
- * @param {number} payload.planId - 套餐 ID
- * @param {number} payload.payType - 支付方式
- * @returns {Promise<void>}
- */
-async function handleRenew({ planId, payType }) {
-  if (renewSubmitting.value) {
-    return
-  }
-
-  renewSubmitting.value = true
-  try {
-    await submitRenewRequest({ planId, payType })
-  } finally {
-    renewSubmitting.value = false
-  }
-}
-
-/**
- * 判断续费失败是否为限时套餐重置确认分支。
- * 职责：只识别后端 4091 业务码，避免把普通错误误当成二次确认。
- * 关键参数：error 为 axios 拦截器抛出的错误对象。
- * 核心分支：HTTP 409 且业务 code=4091 时返回 true。
- *
- * @param {Error|Object} error - 续费接口错误对象
- * @returns {boolean} 是否需要弹出重置确认
- */
-function isRenewResetConfirmError(error) {
-  return Number(error?.response?.status) === 409 && Number(error?.response?.data?.code) === 4091
-}
-
-/**
- * 弹出限时套餐续费重置确认框。
- * 职责：展示剩余流量和剩余时间，让用户明确选择是否继续续费。
- * 关键参数：preview 为后端返回的重置预览数据。
- * 核心分支：用户确认后 resolve，取消时抛出 Element Plus cancel 异常。
- *
- * @param {Object} preview - 限时套餐重置预览
- * @returns {Promise<void>}
- */
-async function confirmTimedRenewReset(preview = {}) {
-  await ElMessageBox.confirm(
-    `当前仍有 ${formatBytes(preview.remaining_traffic)} 流量和 ${formatRemainingTime(preview.remaining_seconds)} 未使用，续费后将重置流量与到期时间。`,
-    '确认续费',
-    {
-      confirmButtonText: '确认续费',
-      cancelButtonText: '取消',
-      type: 'warning'
-    }
-  )
-}
-
-/**
- * 格式化字节数用于续费确认提示。
- * @param {number|string} bytes - 字节数
- * @returns {string} 可读流量
- */
-function formatBytes(bytes) {
-  const value = Number(bytes || 0)
-  if (!Number.isFinite(value) || value <= 0) return '0 B'
-
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
-  return `${parseFloat((value / (1024 ** index)).toFixed(2))} ${units[index]}`
-}
-
-/**
- * 格式化剩余秒数用于续费确认提示。
- * @param {number|string} seconds - 剩余秒数
- * @returns {string} 可读时间
- */
-function formatRemainingTime(seconds) {
-  const value = Math.max(0, Number(seconds || 0))
-  const days = Math.floor(value / 86400)
-  const hours = Math.floor((value % 86400) / 3600)
-  if (days > 0) return `${days} 天 ${hours} 小时`
-  if (hours > 0) return `${hours} 小时`
-  const minutes = Math.floor(value / 60)
-  return `${minutes} 分钟`
-}
-
-/**
- * 提取续费接口错误提示。
- * 职责：优先展示后端业务错误，例如余额不足；缺失时回退通用提示。
- * 关键参数：error 为 axios 拦截器抛出的错误对象，可能包含 userMessage 或 response.data.message。
- * 核心分支：业务提示存在则透传，不存在才显示兜底文案。
- *
- * @param {Error|Object} error - 续费接口错误对象
- * @returns {string} 用户可见错误提示
- */
-function getRenewErrorMessage(error) {
-  return error?.userMessage || error?.response?.data?.message || '续费失败，请重试'
 }
 
 /**

@@ -1,6 +1,6 @@
 /**
  * 留言入口位置回归测试。
- * 职责：确保留言功能从用户中心导航迁移到“我的服务”列表中，避免移动端底部导航超过 4 项。
+ * 职责：确保留言功能从用户中心导航迁移到“我的服务”列表中，并保留套餐页主导航入口。
  */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -29,18 +29,27 @@ function extractMediaBlock(source, query) {
   return ''
 }
 
-test('用户中心主导航移除留言入口并保留 4 个导航项', () => {
+test('用户中心主导航移除留言入口并保留套餐页入口', () => {
   const navItemsBlock = layoutSource.match(/const navItems = \[[\s\S]*?\]/)?.[0]
 
   assert.ok(navItemsBlock, '应存在 navItems 配置')
   assert.doesNotMatch(navItemsBlock, /key:\s*'feedback'/)
   assert.doesNotMatch(navItemsBlock, /label:\s*'留言'/)
   assert.doesNotMatch(navItemsBlock, /to:\s*'\/user\/feedback'/)
-  assert.equal((navItemsBlock.match(/\{\s*key:/g) || []).length, 4)
+  assert.equal((navItemsBlock.match(/\{\s*key:/g) || []).length, 5)
   assert.match(navItemsBlock, /label:\s*'首页'/)
   assert.match(navItemsBlock, /label:\s*'订阅'/)
+  assert.match(navItemsBlock, /label:\s*'套餐'/)
   assert.match(navItemsBlock, /label:\s*'教程'/)
   assert.match(navItemsBlock, /label:\s*'我的'/)
+  assert.ok(
+    navItemsBlock.indexOf("key: 'subscription'") < navItemsBlock.indexOf("key: 'plans'"),
+    '套餐应放在订阅后面'
+  )
+  assert.ok(
+    navItemsBlock.indexOf("key: 'plans'") < navItemsBlock.indexOf("key: 'help'"),
+    '套餐应放在教程前面'
+  )
 })
 
 test('我的服务在工单支持下面提供留言入口', () => {

@@ -95,6 +95,7 @@ import {
   Link,
   Loading,
   QuestionFilled,
+  ShoppingCart,
   SwitchButton,
   User
 } from '@element-plus/icons-vue'
@@ -112,6 +113,7 @@ let unreadTicketRefresher = null
 const navItems = [
   { key: 'home', label: '首页', to: '/user', icon: House },
   { key: 'subscription', label: '订阅', to: '/user/subscription', icon: Link },
+  { key: 'plans', label: '套餐', to: '/user/plans', icon: ShoppingCart },
   { key: 'help', label: '教程', to: '/user/help', icon: QuestionFilled },
   { key: 'my', label: '我的', to: '/user/my', icon: User }
 ]
@@ -150,6 +152,7 @@ function preloadNavPages() {
   const preloadTasks = [
     () => import('@/views/user/Profile.vue'),
     () => import('@/views/user/Subscription.vue'),
+    () => import('@/views/user/Plans.vue'),
     () => import('@/views/user/HelpCenter.vue'),
     () => import('@/views/user/My.vue')
   ]
@@ -666,7 +669,7 @@ onBeforeUnmount(() => {
 
   .bottom-nav {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     position: fixed;
     left: 0;
     right: 0;
