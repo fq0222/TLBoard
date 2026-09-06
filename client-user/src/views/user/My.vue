@@ -111,6 +111,14 @@
           </div>
         </router-link>
 
+        <router-link to="/user/feedback" class="action-item">
+          <div class="action-main">
+            <span class="action-title">留言</span>
+            <span class="action-desc">提交建议、参与优质留言投票和需求反馈</span>
+          </div>
+          <el-icon><ArrowRight /></el-icon>
+        </router-link>
+
         <router-link v-if="subscriptionReady" to="/user/cf-optimize" class="action-item">
           <div class="action-main">
             <span class="action-title">线路优选</span>
@@ -747,7 +755,7 @@ onMounted(async () => {
   }
 
   .action-item {
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
     padding: 13px 0;
   }

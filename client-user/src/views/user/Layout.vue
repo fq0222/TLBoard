@@ -38,6 +38,17 @@
       <router-view v-else />
     </main>
 
+    <button
+      type="button"
+      class="ticket-reminder-button"
+      :class="{ shaking: unreadTicketCount > 0 }"
+      aria-label="查看我的工单"
+      @click="goToTickets"
+    >
+      <el-icon :size="24"><Bell /></el-icon>
+      <span v-if="unreadTicketCount > 0" class="ticket-reminder-dot"></span>
+    </button>
+
     <nav class="bottom-nav">
       <button
         v-for="item in mobileNavItems"
@@ -60,11 +71,12 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import api from '@/api'
 import {
-  ChatDotRound,
+  Bell,
   House,
   Link,
   Loading,
@@ -79,11 +91,12 @@ const route = useRoute()
 const userStore = useUserStore()
 const pendingNavPath = ref('')
 const contentLoading = ref(false)
+const unreadTicketCount = ref(0)
+let unreadTicketTimer = null
 
 const navItems = [
   { key: 'home', label: '首页', to: '/user', icon: House },
   { key: 'subscription', label: '订阅', to: '/user/subscription', icon: Link },
-  { key: 'feedback', label: '留言', to: '/user/feedback', icon: ChatDotRound },
   { key: 'help', label: '教程', to: '/user/help', icon: QuestionFilled },
   { key: 'my', label: '我的', to: '/user/my', icon: User }
 ]
@@ -115,7 +128,6 @@ function preloadNavPages() {
   const preloadTasks = [
     () => import('@/views/user/Profile.vue'),
     () => import('@/views/user/Subscription.vue'),
-    () => import('@/views/user/Feedback.vue'),
     () => import('@/views/user/HelpCenter.vue'),
     () => import('@/views/user/My.vue')
   ]
@@ -134,6 +146,23 @@ function preloadNavPages() {
   }
 
   window.setTimeout(runPreload, 300)
+}
+
+/**
+ * 获取未读工单数量，用于控制全局提醒铃铛的红点和动画。
+ * 核心分支语义：接口异常不打断页面使用，保留当前提醒状态并记录错误。
+ *
+ * @returns {Promise<void>}
+ */
+async function fetchUnreadTicketCount() {
+  try {
+    const response = await api.user.getTicketUnreadCount()
+    if (response.code === 0) {
+      unreadTicketCount.value = response.data.count || 0
+    }
+  } catch (error) {
+    console.error('获取未读工单数量失败:', error)
+  }
 }
 
 /**
@@ -160,6 +189,21 @@ async function handleNavClick(item) {
   }
 }
 
+/**
+ * 跳转到我的工单列表。
+ * 核心分支语义：当前已在工单页时只刷新未读数，不重复触发路由跳转。
+ *
+ * @returns {Promise<void>}
+ */
+async function goToTickets() {
+  if (route.path.startsWith('/user/tickets')) {
+    await fetchUnreadTicketCount()
+    return
+  }
+
+  await router.push('/user/tickets')
+}
+
 async function handleLogout() {
   try {
     await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
@@ -176,6 +220,8 @@ async function handleLogout() {
 }
 
 watch(() => route.path, async (newPath) => {
+  fetchUnreadTicketCount()
+
   if (!pendingNavPath.value) {
     return
   }
@@ -189,6 +235,15 @@ watch(() => route.path, async (newPath) => {
 
 onMounted(() => {
   preloadNavPages()
+  fetchUnreadTicketCount()
+  unreadTicketTimer = window.setInterval(fetchUnreadTicketCount, 60 * 1000)
+})
+
+onBeforeUnmount(() => {
+  if (unreadTicketTimer) {
+    window.clearInterval(unreadTicketTimer)
+    unreadTicketTimer = null
+  }
 })
 </script>
 
@@ -295,6 +350,46 @@ onMounted(() => {
   font-size: 14px;
 }
 
+.ticket-reminder-button {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 230;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border: 0;
+  border-radius: 50%;
+  background: #409eff;
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(64, 158, 255, 0.32);
+  cursor: pointer;
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ticket-reminder-button:hover {
+  background: #337ecc;
+  transform: translateY(-2px);
+  box-shadow: 0 16px 34px rgba(64, 158, 255, 0.38);
+}
+
+.ticket-reminder-button.shaking {
+  animation: ticket-bell-shake 1.8s ease-in-out infinite;
+}
+
+.ticket-reminder-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #f56c6c;
+}
+
 @media (max-width: 1024px) {
   .sidebar {
     width: 200px;
@@ -324,7 +419,7 @@ onMounted(() => {
 
   .bottom-nav {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     position: fixed;
     left: 0;
     right: 0;
@@ -362,6 +457,13 @@ onMounted(() => {
     color: #409eff;
     background: #ecf5ff;
   }
+
+  .ticket-reminder-button {
+    right: 18px;
+    bottom: calc(92px + env(safe-area-inset-bottom));
+    width: 48px;
+    height: 48px;
+  }
 }
 
 @keyframes nav-loading-spin {
@@ -370,6 +472,26 @@ onMounted(() => {
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes ticket-bell-shake {
+  0%,
+  70%,
+  100% {
+    transform: rotate(0deg);
+  }
+  76% {
+    transform: rotate(10deg);
+  }
+  82% {
+    transform: rotate(-8deg);
+  }
+  88% {
+    transform: rotate(6deg);
+  }
+  94% {
+    transform: rotate(-4deg);
   }
 }
 </style>

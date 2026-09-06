@@ -8,7 +8,7 @@
     </div>
 
     <div class="content-card">
-      <el-table :data="tickets" v-loading="loading" style="width: 100%">
+      <el-table :data="tickets" v-loading="loading" class="tickets-table">
         <el-table-column prop="title" label="工单标题" min-width="200">
           <template #default="{ row }">
             <router-link :to="`/user/tickets/${row.id}`" class="ticket-link">
@@ -37,6 +37,37 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div v-loading="loading" class="mobile-ticket-list">
+        <el-empty v-if="tickets.length === 0 && !loading" description="暂无工单" />
+        <router-link
+          v-for="ticket in tickets"
+          :key="ticket.id"
+          :to="`/user/tickets/${ticket.id}`"
+          class="mobile-ticket-card"
+        >
+          <div class="mobile-ticket-top">
+            <div class="mobile-ticket-title-row">
+              <span class="mobile-ticket-title">{{ ticket.title }}</span>
+              <span v-if="ticket.is_unread" class="unread-badge mobile-unread-badge">未读</span>
+            </div>
+            <el-tag class="mobile-ticket-status" :type="getStatusType(ticket.status)">
+              {{ getStatusText(ticket.status) }}
+            </el-tag>
+          </div>
+
+          <div class="mobile-ticket-meta">
+            <div class="mobile-ticket-field">
+              <span>创建</span>
+              <strong>{{ formatCompactTime(ticket.created_at) }}</strong>
+            </div>
+            <div class="mobile-ticket-field action-field">
+              <span>操作</span>
+              <strong>查看</strong>
+            </div>
+          </div>
+        </router-link>
+      </div>
 
       <div class="pagination" v-if="total > limit">
         <el-pagination
@@ -79,6 +110,22 @@ function formatTime(timestamp) {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit'
   })
+}
+
+/**
+ * 格式化移动端工单时间，保留日期和分钟，减少卡片高度。
+ *
+ * @param {number|string|null} timestamp - 后端返回的秒级时间戳
+ * @returns {string} 紧凑时间文本
+ */
+function formatCompactTime(timestamp) {
+  if (!timestamp) return '-'
+
+  const date = new Date(Number(timestamp) * 1000)
+  if (Number.isNaN(date.getTime())) return '-'
+
+  const pad = (num) => String(num).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 async function fetchTickets() {
@@ -137,6 +184,14 @@ onMounted(() => {
   text-decoration: underline;
 }
 
+.tickets-table {
+  width: 100%;
+}
+
+.mobile-ticket-list {
+  display: none;
+}
+
 .unread-badge {
   display: inline-block;
   font-size: 12px;
@@ -153,5 +208,124 @@ onMounted(() => {
   margin-top: 20px;
   display: flex;
   justify-content: center;
+}
+
+@media (max-width: 768px) {
+  .tickets-container {
+    max-width: none;
+  }
+
+  .page-header {
+    margin-bottom: 16px;
+  }
+
+  .page-title {
+    font-size: 22px;
+  }
+
+  .content-card {
+    border-radius: 14px;
+    padding: 14px;
+  }
+
+  .tickets-table {
+    display: none;
+  }
+
+  .mobile-ticket-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 120px;
+  }
+
+  .mobile-ticket-card {
+    display: block;
+    padding: 10px 12px;
+    border: 1px solid #ebeef5;
+    border-radius: 8px;
+    background: #fff;
+    color: #303133;
+    text-decoration: none;
+  }
+
+  .mobile-ticket-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .mobile-ticket-title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .mobile-ticket-title {
+    min-width: 0;
+    overflow: hidden;
+    color: #409eff;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-unread-badge {
+    flex-shrink: 0;
+    margin-left: 0;
+  }
+
+  .mobile-ticket-status {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+  .mobile-ticket-meta {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    margin-top: 8px;
+  }
+
+  .mobile-ticket-field {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .mobile-ticket-field span {
+    color: #909399;
+    font-size: 12px;
+    line-height: 1.2;
+  }
+
+  .mobile-ticket-field strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #606266;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .action-field {
+    justify-content: flex-end;
+  }
+
+  .action-field strong {
+    color: #409eff;
+  }
+
+  .pagination {
+    margin-top: 14px;
+  }
 }
 </style>

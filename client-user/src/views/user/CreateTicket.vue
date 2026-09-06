@@ -93,4 +93,56 @@ async function handleSubmit() {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   padding: 30px;
 }
+
+@media (max-width: 768px) {
+  .create-ticket-container {
+    max-width: none;
+  }
+
+  .page-header {
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .page-title {
+    font-size: 22px;
+  }
+
+  .content-card {
+    border-radius: 14px;
+    padding: 18px;
+  }
+
+  :deep(.el-form-item) {
+    display: block;
+    margin-bottom: 22px;
+  }
+
+  :deep(.el-form-item__label) {
+    display: block;
+    height: auto;
+    margin-bottom: 8px;
+    padding: 0;
+    text-align: left;
+    line-height: 1.4;
+  }
+
+  :deep(.el-form-item__content) {
+    display: block;
+    margin-left: 0 !important;
+  }
+
+  :deep(.el-input) {
+    width: 100%;
+  }
+
+  :deep(.el-textarea) {
+    width: 100%;
+  }
+
+  :deep(.el-button--primary) {
+    width: 100%;
+    min-height: 42px;
+  }
+}
 </style>
