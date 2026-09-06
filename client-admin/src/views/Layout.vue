@@ -113,6 +113,17 @@
         <router-view />
       </div>
     </main>
+
+    <button
+      type="button"
+      class="ticket-reminder-button"
+      :class="{ shaking: actionRequiredTicketCount > 0 }"
+      aria-label="查看待处理工单"
+      @click="goToTickets"
+    >
+      <el-icon :size="24"><Bell /></el-icon>
+      <span v-if="actionRequiredTicketCount > 0" class="ticket-reminder-dot"></span>
+    </button>
   </div>
 </template>
 
@@ -122,9 +133,11 @@
  * 负责左侧导航、页头面包屑和退出登录交互。
  */
 
-import { ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAdminStore } from '@/stores/admin'
+import api from '@/api'
+import { AdminTicketReminderRefresher } from '@/utils/admin-ticket-reminder-refresher'
 import {
   ArrowDown,
   Bell,
@@ -152,6 +165,8 @@ const router = useRouter()
 const currentRoute = useRoute()
 const adminStore = useAdminStore()
 const isCollapsed = ref(false)
+const actionRequiredTicketCount = ref(0)
+let ticketReminderRefresher = null
 
 function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
@@ -166,6 +181,58 @@ function handleCommand(command) {
   if (command === 'logout') {
     handleLogout()
   }
+}
+
+/**
+ * 创建管理端工单提醒刷新器。
+ * 核心分支语义：接口异常由刷新器吞掉，避免影响管理端主流程。
+ */
+function createTicketReminderRefresher() {
+  return new AdminTicketReminderRefresher({
+    fetchActionRequiredCount: () => api.admin.getTicketActionRequiredCount(),
+    setActionRequiredCount: (count) => {
+      actionRequiredTicketCount.value = count
+    }
+  })
+}
+
+async function refreshTicketReminder(options) {
+  if (!ticketReminderRefresher) {
+    ticketReminderRefresher = createTicketReminderRefresher()
+  }
+
+  await ticketReminderRefresher.refresh(options)
+}
+
+async function refreshTicketReminderAfterRouteChange() {
+  if (!ticketReminderRefresher) {
+    ticketReminderRefresher = createTicketReminderRefresher()
+  }
+
+  await ticketReminderRefresher.refreshAfterRouteChange()
+}
+
+function handleVisibilityChange() {
+  if (!document.hidden) {
+    refreshTicketReminder({ force: true })
+  }
+}
+
+function handleTicketReadStateChanged() {
+  refreshTicketReminder({ force: true })
+}
+
+/**
+ * 跳转到工单管理页面。
+ * 核心分支语义：当前已在工单页时只刷新提醒数量，不重复触发路由跳转。
+ */
+async function goToTickets() {
+  if (currentRoute.path.startsWith('/admin/tickets')) {
+    await refreshTicketReminder({ force: true })
+    return
+  }
+
+  await router.push('/admin/tickets')
 }
 
 /**
@@ -185,6 +252,21 @@ async function handleLogout() {
     // 用户取消时不执行额外操作。
   }
 }
+
+watch(() => currentRoute.path, () => {
+  refreshTicketReminderAfterRouteChange()
+})
+
+onMounted(() => {
+  refreshTicketReminderAfterRouteChange()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  window.addEventListener('ticket-read-state-changed', handleTicketReadStateChanged)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  window.removeEventListener('ticket-read-state-changed', handleTicketReadStateChanged)
+})
 </script>
 
 <style scoped>
@@ -311,5 +393,65 @@ async function handleLogout() {
 
 .content {
   padding: 20px;
+}
+
+.ticket-reminder-button {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 230;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border: 0;
+  border-radius: 50%;
+  background: #409eff;
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(64, 158, 255, 0.32);
+  cursor: pointer;
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ticket-reminder-button:hover {
+  background: #337ecc;
+  transform: translateY(-2px);
+  box-shadow: 0 16px 34px rgba(64, 158, 255, 0.38);
+}
+
+.ticket-reminder-button.shaking {
+  animation: ticket-bell-shake 1.8s ease-in-out infinite;
+}
+
+.ticket-reminder-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #f56c6c;
+}
+
+@keyframes ticket-bell-shake {
+  0%,
+  70%,
+  100% {
+    transform: rotate(0deg);
+  }
+  76% {
+    transform: rotate(10deg);
+  }
+  82% {
+    transform: rotate(-8deg);
+  }
+  88% {
+    transform: rotate(6deg);
+  }
+  94% {
+    transform: rotate(-4deg);
+  }
 }
 </style>

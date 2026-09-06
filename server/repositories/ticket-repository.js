@@ -424,6 +424,81 @@ async function countUnreadTickets(db, userId) {
 }
 
 /**
+ * 统计需要管理员处理的工单数量。
+ * 核心分支语义：未关闭且尚无回复的新工单需要处理；未关闭且最后一条回复来自用户的工单也需要处理。
+ *
+ * @param {Object} db - 数据库实例
+ * @returns {Promise<number>} 需要管理员处理的工单数量
+ */
+async function countActionRequiredTickets(db) {
+  const result = await db.prepare(`
+    SELECT COUNT(*) as count
+    FROM tickets t
+    LEFT JOIN LATERAL (
+      SELECT tr.id, tr.user_id, tr.created_at
+      FROM ticket_replies tr
+      WHERE tr.ticket_id = t.id
+      ORDER BY tr.created_at DESC, tr.id DESC
+      LIMIT 1
+    ) latest_reply ON true
+    WHERE t.status <> 'closed'
+      AND (
+        (
+          latest_reply.id IS NULL
+          AND (t.admin_last_read_at IS NULL OR t.created_at > t.admin_last_read_at)
+        )
+        OR (
+          latest_reply.user_id IS NOT NULL
+          AND (t.admin_last_read_at IS NULL OR latest_reply.created_at > t.admin_last_read_at)
+        )
+      )
+  `).get();
+
+  return result.count;
+}
+
+/**
+ * 将管理员对工单的查看进度标记到当前最新用户消息。
+ * 核心分支语义：新工单没有回复时标记创建时间；最后一条回复来自用户时标记该回复时间；最后一条来自管理员时无需更新。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} ticketId - 工单 ID
+ * @returns {Promise<void>}
+ */
+async function markTicketAsAdminRead(db, ticketId) {
+  const readTarget = await db.prepare(`
+    SELECT
+      CASE
+        WHEN latest_reply.id IS NULL THEN t.created_at
+        WHEN latest_reply.user_id IS NOT NULL THEN latest_reply.created_at
+        ELSE NULL
+      END as read_through_at
+    FROM tickets t
+    LEFT JOIN LATERAL (
+      SELECT tr.id, tr.user_id, tr.created_at
+      FROM ticket_replies tr
+      WHERE tr.ticket_id = t.id
+      ORDER BY tr.created_at DESC, tr.id DESC
+      LIMIT 1
+    ) latest_reply ON true
+    WHERE t.id = ?
+  `).get(ticketId);
+
+  if (!readTarget || readTarget.read_through_at === null || readTarget.read_through_at === undefined) {
+    return;
+  }
+
+  await db.prepare(`
+    UPDATE tickets
+    SET admin_last_read_at = CASE
+      WHEN admin_last_read_at IS NULL THEN ?
+      ELSE GREATEST(admin_last_read_at, ?)
+    END
+    WHERE id = ?
+  `).run(readTarget.read_through_at, readTarget.read_through_at, ticketId);
+}
+
+/**
  * 统计指定状态的工单数量。
  *
  * @param {Object} db - 数据库实例
@@ -485,9 +560,33 @@ async function listAdminTickets(db, filters = {}, limit, offset) {
   const { where, params } = buildAdminTicketFilters(filters);
 
   return db.prepare(`
-    SELECT t.*, u.email as user_email
+    SELECT
+      t.*,
+      u.email as user_email,
+      CASE
+        WHEN t.status <> 'closed'
+          AND (
+            (
+              latest_reply.id IS NULL
+              AND (t.admin_last_read_at IS NULL OR t.created_at > t.admin_last_read_at)
+            )
+            OR (
+              latest_reply.user_id IS NOT NULL
+              AND (t.admin_last_read_at IS NULL OR latest_reply.created_at > t.admin_last_read_at)
+            )
+          )
+        THEN 1
+        ELSE 0
+      END as is_action_required
     FROM tickets t
     LEFT JOIN users u ON t.user_id = u.id
+    LEFT JOIN LATERAL (
+      SELECT tr.id, tr.user_id, tr.created_at
+      FROM ticket_replies tr
+      WHERE tr.ticket_id = t.id
+      ORDER BY tr.created_at DESC, tr.id DESC
+      LIMIT 1
+    ) latest_reply ON true
     WHERE ${where}
     ORDER BY t.created_at DESC
     LIMIT ? OFFSET ?
@@ -517,6 +616,8 @@ module.exports = {
   addReplyAndSyncTicket,
   deleteTicketCascade,
   countUnreadTickets,
+  countActionRequiredTickets,
+  markTicketAsAdminRead,
   countTicketsByStatus,
   countTicketsCreatedAfter,
   countAdminTickets,

@@ -121,6 +121,17 @@ async function updateReadTime(db, ticketId, userId, readThroughTime) {
 }
 
 /**
+ * 更新管理员对工单的已读时间。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} ticketId - 工单 ID
+ * @returns {Promise<void>}
+ */
+async function updateAdminReadTime(db, ticketId) {
+  await ticketRepository.markTicketAsAdminRead(db, ticketId);
+}
+
+/**
  * 获取用户未读工单数量。
  *
  * @param {Object} db - 数据库实例
@@ -129,6 +140,16 @@ async function updateReadTime(db, ticketId, userId, readThroughTime) {
  */
 async function getUnreadCount(db, userId) {
   return ticketRepository.countUnreadTickets(db, userId);
+}
+
+/**
+ * 获取需要管理员处理的工单数量。
+ *
+ * @param {Object} db - 数据库实例
+ * @returns {Promise<number>} 需要管理员处理的工单数量
+ */
+async function getActionRequiredCount(db) {
+  return ticketRepository.countActionRequiredTickets(db);
 }
 
 /**
@@ -180,7 +201,9 @@ module.exports = {
   closeTicket,
   deleteTicket,
   updateReadTime,
+  updateAdminReadTime,
   getUnreadCount,
+  getActionRequiredCount,
   getTicketStats,
   getAdminTickets
 };

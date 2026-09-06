@@ -52,6 +52,23 @@ async function getStats(req, res) {
 }
 
 /**
+ * 获取需要管理员处理的工单数量。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function getActionRequiredCount(req, res) {
+  try {
+    const data = await adminTicketsService.getActionRequiredCount(req.app.locals.db);
+    return legacySuccess(res, data);
+  } catch (error) {
+    logger.error(`获取工单待处理提醒数量错误: ${error.message}`);
+    return legacyFail(res);
+  }
+}
+
+/**
  * 获取管理端工单列表。
  *
  * @param {Object} req - Express 请求对象
@@ -186,6 +203,7 @@ async function deleteTicket(req, res) {
 
 module.exports = {
   getStats,
+  getActionRequiredCount,
   listTickets,
   getTicketDetail,
   addReply,

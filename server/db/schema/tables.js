@@ -379,6 +379,7 @@ const tableDefinitions = [
         closed_at BIGINT,
         last_reply_at BIGINT,
         last_read_at BIGINT,
+        admin_last_read_at BIGINT,
         reply_count INTEGER DEFAULT 0
       )
     `

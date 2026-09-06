@@ -57,6 +57,17 @@ async function getStats(db) {
 }
 
 /**
+ * 获取需要管理员处理的工单数量。
+ *
+ * @param {Object} db - 数据库实例
+ * @returns {Promise<{count: number}>} 待处理提醒数量
+ */
+async function getActionRequiredCount(db) {
+  const count = await ticketService.getActionRequiredCount(db);
+  return { count };
+}
+
+/**
  * 获取管理端工单分页列表。
  *
  * @param {Object} db - 数据库实例
@@ -84,7 +95,9 @@ async function listTickets(db, query) {
  */
 async function getTicketDetail(db, ticketId) {
   const ticket = await ticketService.getTicketDetail(db, ticketId);
-  return ensureTicketExists(ticket);
+  const existingTicket = ensureTicketExists(ticket);
+  await ticketService.updateAdminReadTime(db, ticketId);
+  return existingTicket;
 }
 
 /**
@@ -140,6 +153,7 @@ async function deleteTicket(db, ticketId) {
 
 module.exports = {
   getStats,
+  getActionRequiredCount,
   listTickets,
   getTicketDetail,
   addReply,

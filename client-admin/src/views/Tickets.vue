@@ -49,6 +49,7 @@
             <router-link :to="`/admin/tickets/${row.id}`" class="ticket-link">
               {{ row.title }}
             </router-link>
+            <span v-if="row.is_action_required" class="unread-badge">未读</span>
           </template>
         </el-table-column>
         <el-table-column prop="user_email" label="用户邮箱" width="200" />
@@ -254,6 +255,17 @@ onMounted(() => {
 
 .ticket-link:hover {
   text-decoration: underline;
+}
+
+.unread-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #fef0f0;
+  color: #f56c6c;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .pagination {

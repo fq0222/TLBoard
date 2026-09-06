@@ -539,6 +539,14 @@ const adminApi = {
   },
 
   /**
+   * 获取需要管理员处理的工单数量
+   * @returns {Promise<Object>} 响应数据
+   */
+  getTicketActionRequiredCount() {
+    return apiClient.get('/tickets/action-required-count')
+  },
+
+  /**
    * 获取工单列表
    * @param {Object} params - 查询参数
    * @returns {Promise<Object>} 响应数据

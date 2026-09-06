@@ -115,6 +115,7 @@ async function fetchTicket() {
     const response = await api.user.getTicketDetail(id)
     if (response.code === 0) {
       ticket.value = response.data
+      window.dispatchEvent(new CustomEvent('ticket-read-state-changed'))
     }
   } catch (error) {
     console.error('获取工单详情失败:', error)

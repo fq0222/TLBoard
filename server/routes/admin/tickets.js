@@ -17,6 +17,12 @@ const router = express.Router();
 router.get('/stats', authenticateAdmin, ticketsController.getStats);
 
 /**
+ * GET /api/admin/tickets/action-required-count
+ * 获取需要管理员处理的工单数量
+ */
+router.get('/action-required-count', authenticateAdmin, ticketsController.getActionRequiredCount);
+
+/**
  * GET /api/admin/tickets
  * 获取工单列表（支持搜索和筛选）
  */

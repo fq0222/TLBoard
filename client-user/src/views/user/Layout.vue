@@ -211,6 +211,10 @@ function handleVisibilityChange() {
   }
 }
 
+function handleTicketReadStateChanged() {
+  refreshUnreadTicketCount({ force: true })
+}
+
 /**
  * 处理导航点击后的即时高亮和过渡 loading。
  * 核心分支语义：先切换导航选中态并显示内容区 loading，再发起路由跳转；失败时回滚状态。
@@ -284,6 +288,7 @@ onMounted(() => {
   refreshUnreadTicketCount({ force: true })
   unreadTicketTimer = window.setInterval(() => refreshUnreadTicketCount({ force: true }), TICKET_UNREAD_POLL_INTERVAL_MS)
   document.addEventListener('visibilitychange', handleVisibilityChange)
+  window.addEventListener('ticket-read-state-changed', handleTicketReadStateChanged)
 })
 
 onBeforeUnmount(() => {
@@ -292,6 +297,7 @@ onBeforeUnmount(() => {
     unreadTicketTimer = null
   }
   document.removeEventListener('visibilitychange', handleVisibilityChange)
+  window.removeEventListener('ticket-read-state-changed', handleTicketReadStateChanged)
 })
 </script>
 
