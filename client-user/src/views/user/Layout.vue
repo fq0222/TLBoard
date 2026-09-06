@@ -99,10 +99,7 @@ import {
   User
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
-import {
-  TICKET_UNREAD_POLL_INTERVAL_MS,
-  UnreadTicketRefresher
-} from '@/utils/unread-ticket-refresher'
+import { UnreadTicketRefresher } from '@/utils/unread-ticket-refresher'
 
 const router = useRouter()
 const route = useRoute()
@@ -110,7 +107,6 @@ const userStore = useUserStore()
 const pendingNavPath = ref('')
 const contentLoading = ref(false)
 const unreadTicketCount = ref(0)
-let unreadTicketTimer = null
 let unreadTicketRefresher = null
 
 const navItems = [
@@ -286,16 +282,11 @@ watch(() => route.path, async (newPath) => {
 onMounted(() => {
   preloadNavPages()
   refreshUnreadTicketCount({ force: true })
-  unreadTicketTimer = window.setInterval(() => refreshUnreadTicketCount({ force: true }), TICKET_UNREAD_POLL_INTERVAL_MS)
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('ticket-read-state-changed', handleTicketReadStateChanged)
 })
 
 onBeforeUnmount(() => {
-  if (unreadTicketTimer) {
-    window.clearInterval(unreadTicketTimer)
-    unreadTicketTimer = null
-  }
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   window.removeEventListener('ticket-read-state-changed', handleTicketReadStateChanged)
 })

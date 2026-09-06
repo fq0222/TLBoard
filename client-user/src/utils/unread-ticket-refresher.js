@@ -3,7 +3,6 @@
  * 职责：降低未读工单数量接口调用频率，同时保留导航、点击和前台恢复等关键刷新时机。
  */
 
-export const TICKET_UNREAD_POLL_INTERVAL_MS = 10 * 60 * 1000
 export const TICKET_UNREAD_ROUTE_REFRESH_COOLDOWN_MS = 30 * 1000
 
 /**
