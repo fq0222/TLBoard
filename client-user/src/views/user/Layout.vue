@@ -99,6 +99,10 @@ import {
   User
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
+import {
+  TICKET_UNREAD_POLL_INTERVAL_MS,
+  UnreadTicketRefresher
+} from '@/utils/unread-ticket-refresher'
 
 const router = useRouter()
 const route = useRoute()
@@ -107,6 +111,7 @@ const pendingNavPath = ref('')
 const contentLoading = ref(false)
 const unreadTicketCount = ref(0)
 let unreadTicketTimer = null
+let unreadTicketRefresher = null
 
 const navItems = [
   { key: 'home', label: '首页', to: '/user', icon: House },
@@ -175,14 +180,34 @@ function preloadNavPages() {
  *
  * @returns {Promise<void>}
  */
-async function fetchUnreadTicketCount() {
-  try {
-    const response = await api.user.getTicketUnreadCount()
-    if (response.code === 0) {
-      unreadTicketCount.value = response.data.count || 0
+function createUnreadTicketRefresher() {
+  return new UnreadTicketRefresher({
+    fetchUnreadCount: () => api.user.getTicketUnreadCount(),
+    setUnreadCount: (count) => {
+      unreadTicketCount.value = count
     }
-  } catch (error) {
-    console.error('获取未读工单数量失败:', error)
+  })
+}
+
+async function refreshUnreadTicketCount(options) {
+  if (!unreadTicketRefresher) {
+    unreadTicketRefresher = createUnreadTicketRefresher()
+  }
+
+  await unreadTicketRefresher.refresh(options)
+}
+
+async function refreshUnreadTicketCountAfterRouteChange() {
+  if (!unreadTicketRefresher) {
+    unreadTicketRefresher = createUnreadTicketRefresher()
+  }
+
+  await unreadTicketRefresher.refreshAfterRouteChange()
+}
+
+function handleVisibilityChange() {
+  if (!document.hidden) {
+    refreshUnreadTicketCount({ force: true })
   }
 }
 
@@ -218,7 +243,7 @@ async function handleNavClick(item) {
  */
 async function goToTickets() {
   if (route.path.startsWith('/user/tickets')) {
-    await fetchUnreadTicketCount()
+    await refreshUnreadTicketCount({ force: true })
     return
   }
 
@@ -241,7 +266,7 @@ async function handleLogout() {
 }
 
 watch(() => route.path, async (newPath) => {
-  fetchUnreadTicketCount()
+  refreshUnreadTicketCountAfterRouteChange()
 
   if (!pendingNavPath.value) {
     return
@@ -256,8 +281,9 @@ watch(() => route.path, async (newPath) => {
 
 onMounted(() => {
   preloadNavPages()
-  fetchUnreadTicketCount()
-  unreadTicketTimer = window.setInterval(fetchUnreadTicketCount, 60 * 1000)
+  refreshUnreadTicketCount({ force: true })
+  unreadTicketTimer = window.setInterval(() => refreshUnreadTicketCount({ force: true }), TICKET_UNREAD_POLL_INTERVAL_MS)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onBeforeUnmount(() => {
@@ -265,6 +291,7 @@ onBeforeUnmount(() => {
     window.clearInterval(unreadTicketTimer)
     unreadTicketTimer = null
   }
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 
