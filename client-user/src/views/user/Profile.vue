@@ -635,18 +635,18 @@ async function handleAnnouncementPopupClose() {
   }
 }
 
-async function checkSyncStatus() {
+async function checkSyncStatus(profileData = null) {
   try {
-    const result = await userStore.fetchUserProfile()
-    if (result.success) {
-      userInfo.value = result.data
-      cfOptimized.value = result.data.cf_optimized || false
+    const data = profileData || (await userStore.fetchUserProfile()).data
+    if (data) {
+      userInfo.value = data
+      cfOptimized.value = data.cf_optimized || false
 
-      if (result.data.payment_count === 1 && result.data.sync_status !== 2) {
+      if (data.payment_count === 1 && data.sync_status !== 2) {
         syncLoading.value = true
         startSyncPolling()
       } else {
-        await scheduleOnboardingGuide(result.data)
+        await scheduleOnboardingGuide(data)
       }
     }
   } catch (error) {
@@ -1396,14 +1396,14 @@ async function fetchReferralUrl() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('resize', handleResize)
-  fetchUserInfo()
+  await fetchUserInfo()
   loadPublicSettings()
   fetchReferralUrl()
   fetchAnnouncements()
   fetchAnnouncementPopup()
-  checkSyncStatus()
+  checkSyncStatus(userInfo.value)
 })
 
 onBeforeRouteLeave(async () => {

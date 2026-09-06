@@ -6,6 +6,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import api from '@/api'
+import { SessionValidator } from './session-validator'
 
 /**
  * 提取可直接展示给用户的错误文案
@@ -22,6 +23,15 @@ export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('user_token') || '')
   const userInfo = ref(null)
   const loading = ref(false)
+  const sessionValidator = new SessionValidator({
+    getToken: () => token.value,
+    getUserInfo: () => userInfo.value,
+    fetchProfile: () => api.user.getProfile({ skipAuthRedirect: true }),
+    setUserInfo: (profile) => {
+      userInfo.value = profile
+    },
+    clearToken
+  })
 
   const isLoggedIn = computed(() => !!token.value)
   const userEmail = computed(() => userInfo.value?.email || '')
@@ -119,27 +129,7 @@ export const useUserStore = defineStore('user', () => {
    * @returns {Promise<boolean>} token 可用时返回 true，否则返回 false
    */
   async function ensureValidSession() {
-    if (!token.value) {
-      return false
-    }
-
-    if (userInfo.value) {
-      return true
-    }
-
-    try {
-      const response = await api.user.getProfile({ skipAuthRedirect: true })
-
-      if (response.code === 0) {
-        userInfo.value = response.data
-        return true
-      }
-    } catch (error) {
-      console.error('校验用户登录态失败:', error)
-    }
-
-    clearToken()
-    return false
+    return sessionValidator.ensureValidSession()
   }
 
   function logout() {
