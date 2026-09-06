@@ -2,7 +2,11 @@
   <div class="user-layout">
     <aside class="sidebar">
       <div class="sidebar-header">
-        <h2 class="sidebar-title">用户中心</h2>
+        <img class="brand-logo" src="/favicon.svg" alt="天澜大陆" />
+        <div class="brand-copy">
+          <h2 class="brand-name">天澜大陆</h2>
+          <p class="brand-subtitle">Tianlan Continent</p>
+        </div>
       </div>
 
       <nav class="sidebar-nav">
@@ -17,16 +21,25 @@
           }"
           @click="handleNavClick(item)"
         >
-          <el-icon><component :is="item.icon" /></el-icon>
-          <span>{{ item.label }}</span>
+          <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
+          <span class="nav-label">{{ item.label }}</span>
+          <el-icon class="nav-arrow"><ArrowRight /></el-icon>
         </button>
       </nav>
 
       <div class="sidebar-footer">
-        <el-button type="danger" plain @click="handleLogout">
+        <div class="sidebar-user-card">
+          <div class="user-avatar">{{ userInitial }}</div>
+          <div class="user-summary">
+            <strong class="user-display-name">{{ sidebarUserName }}</strong>
+            <span class="user-role">USER</span>
+          </div>
+        </div>
+
+        <button type="button" class="logout-button" @click="handleLogout">
           <el-icon><SwitchButton /></el-icon>
           <span>退出登录</span>
-        </el-button>
+        </button>
       </div>
     </aside>
 
@@ -76,6 +89,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import api from '@/api'
 import {
+  ArrowRight,
   Bell,
   House,
   Link,
@@ -102,6 +116,13 @@ const navItems = [
 ]
 const mobileNavItems = navItems
 const currentNavPath = computed(() => pendingNavPath.value || route.path)
+const sidebarUserName = computed(() => {
+  const email = String(userStore.userEmail || '').trim()
+  if (!email) return 'USER'
+
+  return email.split('@')[0] || email
+})
+const userInitial = computed(() => sidebarUserName.value.charAt(0).toUpperCase() || 'U')
 
 /**
  * 判断导航项是否处于当前激活状态。
@@ -259,9 +280,9 @@ onBeforeUnmount(() => {
 }
 
 .sidebar {
-  width: 240px;
+  width: 260px;
   background: #fff;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 10px 0 30px rgba(31, 45, 61, 0.06);
   display: flex;
   flex-direction: column;
   position: fixed;
@@ -272,60 +293,208 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-header {
-  padding: 20px;
-  border-bottom: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 120px;
+  padding: 32px 28px 24px;
 }
 
-.sidebar-title {
+.brand-logo {
+  width: 50px;
+  height: 50px;
+  flex: 0 0 auto;
+  border-radius: 16px;
+  box-shadow: 0 14px 30px rgba(64, 158, 255, 0.18);
+}
+
+.brand-copy {
+  min-width: 0;
+}
+
+.brand-name {
   margin: 0;
-  font-size: 20px;
-  color: #409eff;
-  text-align: center;
+  color: #111827;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.brand-subtitle {
+  margin: 8px 0 0;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .sidebar-nav {
   flex: 1;
-  padding: 20px 0;
+  padding: 10px 20px 20px;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   width: 100%;
-  padding: 15px 20px;
+  min-height: 54px;
+  margin: 0 0 10px;
+  padding: 0 18px;
   border: 0;
+  border-radius: 16px;
   background: transparent;
-  color: #333;
+  color: #8a95a8;
   font: inherit;
+  font-size: 15px;
+  font-weight: 700;
   text-align: left;
   text-decoration: none;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 
 .nav-button {
   appearance: none;
 }
 
-.nav-item:hover,
+.nav-icon {
+  flex: 0 0 auto;
+  font-size: 22px;
+}
+
+.nav-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-arrow {
+  flex: 0 0 auto;
+  color: #2563eb;
+  font-size: 16px;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.nav-item:hover {
+  background: #f4f8ff;
+  color: #2563eb;
+}
+
 .nav-item.active {
-  background: #ecf5ff;
-  color: #409eff;
+  border-radius: 16px;
+  background: #edf5ff;
+  color: #2563eb;
+  transform: translateX(0);
+}
+
+.nav-item.active .nav-arrow {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .sidebar-footer {
-  padding: 20px;
-  border-top: 1px solid #eee;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px 24px;
 }
 
-.sidebar-footer .el-button {
+.sidebar-user-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   width: 100%;
+  min-height: 90px;
+  padding: 18px;
+  border: 1px solid #eef2f7;
+  border-radius: 10px;
+  background: #fbfcfe;
+  cursor: default;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.sidebar-user-card:hover {
+  border-color: #2563eb;
+  background: #fbfcfe;
+}
+
+.user-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #2563eb;
+  color: #fff;
+  box-shadow: 0 3px 8px rgba(37, 99, 235, 0.28);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.user-summary {
+  min-width: 0;
+}
+
+.user-display-name {
+  display: block;
+  overflow: hidden;
+  color: #111827;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.2s ease;
+}
+
+.sidebar-user-card:hover .user-display-name {
+  color: #2563eb;
+}
+
+.user-role {
+  display: block;
+  margin-top: 4px;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.logout-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  color: #ff2d3d;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.logout-button .el-icon {
+  font-size: 19px;
+}
+
+.logout-button:hover {
+  background: #fff1f2;
+  color: #ff2d3d;
 }
 
 .main-content {
   flex: 1;
-  margin-left: 240px;
+  margin-left: 260px;
   padding: 20px;
 }
 
@@ -393,6 +562,60 @@ onBeforeUnmount(() => {
 @media (max-width: 1024px) {
   .sidebar {
     width: 200px;
+  }
+
+  .sidebar-header {
+    gap: 10px;
+    min-height: 106px;
+    padding: 26px 16px 20px;
+  }
+
+  .brand-logo {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+  }
+
+  .brand-name {
+    font-size: 18px;
+  }
+
+  .brand-subtitle {
+    font-size: 10px;
+  }
+
+  .sidebar-nav {
+    padding: 8px 12px 18px;
+  }
+
+  .nav-item {
+    min-height: 50px;
+    padding: 0 14px;
+  }
+
+  .sidebar-footer {
+    padding: 16px 12px 20px;
+  }
+
+  .sidebar-user-card {
+    gap: 10px;
+    min-height: 78px;
+    padding: 14px;
+  }
+
+  .user-avatar {
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+  }
+
+  .user-display-name {
+    font-size: 13px;
+  }
+
+  .logout-button {
+    min-height: 44px;
+    border-radius: 14px;
   }
 
   .main-content {
