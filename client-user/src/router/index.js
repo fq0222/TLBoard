@@ -5,6 +5,7 @@
 
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { resolveUserNavigation } from './user-session-guard'
 
 const routes = [
   {
@@ -137,18 +138,14 @@ const router = createRouter({
   }
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   document.title = to.meta.title ? `${to.meta.title} - 天澜大陆` : '天澜大陆'
 
   const userStore = useUserStore()
+  const redirect = await resolveUserNavigation(to, userStore)
 
-  if (to.meta.requiresAuth && !userStore.isLoggedIn) {
-    next({ name: 'Login', query: { redirect: to.fullPath } })
-    return
-  }
-
-  if (to.meta.guest && userStore.isLoggedIn) {
-    next({ path: '/user' })
+  if (redirect) {
+    next(redirect)
     return
   }
 

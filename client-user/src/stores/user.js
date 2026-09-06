@@ -113,6 +113,35 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  /**
+   * 校验当前本地登录态是否仍然有效。
+   * 核心分支：无 token 直接视为未登录；已有用户信息复用；后端拒绝时清空本地 token。
+   * @returns {Promise<boolean>} token 可用时返回 true，否则返回 false
+   */
+  async function ensureValidSession() {
+    if (!token.value) {
+      return false
+    }
+
+    if (userInfo.value) {
+      return true
+    }
+
+    try {
+      const response = await api.user.getProfile({ skipAuthRedirect: true })
+
+      if (response.code === 0) {
+        userInfo.value = response.data
+        return true
+      }
+    } catch (error) {
+      console.error('校验用户登录态失败:', error)
+    }
+
+    clearToken()
+    return false
+  }
+
   function logout() {
     clearToken()
   }
@@ -130,6 +159,7 @@ export const useUserStore = defineStore('user', () => {
     trafficPercent,
     setToken,
     clearToken,
+    ensureValidSession,
     login,
     registerAndPay,
     fetchUserProfile,

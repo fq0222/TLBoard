@@ -51,7 +51,9 @@ apiClient.interceptors.response.use(
           break
         case 401:
           localStorage.removeItem('user_token')
-          window.location.href = '/login'
+          if (!error.config?.skipAuthRedirect) {
+            window.location.href = '/login'
+          }
           break
         case 403:
           ElMessage.error('没有权限访问')
@@ -139,8 +141,8 @@ const userApi = {
    * 获取用户个人信息
    * @returns {Promise<Object>} 响应数据
    */
-  getProfile() {
-    return apiClient.get('/profile')
+  getProfile(config = {}) {
+    return apiClient.get('/profile', config)
   },
 
   /**
