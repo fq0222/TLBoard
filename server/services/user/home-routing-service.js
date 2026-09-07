@@ -410,6 +410,9 @@ async function syncServerRoute(server, context) {
   const xraySetting = normalizeXraySetting(configResult);
   const outboundTestUrl = extractOutboundTestUrl(configResult);
 
+  if (context.previousHomeProxyTag && context.previousHomeProxyTag !== context.homeProxyTag) {
+    removeMatchingHomeRules(xraySetting, context.previousHomeProxyTag, context.email);
+  }
   removeMatchingHomeRules(xraySetting, context.homeProxyTag, context.email);
 
   if (context.nextServerIds.includes(Number(server.id))) {
@@ -493,6 +496,7 @@ async function updateHomeRouting(db, userId, payload = {}, logger = console) {
     HOME_ROUTING_SYNC_CONCURRENCY,
     (server) => syncServerRoute(server, {
       homeProxyTag: entitlement.homeProxyTag,
+      previousHomeProxyTag: currentRoute?.home_proxy_tag || '',
       email: entitlement.email,
       nextServerIds
     })

@@ -324,6 +324,42 @@ async function testDuplicateRulesAreCollapsed() {
   assert.strictEqual(otherRules.length, 1);
 }
 
+async function testChangedHomeProxyTagRemovesOldTagRule() {
+  const configs = {
+    1: {
+      inbounds: [{ tag: 'in-a' }],
+      routing: {
+        rules: [
+          { type: 'field', outboundTag: 'old-home-tag', user: ['user@example.com'], inboundTag: ['old-in'] }
+        ]
+      }
+    }
+  };
+  const calls = { get: [], update: [] };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement({ home_proxy_tag: 'new-home-tag', proxy_tag: 'new-home-tag' }),
+    route: {
+      user_id: 1,
+      home_proxy_tag: 'old-home-tag',
+      server_ids: '[1]',
+      last_synced_at: Math.floor(Date.now() / 1000) - 3600
+    },
+    servers: [createServer(1)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+
+  await homeRoutingService.updateHomeRouting({}, 1, { server_ids: [1] });
+
+  assert.strictEqual(
+    configs[1].routing.rules.some((rule) => rule.outboundTag === 'old-home-tag'),
+    false
+  );
+  assert.deepStrictEqual(configs[1].routing.rules, [
+    { type: 'field', inboundTag: ['in-a'], outboundTag: 'new-home-tag', user: ['user@example.com'] }
+  ]);
+  assert.strictEqual(repository.state.savedRoutes[0].homeProxyTag, 'new-home-tag');
+}
+
 async function run() {
   try {
     await testRejectsMissingEntitlement();
@@ -334,6 +370,7 @@ async function run() {
     await testRemoteWriteFailureDoesNotSaveOrCooldown();
     await testCooldownBlocksRecentSuccessfulChange();
     await testDuplicateRulesAreCollapsed();
+    await testChangedHomeProxyTagRemovesOldTagRule();
   } finally {
     homeRoutingService.resetTestDependencies();
   }
