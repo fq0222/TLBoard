@@ -198,6 +198,51 @@ const adminApi = {
   },
 
   /**
+   * 获取家宽 IP 列表
+   * @returns {Promise<Object>} 响应数据
+   */
+  getHomeProxies() {
+    return apiClient.get('/home-proxies')
+  },
+
+  /**
+   * 添加家宽 IP 配置
+   * @param {Object} data - 家宽 SOCKS 配置
+   * @returns {Promise<Object>} 响应数据
+   */
+  addHomeProxy(data) {
+    return apiClient.post('/home-proxies', data)
+  },
+
+  /**
+   * 修改家宽 IP 配置
+   * @param {number} id - 家宽 IP ID
+   * @param {Object} data - 家宽 SOCKS 配置
+   * @returns {Promise<Object>} 响应数据
+   */
+  updateHomeProxy(id, data) {
+    return apiClient.put(`/home-proxies/${id}`, data)
+  },
+
+  /**
+   * 删除家宽 IP 配置，后端会先清理远端 outbound
+   * @param {number} id - 家宽 IP ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  deleteHomeProxy(id) {
+    return apiClient.delete(`/home-proxies/${id}`, { timeout: 120000 })
+  },
+
+  /**
+   * 手动同步家宽 IP outbound
+   * @param {number} id - 家宽 IP ID
+   * @returns {Promise<Object>} 响应数据
+   */
+  syncHomeProxy(id) {
+    return apiClient.post(`/home-proxies/${id}/sync`, {}, { timeout: 120000 })
+  },
+
+  /**
    * 启动 3X-UI 数据库手动备份任务
    * @returns {Promise<Object>} 当前备份任务状态
    */

@@ -38,6 +38,12 @@ const routes = [
         meta: { title: '服务器管理' }
       },
       {
+        path: 'home-proxies',
+        name: 'HomeProxies',
+        component: () => import('@/views/HomeProxies.vue'),
+        meta: { title: '家宽 IP 管理' }
+      },
+      {
         path: 'servers/:id',
         name: 'ServerDetail',
         component: () => import('@/views/ServerDetail.vue'),

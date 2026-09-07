@@ -22,6 +22,7 @@ const adminSystemSettingsRoutes = require('../routes/admin/system-settings');
 const adminReferralsRoutes = require('../routes/admin/referrals');
 const adminTelegramRoutes = require('../routes/admin/telegram');
 const adminFeedbackRoutes = require('../routes/admin/feedback');
+const adminHomeProxiesRoutes = require('../routes/admin/home-proxies');
 
 function registerAdminRoutes(app, logger) {
   const adminPrefix = '/api/admin';
@@ -29,6 +30,7 @@ function registerAdminRoutes(app, logger) {
   app.use(adminPrefix, adminAuthRoutes);
   app.use(`${adminPrefix}/admins`, adminAdminsRoutes);
   app.use(`${adminPrefix}/servers`, adminServersRoutes);
+  app.use(`${adminPrefix}/home-proxies`, adminHomeProxiesRoutes);
   app.use(`${adminPrefix}/plans`, adminPlansRoutes);
   app.use(`${adminPrefix}/users`, adminUsersRoutes);
   app.use(`${adminPrefix}/orders`, adminOrdersRoutes);

@@ -19,6 +19,10 @@
           <el-icon><Monitor /></el-icon>
           <span v-if="!isCollapsed">服务器管理</span>
         </router-link>
+        <router-link to="/admin/home-proxies" class="nav-item" active-class="active">
+          <el-icon><Link /></el-icon>
+          <span v-if="!isCollapsed">家宽 IP 管理</span>
+        </router-link>
         <router-link to="/admin/plans" class="nav-item" active-class="active">
           <el-icon><Goods /></el-icon>
           <span v-if="!isCollapsed">套餐管理</span>
@@ -151,6 +155,7 @@ import {
   Fold,
   Folder,
   Goods,
+  Link,
   Message,
   Monitor,
   Reading,
@@ -288,6 +293,7 @@ onBeforeUnmount(() => {
   background: #304156;
   box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
   transition: width 0.3s;
+  overflow: hidden;
 }
 
 .sidebar.collapsed {
@@ -313,7 +319,23 @@ onBeforeUnmount(() => {
 
 .sidebar-nav {
   flex: 1;
+  min-height: 0;
   padding: 20px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+  border-radius: 6px;
+  background: rgba(191, 203, 217, 0.28);
+}
+
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .nav-item {

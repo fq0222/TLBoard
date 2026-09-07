@@ -147,6 +147,27 @@ const tableDefinitions = [
     `
   },
   {
+    logMessage: '家宽 IP 出站表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS home_proxies (
+        id SERIAL PRIMARY KEY,
+        tag VARCHAR(255) NOT NULL,
+        address VARCHAR(255) NOT NULL,
+        port INTEGER NOT NULL,
+        username VARCHAR(255) NOT NULL,
+        password TEXT NOT NULL,
+        sync_status VARCHAR(30) NOT NULL DEFAULT 'pending',
+        failed_server_ids TEXT NOT NULL DEFAULT '[]',
+        last_sync_at BIGINT,
+        last_sync_success_count INTEGER NOT NULL DEFAULT 0,
+        last_sync_failed_count INTEGER NOT NULL DEFAULT 0,
+        last_sync_message TEXT NOT NULL DEFAULT '',
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
+      )
+    `
+  },
+  {
     logMessage: '流量同步日志表初始化完成',
     sql: `
       CREATE TABLE IF NOT EXISTS traffic_sync_log (

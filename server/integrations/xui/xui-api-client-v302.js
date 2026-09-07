@@ -103,6 +103,41 @@ class XuiApiClientV302 {
   }
 
   /**
+   * 发送表单请求，用于 3X-UI 仍通过 PostForm 读取参数的接口。
+   * @param {string} method - HTTP 方法。
+   * @param {string} path - 请求路径。
+   * @param {Object} data - 表单字段。
+   * @param {Object} [options={}] - 单次请求选项。
+   * @returns {Promise<Object>} 接口响应数据。
+   */
+  async requestForm(method, path, data = {}, options = {}) {
+    const source = xuiActivityTracker.getCurrentSource();
+    if (source === 'background') {
+      await xuiActivityTracker.waitForForegroundIdle();
+    }
+    xuiActivityTracker.beginRequest(source);
+    try {
+      const formData = new URLSearchParams();
+      Object.entries(data || {}).forEach(([key, value]) => {
+        formData.append(key, value === undefined || value === null ? '' : String(value));
+      });
+
+      const response = await this.api.request({
+        method,
+        url: path,
+        data: formData,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        ...(options.timeout !== undefined ? { timeout: options.timeout } : {})
+      });
+      return response.data;
+    } finally {
+      xuiActivityTracker.endRequest(source);
+    }
+  }
+
+  /**
    * 下载二进制资源，例如面板数据库。
    * @param {string} path - 下载路径。
    * @returns {Promise<Buffer>} 下载结果。
@@ -229,6 +264,42 @@ class XuiApiClientV302 {
    */
   getServerStatus() {
     return this.request('get', `${this.serverBasePath}/status`);
+  }
+
+  /**
+   * 获取完整 Xray 配置，用于修改 outbounds 后整体回写。
+   * @param {Object} [options={}] - 单次请求选项。
+   * @returns {Promise<Object>} 3X-UI Xray 配置响应。
+   */
+  getXrayConfig(options = {}) {
+    return this.request('post', '/panel/api/xray/', undefined, options);
+  }
+
+  /**
+   * 回写完整 Xray 配置。
+   * 核心分支语义：3X-UI update 接口读取表单字段 xraySetting，因此这里不能使用 JSON body。
+   *
+   * @param {Object|string} xraySetting - 完整 Xray 配置对象或 JSON 字符串。
+   * @param {string|Object} [outboundTestUrlOrOptions={}] - 出站测试 URL，或兼容旧调用的请求选项。
+   * @param {Object} [options={}] - 单次请求选项。
+   * @returns {Promise<Object>} 3X-UI 更新响应。
+   */
+  updateXrayConfig(xraySetting, outboundTestUrlOrOptions = {}, options = {}) {
+    const outboundTestUrl = typeof outboundTestUrlOrOptions === 'string'
+      ? outboundTestUrlOrOptions
+      : undefined;
+    const requestOptions = typeof outboundTestUrlOrOptions === 'string'
+      ? options
+      : outboundTestUrlOrOptions;
+    const form = {
+      xraySetting: typeof xraySetting === 'string' ? xraySetting : JSON.stringify(xraySetting)
+    };
+
+    if (outboundTestUrl !== undefined) {
+      form.outboundTestUrl = outboundTestUrl;
+    }
+
+    return this.requestForm('post', '/panel/api/xray/update', form, requestOptions);
   }
 }
 

@@ -209,6 +209,38 @@ class XuiService {
   }
 
   /**
+   * 获取 3X-UI 当前完整 Xray 配置。
+   * 用于家宽 outbound 同步场景，调用方负责解析和修改配置内容。
+   *
+   * @param {Object} [options={}] - 单次请求选项。
+   * @returns {Promise<Object>} 3X-UI 原始响应。
+   */
+  async getXrayConfig(options = {}) {
+    if (!this.client) {
+      await this.init();
+    }
+
+    return this.client.getXrayConfig(options);
+  }
+
+  /**
+   * 回写 3X-UI 完整 Xray 配置。
+   * 核心分支语义：底层客户端使用表单提交，匹配 3X-UI 的 xraySetting PostForm 接口。
+   *
+   * @param {Object|string} xraySetting - 完整 Xray 配置对象或 JSON 字符串。
+   * @param {string|Object} [outboundTestUrlOrOptions={}] - 出站测试 URL，或兼容旧调用的请求选项。
+   * @param {Object} [options={}] - 单次请求选项。
+   * @returns {Promise<Object>} 3X-UI 原始响应。
+   */
+  async updateXrayConfig(xraySetting, outboundTestUrlOrOptions = {}, options = {}) {
+    if (!this.client) {
+      await this.init();
+    }
+
+    return this.client.updateXrayConfig(xraySetting, outboundTestUrlOrOptions, options);
+  }
+
+  /**
    * 获取所有 inbounds（节点）
    * @param {Object} [options={}] - 单次请求选项；失败时记录日志并返回标准失败结果
    * @returns {Promise<Object>} 标准化的 inbounds 列表
