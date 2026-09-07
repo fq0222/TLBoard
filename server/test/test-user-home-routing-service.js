@@ -163,6 +163,33 @@ async function testBuildsInboundTagsFromXrayConfig() {
   assert.deepStrictEqual(repository.state.savedRoutes[0].serverIds, [1]);
 }
 
+async function testUnwrapsNestedXraySettingResponse() {
+  const rawXraySetting = {
+    inbounds: [
+      { tag: 'api' },
+      { tag: 'in-21443-tcp' },
+      { tag: 'in-28905-udp' }
+    ],
+    routing: { rules: [] }
+  };
+  const wrapped = {
+    success: true,
+    obj: JSON.stringify({
+      xraySetting: JSON.stringify({
+        xraySetting: JSON.stringify(rawXraySetting),
+        outboundTestUrl: 'https://www.google.com/generate_204'
+      })
+    })
+  };
+
+  const normalized = homeRoutingService.__testables.normalizeXraySetting(wrapped);
+
+  assert.deepStrictEqual(
+    homeRoutingService.__testables.extractInboundTags(normalized),
+    ['in-21443-tcp', 'in-28905-udp']
+  );
+}
+
 async function testDeletesOldServerRuleAndWritesNewRule() {
   const configs = {
     1: {
@@ -365,6 +392,7 @@ async function run() {
     await testRejectsMissingEntitlement();
     await testRejectsMoreThanTwoServers();
     await testBuildsInboundTagsFromXrayConfig();
+    await testUnwrapsNestedXraySettingResponse();
     await testDeletesOldServerRuleAndWritesNewRule();
     await testRemoteDeleteFailureDoesNotSaveOrCooldown();
     await testRemoteWriteFailureDoesNotSaveOrCooldown();

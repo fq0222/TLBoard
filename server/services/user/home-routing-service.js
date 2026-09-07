@@ -88,25 +88,69 @@ function parseJsonLikeConfig(value, label) {
   }
 }
 
+function isXraySettingObject(value) {
+  return Boolean(value && typeof value === 'object' && (
+    Array.isArray(value.inbounds) ||
+    Array.isArray(value.outbounds) ||
+    value.routing !== undefined
+  ));
+}
+
+/**
+ * 递归拆出 3X-UI 返回中的真实 Xray 配置。
+ * 核心分支：有些面板会把 xraySetting 再包一层对象或字符串，直到出现 inbounds/outbounds/routing 才是配置本体。
+ *
+ * @param {*} value - 候选配置或包装对象
+ * @param {number} [depth=0] - 当前递归层数，防止异常响应无限拆包
+ * @returns {Object|undefined} 真实 Xray 配置，无法识别时返回 undefined
+ */
+function unwrapXraySetting(value, depth = 0) {
+  if (depth > 5 || value === null || value === undefined) {
+    return undefined;
+  }
+
+  const parsed = parseJsonLikeConfig(value, 'Xray 配置');
+  if (isXraySettingObject(parsed)) {
+    return parsed;
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return undefined;
+  }
+
+  const nestedCandidates = [
+    parsed.xraySetting,
+    parsed.xray_setting,
+    parsed.setting,
+    parsed.config,
+    parsed.xrayConfig,
+    parsed.xray_config
+  ].filter((item) => item !== undefined && item !== null);
+
+  for (const candidate of nestedCandidates) {
+    const unwrapped = unwrapXraySetting(candidate, depth + 1);
+    if (unwrapped) {
+      return unwrapped;
+    }
+  }
+
+  return undefined;
+}
+
 /**
  * 从 3X-UI 响应中解析完整 Xray 配置。
- * 核心分支：兼容 3X-UI 返回的包装对象和字符串化 xraySetting。
+ * 核心分支：兼容 3X-UI 返回的多层包装对象和字符串化 xraySetting。
  *
  * @param {Object|string} response - 3X-UI 原始响应
  * @returns {Object} Xray 配置对象
  */
 function normalizeXraySetting(response) {
   const root = parseJsonLikeConfig(response?.obj !== undefined ? response.obj : response, 'Xray 配置响应');
-  const candidate =
-    root?.xraySetting ||
-    root?.xray_setting ||
-    root?.setting ||
-    response?.data?.xraySetting ||
-    response?.xraySetting ||
-    root;
-  const xraySetting = parseJsonLikeConfig(candidate, 'Xray 配置');
+  const xraySetting = unwrapXraySetting(root)
+    || unwrapXraySetting(response?.data)
+    || unwrapXraySetting(response);
 
-  if (xraySetting && typeof xraySetting === 'object') {
+  if (xraySetting) {
     return xraySetting;
   }
 
@@ -155,6 +199,7 @@ function ensureRoutingRules(xraySetting) {
  */
 function extractInboundTags(xraySetting) {
   return Array.from(new Set((xraySetting.inbounds || [])
+    .filter((inbound) => inbound?.tag !== 'api' && inbound?.protocol !== 'tunnel')
     .map((inbound) => String(inbound?.tag || '').trim())
     .filter(Boolean)));
 }
@@ -548,6 +593,7 @@ module.exports = {
     normalizeServerIds,
     parseServerIds,
     normalizeXraySetting,
+    unwrapXraySetting,
     extractInboundTags,
     removeMatchingHomeRules,
     upsertHomeRoutingRule,
