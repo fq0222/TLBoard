@@ -647,6 +647,14 @@ async function handleRenew() {
 
   renewSubmitting.value = true
   try {
+    if (shouldConfirmActiveHomeIpRenew()) {
+      try {
+        await confirmActiveHomeIpRenew()
+      } catch {
+        return
+      }
+    }
+
     await submitRenewRequest({ planId: selectedPlanId.value, payType: payType.value })
   } finally {
     renewSubmitting.value = false
@@ -732,6 +740,37 @@ async function confirmTimedRenewReset(preview = {}) {
 }
 
 /**
+ * 判断家宽 IP 套餐支付前是否需要确认。
+ * 核心分支：只有当前已存在未到期家宽权益，且本次选择的仍是家宽 IP 套餐时触发。
+ *
+ * @returns {boolean} 是否需要二次确认
+ */
+function shouldConfirmActiveHomeIpRenew() {
+  if (selectedPlan.value?.plan_type !== 'home_ip') {
+    return false
+  }
+
+  return getHomeIpRemainingSeconds() > 0
+}
+
+/**
+ * 弹出家宽 IP 未到期续费确认框。
+ *
+ * @returns {Promise<void>} 用户确认后 resolve，取消时 reject
+ */
+async function confirmActiveHomeIpRenew() {
+  await ElMessageBox.confirm(
+    `你的家宽 IP 套餐还剩约 ${formatRemainingTime(getHomeIpRemainingSeconds())}。如果继续购买，系统会在支付成功后重新计算新的到期时间。是否继续？`,
+    '确认支付',
+    {
+      confirmButtonText: '继续支付',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  )
+}
+
+/**
  * 格式化字节数用于续费确认提示。
  * @param {number|string} bytes - 字节数。
  * @returns {string} 可读流量。
@@ -758,6 +797,20 @@ function formatRemainingTime(seconds) {
   if (hours > 0) return `${hours} 小时`
   const minutes = Math.floor(value / 60)
   return `${minutes} 分钟`
+}
+
+/**
+ * 计算当前家宽 IP 权益剩余秒数。
+ *
+ * @returns {number} 剩余秒数，未购买或已过期时为 0
+ */
+function getHomeIpRemainingSeconds() {
+  const expireAt = Number(userInfo.value.home_expire_at || 0)
+  if (!Number.isFinite(expireAt) || expireAt <= 0) {
+    return 0
+  }
+
+  return Math.max(0, expireAt - Math.floor(Date.now() / 1000))
 }
 
 /**
