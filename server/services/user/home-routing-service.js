@@ -5,6 +5,7 @@ let repository = require('../../repositories/user-home-routing-repository');
 const HOME_ROUTING_SYNC_CONCURRENCY = 10;
 const HOME_ROUTING_COOLDOWN_SECONDS = 30 * 60;
 const XUI_XRAY_TIMEOUT = 30000;
+const XUI_INBOUNDS_TIMEOUT = 30000;
 
 let xuiServiceFactory = XuiService.getInstance.bind(XuiService);
 
@@ -205,6 +206,43 @@ function extractInboundTags(xraySetting) {
 }
 
 /**
+ * 从实时 inbounds/list 响应中提取业务 inbound tag。
+ * 核心分支：getInbounds 可能返回标准化 data，也可能在测试或底层场景中保留原始 obj。
+ *
+ * @param {Object|Array} result - 3X-UI inbounds 响应
+ * @returns {string[]} 去重后的业务 inbound tag
+ */
+function extractInboundTagsFromInboundsResult(result) {
+  const inbounds = Array.isArray(result)
+    ? result
+    : (Array.isArray(result?.data) ? result.data : result?.obj);
+
+  return extractInboundTags({ inbounds: Array.isArray(inbounds) ? inbounds : [] });
+}
+
+/**
+ * 读取单台服务器真实 inbound tag。
+ * 核心分支：优先使用完整 Xray 配置；若面板版本未在 xray 接口返回 inbounds，则回退到实时 inbounds/list。
+ *
+ * @param {Object} xuiService - 当前服务器的 XUI service
+ * @param {Object} xraySetting - 已读取的 Xray 配置
+ * @returns {Promise<string[]>} 去重后的业务 inbound tag
+ */
+async function resolveInboundTags(xuiService, xraySetting) {
+  const xrayInboundTags = extractInboundTags(xraySetting);
+  if (xrayInboundTags.length > 0) {
+    return xrayInboundTags;
+  }
+
+  const inboundsResult = await xuiService.getInbounds({ timeout: XUI_INBOUNDS_TIMEOUT });
+  if (inboundsResult && inboundsResult.success === false) {
+    throw new Error(inboundsResult.message || inboundsResult.msg || '获取入站列表失败');
+  }
+
+  return extractInboundTagsFromInboundsResult(inboundsResult);
+}
+
+/**
  * 判断 rule 是否属于当前用户当前家宽 tag。
  *
  * @param {Object} rule - routing rule
@@ -245,8 +283,7 @@ function removeMatchingHomeRules(xraySetting, homeProxyTag, email) {
  * @param {string} email - 当前用户邮箱
  * @returns {Object} 新增的 routing rule
  */
-function upsertHomeRoutingRule(xraySetting, homeProxyTag, email) {
-  const inboundTags = extractInboundTags(xraySetting);
+function upsertHomeRoutingRule(xraySetting, homeProxyTag, email, inboundTags = extractInboundTags(xraySetting)) {
   if (inboundTags.length === 0) {
     throw new Error('入站 tag 为空');
   }
@@ -461,7 +498,8 @@ async function syncServerRoute(server, context) {
   removeMatchingHomeRules(xraySetting, context.homeProxyTag, context.email);
 
   if (context.nextServerIds.includes(Number(server.id))) {
-    upsertHomeRoutingRule(xraySetting, context.homeProxyTag, context.email);
+    const inboundTags = await resolveInboundTags(xuiService, xraySetting);
+    upsertHomeRoutingRule(xraySetting, context.homeProxyTag, context.email, inboundTags);
   }
 
   const updateResult = outboundTestUrl === undefined
@@ -595,6 +633,8 @@ module.exports = {
     normalizeXraySetting,
     unwrapXraySetting,
     extractInboundTags,
+    extractInboundTagsFromInboundsResult,
+    resolveInboundTags,
     removeMatchingHomeRules,
     upsertHomeRoutingRule,
     assertActiveHomeEntitlement

@@ -90,6 +90,17 @@ function createFakeXuiFactory(configs, calls, failing = {}) {
           }
         };
       },
+      async getInbounds() {
+        calls.inbounds = calls.inbounds || [];
+        calls.inbounds.push(serverId);
+        if (failing.inbounds?.includes(serverId)) {
+          return { success: false, message: `inbounds failed ${serverId}`, data: [] };
+        }
+        return {
+          success: true,
+          data: clone(configs[serverId]?.inbounds || [])
+        };
+      },
       async updateXrayConfig(xraySetting) {
         calls.update.push(serverId);
         if (failing.update?.includes(serverId)) {
@@ -161,6 +172,48 @@ async function testBuildsInboundTagsFromXrayConfig() {
   assert.strictEqual(configs[1].routing.rules[0].type, 'field');
   assert.deepStrictEqual(configs[1].routing.rules[0].user, ['user@example.com']);
   assert.deepStrictEqual(repository.state.savedRoutes[0].serverIds, [1]);
+}
+
+async function testFallsBackToLiveInboundsWhenXrayConfigHasNoInbounds() {
+  const configs = {
+    1: {
+      inbounds: [
+        { tag: 'api', protocol: 'tunnel' },
+        { tag: 'in-21443-tcp', protocol: 'vless' },
+        { tag: 'in-28905-udp', protocol: 'hysteria' }
+      ],
+      routing: { rules: [] }
+    }
+  };
+  const calls = { get: [], update: [], inbounds: [] };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement(),
+    servers: [createServer(1)]
+  });
+  installTestDependencies(repository, async (apiUrl) => {
+    const service = await createFakeXuiFactory(configs, calls)(apiUrl);
+    return {
+      ...service,
+      async getXrayConfig() {
+        calls.get.push(1);
+        return {
+          success: true,
+          obj: {
+            xraySetting: {
+              outbounds: [],
+              routing: { rules: [] }
+            },
+            outboundTestUrl: 'https://www.google.com/generate_204'
+          }
+        };
+      }
+    };
+  });
+
+  await homeRoutingService.updateHomeRouting({}, 1, { server_ids: [1] });
+
+  assert.deepStrictEqual(calls.inbounds, [1]);
+  assert.deepStrictEqual(configs[1].routing.rules[0].inboundTag, ['in-21443-tcp', 'in-28905-udp']);
 }
 
 async function testUnwrapsNestedXraySettingResponse() {
@@ -392,6 +445,7 @@ async function run() {
     await testRejectsMissingEntitlement();
     await testRejectsMoreThanTwoServers();
     await testBuildsInboundTagsFromXrayConfig();
+    await testFallsBackToLiveInboundsWhenXrayConfigHasNoInbounds();
     await testUnwrapsNestedXraySettingResponse();
     await testDeletesOldServerRuleAndWritesNewRule();
     await testRemoteDeleteFailureDoesNotSaveOrCooldown();
