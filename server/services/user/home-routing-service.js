@@ -3,7 +3,7 @@ const { runWithConcurrency } = require('../../utils/concurrency');
 let repository = require('../../repositories/user-home-routing-repository');
 
 const HOME_ROUTING_SYNC_CONCURRENCY = 10;
-const HOME_ROUTING_COOLDOWN_SECONDS = 30 * 60;
+const HOME_ROUTING_COOLDOWN_SECONDS = 5 * 60;
 const XUI_XRAY_TIMEOUT = 30000;
 const XUI_INBOUNDS_TIMEOUT = 30000;
 
@@ -664,7 +664,7 @@ async function updateHomeRouting(db, userId, payload = {}, logger = console) {
 
 /**
  * 删除当前用户家宽 IP routing 绑定并同步清理 3X-UI。
- * 核心分支：删除同样遵守 30 分钟冷却；远端全部清理成功后才删除本地记录。
+ * 核心分支：删除同样遵守 5 分钟冷却；远端全部清理成功后才删除本地记录。
  *
  * @param {Object} db - 数据库代理对象
  * @param {number} userId - 当前用户 ID

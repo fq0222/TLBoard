@@ -145,6 +145,10 @@ async function testRejectsMissingEntitlement() {
   assert.strictEqual(repository.state.savedRoutes.length, 0);
 }
 
+function testCooldownConstantIsFiveMinutes() {
+  assert.strictEqual(homeRoutingService.HOME_ROUTING_COOLDOWN_SECONDS, 5 * 60);
+}
+
 async function testRejectsMoreThanTwoServers() {
   const repository = createMemoryRepository({
     entitlement: createEntitlement(),
@@ -645,6 +649,7 @@ async function testDeleteIsBlockedByCooldown() {
 
 async function run() {
   try {
+    testCooldownConstantIsFiveMinutes();
     await testRejectsMissingEntitlement();
     await testRejectsMoreThanTwoServers();
     await testBuildsInboundTagsFromXrayConfig();
