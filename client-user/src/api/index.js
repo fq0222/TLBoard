@@ -248,6 +248,25 @@ const userApi = {
   },
 
   /**
+   * 获取当前用户家宽 IP routing 配置选项
+   * @returns {Promise<Object>} 家宽 IP 权益、可选服务器和当前绑定
+   */
+  getHomeRoutingOptions() {
+    return apiClient.get('/subscription/home-routing/options')
+  },
+
+  /**
+   * 更新当前用户家宽 IP routing 绑定
+   * @param {Array<number>} serverIds - 目标 3X-UI 服务器 ID，最多两个
+   * @returns {Promise<Object>} 更新后的绑定信息
+   */
+  updateHomeRouting(serverIds) {
+    return apiClient.put('/subscription/home-routing', {
+      server_ids: serverIds
+    }, { timeout: 120000 })
+  },
+
+  /**
    * 获取留言板精选留言。
    * @returns {Promise<Object>} 精选留言和当前用户投票状态
    */
