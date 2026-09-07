@@ -125,6 +125,45 @@
           </el-table-column>
         </el-table>
 
+        <div v-if="homeRoutingRoute" class="home-routing-mobile-list">
+          <article class="home-routing-mobile-card">
+            <div class="home-routing-mobile-field">
+              <span class="home-routing-mobile-label">IP</span>
+              <span class="home-routing-mobile-value ip-value">{{ homeRoutingRoute.home_proxy_tag || '-' }}</span>
+            </div>
+
+            <div class="home-routing-mobile-grid">
+              <div class="home-routing-mobile-field">
+                <span class="home-routing-mobile-label">服务器</span>
+                <span class="home-routing-mobile-value">{{ homeRoutingRoute.servers?.[0]?.name || '-' }}</span>
+              </div>
+              <div class="home-routing-mobile-field">
+                <span class="home-routing-mobile-label">服务器</span>
+                <span class="home-routing-mobile-value">{{ homeRoutingRoute.servers?.[1]?.name || '-' }}</span>
+              </div>
+            </div>
+
+            <div class="home-routing-mobile-actions">
+              <el-button
+                type="primary"
+                size="large"
+                :disabled="homeRoutingCooldownRemaining > 0"
+                @click="openHomeRoutingDialog"
+              >
+                修改
+              </el-button>
+              <el-button
+                type="danger"
+                size="large"
+                :disabled="homeRoutingCooldownRemaining > 0 || homeRoutingBusy"
+                @click="deleteHomeRouting"
+              >
+                删除
+              </el-button>
+            </div>
+          </article>
+        </div>
+
         <el-empty v-else description="暂未配置家宽 IP 服务器" />
 
         <p v-if="homeRoutingCooldownRemaining > 0" class="home-routing-tip">
@@ -1048,6 +1087,10 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
+.home-routing-mobile-list {
+  display: none;
+}
+
 .home-routing-tip {
   margin: 12px 0 0;
   color: #b45309;
@@ -1377,6 +1420,85 @@ onBeforeUnmount(() => {
   .home-routing-head {
     align-items: flex-start;
     margin-bottom: 14px;
+  }
+
+  .home-routing-table {
+    display: none;
+  }
+
+  .home-routing-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .home-routing-mobile-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 82px;
+    gap: 8px 10px;
+    align-items: stretch;
+    padding: 10px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+    min-width: 0;
+  }
+
+  .home-routing-mobile-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-column: 1;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .home-routing-mobile-field {
+    display: flex;
+    flex-direction: column;
+    grid-column: 1;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .home-routing-mobile-label {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .home-routing-mobile-value {
+    color: #0f172a;
+    font-size: 13px;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+
+  .home-routing-mobile-value.ip-value {
+    overflow-wrap: anywhere;
+  }
+
+  .home-routing-mobile-actions {
+    display: flex;
+    flex-direction: column;
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    gap: 8px;
+    align-self: center;
+  }
+
+  .home-routing-mobile-actions :deep(.el-button) {
+    width: 100%;
+    min-height: 40px;
+    margin-left: 0;
+    padding: 8px 10px;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .home-routing-tip {
+    margin-top: 10px;
+    font-size: 13px;
   }
 
   .nodes-table-wrap {
