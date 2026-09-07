@@ -1,0 +1,555 @@
+const XuiService = require('../../integrations/xui/xui-service');
+const { runWithConcurrency } = require('../../utils/concurrency');
+let repository = require('../../repositories/user-home-routing-repository');
+
+const HOME_ROUTING_SYNC_CONCURRENCY = 10;
+const HOME_ROUTING_COOLDOWN_SECONDS = 30 * 60;
+const XUI_XRAY_TIMEOUT = 30000;
+
+let xuiServiceFactory = XuiService.getInstance.bind(XuiService);
+
+/**
+ * 用户家宽 IP routing 服务。
+ * 职责：校验用户家宽权益、维护本地绑定记录，并将 routing rule 同步到 3X-UI。
+ */
+
+/**
+ * 构造兼容旧接口的业务错误。
+ *
+ * @param {string} message - 错误提示
+ * @param {Object} [options={}] - 错误响应配置
+ * @returns {Error} 可被 controller 识别的业务异常
+ */
+function createLegacyBusinessError(message, options = {}) {
+  const error = new Error(message);
+  error.isLegacyBusinessError = true;
+  error.statusCode = options.statusCode || 400;
+  error.code = options.code || 1001;
+  error.data = options.data === undefined ? null : options.data;
+  return error;
+}
+
+/**
+ * 获取当前秒级时间戳。
+ *
+ * @returns {number} 秒级 Unix 时间戳
+ */
+function getNowTimestamp() {
+  return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * 归一化用户选择的服务器 ID。
+ * 核心分支：非法数字被过滤，重复 ID 去重，超过两台由业务层拒绝。
+ *
+ * @param {Array} serverIds - 前端提交的服务器 ID
+ * @returns {number[]} 去重后的正整数 ID
+ */
+function normalizeServerIds(serverIds) {
+  if (!Array.isArray(serverIds)) {
+    return [];
+  }
+
+  return Array.from(new Set(serverIds
+    .map(Number)
+    .filter((id) => Number.isInteger(id) && id > 0)));
+}
+
+/**
+ * 解析数据库保存的服务器 ID JSON。
+ *
+ * @param {string|number[]|undefined|null} value - 服务器 ID JSON 或数组
+ * @returns {number[]} 归一化服务器 ID
+ */
+function parseServerIds(value) {
+  if (Array.isArray(value)) {
+    return normalizeServerIds(value);
+  }
+  if (!value) {
+    return [];
+  }
+
+  try {
+    return normalizeServerIds(JSON.parse(value));
+  } catch (error) {
+    return [];
+  }
+}
+
+function parseJsonLikeConfig(value, label) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    throw new Error(`解析 ${label} 失败: ${error.message}`);
+  }
+}
+
+/**
+ * 从 3X-UI 响应中解析完整 Xray 配置。
+ * 核心分支：兼容 3X-UI 返回的包装对象和字符串化 xraySetting。
+ *
+ * @param {Object|string} response - 3X-UI 原始响应
+ * @returns {Object} Xray 配置对象
+ */
+function normalizeXraySetting(response) {
+  const root = parseJsonLikeConfig(response?.obj !== undefined ? response.obj : response, 'Xray 配置响应');
+  const candidate =
+    root?.xraySetting ||
+    root?.xray_setting ||
+    root?.setting ||
+    response?.data?.xraySetting ||
+    response?.xraySetting ||
+    root;
+  const xraySetting = parseJsonLikeConfig(candidate, 'Xray 配置');
+
+  if (xraySetting && typeof xraySetting === 'object') {
+    return xraySetting;
+  }
+
+  throw new Error('3X-UI 未返回有效 Xray 配置');
+}
+
+/**
+ * 从 Xray 配置响应中提取出站测试 URL，回写时原样保留。
+ *
+ * @param {Object|string} response - 3X-UI 原始响应
+ * @returns {string|undefined} 出站测试 URL
+ */
+function extractOutboundTestUrl(response) {
+  const root = parseJsonLikeConfig(response?.obj !== undefined ? response.obj : response, 'Xray 配置响应');
+  const value =
+    root?.outboundTestUrl ||
+    root?.outbound_test_url ||
+    response?.data?.outboundTestUrl ||
+    response?.outboundTestUrl;
+
+  return value === undefined || value === null ? undefined : String(value);
+}
+
+/**
+ * 确保 Xray 配置具备 routing.rules 数组。
+ *
+ * @param {Object} xraySetting - 完整 Xray 配置
+ * @returns {Array} routing.rules 数组
+ */
+function ensureRoutingRules(xraySetting) {
+  if (!xraySetting.routing || typeof xraySetting.routing !== 'object') {
+    xraySetting.routing = {};
+  }
+  if (!Array.isArray(xraySetting.routing.rules)) {
+    xraySetting.routing.rules = [];
+  }
+
+  return xraySetting.routing.rules;
+}
+
+/**
+ * 从完整 Xray 配置读取全部真实 inbound tag。
+ *
+ * @param {Object} xraySetting - 完整 Xray 配置
+ * @returns {string[]} 去重后的 inbound tag 列表
+ */
+function extractInboundTags(xraySetting) {
+  return Array.from(new Set((xraySetting.inbounds || [])
+    .map((inbound) => String(inbound?.tag || '').trim())
+    .filter(Boolean)));
+}
+
+/**
+ * 判断 rule 是否属于当前用户当前家宽 tag。
+ *
+ * @param {Object} rule - routing rule
+ * @param {string} homeProxyTag - 家宽 outbound tag
+ * @param {string} email - 当前用户邮箱
+ * @returns {boolean} 是否匹配
+ */
+function isMatchingHomeRule(rule, homeProxyTag, email) {
+  if (!rule || rule.type !== 'field' || rule.outboundTag !== homeProxyTag) {
+    return false;
+  }
+
+  const users = Array.isArray(rule.user) ? rule.user : [];
+  return users.includes(email);
+}
+
+/**
+ * 移除当前用户当前家宽 tag 的所有 routing rule。
+ *
+ * @param {Object} xraySetting - 完整 Xray 配置
+ * @param {string} homeProxyTag - 家宽 outbound tag
+ * @param {string} email - 当前用户邮箱
+ * @returns {number} 删除的 rule 数量
+ */
+function removeMatchingHomeRules(xraySetting, homeProxyTag, email) {
+  const rules = ensureRoutingRules(xraySetting);
+  const beforeLength = rules.length;
+  xraySetting.routing.rules = rules.filter((rule) => !isMatchingHomeRule(rule, homeProxyTag, email));
+  return beforeLength - xraySetting.routing.rules.length;
+}
+
+/**
+ * 追加当前用户的规范家宽 routing rule。
+ * 核心分支：inboundTag 为空说明远端配置不可用，应抛错并阻止本地保存。
+ *
+ * @param {Object} xraySetting - 完整 Xray 配置
+ * @param {string} homeProxyTag - 家宽 outbound tag
+ * @param {string} email - 当前用户邮箱
+ * @returns {Object} 新增的 routing rule
+ */
+function upsertHomeRoutingRule(xraySetting, homeProxyTag, email) {
+  const inboundTags = extractInboundTags(xraySetting);
+  if (inboundTags.length === 0) {
+    throw new Error('入站 tag 为空');
+  }
+
+  const rule = {
+    type: 'field',
+    inboundTag: inboundTags,
+    outboundTag: homeProxyTag,
+    user: [email]
+  };
+
+  ensureRoutingRules(xraySetting).push(rule);
+  return rule;
+}
+
+/**
+ * 校验并格式化当前用户家宽权益。
+ *
+ * @param {Object|undefined} entitlement - 仓储返回的权益记录
+ * @param {number} [now=getNowTimestamp()] - 当前秒级时间戳
+ * @returns {Object} 已归一化权益
+ */
+function assertActiveHomeEntitlement(entitlement, now = getNowTimestamp()) {
+  if (!entitlement || !entitlement.home_plan_id) {
+    throw createLegacyBusinessError('购买家宽 IP 套餐后可配置', { code: 4101 });
+  }
+  if (Number(entitlement.home_expire_at || 0) <= now) {
+    throw createLegacyBusinessError('家宽 IP 套餐已到期，请先续费', { code: 4102 });
+  }
+  if (String(entitlement.plan_type || '') !== 'home_ip') {
+    throw createLegacyBusinessError('当前家宽 IP 套餐配置异常，请联系客服', { code: 4103 });
+  }
+  if (!String(entitlement.home_proxy_tag || '').trim()) {
+    throw createLegacyBusinessError('当前家宽 IP 未绑定 tag，请联系客服', { code: 4104 });
+  }
+  if (!entitlement.home_proxy_id) {
+    throw createLegacyBusinessError('当前家宽 IP 配置不存在，请联系客服', { code: 4105 });
+  }
+
+  return {
+    userId: Number(entitlement.user_id),
+    email: entitlement.email,
+    homeProxyTag: String(entitlement.home_proxy_tag).trim(),
+    homePlanName: entitlement.home_plan_name || '',
+    homeExpireAt: Number(entitlement.home_expire_at)
+  };
+}
+
+function getCooldownRemaining(route, now = getNowTimestamp()) {
+  const lastSyncedAt = Number(route?.last_synced_at || 0);
+  if (!lastSyncedAt) {
+    return 0;
+  }
+
+  return Math.max(0, lastSyncedAt + HOME_ROUTING_COOLDOWN_SECONDS - now);
+}
+
+function formatServer(server) {
+  return {
+    id: Number(server.id),
+    name: server.name,
+    status: Number(server.status)
+  };
+}
+
+async function formatRoute(db, route) {
+  if (!route) {
+    return null;
+  }
+
+  const serverIds = parseServerIds(route.server_ids);
+  const servers = await repository.listServersByIds(db, serverIds);
+  const serverMap = new Map(servers.map((server) => [Number(server.id), server]));
+
+  return {
+    home_proxy_tag: route.home_proxy_tag,
+    server_ids: serverIds,
+    servers: serverIds.map((id) => {
+      const server = serverMap.get(Number(id));
+      return {
+        id,
+        name: server ? server.name : `未知服务器 ${id}`,
+        status: server ? Number(server.status) : 0
+      };
+    }),
+    last_synced_at: route.last_synced_at
+  };
+}
+
+/**
+ * 获取当前用户家宽 IP routing 配置选项。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 当前用户 ID
+ * @returns {Promise<Object>} 家宽权益、服务器列表和当前绑定
+ */
+async function getHomeRoutingOptions(db, userId) {
+  const now = getNowTimestamp();
+  const entitlement = await repository.findHomeRoutingEntitlement(db, userId);
+  let activeEntitlement;
+
+  try {
+    activeEntitlement = assertActiveHomeEntitlement(entitlement, now);
+  } catch (error) {
+    if (error && error.isLegacyBusinessError) {
+      return {
+        available: false,
+        message: error.message
+      };
+    }
+    throw error;
+  }
+
+  const [onlineServers, route] = await Promise.all([
+    repository.listOnlineServers(db),
+    repository.findUserHomeRoute(db, userId)
+  ]);
+
+  return {
+    available: true,
+    home_proxy_tag: activeEntitlement.homeProxyTag,
+    home_plan_name: activeEntitlement.homePlanName,
+    home_expire_at: activeEntitlement.homeExpireAt,
+    servers: onlineServers.map(formatServer),
+    route: await formatRoute(db, route),
+    cooldown_remaining_seconds: getCooldownRemaining(route, now)
+  };
+}
+
+function assertServerSelection(serverIds) {
+  if (serverIds.length === 0) {
+    throw createLegacyBusinessError('请至少选择一台服务器', { code: 4106 });
+  }
+  if (serverIds.length > 2) {
+    throw createLegacyBusinessError('最多选择两台服务器', { code: 4106 });
+  }
+}
+
+function collectMissingIds(requestedIds, servers) {
+  const existingIds = new Set((servers || []).map((server) => Number(server.id)));
+  return requestedIds.filter((id) => !existingIds.has(Number(id)));
+}
+
+function assertSelectedServersOnline(serverIds, onlineServers) {
+  const missingIds = collectMissingIds(serverIds, onlineServers);
+  if (missingIds.length > 0) {
+    throw createLegacyBusinessError('选择的服务器不存在或当前离线', {
+      code: 4108,
+      data: {
+        failed_servers: missingIds.map((id) => ({
+          id,
+          name: `服务器 ${id}`,
+          message: '服务器不存在或当前离线'
+        })),
+        retryable: true
+      }
+    });
+  }
+}
+
+async function loadInvolvedServers(db, oldServerIds, nextServerIds, onlineServers) {
+  const involvedIds = normalizeServerIds([...oldServerIds, ...nextServerIds]);
+  const servers = await repository.listServersByIds(db, involvedIds);
+  const serverMap = new Map(servers.map((server) => [Number(server.id), server]));
+  const onlineIds = new Set(onlineServers.map((server) => Number(server.id)));
+
+  const missingOrOffline = involvedIds
+    .filter((id) => !serverMap.has(Number(id)) || !onlineIds.has(Number(id)))
+    .map((id) => {
+      const server = serverMap.get(Number(id));
+      return {
+        id,
+        name: server ? server.name : `服务器 ${id}`,
+        message: server ? '服务器当前离线，无法同步 routing' : '服务器不存在，无法同步 routing'
+      };
+    });
+
+  if (missingOrOffline.length > 0) {
+    throw createLegacyBusinessError('家宽 IP routing 同步失败，请重试', {
+      code: 4107,
+      data: {
+        failed_servers: missingOrOffline,
+        retryable: true
+      }
+    });
+  }
+
+  return involvedIds.map((id) => serverMap.get(Number(id)));
+}
+
+/**
+ * 向单台 3X-UI 服务器同步当前用户家宽 routing。
+ *
+ * @param {Object} server - 3X-UI 服务器记录
+ * @param {Object} context - 同步上下文
+ * @param {string} context.homeProxyTag - 家宽 outbound tag
+ * @param {string} context.email - 当前用户邮箱
+ * @param {number[]} context.nextServerIds - 用户新选择的服务器 ID
+ * @returns {Promise<Object>} 单台同步结果
+ */
+async function syncServerRoute(server, context) {
+  const xuiService = await xuiServiceFactory(server.api_url, server.api_token, {
+    apiVersion: server.panel_version || '3.0.2'
+  });
+  const configResult = await xuiService.getXrayConfig({ timeout: XUI_XRAY_TIMEOUT });
+  const xraySetting = normalizeXraySetting(configResult);
+  const outboundTestUrl = extractOutboundTestUrl(configResult);
+
+  removeMatchingHomeRules(xraySetting, context.homeProxyTag, context.email);
+
+  if (context.nextServerIds.includes(Number(server.id))) {
+    upsertHomeRoutingRule(xraySetting, context.homeProxyTag, context.email);
+  }
+
+  const updateResult = outboundTestUrl === undefined
+    ? await xuiService.updateXrayConfig(xraySetting, { timeout: XUI_XRAY_TIMEOUT })
+    : await xuiService.updateXrayConfig(xraySetting, outboundTestUrl, { timeout: XUI_XRAY_TIMEOUT });
+
+  if (updateResult && updateResult.success === false) {
+    throw new Error(updateResult.msg || updateResult.message || '回写 Xray 配置失败');
+  }
+
+  return { server_id: Number(server.id), server_name: server.name };
+}
+
+function collectFailedServers(servers, results) {
+  return results
+    .map((result, index) => ({ result, server: servers[index] }))
+    .filter((item) => item.result.status === 'rejected')
+    .map((item) => ({
+      id: Number(item.server.id),
+      name: item.server.name,
+      message: item.result.reason?.message || String(item.result.reason || '同步失败')
+    }));
+}
+
+async function saveSuccessfulRoute(db, payload) {
+  if (typeof db.transaction !== 'function') {
+    await repository.upsertUserHomeRoute(db, payload);
+    return;
+  }
+
+  const transaction = db.transaction(async (transactionDb) => {
+    await repository.upsertUserHomeRoute(transactionDb, payload);
+  });
+  await transaction();
+}
+
+/**
+ * 更新当前用户家宽 IP routing 绑定并同步到 3X-UI。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 当前用户 ID
+ * @param {Object} payload - 前端提交数据
+ * @param {Object} logger - 日志实例
+ * @returns {Promise<Object>} 更新后的绑定选项
+ */
+async function updateHomeRouting(db, userId, payload = {}, logger = console) {
+  const now = getNowTimestamp();
+  const nextServerIds = normalizeServerIds(payload.server_ids);
+  assertServerSelection(nextServerIds);
+
+  const entitlement = assertActiveHomeEntitlement(
+    await repository.findHomeRoutingEntitlement(db, userId),
+    now
+  );
+  const [currentRoute, onlineServers] = await Promise.all([
+    repository.findUserHomeRoute(db, userId),
+    repository.listOnlineServers(db)
+  ]);
+  const cooldownRemaining = getCooldownRemaining(currentRoute, now);
+
+  if (cooldownRemaining > 0) {
+    throw createLegacyBusinessError(`请稍后再修改，剩余 ${Math.ceil(cooldownRemaining / 60)} 分钟`, {
+      statusCode: 429,
+      code: 4109,
+      data: {
+        cooldown_remaining_seconds: cooldownRemaining
+      }
+    });
+  }
+
+  assertSelectedServersOnline(nextServerIds, onlineServers);
+
+  const oldServerIds = parseServerIds(currentRoute?.server_ids);
+  const involvedServers = await loadInvolvedServers(db, oldServerIds, nextServerIds, onlineServers);
+  const results = await runWithConcurrency(
+    involvedServers,
+    HOME_ROUTING_SYNC_CONCURRENCY,
+    (server) => syncServerRoute(server, {
+      homeProxyTag: entitlement.homeProxyTag,
+      email: entitlement.email,
+      nextServerIds
+    })
+  );
+  const failedServers = collectFailedServers(involvedServers, results);
+
+  if (failedServers.length > 0) {
+    failedServers.forEach((server) => {
+      logger.warn(`家宽 IP routing 同步失败: user=${entitlement.email}, serverId=${server.id}, server=${server.name}, tag=${entitlement.homeProxyTag}, error=${server.message}`);
+    });
+    throw createLegacyBusinessError('家宽 IP routing 同步失败，请重试', {
+      code: 4107,
+      data: {
+        failed_servers: failedServers,
+        retryable: true
+      }
+    });
+  }
+
+  await saveSuccessfulRoute(db, {
+    userId,
+    homeProxyTag: entitlement.homeProxyTag,
+    serverIds: nextServerIds,
+    syncedAt: now,
+    message: `同步成功，共处理 ${involvedServers.length} 台服务器`
+  });
+
+  return getHomeRoutingOptions(db, userId);
+}
+
+function setRepositoryForTest(testRepository) {
+  repository = testRepository;
+}
+
+function setXuiServiceFactoryForTest(factory) {
+  xuiServiceFactory = factory;
+}
+
+function resetTestDependencies() {
+  repository = require('../../repositories/user-home-routing-repository');
+  xuiServiceFactory = XuiService.getInstance.bind(XuiService);
+}
+
+module.exports = {
+  HOME_ROUTING_COOLDOWN_SECONDS,
+  getHomeRoutingOptions,
+  updateHomeRouting,
+  __testables: {
+    normalizeServerIds,
+    parseServerIds,
+    normalizeXraySetting,
+    extractInboundTags,
+    removeMatchingHomeRules,
+    upsertHomeRoutingRule,
+    assertActiveHomeEntitlement
+  },
+  setRepositoryForTest,
+  setXuiServiceFactoryForTest,
+  resetTestDependencies
+};
