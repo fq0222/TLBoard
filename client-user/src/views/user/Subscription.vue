@@ -42,134 +42,136 @@
     </section>
 
     <section class="content-grid">
-      <article class="panel-card result-card">
-        <div class="section-head">
-          <h2 class="card-title">结果区</h2>
-          <el-tag size="small" :type="cfOptimized ? 'success' : 'warning'">
-            {{ cfOptimized ? '极速通道已开启' : '极速通道未开启' }}
-          </el-tag>
-        </div>
-
-        <div v-if="subscriptionReady" class="subscription-links">
-          <div class="link-group">
-            <span class="link-label">通用订阅链接</span>
-            <el-input :model-value="subscription.subscription_url || ''" readonly size="large">
-              <template #append>
-                <el-button @click="copyLink(subscription.subscription_url)">复制</el-button>
-              </template>
-            </el-input>
-            <p class="link-tip">适用于 v2rayN、v2rayNG、Shadowrocket、Quantumult X 等客户端。</p>
+      <div class="primary-cards">
+        <article class="panel-card result-card">
+          <div class="section-head">
+            <h2 class="card-title">结果区</h2>
+            <el-tag size="small" :type="cfOptimized ? 'success' : 'warning'">
+              {{ cfOptimized ? '极速通道已开启' : '极速通道未开启' }}
+            </el-tag>
           </div>
 
-          <div class="link-group">
-            <span class="link-label">Clash 订阅链接</span>
-            <el-input :model-value="subscription.clash_url || ''" readonly size="large">
-              <template #append>
-                <el-button @click="copyLink(subscription.clash_url)">复制</el-button>
-              </template>
-            </el-input>
-            <p class="link-tip">适用于 Clash、Clash Verge、ClashX、Clash for Windows 等客户端。</p>
-          </div>
-        </div>
-        <el-empty v-else description="请先点击“生成订阅链接”按钮" />
-      </article>
+          <div v-if="subscriptionReady" class="subscription-links">
+            <div class="link-group">
+              <span class="link-label">通用订阅链接</span>
+              <el-input :model-value="subscription.subscription_url || ''" readonly size="large">
+                <template #append>
+                  <el-button @click="copyLink(subscription.subscription_url)">复制</el-button>
+                </template>
+              </el-input>
+              <p class="link-tip">适用于 v2rayN、v2rayNG、Shadowrocket、Quantumult X 等客户端。</p>
+            </div>
 
-      <article v-if="homeRoutingOptions.available" class="panel-card home-routing-card">
-        <div class="home-routing-head">
-          <h2 class="card-title">家宽 IP 控制</h2>
-          <el-button
-            type="primary"
-            :disabled="actionBusy || homeRoutingBusy || homeRoutingCooldownRemaining > 0"
-            @click="openHomeRoutingDialog"
+            <div class="link-group">
+              <span class="link-label">Clash 订阅链接</span>
+              <el-input :model-value="subscription.clash_url || ''" readonly size="large">
+                <template #append>
+                  <el-button @click="copyLink(subscription.clash_url)">复制</el-button>
+                </template>
+              </el-input>
+              <p class="link-tip">适用于 Clash、Clash Verge、ClashX、Clash for Windows 等客户端。</p>
+            </div>
+          </div>
+          <el-empty v-else description="请先点击“生成订阅链接”按钮" />
+        </article>
+
+        <article v-if="homeRoutingOptions.available" class="panel-card home-routing-card">
+          <div class="home-routing-head">
+            <h2 class="card-title">家宽 IP 控制</h2>
+            <el-button
+              type="primary"
+              :disabled="actionBusy || homeRoutingBusy || homeRoutingCooldownRemaining > 0"
+              @click="openHomeRoutingDialog"
+            >
+              {{ homeRoutingRoute ? '修改' : '添加' }}
+            </el-button>
+          </div>
+
+          <el-table
+            v-if="homeRoutingRoute"
+            :data="[homeRoutingRoute]"
+            class="home-routing-table"
+            size="large"
           >
-            {{ homeRoutingRoute ? '修改' : '添加' }}
-          </el-button>
-        </div>
+            <el-table-column prop="home_proxy_tag" label="IP" min-width="150" />
+            <el-table-column label="服务器" min-width="130">
+              <template #default="{ row }">
+                {{ row.servers?.[0]?.name || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="服务器" min-width="130">
+              <template #default="{ row }">
+                {{ row.servers?.[1]?.name || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="140">
+              <template #default>
+                <el-button
+                  link
+                  type="primary"
+                  :disabled="homeRoutingCooldownRemaining > 0"
+                  @click="openHomeRoutingDialog"
+                >
+                  修改
+                </el-button>
+                <el-button
+                  link
+                  type="danger"
+                  :disabled="homeRoutingCooldownRemaining > 0 || homeRoutingBusy"
+                  @click="deleteHomeRouting"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
 
-        <el-table
-          v-if="homeRoutingRoute"
-          :data="[homeRoutingRoute]"
-          class="home-routing-table"
-          size="large"
-        >
-          <el-table-column prop="home_proxy_tag" label="IP" min-width="150" />
-          <el-table-column label="服务器" min-width="130">
-            <template #default="{ row }">
-              {{ row.servers?.[0]?.name || '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column label="服务器" min-width="130">
-            <template #default="{ row }">
-              {{ row.servers?.[1]?.name || '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="140">
-            <template #default>
-              <el-button
-                link
-                type="primary"
-                :disabled="homeRoutingCooldownRemaining > 0"
-                @click="openHomeRoutingDialog"
-              >
-                修改
-              </el-button>
-              <el-button
-                link
-                type="danger"
-                :disabled="homeRoutingCooldownRemaining > 0 || homeRoutingBusy"
-                @click="deleteHomeRouting"
-              >
-                删除
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-
-        <div v-if="homeRoutingRoute" class="home-routing-mobile-list">
-          <article class="home-routing-mobile-card">
-            <div class="home-routing-mobile-field">
-              <span class="home-routing-mobile-label">IP</span>
-              <span class="home-routing-mobile-value ip-value">{{ homeRoutingRoute.home_proxy_tag || '-' }}</span>
-            </div>
-
-            <div class="home-routing-mobile-grid">
+          <div v-if="homeRoutingRoute" class="home-routing-mobile-list">
+            <article class="home-routing-mobile-card">
               <div class="home-routing-mobile-field">
-                <span class="home-routing-mobile-label">服务器</span>
-                <span class="home-routing-mobile-value">{{ homeRoutingRoute.servers?.[0]?.name || '-' }}</span>
+                <span class="home-routing-mobile-label">IP</span>
+                <span class="home-routing-mobile-value ip-value">{{ homeRoutingRoute.home_proxy_tag || '-' }}</span>
               </div>
-              <div class="home-routing-mobile-field">
-                <span class="home-routing-mobile-label">服务器</span>
-                <span class="home-routing-mobile-value">{{ homeRoutingRoute.servers?.[1]?.name || '-' }}</span>
+
+              <div class="home-routing-mobile-grid">
+                <div class="home-routing-mobile-field">
+                  <span class="home-routing-mobile-label">服务器</span>
+                  <span class="home-routing-mobile-value">{{ homeRoutingRoute.servers?.[0]?.name || '-' }}</span>
+                </div>
+                <div class="home-routing-mobile-field">
+                  <span class="home-routing-mobile-label">服务器</span>
+                  <span class="home-routing-mobile-value">{{ homeRoutingRoute.servers?.[1]?.name || '-' }}</span>
+                </div>
               </div>
-            </div>
 
-            <div class="home-routing-mobile-actions">
-              <el-button
-                type="primary"
-                size="large"
-                :disabled="homeRoutingCooldownRemaining > 0"
-                @click="openHomeRoutingDialog"
-              >
-                修改
-              </el-button>
-              <el-button
-                type="danger"
-                size="large"
-                :disabled="homeRoutingCooldownRemaining > 0 || homeRoutingBusy"
-                @click="deleteHomeRouting"
-              >
-                删除
-              </el-button>
-            </div>
-          </article>
-        </div>
+              <div class="home-routing-mobile-actions">
+                <el-button
+                  type="primary"
+                  size="large"
+                  :disabled="homeRoutingCooldownRemaining > 0"
+                  @click="openHomeRoutingDialog"
+                >
+                  修改
+                </el-button>
+                <el-button
+                  type="danger"
+                  size="large"
+                  :disabled="homeRoutingCooldownRemaining > 0 || homeRoutingBusy"
+                  @click="deleteHomeRouting"
+                >
+                  删除
+                </el-button>
+              </div>
+            </article>
+          </div>
 
-        <el-empty v-else description="暂未配置家宽 IP 服务器" />
+          <el-empty v-else description="暂未配置家宽 IP 服务器" />
 
-        <p v-if="homeRoutingCooldownRemaining > 0" class="home-routing-tip">
-          距离下次修改还需等待 {{ homeRoutingCooldownText }}
-        </p>
-      </article>
+          <p v-if="homeRoutingCooldownRemaining > 0" class="home-routing-tip">
+            距离下次修改还需等待 {{ homeRoutingCooldownText }}
+          </p>
+        </article>
+      </div>
 
       <article v-if="subscriptionReady" class="panel-card nodes-card">
         <div class="section-head">
@@ -1020,14 +1022,15 @@ onBeforeUnmount(() => {
   align-items: start;
 }
 
-.result-card,
-.home-routing-card {
-  grid-column: 1;
+.primary-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
 }
 
 .nodes-card {
-  grid-column: 2;
-  grid-row: 1 / span 2;
+  min-width: 0;
 }
 
 .section-head {
@@ -1379,13 +1382,6 @@ onBeforeUnmount(() => {
 @media (max-width: 1024px) {
   .content-grid {
     grid-template-columns: 1fr;
-  }
-
-  .result-card,
-  .home-routing-card,
-  .nodes-card {
-    grid-column: auto;
-    grid-row: auto;
   }
 }
 
