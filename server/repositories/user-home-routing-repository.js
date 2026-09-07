@@ -41,6 +41,17 @@ async function findUserHomeRoute(db, userId) {
 }
 
 /**
+ * 查询家宽 routing 删除所需的用户上下文。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 当前用户 ID
+ * @returns {Promise<Object|undefined>} 用户邮箱上下文
+ */
+async function findUserHomeRoutingContext(db, userId) {
+  return db.prepare('SELECT id AS user_id, email FROM users WHERE id = ?').get(userId);
+}
+
+/**
  * 查询用户可选择的在线 3X-UI 服务器。
  *
  * @param {Object} db - 数据库代理对象
@@ -117,10 +128,24 @@ async function upsertUserHomeRoute(db, payload) {
   );
 }
 
+/**
+ * 删除用户本地家宽 routing 绑定记录。
+ * 核心分支：调用方已确认远端清理成功，这里只删除当前用户自己的记录。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<void>}
+ */
+async function deleteUserHomeRoute(db, userId) {
+  await db.prepare('DELETE FROM user_home_proxy_routes WHERE user_id = ?').run(userId);
+}
+
 module.exports = {
   findHomeRoutingEntitlement,
   findUserHomeRoute,
+  findUserHomeRoutingContext,
   listOnlineServers,
   listServersByIds,
-  upsertUserHomeRoute
+  upsertUserHomeRoute,
+  deleteUserHomeRoute
 };

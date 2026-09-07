@@ -30,13 +30,22 @@ function createMemoryRepository(initialState = {}) {
     entitlement: initialState.entitlement,
     route: initialState.route,
     servers: initialState.servers || [],
-    savedRoutes: []
+    savedRoutes: [],
+    deletedRoutes: []
   };
 
   return {
     state,
     async findHomeRoutingEntitlement() {
       return state.entitlement ? clone(state.entitlement) : undefined;
+    },
+    async findUserHomeRoutingContext() {
+      return state.entitlement
+        ? {
+            user_id: state.entitlement.user_id,
+            email: state.entitlement.email
+          }
+        : undefined;
     },
     async findUserHomeRoute() {
       return state.route ? clone(state.route) : undefined;
@@ -58,6 +67,10 @@ function createMemoryRepository(initialState = {}) {
         last_sync_status: 'success',
         last_sync_message: payload.message || ''
       };
+    },
+    async deleteUserHomeRoute(db, userId) {
+      state.deletedRoutes.push({ userId });
+      state.route = undefined;
     }
   };
 }
@@ -518,6 +531,118 @@ async function testChangedHomeProxyTagRemovesOldTagRule() {
   assert.strictEqual(repository.state.savedRoutes[0].homeProxyTag, 'new-home-tag');
 }
 
+async function testDeleteRemovesOnlyCurrentUserFromSharedRuleAndDeletesLocalRoute() {
+  const configs = {
+    1: {
+      inbounds: [{ tag: 'in-a' }],
+      routing: {
+        rules: [
+          {
+            type: 'field',
+            inboundTag: ['in-a'],
+            outboundTag: 'local-ip-lax',
+            user: ['first@example.com', 'second@example.com']
+          }
+        ]
+      }
+    },
+    2: {
+      inbounds: [{ tag: 'in-b' }],
+      routing: {
+        rules: [
+          {
+            type: 'field',
+            inboundTag: ['in-b'],
+            outboundTag: 'local-ip-lax',
+            user: ['second@example.com']
+          }
+        ]
+      }
+    }
+  };
+  const calls = { get: [], update: [] };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement({ email: 'second@example.com' }),
+    route: {
+      user_id: 1,
+      home_proxy_tag: 'local-ip-lax',
+      server_ids: '[1,2]',
+      last_synced_at: Math.floor(Date.now() / 1000) - 3600
+    },
+    servers: [createServer(1), createServer(2)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+
+  await homeRoutingService.deleteHomeRouting({}, 1);
+
+  assert.deepStrictEqual(configs[1].routing.rules, [
+    {
+      type: 'field',
+      inboundTag: ['in-a'],
+      outboundTag: 'local-ip-lax',
+      user: ['first@example.com']
+    }
+  ]);
+  assert.deepStrictEqual(configs[2].routing.rules, []);
+  assert.deepStrictEqual(repository.state.deletedRoutes, [{ userId: 1 }]);
+}
+
+async function testDeleteFailureKeepsLocalRoute() {
+  const configs = {
+    1: {
+      inbounds: [{ tag: 'in-a' }],
+      routing: {
+        rules: [
+          { type: 'field', inboundTag: ['in-a'], outboundTag: 'local-ip-lax', user: ['second@example.com'] }
+        ]
+      }
+    }
+  };
+  const calls = { get: [], update: [] };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement({ email: 'second@example.com' }),
+    route: {
+      user_id: 1,
+      home_proxy_tag: 'local-ip-lax',
+      server_ids: '[1]',
+      last_synced_at: Math.floor(Date.now() / 1000) - 3600
+    },
+    servers: [createServer(1)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls, { update: [1] }));
+
+  await assert.rejects(
+    () => homeRoutingService.deleteHomeRouting({}, 1),
+    /家宽 IP routing 删除失败/
+  );
+
+  assert.strictEqual(repository.state.deletedRoutes.length, 0);
+  assert.ok(repository.state.route);
+}
+
+async function testDeleteIsBlockedByCooldown() {
+  const calls = { get: [], update: [] };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement({ email: 'second@example.com' }),
+    route: {
+      user_id: 1,
+      home_proxy_tag: 'local-ip-lax',
+      server_ids: '[1]',
+      last_synced_at: Math.floor(Date.now() / 1000) - 60
+    },
+    servers: [createServer(1)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory({}, calls));
+
+  await assert.rejects(
+    () => homeRoutingService.deleteHomeRouting({}, 1),
+    /请稍后再修改/
+  );
+
+  assert.deepStrictEqual(calls.get, []);
+  assert.strictEqual(repository.state.deletedRoutes.length, 0);
+}
+
 async function run() {
   try {
     await testRejectsMissingEntitlement();
@@ -533,6 +658,9 @@ async function run() {
     await testMergesUsersIntoSameHomeRoutingRule();
     await testRemovingUserKeepsSharedHomeRoutingRule();
     await testChangedHomeProxyTagRemovesOldTagRule();
+    await testDeleteRemovesOnlyCurrentUserFromSharedRuleAndDeletesLocalRoute();
+    await testDeleteFailureKeepsLocalRoute();
+    await testDeleteIsBlockedByCooldown();
   } finally {
     homeRoutingService.resetTestDependencies();
   }

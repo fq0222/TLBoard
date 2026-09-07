@@ -187,6 +187,26 @@ async function updateHomeRouting(req, res) {
 }
 
 /**
+ * 删除当前用户家宽 IP routing 绑定并同步清理 3X-UI。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
+async function deleteHomeRouting(req, res) {
+  try {
+    const data = await homeRoutingService.deleteHomeRouting(
+      req.app.locals.db,
+      req.user.id,
+      logger
+    );
+    return legacySuccess(res, data);
+  } catch (error) {
+    return handleControllerError(res, '删除家宽 IP routing', error);
+  }
+}
+
+/**
  * 输出 Base64 / Clash 等订阅文本内容。
  *
  * @param {Object} req - Express 请求对象
@@ -227,5 +247,6 @@ module.exports = {
   getSubscriptionInfo,
   getHomeRoutingOptions,
   updateHomeRouting,
+  deleteHomeRouting,
   getSubscriptionContent
 };

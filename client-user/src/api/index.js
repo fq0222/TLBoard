@@ -267,6 +267,14 @@ const userApi = {
   },
 
   /**
+   * 删除当前用户家宽 IP routing 绑定
+   * @returns {Promise<Object>} 删除后的绑定信息
+   */
+  deleteHomeRouting() {
+    return apiClient.delete('/subscription/home-routing', { timeout: 120000 })
+  },
+
+  /**
    * 获取留言板精选留言。
    * @returns {Promise<Object>} 精选留言和当前用户投票状态
    */

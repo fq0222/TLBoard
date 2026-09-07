@@ -576,6 +576,18 @@ async function saveSuccessfulRoute(db, payload) {
   await transaction();
 }
 
+async function deleteSuccessfulRoute(db, userId) {
+  if (typeof db.transaction !== 'function') {
+    await repository.deleteUserHomeRoute(db, userId);
+    return;
+  }
+
+  const transaction = db.transaction(async (transactionDb) => {
+    await repository.deleteUserHomeRoute(transactionDb, userId);
+  });
+  await transaction();
+}
+
 /**
  * 更新当前用户家宽 IP routing 绑定并同步到 3X-UI。
  *
@@ -650,6 +662,72 @@ async function updateHomeRouting(db, userId, payload = {}, logger = console) {
   return getHomeRoutingOptions(db, userId);
 }
 
+/**
+ * 删除当前用户家宽 IP routing 绑定并同步清理 3X-UI。
+ * 核心分支：删除同样遵守 30 分钟冷却；远端全部清理成功后才删除本地记录。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 当前用户 ID
+ * @param {Object} logger - 日志实例
+ * @returns {Promise<Object>} 删除后的绑定选项
+ */
+async function deleteHomeRouting(db, userId, logger = console) {
+  const now = getNowTimestamp();
+  const [currentRoute, userContext, onlineServers] = await Promise.all([
+    repository.findUserHomeRoute(db, userId),
+    repository.findUserHomeRoutingContext(db, userId),
+    repository.listOnlineServers(db)
+  ]);
+
+  if (!currentRoute) {
+    throw createLegacyBusinessError('家宽 IP routing 配置不存在', { statusCode: 404, code: 404 });
+  }
+  if (!userContext || !userContext.email) {
+    throw createLegacyBusinessError('用户不存在或邮箱异常', { statusCode: 404, code: 404 });
+  }
+
+  const cooldownRemaining = getCooldownRemaining(currentRoute, now);
+  if (cooldownRemaining > 0) {
+    throw createLegacyBusinessError(`请稍后再修改，剩余 ${Math.ceil(cooldownRemaining / 60)} 分钟`, {
+      statusCode: 429,
+      code: 4109,
+      data: {
+        cooldown_remaining_seconds: cooldownRemaining
+      }
+    });
+  }
+
+  const oldServerIds = parseServerIds(currentRoute.server_ids);
+  const involvedServers = await loadInvolvedServers(db, oldServerIds, [], onlineServers);
+  const results = await runWithConcurrency(
+    involvedServers,
+    HOME_ROUTING_SYNC_CONCURRENCY,
+    (server) => syncServerRoute(server, {
+      homeProxyTag: String(currentRoute.home_proxy_tag || '').trim(),
+      previousHomeProxyTag: '',
+      email: userContext.email,
+      nextServerIds: []
+    })
+  );
+  const failedServers = collectFailedServers(involvedServers, results);
+
+  if (failedServers.length > 0) {
+    failedServers.forEach((server) => {
+      logger.warn(`家宽 IP routing 删除失败: user=${userContext.email}, serverId=${server.id}, server=${server.name}, tag=${currentRoute.home_proxy_tag}, error=${server.message}`);
+    });
+    throw createLegacyBusinessError('家宽 IP routing 删除失败，请重试', {
+      code: 4110,
+      data: {
+        failed_servers: failedServers,
+        retryable: true
+      }
+    });
+  }
+
+  await deleteSuccessfulRoute(db, userId);
+  return getHomeRoutingOptions(db, userId);
+}
+
 function setRepositoryForTest(testRepository) {
   repository = testRepository;
 }
@@ -667,6 +745,7 @@ module.exports = {
   HOME_ROUTING_COOLDOWN_SECONDS,
   getHomeRoutingOptions,
   updateHomeRouting,
+  deleteHomeRouting,
   __testables: {
     normalizeServerIds,
     parseServerIds,

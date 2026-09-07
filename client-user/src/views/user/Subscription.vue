@@ -103,7 +103,7 @@
               {{ row.servers?.[1]?.name || '-' }}
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="100">
+          <el-table-column label="操作" width="140">
             <template #default>
               <el-button
                 link
@@ -112,6 +112,14 @@
                 @click="openHomeRoutingDialog"
               >
                 修改
+              </el-button>
+              <el-button
+                link
+                type="danger"
+                :disabled="homeRoutingCooldownRemaining > 0 || homeRoutingBusy"
+                @click="deleteHomeRouting"
+              >
+                删除
               </el-button>
             </template>
           </el-table-column>
@@ -517,6 +525,57 @@ async function submitHomeRouting() {
       ElMessage.error(`同步失败：${serverNames}，请重试`)
     } else {
       ElMessage.error(error.userMessage || '家宽 IP 配置同步失败')
+    }
+  } finally {
+    homeRoutingBusy.value = false
+  }
+}
+
+/**
+ * 删除当前用户家宽 IP routing 绑定。
+ * 核心分支：删除需用户确认，远端失败时保留本地记录并提示失败服务器。
+ */
+async function deleteHomeRouting() {
+  if (!homeRoutingRoute.value) {
+    ElMessage.warning('暂无可删除的家宽 IP 配置')
+    return
+  }
+  if (homeRoutingCooldownRemaining.value > 0) {
+    ElMessage.warning(`距离下次修改还需等待 ${homeRoutingCooldownText.value}`)
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '确定删除当前家宽 IP 服务器配置？删除会同步清理对应 3X-UI 服务器中的 routing。',
+      '删除确认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+
+  homeRoutingBusy.value = true
+  try {
+    const response = await api.user.deleteHomeRouting()
+    homeRoutingOptions.value = {
+      ...homeRoutingOptions.value,
+      ...(response.data || {})
+    }
+    ElMessage.success('家宽 IP 配置已删除')
+    await fetchPageData()
+  } catch (error) {
+    console.error('删除家宽 IP routing 失败:', error)
+    const failedServers = error.response?.data?.data?.failed_servers || []
+    if (failedServers.length > 0) {
+      const serverNames = failedServers.map((server) => server.name).join('、')
+      ElMessage.error(`删除失败：${serverNames}，请重试`)
+    } else {
+      ElMessage.error(error.userMessage || '家宽 IP 配置删除失败')
     }
   } finally {
     homeRoutingBusy.value = false

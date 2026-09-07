@@ -24,6 +24,7 @@ router.put('/home-routing', authenticateUser, [
     .isInt({ min: 1 })
     .withMessage('服务器ID必须是大于0的整数')
 ], subscriptionController.updateHomeRouting);
+router.delete('/home-routing', authenticateUser, subscriptionController.deleteHomeRouting);
 router.get('/', authenticateUser, subscriptionController.getSubscriptionInfo);
 router.get('/sub/:token', subscriptionInvalidTokenLimiter, [
   param('token')
