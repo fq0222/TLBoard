@@ -3,6 +3,7 @@ const { legacySuccess, legacyFail, legacyValidationError } = require('../../shar
 const { createLogger } = require('../../utils/logger');
 const { generateSubscriptionUrls } = require('../../utils/site-url');
 const subscriptionService = require('../../services/user/subscription-service');
+const homeRoutingService = require('../../services/user/home-routing-service');
 const ipLocationService = require('../../services/shared/ip-location-service');
 
 const logger = createLogger('USER-SUB');
@@ -145,6 +146,47 @@ async function getSubscriptionInfo(req, res) {
 }
 
 /**
+ * 获取当前用户家宽 IP routing 配置选项。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
+async function getHomeRoutingOptions(req, res) {
+  try {
+    const data = await homeRoutingService.getHomeRoutingOptions(req.app.locals.db, req.user.id);
+    return legacySuccess(res, data);
+  } catch (error) {
+    return handleControllerError(res, '获取家宽 IP routing 配置', error);
+  }
+}
+
+/**
+ * 更新当前用户家宽 IP routing 绑定并同步到 3X-UI。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
+async function updateHomeRouting(req, res) {
+  if (handleValidationFailure(req, res)) {
+    return;
+  }
+
+  try {
+    const data = await homeRoutingService.updateHomeRouting(
+      req.app.locals.db,
+      req.user.id,
+      req.body,
+      logger
+    );
+    return legacySuccess(res, data);
+  } catch (error) {
+    return handleControllerError(res, '同步家宽 IP routing', error);
+  }
+}
+
+/**
  * 输出 Base64 / Clash 等订阅文本内容。
  *
  * @param {Object} req - Express 请求对象
@@ -183,5 +225,7 @@ module.exports = {
   generateSubscription,
   replaceSubscriptionLink,
   getSubscriptionInfo,
+  getHomeRoutingOptions,
+  updateHomeRouting,
   getSubscriptionContent
 };

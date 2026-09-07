@@ -5,7 +5,7 @@
  */
 
 const express = require('express');
-const { param, query } = require('express-validator');
+const { body, param, query } = require('express-validator');
 const { authenticateUser } = require('../../middleware/auth-user');
 const { subscriptionInvalidTokenLimiter } = require('../../middleware/rate-limiter');
 const subscriptionController = require('../../controllers/user/subscription-controller');
@@ -15,6 +15,15 @@ const router = express.Router();
 
 router.post('/generate', authenticateUser, subscriptionController.generateSubscription);
 router.post('/replace-link', authenticateUser, subscriptionController.replaceSubscriptionLink);
+router.get('/home-routing/options', authenticateUser, subscriptionController.getHomeRoutingOptions);
+router.put('/home-routing', authenticateUser, [
+  body('server_ids')
+    .isArray({ min: 1, max: 2 })
+    .withMessage('最多选择两台服务器'),
+  body('server_ids.*')
+    .isInt({ min: 1 })
+    .withMessage('服务器ID必须是大于0的整数')
+], subscriptionController.updateHomeRouting);
 router.get('/', authenticateUser, subscriptionController.getSubscriptionInfo);
 router.get('/sub/:token', subscriptionInvalidTokenLimiter, [
   param('token')
