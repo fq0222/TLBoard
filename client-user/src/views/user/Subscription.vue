@@ -74,6 +74,56 @@
         <el-empty v-else description="请先点击“生成订阅链接”按钮" />
       </article>
 
+      <article v-if="homeRoutingOptions.available" class="panel-card home-routing-card">
+        <div class="home-routing-head">
+          <h2 class="card-title">家宽 IP 控制</h2>
+          <el-button
+            type="primary"
+            :disabled="actionBusy || homeRoutingBusy || homeRoutingCooldownRemaining > 0"
+            @click="openHomeRoutingDialog"
+          >
+            {{ homeRoutingRoute ? '修改' : '添加' }}
+          </el-button>
+        </div>
+
+        <el-table
+          v-if="homeRoutingRoute"
+          :data="[homeRoutingRoute]"
+          class="home-routing-table"
+          size="large"
+        >
+          <el-table-column prop="home_proxy_tag" label="IP" min-width="150" />
+          <el-table-column label="服务器" min-width="130">
+            <template #default="{ row }">
+              {{ row.servers?.[0]?.name || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="服务器" min-width="130">
+            <template #default="{ row }">
+              {{ row.servers?.[1]?.name || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100">
+            <template #default>
+              <el-button
+                link
+                type="primary"
+                :disabled="homeRoutingCooldownRemaining > 0"
+                @click="openHomeRoutingDialog"
+              >
+                修改
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-empty v-else description="暂未配置家宽 IP 服务器" />
+
+        <p v-if="homeRoutingCooldownRemaining > 0" class="home-routing-tip">
+          距离下次修改还需等待 {{ homeRoutingCooldownText }}
+        </p>
+      </article>
+
       <article v-if="subscriptionReady" class="panel-card nodes-card">
         <div class="section-head">
           <h2 class="card-title">节点列表</h2>
@@ -186,6 +236,55 @@
     </el-dialog>
 
     <el-dialog
+      v-model="homeRoutingDialogVisible"
+      title="家宽 IP 控制"
+      :width="homeRoutingDialogWidth"
+      :close-on-click-modal="false"
+    >
+      <el-form label-position="top">
+        <el-form-item label="家宽 IP">
+          <el-select v-model="homeRoutingForm.home_proxy_tag" disabled style="width: 100%">
+            <el-option
+              :label="homeRoutingOptions.home_proxy_tag"
+              :value="homeRoutingOptions.home_proxy_tag"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="服务器">
+          <el-select v-model="homeRoutingForm.server_id_1" placeholder="请选择服务器" style="width: 100%">
+            <el-option
+              v-for="server in homeRoutingServers"
+              :key="server.id"
+              :label="server.name"
+              :value="server.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="服务器">
+          <el-select
+            v-model="homeRoutingForm.server_id_2"
+            clearable
+            placeholder="可选第二台服务器"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="server in secondHomeRoutingServers"
+              :key="server.id"
+              :label="server.name"
+              :value="server.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="homeRoutingDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="homeRoutingBusy" @click="submitHomeRouting">
+          确定
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
       v-model="qrDialogVisible"
       title="订阅二维码"
       :width="qrDialogWidth"
@@ -247,6 +346,14 @@ const pageLoading = ref(false)
 const generatingSubscription = ref(false)
 const cfOptimized = ref(false)
 const optimizing = ref(false)
+const homeRoutingOptions = ref({ available: false })
+const homeRoutingDialogVisible = ref(false)
+const homeRoutingBusy = ref(false)
+const homeRoutingForm = ref({
+  home_proxy_tag: '',
+  server_id_1: null,
+  server_id_2: null
+})
 const optimizeProgress = ref(0)
 const optimizeStatusText = ref('')
 const windowWidth = ref(window.innerWidth)
@@ -260,17 +367,33 @@ const MAX_OPTIMIZE_FAILURE_COUNT = 3
 
 const hasNodes = computed(() => Array.isArray(subscription.value.nodes) && subscription.value.nodes.length > 0)
 const subscriptionReady = computed(() => !!subscription.value.subscription_ready)
-const actionBusy = computed(() => optimizing.value || generatingSubscription.value || generatingQr.value)
+const actionBusy = computed(() => optimizing.value || generatingSubscription.value || generatingQr.value || homeRoutingBusy.value)
 const optimizeDialogWidth = computed(() => (windowWidth.value <= 768 ? '94%' : '420px'))
+const homeRoutingDialogWidth = computed(() => (windowWidth.value <= 768 ? '92vw' : '520px'))
 const qrDialogWidth = computed(() => (windowWidth.value <= 768 ? 'calc(100vw - 20px)' : '740px'))
 const websiteUrl = computed(() => getWebsiteUrl(subscription.value.subscription_url))
+const homeRoutingRoute = computed(() => homeRoutingOptions.value.route || null)
+const homeRoutingServers = computed(() => homeRoutingOptions.value.servers || [])
+const secondHomeRoutingServers = computed(() => (
+  homeRoutingServers.value.filter((server) => Number(server.id) !== Number(homeRoutingForm.value.server_id_1))
+))
+const homeRoutingCooldownRemaining = computed(() => Number(homeRoutingOptions.value.cooldown_remaining_seconds || 0))
+const homeRoutingCooldownText = computed(() => {
+  const seconds = homeRoutingCooldownRemaining.value
+  const minutes = Math.ceil(seconds / 60)
+  return `${minutes} 分钟`
+})
 
 async function fetchPageData() {
   try {
     pageLoading.value = true
-    const [subscriptionResponse, profileResult] = await Promise.all([
+    const [subscriptionResponse, profileResult, homeRoutingResponse] = await Promise.all([
       api.user.getSubscription(),
-      userStore.fetchUserProfile()
+      userStore.fetchUserProfile(),
+      api.user.getHomeRoutingOptions().catch((error) => {
+        console.error('获取家宽 IP routing 配置失败:', error)
+        return { code: 0, data: { available: false } }
+      })
     ])
 
     if (subscriptionResponse.code === 0) {
@@ -279,6 +402,10 @@ async function fetchPageData() {
 
     if (profileResult.success) {
       cfOptimized.value = !!profileResult.data.cf_optimized
+    }
+
+    if (homeRoutingResponse.code === 0) {
+      homeRoutingOptions.value = homeRoutingResponse.data || { available: false }
     }
   } catch (error) {
     console.error('获取订阅页面数据失败:', error)
@@ -330,6 +457,69 @@ function fallbackCopyText(text) {
 
   if (!copied) {
     throw new Error('execCommand copy failed')
+  }
+}
+
+/**
+ * 打开家宽 IP routing 添加或修改弹窗。
+ * 核心分支：已有绑定时回填服务器选择；未绑定时仅预选当前家宽 IP tag。
+ */
+function openHomeRoutingDialog() {
+  const routeServerIds = homeRoutingRoute.value?.server_ids || []
+  homeRoutingForm.value = {
+    home_proxy_tag: homeRoutingOptions.value.home_proxy_tag || '',
+    server_id_1: routeServerIds[0] || null,
+    server_id_2: routeServerIds[1] || null
+  }
+  homeRoutingDialogVisible.value = true
+}
+
+/**
+ * 从弹窗表单构造服务器 ID 列表。
+ * @returns {number[]} 去重前的有效服务器 ID，用于前端重复选择提示。
+ */
+function buildHomeRoutingServerIds() {
+  return [homeRoutingForm.value.server_id_1, homeRoutingForm.value.server_id_2]
+    .map(Number)
+    .filter((id) => Number.isInteger(id) && id > 0)
+}
+
+/**
+ * 提交当前用户家宽 IP routing 绑定。
+ * 核心分支：后端远端同步失败时保留弹窗，用户可以立即重试。
+ */
+async function submitHomeRouting() {
+  const serverIds = buildHomeRoutingServerIds()
+  if (serverIds.length === 0) {
+    ElMessage.warning('请选择至少一台服务器')
+    return
+  }
+  if (new Set(serverIds).size !== serverIds.length) {
+    ElMessage.warning('两台服务器不能重复')
+    return
+  }
+
+  homeRoutingBusy.value = true
+  try {
+    const response = await api.user.updateHomeRouting(serverIds)
+    homeRoutingOptions.value = {
+      ...homeRoutingOptions.value,
+      ...(response.data || {})
+    }
+    homeRoutingDialogVisible.value = false
+    ElMessage.success('家宽 IP 配置已同步')
+    await fetchPageData()
+  } catch (error) {
+    console.error('同步家宽 IP routing 失败:', error)
+    const failedServers = error.response?.data?.data?.failed_servers || []
+    if (failedServers.length > 0) {
+      const serverNames = failedServers.map((server) => server.name).join('、')
+      ElMessage.error(`同步失败：${serverNames}，请重试`)
+    } else {
+      ElMessage.error(error.userMessage || '家宽 IP 配置同步失败')
+    }
+  } finally {
+    homeRoutingBusy.value = false
   }
 }
 
@@ -732,6 +922,16 @@ onBeforeUnmount(() => {
   align-items: start;
 }
 
+.result-card,
+.home-routing-card {
+  grid-column: 1;
+}
+
+.nodes-card {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
 .section-head {
   display: flex;
   align-items: center;
@@ -769,6 +969,29 @@ onBeforeUnmount(() => {
 .link-tip {
   margin: 8px 0 0;
   color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.home-routing-card {
+  min-height: 220px;
+}
+
+.home-routing-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.home-routing-table {
+  width: 100%;
+}
+
+.home-routing-tip {
+  margin: 12px 0 0;
+  color: #b45309;
   font-size: 13px;
   line-height: 1.6;
 }
@@ -1055,6 +1278,13 @@ onBeforeUnmount(() => {
   .content-grid {
     grid-template-columns: 1fr;
   }
+
+  .result-card,
+  .home-routing-card,
+  .nodes-card {
+    grid-column: auto;
+    grid-row: auto;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1079,6 +1309,15 @@ onBeforeUnmount(() => {
   .section-head {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .home-routing-card {
+    min-height: 0;
+  }
+
+  .home-routing-head {
+    align-items: flex-start;
+    margin-bottom: 14px;
   }
 
   .nodes-table-wrap {
