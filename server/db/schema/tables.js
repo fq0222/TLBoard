@@ -171,6 +171,23 @@ const tableDefinitions = [
     `
   },
   {
+    logMessage: '用户家宽 IP routing 绑定表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_home_proxy_routes (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        home_proxy_tag VARCHAR(255) NOT NULL,
+        server_ids TEXT NOT NULL DEFAULT '[]',
+        last_synced_at BIGINT,
+        last_sync_status VARCHAR(30) NOT NULL DEFAULT 'success',
+        last_sync_message TEXT NOT NULL DEFAULT '',
+        created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()),
+        UNIQUE(user_id)
+      )
+    `
+  },
+  {
     logMessage: '流量同步日志表初始化完成',
     sql: `
       CREATE TABLE IF NOT EXISTS traffic_sync_log (

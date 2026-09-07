@@ -17,6 +17,8 @@ const indexStatements = [
   'CREATE INDEX IF NOT EXISTS idx_referral_rewards_referred_user_id ON referral_rewards(referred_user_id)',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_home_proxies_tag ON home_proxies(tag)',
   'CREATE INDEX IF NOT EXISTS idx_home_proxies_sync_status ON home_proxies(sync_status)',
+  'CREATE INDEX IF NOT EXISTS idx_user_home_proxy_routes_user_id ON user_home_proxy_routes(user_id)',
+  'CREATE INDEX IF NOT EXISTS idx_user_home_proxy_routes_home_proxy_tag ON user_home_proxy_routes(home_proxy_tag)',
   'CREATE INDEX IF NOT EXISTS idx_xui_nodes_server_id ON xui_nodes(server_id)',
   'CREATE INDEX IF NOT EXISTS idx_user_cf_ips_user_id ON user_cf_ips(user_id)',
   'CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id)',
