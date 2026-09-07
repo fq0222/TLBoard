@@ -547,7 +547,7 @@ async function deleteHomeRouting() {
 
   try {
     await ElMessageBox.confirm(
-      '确定删除当前家宽 IP 服务器配置？删除会同步清理对应 3X-UI 服务器中的 routing。',
+      '删除后，当前配置的服务器将不再使用该家宽 IP 出口。确定继续删除？',
       '删除确认',
       {
         confirmButtonText: '确定',
