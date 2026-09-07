@@ -466,6 +466,12 @@ import { CircleCheck, Loading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import api from '@/api'
+import {
+  buildDisplayPlans,
+  filterHomeIpPlans,
+  filterTrafficPlans,
+  resolveRecommendedTrafficPlanId
+} from '@/utils/plan-categories'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -491,25 +497,10 @@ const renewTipText = computed(() => {
   return '不限时套餐续费会在现有套餐基础上累加流量。'
 })
 
-const recommendedPlanId = computed(() => {
-  const preferred = trafficPlans.value.find((plan) => plan.is_recommended || plan.recommended)
-  if (preferred) return preferred.id
-
-  const availablePlans = trafficPlans.value.filter((plan) => !plan.is_soldout)
-  if (availablePlans.length > 0) return availablePlans[0].id
-
-  return trafficPlans.value[0]?.id ?? null
-})
-
-const displayPlans = computed(() =>
-  plans.value.map((plan) => ({
-    ...plan,
-    isRecommended: plan.id === recommendedPlanId.value,
-    durationText: Number(plan.duration_days) === 0 ? '不限时套餐' : `${plan.duration_days} 天周期`
-  }))
-)
-const trafficPlans = computed(() => displayPlans.value.filter((plan) => plan.plan_type !== 'home_ip'))
-const homeIpPlans = computed(() => displayPlans.value.filter((plan) => plan.plan_type === 'home_ip'))
+const recommendedPlanId = computed(() => resolveRecommendedTrafficPlanId(plans.value))
+const displayPlans = computed(() => buildDisplayPlans(plans.value, recommendedPlanId.value))
+const trafficPlans = computed(() => filterTrafficPlans(displayPlans.value))
+const homeIpPlans = computed(() => filterHomeIpPlans(displayPlans.value))
 
 /**
  * 初始化套餐页所需数据。
