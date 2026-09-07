@@ -136,6 +136,7 @@ async function findPaidOrderContextByOutTradeNo(db, outTradeNo) {
   return db.prepare(`
     SELECT o.*, o.id, o.referrer_user_id,
            u.expire_at as current_expire_at, u.traffic_limit as current_traffic_limit,
+           u.home_plan_id as current_home_plan_id, u.home_expire_at as current_home_expire_at,
            u.traffic_used as current_traffic_used,
            u.email, u.subscription_token, u.plan_id as current_plan_id, u.enabled as current_enabled,
            u.disable_reason as current_disable_reason, u.payment_count as current_payment_count,
@@ -432,6 +433,25 @@ async function listAdminOrders(db, payload) {
 }
 
 /**
+ * 写入支付完成后的家宽 IP 附加套餐权益。
+ * 职责：只更新用户家宽套餐字段，不覆盖主流量套餐权益。
+ * 关键参数：payload.homePlanId 为家宽套餐 ID，payload.homeExpireAt 为秒级到期时间。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {{userId:number,homePlanId:number,homeExpireAt:number,updatedAt:number}} payload - 家宽权益数据
+ * @returns {Promise<void>}
+ */
+async function updateUserHomePlanAfterPaidOrder(db, payload) {
+  await db.prepare(`
+    UPDATE users SET
+      home_plan_id = ?,
+      home_expire_at = ?,
+      updated_at = ?
+    WHERE id = ?
+  `).run(payload.homePlanId, payload.homeExpireAt, payload.updatedAt, payload.userId);
+}
+
+/**
  * 统计管理端订单全局汇总。
  *
  * @param {Object} db - 数据库代理对象
@@ -502,6 +522,7 @@ module.exports = {
   findPaidOrderContextByOutTradeNo,
   markOrderPaid,
   updateUserAfterPaidOrder,
+  updateUserHomePlanAfterPaidOrder,
   incrementPlanSalesCount,
   decrementPlanSalesCount,
   countUserOrders,

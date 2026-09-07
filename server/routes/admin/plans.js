@@ -27,8 +27,12 @@ router.post('/', authenticateAdmin, [
     .withMessage('流量上限必须是非负整数'),
   body('plan_type')
     .optional()
-    .isIn(['lifetime', 'timed'])
+    .isIn(['lifetime', 'timed', 'home_ip'])
     .withMessage('套餐类型无效'),
+  body('home_proxy_tag')
+    .optional({ nullable: true })
+    .isString()
+    .withMessage('home_proxy_tag必须是字符串'),
   body('show_on_home')
     .optional()
     .isBoolean()
@@ -65,8 +69,12 @@ router.put('/:id', authenticateAdmin, [
     .withMessage('流量上限必须是非负整数'),
   body('plan_type')
     .optional()
-    .isIn(['lifetime', 'timed'])
+    .isIn(['lifetime', 'timed', 'home_ip'])
     .withMessage('套餐类型无效'),
+  body('home_proxy_tag')
+    .optional({ nullable: true })
+    .isString()
+    .withMessage('home_proxy_tag必须是字符串'),
   body('show_on_home')
     .optional()
     .isBoolean()

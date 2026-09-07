@@ -7,7 +7,8 @@ const { formatTraffic } = require('../../shared/utils/format-traffic');
 
 const PLAN_TYPES = {
   LIFETIME: 'lifetime',
-  TIMED: 'timed'
+  TIMED: 'timed',
+  HOME_IP: 'home_ip'
 };
 
 /**
@@ -16,7 +17,9 @@ const PLAN_TYPES = {
  * @returns {string} 仅返回 lifetime 或 timed，历史空值按 lifetime 处理
  */
 function normalizePlanType(value) {
-  return value === PLAN_TYPES.TIMED ? PLAN_TYPES.TIMED : PLAN_TYPES.LIFETIME;
+  if (value === PLAN_TYPES.TIMED) return PLAN_TYPES.TIMED;
+  if (value === PLAN_TYPES.HOME_IP) return PLAN_TYPES.HOME_IP;
+  return PLAN_TYPES.LIFETIME;
 }
 
 /**
@@ -38,6 +41,15 @@ function isTimedPlan(plan) {
 }
 
 /**
+ * 判断套餐是否为家宽 IP 套餐。
+ * @param {object} plan - 套餐对象，读取 plan_type 字段
+ * @returns {boolean} 仅显式 home_ip 返回 true
+ */
+function isHomeIpPlan(plan) {
+  return normalizePlanType(plan?.plan_type) === PLAN_TYPES.HOME_IP;
+}
+
+/**
  * 校验套餐有效天数与类型是否匹配。
  * @param {object} plan - 套餐对象，读取 plan_type 和 duration_days
  * @returns {{valid: boolean, message?: string}} lifetime 必须为 0，timed 必须大于 0
@@ -50,6 +62,13 @@ function validatePlanDuration(plan) {
     return {
       valid: false,
       message: '不限时套餐的有效天数必须为 0'
+    };
+  }
+
+  if (planType === PLAN_TYPES.HOME_IP && (!Number.isFinite(durationDays) || durationDays <= 0)) {
+    return {
+      valid: false,
+      message: '家宽 IP 套餐的有效天数必须大于 0'
     };
   }
 
@@ -96,6 +115,7 @@ module.exports = {
   normalizePlanType,
   isLifetimePlan,
   isTimedPlan,
+  isHomeIpPlan,
   validatePlanDuration,
   buildTimedRenewResetPreview
 };

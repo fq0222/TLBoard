@@ -1,6 +1,6 @@
 const { formatTraffic } = require('../../shared/utils/format-traffic');
 const planRepository = require('../../repositories/plan-repository');
-const { normalizePlanType } = require('../shared/plan-type');
+const { normalizePlanType, isHomeIpPlan } = require('../shared/plan-type');
 
 /**
  * 用户端套餐服务
@@ -24,8 +24,9 @@ async function listAvailablePlans(db) {
     price_text: (plan.price / 100).toFixed(2),
     duration_days: plan.duration_days,
     traffic_limit: plan.traffic_limit,
-    traffic_text: formatTraffic(plan.traffic_limit),
+    traffic_text: isHomeIpPlan(plan) ? '不限制流量' : formatTraffic(plan.traffic_limit),
     plan_type: normalizePlanType(plan.plan_type),
+    home_proxy_tag: plan.home_proxy_tag || '',
     show_on_home: plan.show_on_home === undefined ? 1 : Number(plan.show_on_home),
     sort_order: plan.sort_order,
     sales_limit: plan.sales_limit,

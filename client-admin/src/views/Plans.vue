@@ -18,8 +18,8 @@
         <el-table-column prop="name" label="套餐名称" />
         <el-table-column label="套餐类型" width="110">
           <template #default="scope">
-            <el-tag :type="scope.row.plan_type === 'timed' ? 'warning' : 'info'">
-              {{ scope.row.plan_type_text || (scope.row.plan_type === 'timed' ? '限时套餐' : '不限时套餐') }}
+            <el-tag :type="getPlanTypeTagType(scope.row.plan_type)">
+              {{ scope.row.plan_type_text || getPlanTypeText(scope.row.plan_type) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -33,7 +33,16 @@
             {{ formatDuration(scope.row) }}
           </template>
         </el-table-column>
-        <el-table-column prop="traffic_text" label="流量上限" />
+        <el-table-column label="流量上限">
+          <template #default="scope">
+            {{ scope.row.plan_type === 'home_ip' ? '不限制流量' : scope.row.traffic_text }}
+          </template>
+        </el-table-column>
+        <el-table-column label="家宽 tag" min-width="140">
+          <template #default="scope">
+            {{ scope.row.plan_type === 'home_ip' ? (scope.row.home_proxy_tag || '-') : '-' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="sort_order" label="排序" width="80" />
         <el-table-column label="可销售总量" width="120">
           <template #default="scope">
@@ -92,17 +101,18 @@
           <el-radio-group v-model="planForm.plan_type">
             <el-radio-button label="timed">限时套餐</el-radio-button>
             <el-radio-button label="lifetime">不限时套餐</el-radio-button>
+            <el-radio-button label="home_ip">家宽IP套餐</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="有效天数" prop="duration_days">
           <el-input-number
             v-model="planForm.duration_days"
-            :min="planForm.plan_type === 'timed' ? 1 : 0"
+            :min="planForm.plan_type === 'lifetime' ? 0 : 1"
             :disabled="planForm.plan_type === 'lifetime'"
           />
-          <span class="form-tip">{{ planForm.plan_type === 'lifetime' ? '不限时套餐固定为 0' : '限时套餐需大于 0' }}</span>
+          <span class="form-tip">{{ getDurationTip() }}</span>
         </el-form-item>
-        <el-form-item label="流量上限" prop="traffic_limit">
+        <el-form-item v-if="planForm.plan_type !== 'home_ip'" label="流量上限" prop="traffic_limit">
           <div class="traffic-input">
             <el-input-number v-model="trafficValue" :min="0" :precision="2" />
             <el-select v-model="trafficUnit" style="width: 100px;">
@@ -112,6 +122,23 @@
               <el-option label="B" :value="1" />
             </el-select>
           </div>
+        </el-form-item>
+        <el-form-item v-if="planForm.plan_type === 'home_ip'" label="家宽 tag" prop="home_proxy_tag">
+          <el-select
+            v-model="planForm.home_proxy_tag"
+            filterable
+            clearable
+            placeholder="请选择家宽 IP tag"
+            style="width: 240px;"
+          >
+            <el-option
+              v-for="proxy in homeProxies"
+              :key="proxy.tag"
+              :label="proxy.tag"
+              :value="proxy.tag"
+            />
+          </el-select>
+          <span class="form-tip">绑定家宽 IP 管理中的 tag</span>
         </el-form-item>
         <el-form-item label="排序权重" prop="sort_order">
           <el-input-number v-model="planForm.sort_order" :min="0" />
@@ -143,6 +170,7 @@ import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
 import api from '@/api'
 
 const plans = ref([])
+const homeProxies = ref([])
 const dialogVisible = ref(false)
 const isEditing = ref(false)
 const submitting = ref(false)
@@ -160,6 +188,7 @@ const planForm = reactive({
   plan_type: 'timed',
   duration_days: 30,
   traffic_limit: 0,
+  home_proxy_tag: '',
   sort_order: 0,
   enabled: true,
   show_on_home: true,
@@ -179,9 +208,24 @@ function validateDurationDays(rule, value, callback) {
   }
 
   if (!Number.isFinite(days) || days <= 0) {
-    callback(new Error('限时套餐的有效天数必须大于 0'))
+    callback(new Error('限时或家宽 IP 套餐的有效天数必须大于 0'))
     return
   }
+  callback()
+}
+
+// 校验家宽 IP 套餐必须绑定已有 tag，避免提交后端必然失败的数据。
+function validateHomeProxyTag(rule, value, callback) {
+  if (planForm.plan_type !== 'home_ip') {
+    callback()
+    return
+  }
+
+  if (!String(value || '').trim()) {
+    callback(new Error('请选择家宽 IP tag'))
+    return
+  }
+
   callback()
 }
 
@@ -189,7 +233,8 @@ const planRules = {
   name: [{ required: true, message: '请输入套餐名称', trigger: 'blur' }],
   price: [{ required: true, message: '请输入价格', trigger: 'blur' }],
   plan_type: [{ required: true, message: '请选择套餐类型', trigger: 'change' }],
-  duration_days: [{ required: true, validator: validateDurationDays, trigger: 'change' }]
+  duration_days: [{ required: true, validator: validateDurationDays, trigger: 'change' }],
+  home_proxy_tag: [{ validator: validateHomeProxyTag, trigger: 'change' }]
 }
 
 function formatTime(timestamp) {
@@ -212,6 +257,22 @@ function formatDuration(plan) {
   return resolvePlanType(plan) === 'lifetime' ? '无限期' : `${plan.duration_days}天`
 }
 
+function getPlanTypeText(planType) {
+  if (planType === 'home_ip') return '家宽IP套餐'
+  return planType === 'timed' ? '限时套餐' : '不限时套餐'
+}
+
+function getPlanTypeTagType(planType) {
+  if (planType === 'home_ip') return 'success'
+  return planType === 'timed' ? 'warning' : 'info'
+}
+
+function getDurationTip() {
+  if (planForm.plan_type === 'lifetime') return '不限时套餐固定为 0'
+  if (planForm.plan_type === 'home_ip') return '家宽 IP 套餐需大于 0'
+  return '限时套餐需大于 0'
+}
+
 // 监听流量值和单位变化，计算实际字节数
 watch([trafficValue, trafficUnit], () => {
   planForm.traffic_limit = Math.round(trafficValue.value * trafficUnit.value)
@@ -224,7 +285,13 @@ watch(() => planForm.plan_type, (planType) => {
   } else if (Number(planForm.duration_days) <= 0) {
     planForm.duration_days = 30
   }
+  if (planType === 'home_ip') {
+    planForm.traffic_limit = 0
+  } else {
+    planForm.home_proxy_tag = ''
+  }
   planFormRef.value?.clearValidate('duration_days')
+  planFormRef.value?.clearValidate('home_proxy_tag')
 })
 
 async function fetchPlans() {
@@ -235,6 +302,17 @@ async function fetchPlans() {
     }
   } catch (error) {
     console.error('获取套餐列表失败:', error)
+  }
+}
+
+async function fetchHomeProxies() {
+  try {
+    const response = await api.admin.getHomeProxies()
+    if (response.code === 0) {
+      homeProxies.value = response.data.home_proxies || []
+    }
+  } catch (error) {
+    console.error('获取家宽 IP 列表失败:', error)
   }
 }
 
@@ -253,6 +331,7 @@ function showEditDialog(plan) {
   planForm.price = plan.price
   planForm.plan_type = resolvePlanType(plan)
   planForm.duration_days = plan.duration_days
+  planForm.home_proxy_tag = plan.home_proxy_tag || ''
   planForm.sort_order = plan.sort_order
   planForm.enabled = !!plan.enabled  // 将数字转换为布尔值
   planForm.show_on_home = !!plan.show_on_home
@@ -285,6 +364,7 @@ function resetForm() {
   planForm.plan_type = 'timed'
   planForm.duration_days = 30
   planForm.traffic_limit = 0
+  planForm.home_proxy_tag = ''
   planForm.sort_order = 0
   planForm.enabled = true
   planForm.show_on_home = true
@@ -302,6 +382,14 @@ async function handleSubmit() {
     planForm.traffic_limit = Math.round(trafficValue.value * trafficUnit.value)
     if (planForm.plan_type === 'lifetime') {
       planForm.duration_days = 0
+      planForm.home_proxy_tag = ''
+    } else if (planForm.plan_type === 'home_ip') {
+      planForm.traffic_limit = 0
+      if (Number(planForm.duration_days) <= 0) {
+        planForm.duration_days = 30
+      }
+    } else {
+      planForm.home_proxy_tag = ''
     }
     
     if (isEditing.value) {
@@ -339,6 +427,7 @@ async function deletePlan(plan) {
 
 onMounted(() => {
   fetchPlans()
+  fetchHomeProxies()
 })
 </script>
 

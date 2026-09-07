@@ -3,6 +3,7 @@ const plansRepository = require('../../repositories/plans-repository');
 const {
   PLAN_TYPES,
   normalizePlanType,
+  isHomeIpPlan,
   validatePlanDuration
 } = require('../shared/plan-type');
 
@@ -27,7 +28,11 @@ function createLegacyBusinessError(message, options = {}) {
  * @returns {string} 管理端列表展示用中文类型名
  */
 function getPlanTypeText(planType) {
-  return normalizePlanType(planType) === PLAN_TYPES.TIMED ? '限时套餐' : '不限时套餐';
+  const normalizedPlanType = normalizePlanType(planType);
+  if (normalizedPlanType === PLAN_TYPES.HOME_IP) {
+    return '家宽IP套餐';
+  }
+  return normalizedPlanType === PLAN_TYPES.TIMED ? '限时套餐' : '不限时套餐';
 }
 
 /**
@@ -59,6 +64,43 @@ function resolveCreatePlanType(payload) {
 }
 
 /**
+ * 归一化家宽 IP tag。
+ *
+ * @param {*} value - 管理端提交的 home_proxy_tag
+ * @returns {string} 去除首尾空白后的 tag
+ */
+function normalizeHomeProxyTag(value) {
+  return String(value || '').trim();
+}
+
+/**
+ * 校验家宽 IP 套餐绑定的 tag。
+ * 职责：只有 home_ip 套餐必须绑定已存在的 home_proxies.tag。
+ * 核心分支：非家宽套餐返回 null，家宽套餐返回已归一化 tag。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} plan - 套餐草稿
+ * @returns {Promise<string|null>} 家宽 tag 或空值
+ */
+async function validateHomeIpPlan(db, plan) {
+  if (!isHomeIpPlan(plan)) {
+    return null;
+  }
+
+  const tag = normalizeHomeProxyTag(plan.home_proxy_tag);
+  if (!tag) {
+    throw createLegacyBusinessError('家宽 IP 套餐必须绑定 tag');
+  }
+
+  const homeProxy = await db.prepare('SELECT * FROM home_proxies WHERE tag = ?').get(tag);
+  if (!homeProxy) {
+    throw createLegacyBusinessError('绑定的家宽 IP tag 不存在');
+  }
+
+  return tag;
+}
+
+/**
  * 格式化套餐输出，统一补齐价格与流量展示字段。
  *
  * @param {Object} plan - 原始套餐记录
@@ -76,6 +118,7 @@ function formatPlan(plan) {
     traffic_text: formatTraffic(plan.traffic_limit),
     plan_type: normalizePlanType(plan.plan_type),
     plan_type_text: getPlanTypeText(plan.plan_type),
+    home_proxy_tag: plan.home_proxy_tag || '',
     show_on_home: plan.show_on_home === undefined ? 1 : Number(plan.show_on_home),
     sort_order: plan.sort_order,
     enabled: plan.enabled,
@@ -111,14 +154,20 @@ async function createPlan(db, payload) {
   if (!durationCheck.valid) {
     throw createLegacyBusinessError(durationCheck.message);
   }
+  const homeProxyTag = await validateHomeIpPlan(db, {
+    plan_type: normalizedPlanType,
+    home_proxy_tag: payload.home_proxy_tag
+  });
+  const trafficLimit = normalizedPlanType === PLAN_TYPES.HOME_IP ? 0 : payload.traffic_limit;
 
   const result = await plansRepository.createPlan(db, {
     name: payload.name,
     description: payload.description || null,
     price: payload.price,
     durationDays: payload.duration_days,
-    trafficLimit: payload.traffic_limit,
+    trafficLimit,
     planType: normalizedPlanType,
+    homeProxyTag,
     showOnHome: payload.show_on_home === undefined ? 1 : normalizeBooleanFlag(payload.show_on_home),
     sortOrder: payload.sort_order === undefined ? 0 : payload.sort_order,
     enabled: payload.enabled === undefined ? 1 : (payload.enabled ? 1 : 0),
@@ -146,12 +195,15 @@ async function updatePlan(db, planId, payload) {
   const nextPlan = {
     ...existingPlan,
     plan_type: payload.plan_type === undefined ? existingPlan.plan_type : normalizePlanType(payload.plan_type),
-    duration_days: payload.duration_days === undefined ? existingPlan.duration_days : payload.duration_days
+    duration_days: payload.duration_days === undefined ? existingPlan.duration_days : payload.duration_days,
+    home_proxy_tag: payload.home_proxy_tag === undefined ? existingPlan.home_proxy_tag : payload.home_proxy_tag
   };
   const durationCheck = validatePlanDuration(nextPlan);
   if (!durationCheck.valid) {
     throw createLegacyBusinessError(durationCheck.message);
   }
+  const homeProxyTag = await validateHomeIpPlan(db, nextPlan);
+  const nextPlanType = normalizePlanType(nextPlan.plan_type);
 
   const updates = [];
   const values = [];
@@ -172,13 +224,17 @@ async function updatePlan(db, planId, payload) {
     updates.push('duration_days = ?');
     values.push(payload.duration_days);
   }
-  if (payload.traffic_limit !== undefined) {
+  if (payload.traffic_limit !== undefined || nextPlanType === PLAN_TYPES.HOME_IP) {
     updates.push('traffic_limit = ?');
-    values.push(payload.traffic_limit);
+    values.push(nextPlanType === PLAN_TYPES.HOME_IP ? 0 : payload.traffic_limit);
   }
   if (payload.plan_type !== undefined) {
     updates.push('plan_type = ?');
-    values.push(normalizePlanType(payload.plan_type));
+    values.push(nextPlanType);
+  }
+  if (payload.home_proxy_tag !== undefined || payload.plan_type !== undefined) {
+    updates.push('home_proxy_tag = ?');
+    values.push(nextPlanType === PLAN_TYPES.HOME_IP ? homeProxyTag : null);
   }
   if (payload.show_on_home !== undefined) {
     updates.push('show_on_home = ?');

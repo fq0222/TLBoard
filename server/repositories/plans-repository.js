@@ -37,6 +37,7 @@ async function createPlan(db, payload) {
     durationDays,
     trafficLimit,
     planType,
+    homeProxyTag,
     showOnHome,
     sortOrder,
     enabled,
@@ -44,8 +45,8 @@ async function createPlan(db, payload) {
   } = payload;
 
   return db.prepare(`
-    INSERT INTO plans (name, description, price, duration_days, traffic_limit, plan_type, show_on_home, sort_order, enabled, sales_limit)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO plans (name, description, price, duration_days, traffic_limit, plan_type, home_proxy_tag, show_on_home, sort_order, enabled, sales_limit)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     name,
     description,
@@ -53,6 +54,7 @@ async function createPlan(db, payload) {
     durationDays,
     trafficLimit,
     planType,
+    homeProxyTag,
     showOnHome,
     sortOrder,
     enabled,

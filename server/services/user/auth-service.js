@@ -8,7 +8,7 @@ const userRepository = require('../../repositories/user-repository');
 const emailRepository = require('../../repositories/email-repository');
 const referralService = require('../referral-service');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
-const { isTimedPlan } = require('../shared/plan-type');
+const { isTimedPlan, isHomeIpPlan } = require('../shared/plan-type');
 const { generatePublicSubscriptionId } = require('../../utils/subscription-id');
 
 const TELEGRAM_CHANNEL_URL_KEY = 'telegram_channel_url';
@@ -417,6 +417,12 @@ async function registerAndPay(db, payload) {
     throw createLegacyBusinessError('套餐不存在或已下架');
   }
 
+  if (isHomeIpPlan(plan)) {
+    throw createLegacyBusinessError('家宽 IP 套餐仅支持已购买流量套餐的用户购买', {
+      code: 1004
+    });
+  }
+
   if (plan.sales_limit !== -1 && plan.sales_count >= plan.sales_limit) {
     throw createLegacyBusinessError('该套餐已售罄', {
       code: 1002
@@ -624,6 +630,10 @@ async function getProfile(db, userId) {
     plan_id: user.plan_id,
     plan_name: user.plan_name,
     plan_type: user.plan_type,
+    home_plan_id: user.home_plan_id,
+    home_plan_name: user.home_plan_name,
+    home_expire_at: user.home_expire_at,
+    home_proxy_tag: user.home_proxy_tag,
     sub_id: user.sub_id,
     cf_optimized: cfOptimized,
     subscription_ready: subscriptionReady,

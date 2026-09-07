@@ -8,6 +8,7 @@ const {
   PLAN_TYPES,
   normalizePlanType,
   isTimedPlan,
+  isHomeIpPlan,
   buildTimedRenewResetPreview
 } = require('../shared/plan-type');
 const { formatTraffic } = require('../../shared/utils/format-traffic');
@@ -80,8 +81,9 @@ function formatRenewPlan(plan) {
     price_text: (Number(plan.price) / 100).toFixed(2),
     duration_days: plan.duration_days,
     traffic_limit: plan.traffic_limit,
-    traffic_text: formatTraffic(plan.traffic_limit),
+    traffic_text: isHomeIpPlan(plan) ? '不限制流量' : formatTraffic(plan.traffic_limit),
     plan_type: normalizePlanType(plan.plan_type),
+    home_proxy_tag: plan.home_proxy_tag || '',
     show_on_home: plan.show_on_home === undefined ? 1 : Number(plan.show_on_home),
     sort_order: plan.sort_order,
     sales_limit: plan.sales_limit,
@@ -109,7 +111,10 @@ async function listRenewPlans(db, userId) {
   }
 
   const currentPlanType = normalizePlanType(currentPlan.plan_type);
-  const plans = await planRepository.findEnabledPlansByType(db, currentPlanType);
+  const plans = [
+    ...await planRepository.findEnabledPlansByType(db, currentPlanType),
+    ...await planRepository.findEnabledPlansByType(db, PLAN_TYPES.HOME_IP)
+  ];
 
   return plans.map(formatRenewPlan);
 }
@@ -145,12 +150,20 @@ async function createRenewOrder(db, userId, payload) {
     throw createLegacyBusinessError('当前套餐不存在，请联系管理员', { code: 2004 });
   }
 
-  const currentPlanType = normalizePlanType(currentPlan.plan_type);
-  const targetPlanType = normalizePlanType(plan.plan_type);
-  if (currentPlanType !== targetPlanType) {
-    throw createLegacyBusinessError('不能跨套餐类型续费，请选择当前套餐类型下的套餐', {
-      code: 1003
-    });
+  if (isHomeIpPlan(plan)) {
+    if (!user.plan_id) {
+      throw createLegacyBusinessError('请先购买流量套餐后再购买家宽 IP 套餐', {
+        code: 2004
+      });
+    }
+  } else {
+    const currentPlanType = normalizePlanType(currentPlan.plan_type);
+    const targetPlanType = normalizePlanType(plan.plan_type);
+    if (currentPlanType !== targetPlanType) {
+      throw createLegacyBusinessError('不能跨套餐类型续费，请选择当前套餐类型下的套餐', {
+        code: 1003
+      });
+    }
   }
 
   const renewEligibility = evaluateRenewEligibility(user, plan);

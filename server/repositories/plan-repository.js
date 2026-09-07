@@ -11,9 +11,11 @@
  */
 async function findEnabledPlans(db) {
   return db.prepare(`
-    SELECT id, name, description, price, duration_days, traffic_limit, plan_type, show_on_home, sort_order, sales_limit, sales_count
+    SELECT id, name, description, price, duration_days, traffic_limit, plan_type, home_proxy_tag, show_on_home, sort_order, sales_limit, sales_count
     FROM plans
-    WHERE enabled = 1 AND show_on_home = 1
+    WHERE enabled = 1
+      AND show_on_home = 1
+      AND COALESCE(plan_type, 'lifetime') != 'home_ip'
     ORDER BY sort_order ASC, id ASC
   `).all();
 }
@@ -26,9 +28,9 @@ async function findEnabledPlans(db) {
  * @returns {Promise<Array<Object>>} 同类型且已上架的套餐记录列表，续费场景不按首页可见性过滤
  */
 async function findEnabledPlansByType(db, planType) {
-  if (planType === 'timed') {
+  if (planType === 'timed' || planType === 'home_ip') {
     return db.prepare(`
-      SELECT id, name, description, price, duration_days, traffic_limit, plan_type, show_on_home, sort_order, sales_limit, sales_count
+      SELECT id, name, description, price, duration_days, traffic_limit, plan_type, home_proxy_tag, show_on_home, sort_order, sales_limit, sales_count
       FROM plans
       WHERE enabled = 1 AND plan_type = ?
       ORDER BY sort_order ASC, id ASC
@@ -36,7 +38,7 @@ async function findEnabledPlansByType(db, planType) {
   }
 
   return db.prepare(`
-    SELECT id, name, description, price, duration_days, traffic_limit, plan_type, show_on_home, sort_order, sales_limit, sales_count
+    SELECT id, name, description, price, duration_days, traffic_limit, plan_type, home_proxy_tag, show_on_home, sort_order, sales_limit, sales_count
     FROM plans
     WHERE enabled = 1 AND (plan_type = 'lifetime' OR plan_type IS NULL OR plan_type = '')
     ORDER BY sort_order ASC, id ASC

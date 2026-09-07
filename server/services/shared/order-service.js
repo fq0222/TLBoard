@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const XuiService = require('../../integrations/xui/xui-service');
 const { getServerInboundsSnapshot } = require('../../integrations/xui/xui-sync');
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
-const { isTimedPlan } = require('./plan-type');
+const { isTimedPlan, isHomeIpPlan } = require('./plan-type');
 const { getStrategyFromRemark } = require('./subscription-strategy');
 const { createLogger } = require('../../utils/logger');
 const { runWithConcurrency } = require('../../utils/concurrency');
@@ -751,6 +751,18 @@ async function enqueueAndTryUserSync(db, taskType, userInfo, plan) {
 function calculatePaidOrderEntitlement(order, plan, now = Math.floor(Date.now() / 1000)) {
   const isRenewOrder = order.out_trade_no.startsWith('REN');
 
+  if (isHomeIpPlan(plan)) {
+    const currentHomeExpireAt = Number(order.current_home_expire_at || 0);
+    const baseExpireAt = currentHomeExpireAt > now ? currentHomeExpireAt : now;
+    return {
+      isHomeIp: true,
+      homePlanId: plan.id,
+      homeExpireAt: baseExpireAt + (Number(plan.duration_days) * 24 * 60 * 60),
+      resetTrafficUsed: false,
+      resetClientTraffic: false
+    };
+  }
+
   if (isRenewOrder && isTimedPlan(plan)) {
     return {
       trafficLimit: Number(plan.traffic_limit || 0),
@@ -821,6 +833,29 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   const isRenewOrder = order.out_trade_no.startsWith('REN');
   const planLogName = plan.name || `套餐${plan.id}`;
   const currentPlanLogName = order.current_plan_name || `套餐${order.current_plan_id}`;
+
+  if (entitlement.isHomeIp) {
+    const transaction = db.transaction(async (transactionDb) => {
+      await orderRepository.markOrderPaid(transactionDb, {
+        outTradeNo,
+        tradeNo: finalTradeNo,
+        paidAt: now
+      });
+
+      await orderRepository.updateUserHomePlanAfterPaidOrder(transactionDb, {
+        userId: order.user_id,
+        homePlanId: entitlement.homePlanId,
+        homeExpireAt: entitlement.homeExpireAt,
+        updatedAt: now
+      });
+
+      await orderRepository.incrementPlanSalesCount(transactionDb, plan.id);
+    });
+
+    await transaction();
+    logger.info(`家宽 IP 套餐支付完成: ${outTradeNo}, user=${order.email}, home_expire_at=${entitlement.homeExpireAt}`);
+    return { handled: true, alreadyPaid: false, order, plan, expireAt: entitlement.homeExpireAt };
+  }
 
   if (isRenewOrder && resetTrafficUsed) {
     logger.info(`限时套餐续费重置权益: traffic_limit=${newTrafficLimit}, expire_at=${expireAt}`);

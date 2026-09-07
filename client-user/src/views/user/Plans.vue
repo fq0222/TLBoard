@@ -9,7 +9,7 @@
                 <h2>流量套餐</h2>
                 <p>{{ renewTipText }}</p>
               </div>
-              <span class="section-count">{{ plans.length }} 个可续费套餐</span>
+              <span class="section-count">{{ trafficPlans.length }} 个可续费套餐</span>
             </div>
 
             <div v-if="plansLoading" class="state-container">
@@ -17,13 +17,13 @@
               <span>加载套餐中...</span>
             </div>
 
-            <div v-else-if="plans.length === 0" class="state-container">
+            <div v-else-if="trafficPlans.length === 0" class="state-container">
               <el-empty description="暂无可用套餐" />
             </div>
 
             <div v-else class="plans-grid">
               <article
-                v-for="plan in displayPlans"
+                v-for="plan in trafficPlans"
                 :key="plan.id"
                 class="plan-card"
                 :class="{
@@ -49,7 +49,7 @@
                 <div class="plan-metrics">
                   <div class="metric-item">
                     <span>流量</span>
-                    <strong>{{ formatTraffic(plan.traffic_limit) }}</strong>
+                    <strong>{{ formatPlanTraffic(plan) }}</strong>
                   </div>
                   <div class="metric-item">
                     <span>时长</span>
@@ -83,7 +83,7 @@
                 <div class="summary-metrics">
                   <div class="summary-metric">
                     <span>流量</span>
-                    <strong class="summary-traffic">{{ formatTraffic(selectedPlan.traffic_limit) }}</strong>
+                    <strong class="summary-traffic">{{ formatPlanTraffic(selectedPlan) }}</strong>
                   </div>
                   <div class="summary-metric">
                     <span>时长</span>
@@ -181,12 +181,59 @@
             <div class="section-head">
               <div>
                 <h2>家宽IP套餐</h2>
-                <p>家宽 IP 套餐接口还未接入，后续获取后会在这里展示。</p>
+                <p>家宽 IP 套餐只限制使用时间，不限制流量。</p>
               </div>
-              <span class="section-count pending">未获取</span>
+              <span class="section-count">{{ homeIpPlans.length }} 个可购买套餐</span>
             </div>
-            <div class="broadband-placeholder">
-              <el-empty description="未获取家宽 IP 套餐" />
+            <div v-if="plansLoading" class="state-container">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <span>加载套餐中...</span>
+            </div>
+            <div v-else-if="homeIpPlans.length === 0" class="broadband-placeholder">
+              <el-empty description="暂无家宽 IP 套餐" />
+            </div>
+            <div v-else class="plans-grid">
+              <article
+                v-for="plan in homeIpPlans"
+                :key="plan.id"
+                class="plan-card"
+                :class="{
+                  'is-selected': selectedPlanId === plan.id,
+                  'is-soldout': plan.is_soldout
+                }"
+                @click="selectHomeIpPlan(plan)"
+              >
+                <div class="plan-badges">
+                  <span v-if="userInfo.home_plan_id === plan.id" class="plan-badge current">当前家宽</span>
+                  <span v-if="plan.is_soldout && userInfo.home_plan_id !== plan.id" class="plan-badge soldout">已售罄</span>
+                </div>
+
+                <div class="plan-top">
+                  <h3 class="plan-name">{{ plan.name }}</h3>
+                  <div class="plan-price">
+                    <span class="currency">¥</span>
+                    <span class="amount">{{ formatPrice(plan.price) }}</span>
+                  </div>
+                </div>
+
+                <div class="plan-metrics">
+                  <div class="metric-item">
+                    <span>流量</span>
+                    <strong>{{ formatPlanTraffic(plan) }}</strong>
+                  </div>
+                  <div class="metric-item">
+                    <span>时长</span>
+                    <strong>{{ plan.durationText }}</strong>
+                  </div>
+                </div>
+
+                <p v-if="plan.description" class="plan-description">{{ plan.description }}</p>
+
+                <div class="plan-state">
+                  <span>{{ getStateText(plan) }}</span>
+                  <el-icon v-if="selectedPlanId === plan.id" class="plan-check"><CircleCheck /></el-icon>
+                </div>
+              </article>
             </div>
           </section>
 
@@ -206,7 +253,7 @@
                 <div class="summary-metrics">
                   <div class="summary-metric">
                     <span>流量</span>
-                    <strong class="summary-traffic">{{ formatTraffic(selectedPlan.traffic_limit) }}</strong>
+                    <strong class="summary-traffic">{{ formatPlanTraffic(selectedPlan) }}</strong>
                   </div>
                   <div class="summary-metric">
                     <span>时长</span>
@@ -314,7 +361,7 @@
               <div class="summary-metrics">
                 <div class="summary-metric">
                   <span>流量</span>
-                  <strong class="summary-traffic">{{ formatTraffic(selectedPlan.traffic_limit) }}</strong>
+                  <strong class="summary-traffic">{{ formatPlanTraffic(selectedPlan) }}</strong>
                 </div>
                 <div class="summary-metric">
                   <span>时长</span>
@@ -435,6 +482,9 @@ const renewSubmitting = ref(false)
 const currentPlanId = computed(() => userInfo.value.plan_id || null)
 const selectedPlan = computed(() => displayPlans.value.find((plan) => plan.id === selectedPlanId.value) || null)
 const renewTipText = computed(() => {
+  if (selectedPlan.value?.plan_type === 'home_ip') {
+    return '家宽 IP 套餐会单独计算到期时间，不影响当前流量套餐。'
+  }
   if (selectedPlan.value?.plan_type === 'timed') {
     return '限时套餐续费会从支付完成时重新计算流量和到期时间。'
   }
@@ -442,13 +492,13 @@ const renewTipText = computed(() => {
 })
 
 const recommendedPlanId = computed(() => {
-  const preferred = plans.value.find((plan) => plan.is_recommended || plan.recommended)
+  const preferred = trafficPlans.value.find((plan) => plan.is_recommended || plan.recommended)
   if (preferred) return preferred.id
 
-  const availablePlans = plans.value.filter((plan) => !plan.is_soldout)
+  const availablePlans = trafficPlans.value.filter((plan) => !plan.is_soldout)
   if (availablePlans.length > 0) return availablePlans[0].id
 
-  return plans.value[0]?.id ?? null
+  return trafficPlans.value[0]?.id ?? null
 })
 
 const displayPlans = computed(() =>
@@ -458,6 +508,8 @@ const displayPlans = computed(() =>
     durationText: Number(plan.duration_days) === 0 ? '不限时套餐' : `${plan.duration_days} 天周期`
   }))
 )
+const trafficPlans = computed(() => displayPlans.value.filter((plan) => plan.plan_type !== 'home_ip'))
+const homeIpPlans = computed(() => displayPlans.value.filter((plan) => plan.plan_type === 'home_ip'))
 
 /**
  * 初始化套餐页所需数据。
@@ -528,6 +580,21 @@ function selectPlan(plan) {
 }
 
 /**
+ * 选择家宽 IP 附加套餐。
+ * 核心分支语义：家宽套餐允许当前家宽套餐继续购买顺延，其他售罄套餐不可选。
+ *
+ * @param {Object} plan - 后端返回的家宽套餐对象。
+ */
+function selectHomeIpPlan(plan) {
+  if (plan.is_soldout && plan.id !== userInfo.value.home_plan_id) {
+    ElMessage.warning('该家宽 IP 套餐已售罄')
+    return
+  }
+  selectedPlanCategory.value = 'broadband'
+  selectedPlanId.value = plan.id
+}
+
+/**
  * 格式化金额分值。
  * @param {number|string} price - 后端返回的分值价格。
  * @returns {string} 元单位金额。
@@ -553,15 +620,21 @@ function formatTraffic(bytes) {
   return `${parseFloat((numBytes / (1024 ** index)).toFixed(2))} ${units[index]}`
 }
 
+function formatPlanTraffic(plan) {
+  if (plan?.plan_type === 'home_ip') return '不限制流量'
+  return formatTraffic(plan?.traffic_limit)
+}
+
 /**
  * 获取套餐状态说明。
  * @param {Object} plan - 套餐对象。
  * @returns {string} 用户可见状态文案。
  */
 function getStateText(plan) {
+  if (plan.plan_type === 'home_ip' && plan.id === userInfo.value.home_plan_id) return '当前正在使用的家宽 IP 套餐'
   if (plan.id === currentPlanId.value) return '当前正在使用的套餐'
   if (plan.is_soldout) return '暂不可选择该套餐'
-  if (selectedPlanId.value === plan.id) return '已选中，提交后进入原续费流程'
+  if (selectedPlanId.value === plan.id) return plan.plan_type === 'home_ip' ? '已选中，提交后购买家宽 IP 权益' : '已选中，提交后进入原续费流程'
   return '点击卡片即可切换为该续费方案'
 }
 

@@ -306,12 +306,14 @@ async function updateUserPasswordHash(db, userId, passwordHash, updatedAt) {
 async function findUserProfileById(db, userId) {
   return db.prepare(`
     SELECT
-      u.id, u.email, u.plan_id, u.subscription_token, u.sub_id,
+      u.id, u.email, u.plan_id, u.home_plan_id, u.home_expire_at, u.subscription_token, u.sub_id,
       u.traffic_used, u.traffic_limit, u.referral_traffic_limit, u.balance, u.expire_at, u.enabled, u.disable_reason, u.created_at,
       u.payment_count, u.sync_status, u.onboarding_completed,
-      p.name as plan_name, p.plan_type as plan_type
+      p.name as plan_name, p.plan_type as plan_type,
+      hp.name as home_plan_name, hp.home_proxy_tag as home_proxy_tag
     FROM users u
     LEFT JOIN plans p ON u.plan_id = p.id
+    LEFT JOIN plans hp ON u.home_plan_id = hp.id
     WHERE u.id = ?
   `).get(userId);
 }
