@@ -259,23 +259,51 @@ function isMatchingHomeRule(rule, homeProxyTag, email) {
   return users.includes(email);
 }
 
+function isHomeUserRule(rule, homeProxyTag) {
+  return Boolean(rule
+    && rule.type === 'field'
+    && rule.outboundTag === homeProxyTag
+    && Array.isArray(rule.user));
+}
+
+function normalizeRuleUsers(users) {
+  return Array.from(new Set((users || [])
+    .map((user) => String(user || '').trim())
+    .filter(Boolean)));
+}
+
 /**
- * 移除当前用户当前家宽 tag 的所有 routing rule。
+ * 从当前家宽 tag 的 routing rule 中移除当前用户。
+ * 核心分支：共享 rule 仍有其他用户时保留 rule；当前用户是最后一个用户时删除 rule。
  *
  * @param {Object} xraySetting - 完整 Xray 配置
  * @param {string} homeProxyTag - 家宽 outbound tag
  * @param {string} email - 当前用户邮箱
- * @returns {number} 删除的 rule 数量
+ * @returns {number} 受影响的 rule 数量
  */
 function removeMatchingHomeRules(xraySetting, homeProxyTag, email) {
   const rules = ensureRoutingRules(xraySetting);
-  const beforeLength = rules.length;
-  xraySetting.routing.rules = rules.filter((rule) => !isMatchingHomeRule(rule, homeProxyTag, email));
-  return beforeLength - xraySetting.routing.rules.length;
+  let affectedCount = 0;
+
+  xraySetting.routing.rules = rules
+    .map((rule) => {
+      if (!isMatchingHomeRule(rule, homeProxyTag, email)) {
+        return rule;
+      }
+
+      affectedCount += 1;
+      return {
+        ...rule,
+        user: normalizeRuleUsers(rule.user).filter((user) => user !== email)
+      };
+    })
+    .filter((rule) => !isHomeUserRule(rule, homeProxyTag) || rule.user.length > 0);
+
+  return affectedCount;
 }
 
 /**
- * 追加当前用户的规范家宽 routing rule。
+ * 合并当前用户到共享家宽 routing rule。
  * 核心分支：inboundTag 为空说明远端配置不可用，应抛错并阻止本地保存。
  *
  * @param {Object} xraySetting - 完整 Xray 配置
@@ -288,11 +316,23 @@ function upsertHomeRoutingRule(xraySetting, homeProxyTag, email, inboundTags = e
     throw new Error('入站 tag 为空');
   }
 
+  const existingRules = ensureRoutingRules(xraySetting);
+  const mergedUsers = [];
+  xraySetting.routing.rules = existingRules.filter((rule) => {
+    if (!isHomeUserRule(rule, homeProxyTag)) {
+      return true;
+    }
+
+    mergedUsers.push(...normalizeRuleUsers(rule.user));
+    return false;
+  });
+  mergedUsers.push(email);
+
   const rule = {
     type: 'field',
     inboundTag: inboundTags,
     outboundTag: homeProxyTag,
-    user: [email]
+    user: normalizeRuleUsers(mergedUsers)
   };
 
   ensureRoutingRules(xraySetting).push(rule);
@@ -635,6 +675,7 @@ module.exports = {
     extractInboundTags,
     extractInboundTagsFromInboundsResult,
     resolveInboundTags,
+    normalizeRuleUsers,
     removeMatchingHomeRules,
     upsertHomeRoutingRule,
     assertActiveHomeEntitlement

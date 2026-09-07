@@ -404,6 +404,84 @@ async function testDuplicateRulesAreCollapsed() {
   assert.strictEqual(otherRules.length, 1);
 }
 
+async function testMergesUsersIntoSameHomeRoutingRule() {
+  const configs = {
+    1: {
+      inbounds: [{ tag: 'in-a' }, { tag: 'in-b' }],
+      routing: {
+        rules: [
+          { type: 'field', inboundTag: ['in-a', 'in-b'], outboundTag: 'local-ip-lax', user: ['first@example.com'] }
+        ]
+      }
+    }
+  };
+  const calls = { get: [], update: [] };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement({ email: 'second@example.com' }),
+    servers: [createServer(1)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+
+  await homeRoutingService.updateHomeRouting({}, 1, { server_ids: [1] });
+
+  assert.deepStrictEqual(configs[1].routing.rules, [
+    {
+      type: 'field',
+      inboundTag: ['in-a', 'in-b'],
+      outboundTag: 'local-ip-lax',
+      user: ['first@example.com', 'second@example.com']
+    }
+  ]);
+}
+
+async function testRemovingUserKeepsSharedHomeRoutingRule() {
+  const configs = {
+    1: {
+      inbounds: [{ tag: 'in-a' }, { tag: 'in-b' }],
+      routing: {
+        rules: [
+          {
+            type: 'field',
+            inboundTag: ['in-a', 'in-b'],
+            outboundTag: 'local-ip-lax',
+            user: ['first@example.com', 'second@example.com']
+          }
+        ]
+      }
+    },
+    2: {
+      inbounds: [{ tag: 'new-in' }],
+      routing: { rules: [] }
+    }
+  };
+  const calls = { get: [], update: [] };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement({ email: 'second@example.com' }),
+    route: {
+      user_id: 1,
+      home_proxy_tag: 'local-ip-lax',
+      server_ids: '[1]',
+      last_synced_at: Math.floor(Date.now() / 1000) - 3600
+    },
+    servers: [createServer(1), createServer(2)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+
+  await homeRoutingService.updateHomeRouting({}, 1, { server_ids: [2] });
+
+  assert.deepStrictEqual(configs[1].routing.rules, [
+    {
+      type: 'field',
+      inboundTag: ['in-a', 'in-b'],
+      outboundTag: 'local-ip-lax',
+      user: ['first@example.com']
+    }
+  ]);
+  assert.deepStrictEqual(configs[2].routing.rules, [
+    { type: 'field', inboundTag: ['new-in'], outboundTag: 'local-ip-lax', user: ['second@example.com'] }
+  ]);
+}
+
 async function testChangedHomeProxyTagRemovesOldTagRule() {
   const configs = {
     1: {
@@ -452,6 +530,8 @@ async function run() {
     await testRemoteWriteFailureDoesNotSaveOrCooldown();
     await testCooldownBlocksRecentSuccessfulChange();
     await testDuplicateRulesAreCollapsed();
+    await testMergesUsersIntoSameHomeRoutingRule();
+    await testRemovingUserKeepsSharedHomeRoutingRule();
     await testChangedHomeProxyTagRemovesOldTagRule();
   } finally {
     homeRoutingService.resetTestDependencies();
