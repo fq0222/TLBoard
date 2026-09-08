@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const authService = require('../services/user/auth-service');
 const usersService = require('../services/admin/users-service');
 const userRepository = require('../repositories/user-repository');
+const homeRoutingService = require('../services/shared/home-routing-service');
 const { DISABLE_REASONS } = require('../services/shared/renew-policy');
 
 /**
@@ -350,6 +351,46 @@ test('admin user delete returns legacy error when user is missing', async () => 
       (error) => error.isLegacyBusinessError && error.code === 2004
     );
   } finally {
+    restoreRepository();
+  }
+});
+
+test('admin home routing actions update expire time and reuse shared service with cooldown skipped', async () => {
+  const calls = [];
+  const restoreRepository = replaceMethods(userRepository, {
+    updateUserHomeExpireAt: async (db, userId, homeExpireAt) => {
+      calls.push({ method: 'updateExpire', db, userId, homeExpireAt });
+    }
+  });
+  const restoreHomeRouting = replaceMethods(homeRoutingService, {
+    getHomeRoutingOptions: async (db, userId) => {
+      calls.push({ method: 'get', db, userId });
+      return { available: true };
+    },
+    updateHomeRouting: async (db, userId, payload, logger, options) => {
+      calls.push({ method: 'update', db, userId, payload, options });
+      return { route: { server_ids: payload.server_ids } };
+    },
+    deleteHomeRouting: async (db, userId, logger, options) => {
+      calls.push({ method: 'delete', db, userId, options });
+      return { route: null };
+    }
+  });
+
+  try {
+    const db = { marker: 'admin-db' };
+    await usersService.getHomeRoutingOptions(db, 42);
+    await usersService.updateHomeRouting(db, 42, { server_ids: [1, 2], home_expire_at: 1900000000 });
+    await usersService.deleteHomeRouting(db, 42);
+
+    assert.deepEqual(calls, [
+      { method: 'get', db, userId: 42 },
+      { method: 'updateExpire', db, userId: 42, homeExpireAt: 1900000000 },
+      { method: 'update', db, userId: 42, payload: { server_ids: [1, 2], home_expire_at: 1900000000 }, options: { skipCooldown: true } },
+      { method: 'delete', db, userId: 42, options: { skipCooldown: true } }
+    ]);
+  } finally {
+    restoreHomeRouting();
     restoreRepository();
   }
 });

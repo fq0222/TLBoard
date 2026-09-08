@@ -153,7 +153,7 @@ test('家宽过期标记会二次确认权益仍然到期', async () => {
 
 test('家宽到期清理成功后标记过期并只触发一次邮件', async () => {
   const trafficRepository = require('../repositories/traffic-repository');
-  const homeRoutingService = require('../services/user/home-routing-service');
+  const homeRoutingService = require('../services/shared/home-routing-service');
   const emailService = require('../services/shared/renewal-required-email-service');
   const homeIpExpirationService = require('../services/shared/home-ip-expiration-service');
   const originals = {
@@ -215,7 +215,7 @@ test('家宽到期清理成功后标记过期并只触发一次邮件', async ()
 
 test('家宽到期清理失败时不标记过期也不发送邮件', async () => {
   const trafficRepository = require('../repositories/traffic-repository');
-  const homeRoutingService = require('../services/user/home-routing-service');
+  const homeRoutingService = require('../services/shared/home-routing-service');
   const emailService = require('../services/shared/renewal-required-email-service');
   const homeIpExpirationService = require('../services/shared/home-ip-expiration-service');
   const originals = {
@@ -293,7 +293,7 @@ test('家宽到期邮件使用家宽文案且不展示流量字段', () => {
 });
 
 test('用户家宽 routing 选项为过期权益返回可展示状态并禁止编辑', async () => {
-  const homeRoutingService = require('../services/user/home-routing-service');
+  const homeRoutingService = require('../services/shared/home-routing-service');
   const repository = require('../repositories/user-home-routing-repository');
   const originals = {
     findHomeRoutingEntitlement: repository.findHomeRoutingEntitlement,

@@ -56,6 +56,34 @@ router.get('/:id', authenticateAdmin, [
     .withMessage('ID必须是大于0的整数')
 ], usersController.getUserDetail);
 
+router.get('/:id/home-routing/options', authenticateAdmin, [
+  param('id')
+    .isInt({ min: 1 })
+    .withMessage('ID必须是大于0的整数')
+], usersController.getHomeRoutingOptions);
+
+router.put('/:id/home-routing', authenticateAdmin, [
+  param('id')
+    .isInt({ min: 1 })
+    .withMessage('ID必须是大于0的整数'),
+  body('server_ids')
+    .isArray({ min: 1, max: 2 })
+    .withMessage('最多选择两台服务器'),
+  body('server_ids.*')
+    .isInt({ min: 1 })
+    .withMessage('服务器ID必须是大于0的整数'),
+  body('home_expire_at')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('家宽到期时间必须是非负整数')
+], usersController.updateHomeRouting);
+
+router.delete('/:id/home-routing', authenticateAdmin, [
+  param('id')
+    .isInt({ min: 1 })
+    .withMessage('ID必须是大于0的整数')
+], usersController.deleteHomeRouting);
+
 router.put('/:id', authenticateAdmin, [
   param('id')
     .isInt({ min: 1 })

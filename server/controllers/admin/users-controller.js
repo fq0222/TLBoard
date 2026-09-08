@@ -280,6 +280,96 @@ async function startBatchGenerateSubscriptions(req, res) {
 }
 
 /**
+ * 获取管理端指定用户的家宽 IP routing 配置选项。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function getHomeRoutingOptions(req, res) {
+  if (handleValidationFailure(req, res)) {
+    return;
+  }
+
+  try {
+    const userId = parseInt(req.params.id, 10);
+    const data = await usersService.getHomeRoutingOptions(req.app.locals.db, userId);
+
+    logger.info(`获取用户家宽 IP routing 配置成功: user=${userId}`);
+    return res.json({
+      code: 0,
+      message: 'ok',
+      data
+    });
+  } catch (error) {
+    return handleControllerError(res, '获取用户家宽 IP routing 配置', error);
+  }
+}
+
+/**
+ * 管理端应用指定用户家宽 IP routing 绑定。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function updateHomeRouting(req, res) {
+  if (handleValidationFailure(req, res)) {
+    return;
+  }
+
+  try {
+    const userId = parseInt(req.params.id, 10);
+    const data = await usersService.updateHomeRouting(
+      req.app.locals.db,
+      userId,
+      req.body,
+      logger
+    );
+
+    logger.info(`应用用户家宽 IP routing 配置成功: user=${userId}`);
+    return res.json({
+      code: 0,
+      message: 'ok',
+      data
+    });
+  } catch (error) {
+    return handleControllerError(res, '应用用户家宽 IP routing 配置', error);
+  }
+}
+
+/**
+ * 管理端删除指定用户家宽 IP routing 绑定。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function deleteHomeRouting(req, res) {
+  if (handleValidationFailure(req, res)) {
+    return;
+  }
+
+  try {
+    const userId = parseInt(req.params.id, 10);
+    const data = await usersService.deleteHomeRouting(
+      req.app.locals.db,
+      userId,
+      logger
+    );
+
+    logger.info(`删除用户家宽 IP routing 配置成功: user=${userId}`);
+    return res.json({
+      code: 0,
+      message: 'ok',
+      data
+    });
+  } catch (error) {
+    return handleControllerError(res, '删除用户家宽 IP routing 配置', error);
+  }
+}
+
+/**
  * 获取最近一次批量重新生成订阅链接任务状态。
  *
  * @param {Object} req - Express 请求对象
@@ -306,6 +396,9 @@ module.exports = {
   deleteUser,
   updateUserCfIps,
   generateSubscription,
+  getHomeRoutingOptions,
+  updateHomeRouting,
+  deleteHomeRouting,
   startBatchGenerateSubscriptions,
   getBatchGenerateSubscriptionStatus
 };

@@ -1,5 +1,6 @@
 const XuiService = require('../../integrations/xui/xui-service');
 const userSubscriptionService = require('../user/subscription-service');
+const homeRoutingService = require('../shared/home-routing-service');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
 const ipLocationService = require('../shared/ip-location-service');
 const { getStrategyFromRemark } = require('../shared/subscription-strategy');
@@ -60,6 +61,16 @@ function normalizeBytes(value) {
 function normalizeExpireAt(value) {
   const expireAt = Number(value) || 0;
   return expireAt > 0 ? expireAt : 0;
+}
+
+/**
+ * 判断请求体是否携带家宽到期时间字段。
+ *
+ * @param {Object} payload - 管理端家宽控制请求体
+ * @returns {boolean} 是否需要更新 users.home_expire_at
+ */
+function hasHomeExpireAtChange(payload = {}) {
+  return Object.prototype.hasOwnProperty.call(payload, 'home_expire_at');
 }
 
 /**
@@ -572,6 +583,52 @@ function getNodeUpdateStrategy(node = {}) {
   return getStrategyFromRemark(node.remark);
 }
 
+/**
+ * 获取管理端指定用户的家宽 IP routing 配置选项。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<Object>} 家宽权益、可选服务器和当前绑定
+ */
+async function getHomeRoutingOptions(db, userId) {
+  return homeRoutingService.getHomeRoutingOptions(db, userId);
+}
+
+/**
+ * 管理端应用指定用户家宽 IP routing 绑定。
+ * 核心分支：管理员操作跳过用户端 5 分钟冷却限制，其它同步校验仍复用 shared 服务。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {Object} payload - 包含 server_ids 的请求体
+ * @param {Object} logger - 日志实例
+ * @returns {Promise<Object>} 更新后的绑定选项
+ */
+async function updateHomeRouting(db, userId, payload = {}, logger = console) {
+  if (hasHomeExpireAtChange(payload)) {
+    await userRepository.updateUserHomeExpireAt(db, userId, normalizeExpireAt(payload.home_expire_at));
+  }
+
+  return homeRoutingService.updateHomeRouting(db, userId, payload, logger, {
+    skipCooldown: true
+  });
+}
+
+/**
+ * 管理端删除指定用户家宽 IP routing 绑定。
+ * 核心分支：管理员操作跳过用户端 5 分钟冷却限制，远端清理失败时仍保留本地绑定。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {Object} logger - 日志实例
+ * @returns {Promise<Object>} 删除后的绑定选项
+ */
+async function deleteHomeRouting(db, userId, logger = console) {
+  return homeRoutingService.deleteHomeRouting(db, userId, logger, {
+    skipCooldown: true
+  });
+}
+
 function isPanelVersionAtLeast(version, minimum) {
   const left = String(version || '').split('.').map(Number);
   const right = String(minimum || '').split('.').map(Number);
@@ -590,5 +647,8 @@ module.exports = {
   updateUser,
   deleteUserLocalData,
   updateUserCfIps,
-  generateSubscription
+  generateSubscription,
+  getHomeRoutingOptions,
+  updateHomeRouting,
+  deleteHomeRouting
 };

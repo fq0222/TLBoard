@@ -3,7 +3,7 @@ const { legacySuccess, legacyFail, legacyValidationError } = require('../../shar
 const { createLogger } = require('../../utils/logger');
 const { generateSubscriptionUrls } = require('../../utils/site-url');
 const subscriptionService = require('../../services/user/subscription-service');
-const homeRoutingService = require('../../services/user/home-routing-service');
+const homeRoutingService = require('../../services/shared/home-routing-service');
 const ipLocationService = require('../../services/shared/ip-location-service');
 
 const logger = createLogger('USER-SUB');

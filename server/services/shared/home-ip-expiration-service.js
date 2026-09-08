@@ -5,7 +5,7 @@
 
 const { withUserStatusLock } = require('./user-status-lock');
 const trafficRepository = require('../../repositories/traffic-repository');
-const homeRoutingService = require('../user/home-routing-service');
+const homeRoutingService = require('./home-routing-service');
 const renewalRequiredEmailService = require('./renewal-required-email-service');
 const { createLogger } = require('../../utils/logger');
 

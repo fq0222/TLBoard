@@ -634,15 +634,17 @@ async function deleteSuccessfulRoute(db, userId) {
 }
 
 /**
- * 更新当前用户家宽 IP routing 绑定并同步到 3X-UI。
+ * 更新指定用户家宽 IP routing 绑定并同步到 3X-UI。
  *
  * @param {Object} db - 数据库代理对象
- * @param {number} userId - 当前用户 ID
+ * @param {number} userId - 用户 ID
  * @param {Object} payload - 前端提交数据
  * @param {Object} logger - 日志实例
+ * @param {Object} [options={}] - 同步选项
+ * @param {boolean} [options.skipCooldown=false] - 是否跳过手动修改冷却，管理端操作使用。
  * @returns {Promise<Object>} 更新后的绑定选项
  */
-async function updateHomeRouting(db, userId, payload = {}, logger = console) {
+async function updateHomeRouting(db, userId, payload = {}, logger = console, options = {}) {
   const now = getNowTimestamp();
   const nextServerIds = normalizeServerIds(payload.server_ids);
   assertServerSelection(nextServerIds);
@@ -657,7 +659,7 @@ async function updateHomeRouting(db, userId, payload = {}, logger = console) {
   ]);
   const cooldownRemaining = getCooldownRemaining(currentRoute, now);
 
-  if (cooldownRemaining > 0) {
+  if (!options.skipCooldown && cooldownRemaining > 0) {
     throw createLegacyBusinessError(`请稍后再修改，剩余 ${Math.ceil(cooldownRemaining / 60)} 分钟`, {
       statusCode: 429,
       code: 4109,
@@ -790,16 +792,21 @@ async function cleanupHomeRoutingForUser(db, userId, options = {}) {
 }
 
 /**
- * 删除当前用户家宽 IP routing 绑定并同步清理 3X-UI。
- * 核心分支：删除同样遵守 5 分钟冷却；远端全部清理成功后才删除本地记录。
+ * 删除指定用户家宽 IP routing 绑定并同步清理 3X-UI。
+ * 核心分支：用户端删除遵守 5 分钟冷却；管理端可通过 skipCooldown 绕过。
  *
  * @param {Object} db - 数据库代理对象
- * @param {number} userId - 当前用户 ID
+ * @param {number} userId - 用户 ID
  * @param {Object} logger - 日志实例
+ * @param {Object} [options={}] - 删除选项
+ * @param {boolean} [options.skipCooldown=false] - 是否跳过手动删除冷却，管理端操作使用。
  * @returns {Promise<Object>} 删除后的绑定选项
  */
-async function deleteHomeRouting(db, userId, logger = console) {
-  await cleanupHomeRoutingForUser(db, userId, { logger });
+async function deleteHomeRouting(db, userId, logger = console, options = {}) {
+  await cleanupHomeRoutingForUser(db, userId, {
+    logger,
+    skipCooldown: options.skipCooldown === true
+  });
   return getHomeRoutingOptions(db, userId);
 }
 

@@ -373,6 +373,35 @@ const adminApi = {
   },
 
   /**
+   * 获取指定用户家宽 IP routing 配置选项
+   * @param {number} id - 用户ID
+   * @returns {Promise<Object>} 家宽 IP 权益、可选服务器和当前绑定
+   */
+  getUserHomeRoutingOptions(id) {
+    return apiClient.get(`/users/${id}/home-routing/options`)
+  },
+
+  /**
+   * 应用指定用户家宽 IP routing 绑定
+   * @param {number} id - 用户ID
+   * @param {Array<number>|Object} data - 服务器 ID 列表或完整家宽控制请求体
+   * @returns {Promise<Object>} 更新后的绑定信息
+   */
+  updateUserHomeRouting(id, data) {
+    const payload = Array.isArray(data) ? { server_ids: data } : data
+    return apiClient.put(`/users/${id}/home-routing`, payload, { timeout: 120000 })
+  },
+
+  /**
+   * 删除指定用户家宽 IP routing 绑定
+   * @param {number} id - 用户ID
+   * @returns {Promise<Object>} 删除后的绑定信息
+   */
+  deleteUserHomeRouting(id) {
+    return apiClient.delete(`/users/${id}/home-routing`, { timeout: 120000 })
+  },
+
+  /**
    * 启动批量生成用户订阅链接任务
    * @param {Object} data - 批处理选项
    * @param {boolean} data.cf_optimized_only - 是否仅处理已配置优选 CF IP 的用户

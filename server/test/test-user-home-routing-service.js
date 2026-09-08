@@ -4,7 +4,7 @@
  */
 
 const assert = require('assert');
-const homeRoutingService = require('../services/user/home-routing-service');
+const homeRoutingService = require('../services/shared/home-routing-service');
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -388,6 +388,41 @@ async function testCooldownBlocksRecentSuccessfulChange() {
   assert.strictEqual(repository.state.savedRoutes.length, 0);
 }
 
+async function testUpdateCanSkipCooldownForAdmin() {
+  const recentSyncedAt = Math.floor(Date.now() / 1000) - 60;
+  const configs = {
+    1: {
+      inbounds: [{ tag: 'old-in' }],
+      routing: {
+        rules: [
+          { type: 'field', outboundTag: 'local-ip-lax', user: ['user@example.com'], inboundTag: ['old-in'] }
+        ]
+      }
+    },
+    2: {
+      inbounds: [{ tag: 'new-in' }],
+      routing: { rules: [] }
+    }
+  };
+  const calls = { get: [], update: [] };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement(),
+    route: {
+      user_id: 1,
+      home_proxy_tag: 'local-ip-lax',
+      server_ids: '[1]',
+      last_synced_at: recentSyncedAt
+    },
+    servers: [createServer(1), createServer(2)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+
+  await homeRoutingService.updateHomeRouting({}, 1, { server_ids: [2] }, console, { skipCooldown: true });
+
+  assert.deepStrictEqual(calls.get, [1, 2]);
+  assert.deepStrictEqual(repository.state.savedRoutes[0].serverIds, [2]);
+}
+
 async function testDuplicateRulesAreCollapsed() {
   const configs = {
     1: {
@@ -647,6 +682,36 @@ async function testDeleteIsBlockedByCooldown() {
   assert.strictEqual(repository.state.deletedRoutes.length, 0);
 }
 
+async function testDeleteCanSkipCooldownForAdmin() {
+  const configs = {
+    1: {
+      inbounds: [{ tag: 'in-a' }],
+      routing: {
+        rules: [
+          { type: 'field', inboundTag: ['in-a'], outboundTag: 'local-ip-lax', user: ['second@example.com'] }
+        ]
+      }
+    }
+  };
+  const calls = { get: [], update: [] };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement({ email: 'second@example.com' }),
+    route: {
+      user_id: 1,
+      home_proxy_tag: 'local-ip-lax',
+      server_ids: '[1]',
+      last_synced_at: Math.floor(Date.now() / 1000) - 60
+    },
+    servers: [createServer(1)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+
+  await homeRoutingService.deleteHomeRouting({}, 1, console, { skipCooldown: true });
+
+  assert.deepStrictEqual(calls.get, [1]);
+  assert.deepStrictEqual(repository.state.deletedRoutes, [{ userId: 1 }]);
+}
+
 async function run() {
   try {
     testCooldownConstantIsFiveMinutes();
@@ -659,6 +724,7 @@ async function run() {
     await testRemoteDeleteFailureDoesNotSaveOrCooldown();
     await testRemoteWriteFailureDoesNotSaveOrCooldown();
     await testCooldownBlocksRecentSuccessfulChange();
+    await testUpdateCanSkipCooldownForAdmin();
     await testDuplicateRulesAreCollapsed();
     await testMergesUsersIntoSameHomeRoutingRule();
     await testRemovingUserKeepsSharedHomeRoutingRule();
@@ -666,6 +732,7 @@ async function run() {
     await testDeleteRemovesOnlyCurrentUserFromSharedRuleAndDeletesLocalRoute();
     await testDeleteFailureKeepsLocalRoute();
     await testDeleteIsBlockedByCooldown();
+    await testDeleteCanSkipCooldownForAdmin();
   } finally {
     homeRoutingService.resetTestDependencies();
   }

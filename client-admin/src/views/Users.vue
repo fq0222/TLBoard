@@ -91,97 +91,180 @@
       </div>
     </div>
     
-    <el-dialog v-model="dialogVisible" title="编辑用户" width="600px" top="8vh" :close-on-click-modal="!submitting">
+    <el-dialog v-model="dialogVisible" title="编辑用户" width="min(960px, 94vw)" top="6vh" :close-on-click-modal="!submitting">
       <el-form :model="userForm" label-width="100px">
-        <!-- 基本信息 -->
-        <el-divider content-position="left">基本信息</el-divider>
-        <el-form-item label="邮箱">
-          <el-input v-model="userForm.email" readonly />
-        </el-form-item>
-        <el-form-item label="启用">
-          <el-switch v-model="userForm.enabled" :disabled="submitting" />
-        </el-form-item>
-        <el-form-item label="流量上限">
-          <div class="traffic-edit-row">
-            <el-input-number
-              v-model="userForm.traffic_value"
-              :min="0"
-              :precision="2"
-              :step="trafficStepSize('limit')"
-              class="traffic-number-input"
-              @change="handleTrafficValueChange('limit')"
-              :disabled="submitting"
-            />
-            <el-select v-model="userForm.traffic_unit" style="width: 100px;" @change="handleTrafficUnitChange('limit', $event)" :disabled="submitting">
-              <el-option label="B" value="B" />
-              <el-option label="KB" value="KB" />
-              <el-option label="MB" value="MB" />
-              <el-option label="GB" value="GB" />
-              <el-option label="TB" value="TB" />
-            </el-select>
-            <button
-              type="button"
-              class="traffic-step-button"
-              :class="{ active: userForm.traffic_step_100 }"
-              :disabled="submitting"
-              @click="toggleTrafficStepMultiplier('limit')"
-            >
-              100
-            </button>
-          </div>
-        </el-form-item>
-        <el-form-item label="已用流量">
-          <div class="traffic-edit-row">
-            <el-input-number
-              v-model="userForm.used_traffic_value"
-              :min="0"
-              :precision="2"
-              :step="trafficStepSize('used')"
-              class="traffic-number-input"
-              @change="handleTrafficValueChange('used')"
-              :disabled="submitting"
-            />
-            <el-select v-model="userForm.used_traffic_unit" style="width: 100px;" @change="handleTrafficUnitChange('used', $event)" :disabled="submitting">
-              <el-option label="B" value="B" />
-              <el-option label="KB" value="KB" />
-              <el-option label="MB" value="MB" />
-              <el-option label="GB" value="GB" />
-              <el-option label="TB" value="TB" />
-            </el-select>
-            <button
-              type="button"
-              class="traffic-step-button"
-              :class="{ active: userForm.used_traffic_step_100 }"
-              :disabled="submitting"
-              @click="toggleTrafficStepMultiplier('used')"
-            >
-              100
-            </button>
-          </div>
-        </el-form-item>
-        <el-form-item label="到期时间">
-          <el-date-picker v-model="userForm.expire_at" type="datetime" placeholder="选择到期时间" :disabled="submitting" />
-        </el-form-item>
-        <el-form-item>
-          <el-button
-            @click="resetBasicInfoChanges"
-            :disabled="submitting"
-          >
-            重置
-          </el-button>
-          <el-button
-            type="primary"
-            @click="saveBasicInfo"
-            :loading="basicSubmitting"
-            :disabled="cfIpsSubmitting || generatingSubscription"
-          >
-            更新基本信息
-          </el-button>
-        </el-form-item>
-        
-        <!-- CF IP 管理 -->
-        <el-divider content-position="left">优选 IP（最多 5 个）</el-divider>
-        <el-form-item>
+        <div class="edit-dialog-grid">
+          <section class="edit-dialog-pane">
+            <!-- 基本信息 -->
+            <el-divider content-position="left">基本信息</el-divider>
+            <el-form-item label="邮箱">
+              <el-input v-model="userForm.email" readonly />
+            </el-form-item>
+            <el-form-item label="启用">
+              <el-switch v-model="userForm.enabled" :disabled="submitting" />
+            </el-form-item>
+            <el-form-item label="流量上限">
+              <div class="traffic-edit-row">
+                <el-input-number
+                  v-model="userForm.traffic_value"
+                  :min="0"
+                  :precision="2"
+                  :step="trafficStepSize('limit')"
+                  class="traffic-number-input"
+                  @change="handleTrafficValueChange('limit')"
+                  :disabled="submitting"
+                />
+                <el-select v-model="userForm.traffic_unit" style="width: 100px;" @change="handleTrafficUnitChange('limit', $event)" :disabled="submitting">
+                  <el-option label="B" value="B" />
+                  <el-option label="KB" value="KB" />
+                  <el-option label="MB" value="MB" />
+                  <el-option label="GB" value="GB" />
+                  <el-option label="TB" value="TB" />
+                </el-select>
+                <button
+                  type="button"
+                  class="traffic-step-button"
+                  :class="{ active: userForm.traffic_step_100 }"
+                  :disabled="submitting"
+                  @click="toggleTrafficStepMultiplier('limit')"
+                >
+                  100
+                </button>
+              </div>
+            </el-form-item>
+            <el-form-item label="已用流量">
+              <div class="traffic-edit-row">
+                <el-input-number
+                  v-model="userForm.used_traffic_value"
+                  :min="0"
+                  :precision="2"
+                  :step="trafficStepSize('used')"
+                  class="traffic-number-input"
+                  @change="handleTrafficValueChange('used')"
+                  :disabled="submitting"
+                />
+                <el-select v-model="userForm.used_traffic_unit" style="width: 100px;" @change="handleTrafficUnitChange('used', $event)" :disabled="submitting">
+                  <el-option label="B" value="B" />
+                  <el-option label="KB" value="KB" />
+                  <el-option label="MB" value="MB" />
+                  <el-option label="GB" value="GB" />
+                  <el-option label="TB" value="TB" />
+                </el-select>
+                <button
+                  type="button"
+                  class="traffic-step-button"
+                  :class="{ active: userForm.used_traffic_step_100 }"
+                  :disabled="submitting"
+                  @click="toggleTrafficStepMultiplier('used')"
+                >
+                  100
+                </button>
+              </div>
+            </el-form-item>
+            <el-form-item label="到期时间">
+              <el-date-picker v-model="userForm.expire_at" type="datetime" placeholder="选择到期时间" :disabled="submitting" />
+            </el-form-item>
+            <el-form-item>
+              <el-button
+                @click="resetBasicInfoChanges"
+                :disabled="submitting"
+              >
+                重置
+              </el-button>
+              <el-button
+                type="primary"
+                @click="saveBasicInfo"
+                :loading="basicSubmitting"
+                :disabled="cfIpsSubmitting || generatingSubscription"
+              >
+                更新基本信息
+              </el-button>
+            </el-form-item>
+
+            <!-- 家宽 IP 控制 -->
+            <el-divider content-position="left">家宽 IP 控制</el-divider>
+            <el-form-item>
+              <div class="home-routing-editor">
+                <div class="home-routing-row">
+                  <el-select
+                    v-model="homeRoutingForm.home_proxy_tag"
+                    disabled
+                    placeholder="暂无家宽 IP"
+                    class="home-routing-select"
+                  >
+                    <el-option
+                      v-if="homeRoutingOptions.home_proxy_tag"
+                      :label="homeRoutingOptions.home_proxy_tag"
+                      :value="homeRoutingOptions.home_proxy_tag"
+                    />
+                  </el-select>
+                  <el-select
+                    v-model="homeRoutingForm.server_id_1"
+                    placeholder="请选择服务器"
+                    class="home-routing-select"
+                    :disabled="!homeRoutingEditable || homeRoutingBusy"
+                  >
+                    <el-option
+                      v-for="server in homeRoutingServers"
+                      :key="server.id"
+                      :label="server.name"
+                      :value="server.id"
+                    />
+                  </el-select>
+                  <el-select
+                    v-model="homeRoutingForm.server_id_2"
+                    clearable
+                    placeholder="可选第二台服务器"
+                    class="home-routing-select"
+                    :disabled="!homeRoutingEditable || homeRoutingBusy"
+                  >
+                    <el-option
+                      v-for="server in secondHomeRoutingServers"
+                      :key="server.id"
+                      :label="server.name"
+                      :value="server.id"
+                    />
+                  </el-select>
+                </div>
+                <div class="home-routing-expire-row">
+                  <span class="home-routing-expire-label">到期时间</span>
+                  <el-date-picker
+                    v-model="homeRoutingForm.home_expire_at"
+                    type="datetime"
+                    placeholder="选择到期时间"
+                    class="home-routing-expire-picker"
+                    :disabled="!homeRoutingEditable || homeRoutingBusy"
+                  />
+                </div>
+                <div class="section-actions">
+                  <el-button
+                    type="primary"
+                    :loading="homeRoutingBusy && homeRoutingAction === 'apply'"
+                    :disabled="!homeRoutingEditable || submitting || generatingSubscription || isHomeRoutingDeleting"
+                    @click="applyHomeRouting"
+                  >
+                    应用
+                  </el-button>
+                  <el-button
+                    type="danger"
+                    :loading="isHomeRoutingDeleting"
+                    :disabled="!homeRoutingRoute || submitting || generatingSubscription || isHomeRoutingApplying"
+                    @click="deleteHomeRouting"
+                  >
+                    删除
+                  </el-button>
+                </div>
+                <div v-if="homeRoutingMessage" class="home-routing-tip">
+                  {{ homeRoutingMessage }}
+                </div>
+              </div>
+            </el-form-item>
+          </section>
+
+          <section class="edit-dialog-pane edit-dialog-pane-right">
+            <!-- CF IP 管理 -->
+            <el-divider content-position="left">优选 IP（最多 5 个）</el-divider>
+            <el-form-item>
           <div style="width: 100%;">
             <!-- 已选择的 IP 列表 -->
             <div v-for="(ip, index) in cfIps" :key="ip.id" style="display: flex; align-items: center; margin-bottom: 8px; padding: 8px; background: #f5f7fa; border-radius: 4px;">
@@ -281,6 +364,8 @@
             </div>
           </div>
         </el-form-item>
+          </section>
+        </div>
       </el-form>
       
       <div v-if="submitting" style="text-align: center; color: #409eff; margin-top: 10px;">
@@ -329,7 +414,9 @@ const sortOrder = ref('')
 const dialogVisible = ref(false)
 const basicSubmitting = ref(false)
 const cfIpsSubmitting = ref(false)
-const submitting = computed(() => basicSubmitting.value || cfIpsSubmitting.value)
+const homeRoutingBusy = ref(false)
+const homeRoutingAction = ref('')
+const submitting = computed(() => basicSubmitting.value || cfIpsSubmitting.value || homeRoutingBusy.value)
 const editingId = ref(null)
 const deletingUserId = ref(null)
 
@@ -346,6 +433,13 @@ const batchDialogVisible = ref(false)
 const batchStarting = ref(false)
 const batchSocket = ref(null)
 const batchReconnectTimer = ref(null)
+const homeRoutingOptions = ref({ available: false })
+const homeRoutingForm = reactive({
+  home_proxy_tag: '',
+  server_id_1: null,
+  server_id_2: null,
+  home_expire_at: null
+})
 
 const batchForm = reactive({
   cfOptimizedOnly: true
@@ -382,6 +476,16 @@ const basicInfoSnapshot = reactive({
   traffic_bytes: 0,
   expire_at: null
 })
+
+const homeRoutingRoute = computed(() => homeRoutingOptions.value.route || null)
+const homeRoutingServers = computed(() => homeRoutingOptions.value.servers || [])
+const secondHomeRoutingServers = computed(() => (
+  homeRoutingServers.value.filter((server) => Number(server.id) !== Number(homeRoutingForm.server_id_1))
+))
+const homeRoutingEditable = computed(() => !!homeRoutingOptions.value.available && !!homeRoutingOptions.value.editable)
+const homeRoutingMessage = computed(() => homeRoutingOptions.value.message || '')
+const isHomeRoutingApplying = computed(() => homeRoutingBusy.value && homeRoutingAction.value === 'apply')
+const isHomeRoutingDeleting = computed(() => homeRoutingBusy.value && homeRoutingAction.value === 'delete')
 
 // 单位到字节的转换系数
 const unitMultipliers = {
@@ -539,6 +643,46 @@ function buildBasicInfoChanges() {
   }
 
   return data
+}
+
+/**
+ * 将管理端家宽 IP routing 选项写入编辑表单。
+ * 核心分支：已有绑定时回填服务器；未绑定时只保留当前家宽 IP tag。
+ */
+function applyHomeRoutingOptions(options) {
+  homeRoutingOptions.value = options || { available: false }
+  const routeServerIds = homeRoutingOptions.value.route?.server_ids || []
+  const homeExpireAt = Number(homeRoutingOptions.value.home_expire_at) || 0
+  homeRoutingForm.home_proxy_tag = homeRoutingOptions.value.home_proxy_tag || ''
+  homeRoutingForm.server_id_1 = routeServerIds[0] || null
+  homeRoutingForm.server_id_2 = routeServerIds[1] || null
+  homeRoutingForm.home_expire_at = homeExpireAt > 0 ? new Date(homeExpireAt * 1000) : null
+}
+
+/**
+ * 读取正在编辑用户的家宽 IP routing 配置。
+ * @param {number} userId - 管理端当前编辑的用户 ID。
+ */
+async function fetchHomeRoutingOptions(userId) {
+  try {
+    const response = await api.admin.getUserHomeRoutingOptions(userId)
+    if (response.code === 0) {
+      applyHomeRoutingOptions(response.data)
+    }
+  } catch (error) {
+    console.error('获取用户家宽 IP routing 配置失败:', error)
+    applyHomeRoutingOptions({ available: false, editable: false, message: '获取家宽 IP 配置失败' })
+  }
+}
+
+/**
+ * 从管理端家宽 IP 控制表单构造服务器 ID 列表。
+ * @returns {number[]} 去重前的有效服务器 ID，用于提示重复选择。
+ */
+function buildHomeRoutingServerIds() {
+  return [homeRoutingForm.server_id_1, homeRoutingForm.server_id_2]
+    .map(Number)
+    .filter((id) => Number.isInteger(id) && id > 0)
 }
 
 async function fetchUsers() {
@@ -827,13 +971,17 @@ async function showEditDialog(user) {
   const expireAt = Number(user.expire_at) || 0
   userForm.expire_at = expireAt > 0 ? new Date(expireAt * 1000) : null
   captureBasicInfoSnapshot()
+  applyHomeRoutingOptions({ available: false })
   
   // 获取 CF IP 池
   fetchCfIpPool()
   
-  // 获取完整用户详情（包含 CF IP 和订阅链接）
+  // 获取完整用户详情（包含 CF IP 和订阅链接）以及家宽 IP 控制状态。
   try {
-    const response = await api.admin.getUserDetail(user.id)
+    const [response] = await Promise.all([
+      api.admin.getUserDetail(user.id),
+      fetchHomeRoutingOptions(user.id)
+    ])
     if (response.code === 0) {
       cfIps.value = response.data.cf_ips || []
       subscriptionUrl.value = response.data.user.subscription_url || ''
@@ -847,6 +995,98 @@ async function showEditDialog(user) {
   }
   
   dialogVisible.value = true
+}
+
+/**
+ * 管理端应用当前用户家宽 IP routing 绑定。
+ * 核心分支：管理员操作由后端跳过冷却；前端仍校验至少一台服务器且两台不重复。
+ */
+async function applyHomeRouting() {
+  const serverIds = buildHomeRoutingServerIds()
+  if (serverIds.length === 0) {
+    ElMessage.warning('请选择至少一台服务器')
+    return
+  }
+  if (new Set(serverIds).size !== serverIds.length) {
+    ElMessage.warning('两台服务器不能重复')
+    return
+  }
+
+  homeRoutingBusy.value = true
+  homeRoutingAction.value = 'apply'
+  try {
+    const response = await api.admin.updateUserHomeRouting(editingId.value, {
+      server_ids: serverIds,
+      home_expire_at: toExpireTimestamp(homeRoutingForm.home_expire_at) || 0
+    })
+    if (response.code === 0) {
+      applyHomeRoutingOptions(response.data)
+      ElMessage.success('家宽 IP 配置已同步')
+    } else {
+      ElMessage.error(response.message || '家宽 IP 配置同步失败')
+    }
+  } catch (error) {
+    console.error('同步用户家宽 IP routing 失败:', error)
+    const failedServers = error.response?.data?.data?.failed_servers || []
+    if (failedServers.length > 0) {
+      const serverNames = failedServers.map((server) => server.name).join('、')
+      ElMessage.error(`同步失败：${serverNames}，请重试`)
+    } else {
+      ElMessage.error(error.response?.data?.message || '家宽 IP 配置同步失败')
+    }
+  } finally {
+    homeRoutingBusy.value = false
+    homeRoutingAction.value = ''
+  }
+}
+
+/**
+ * 管理端删除当前用户家宽 IP routing 绑定。
+ * 核心分支：复用用户端删除确认文案；后端会跳过冷却并在远端清理成功后删除本地记录。
+ */
+async function deleteHomeRouting() {
+  if (!homeRoutingRoute.value) {
+    ElMessage.warning('暂无可删除的家宽 IP 配置')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '删除后，当前配置的服务器将不再使用该家宽 IP 出口。确定继续删除？',
+      '删除确认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+
+  homeRoutingBusy.value = true
+  homeRoutingAction.value = 'delete'
+  try {
+    const response = await api.admin.deleteUserHomeRouting(editingId.value)
+    if (response.code === 0) {
+      applyHomeRoutingOptions(response.data)
+      ElMessage.success('家宽 IP 配置已删除')
+    } else {
+      ElMessage.error(response.message || '家宽 IP 配置删除失败')
+    }
+  } catch (error) {
+    console.error('删除用户家宽 IP routing 失败:', error)
+    const failedServers = error.response?.data?.data?.failed_servers || []
+    if (failedServers.length > 0) {
+      const serverNames = failedServers.map((server) => server.name).join('、')
+      ElMessage.error(`删除失败：${serverNames}，请重试`)
+    } else {
+      ElMessage.error(error.response?.data?.message || '家宽 IP 配置删除失败')
+    }
+  } finally {
+    homeRoutingBusy.value = false
+    homeRoutingAction.value = ''
+  }
 }
 
 /**
@@ -1005,4 +1245,37 @@ onBeforeUnmount(() => {
 .traffic-step-button:disabled { cursor: not-allowed; opacity: 0.6; }
 .batch-progress { margin-left: 16px; color: #606266; font-size: 13px; white-space: nowrap; }
 .batch-dialog-tip { margin-bottom: 12px; color: #606266; font-size: 13px; line-height: 1.6; }
+.edit-dialog-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 24px;
+  max-height: calc(88vh - 150px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.edit-dialog-pane { min-width: 0; }
+.edit-dialog-pane-right {
+  border-left: 1px solid #dcdfe6;
+  padding-left: 24px;
+}
+.home-routing-editor { width: 100%; }
+.home-routing-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.home-routing-select { width: 100%; }
+.home-routing-expire-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.home-routing-expire-label { color: #606266; font-size: 14px; white-space: nowrap; }
+.home-routing-expire-picker { width: 220px; }
+.home-routing-tip { margin-top: 8px; color: #e6a23c; font-size: 12px; line-height: 1.5; }
+
+@media (max-width: 960px) {
+  .edit-dialog-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+    max-height: calc(88vh - 140px);
+  }
+
+  .edit-dialog-pane-right {
+    border-left: 0;
+    padding-left: 0;
+  }
+}
 </style>

@@ -506,6 +506,20 @@ async function updateUserFields(db, userId, updates, values) {
 }
 
 /**
+ * 更新用户家宽 IP 套餐到期时间。
+ * 职责：供管理端家宽 IP 控制区单独维护 home_expire_at，不影响 routing 删除逻辑。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {number} homeExpireAt - 家宽套餐秒级到期时间戳
+ * @returns {Promise<void>}
+ */
+async function updateUserHomeExpireAt(db, userId, homeExpireAt) {
+  await db.prepare('UPDATE users SET home_expire_at = ?, updated_at = ? WHERE id = ?')
+    .run(homeExpireAt, Math.floor(Date.now() / 1000), userId);
+}
+
+/**
  * 查询用户 IP 归属地 JSON。
  *
  * @param {Object} db - 数据库代理对象
@@ -867,6 +881,7 @@ module.exports = {
   listUserOrders,
   listUserCfIps,
   updateUserFields,
+  updateUserHomeExpireAt,
   findUserIpLocationById,
   updateUserIpLocation,
   deleteUserLocalRelatedData,
