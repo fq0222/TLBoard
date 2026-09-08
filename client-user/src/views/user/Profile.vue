@@ -1,236 +1,190 @@
 <template>
   <div class="profile-container" v-loading="loading">
-    <section class="top-grid">
-      <section class="welcome-card">
-        <div class="welcome-main">
-          <div class="welcome-badge">会员工作台</div>
-          <h1 class="welcome-title">{{ greetingText }}，{{ displayName }}</h1>
-
-          <div class="status-pills">
-            <span class="status-pill">
-              账号状态：
-              <el-tag size="small" :type="accountStatusType">
-                {{ accountStatusText }}
-              </el-tag>
-            </span>
-            <span class="status-pill">订阅状态：{{ userInfo.subscription_ready ? '已生成' : '未生成' }}</span>
-            <span class="status-pill">极速通道：{{ cfOptimized ? '已开启' : '未开启' }}</span>
-          </div>
+    <section class="dashboard-card-grid">
+      <article class="panel-card dashboard-card referral-card">
+        <div class="dashboard-card-head">
+          <span class="dashboard-card-label">账户信息</span>
+          <span class="dashboard-icon blue">
+            <el-icon><User /></el-icon>
+          </span>
         </div>
-
-        <div class="welcome-actions">
-          <el-button
-            size="large"
-            class="guide-button"
+        <div class="account-email">{{ userInfo.email || '-' }}</div>
+        <dl class="metric-list">
+          <div class="metric-row">
+            <dt>余额</dt>
+            <dd>{{ userInfo.balance_text || '0.00 元' }}</dd>
+          </div>
+          <div class="metric-row">
+            <dt>推广奖励总额</dt>
+            <dd>{{ rewardAmountText }}</dd>
+          </div>
+        </dl>
+        <div class="referral-action-row">
+          <button
+            type="button"
+            class="text-link-button onboarding-link-button"
             @click="startOnboardingGuide(true)"
           >
             新手引导
-          </el-button>
-          <el-button
-            type="info"
-            size="large"
-            class="renew-button"
-            @click="goToPlansPage"
-            :disabled="!userInfo.plan_id"
+          </button>
+          <button
+            type="button"
+            class="text-link-button share-friend-button"
+            @click="referralPosterRef?.open()"
           >
-            <el-icon><Refresh /></el-icon>
-            续费套餐
-          </el-button>
-          <div
-            v-if="telegramChannelUrl || onlineCustomerServiceUrl"
-            class="support-actions"
-            :class="{ 'support-actions-single': !(telegramChannelUrl && onlineCustomerServiceUrl) }"
+            分享给好友
+          </button>
+          <a
+            v-if="telegramChannelUrl"
+            :href="telegramChannelUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-link-button telegram-channel-button"
           >
-            <el-button
-              v-if="telegramChannelUrl"
-              tag="a"
-              :href="telegramChannelUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              size="large"
-              class="telegram-channel-button"
-            >
-              <el-icon><Promotion /></el-icon>
-              官方电报频道
-            </el-button>
-            <el-button
-              v-if="onlineCustomerServiceUrl"
-              tag="a"
-              :href="onlineCustomerServiceHref"
-              target="_blank"
-              rel="noopener noreferrer"
-              size="large"
-              class="online-service-button"
-            >
-              <el-icon><Service /></el-icon>
-              在线客服
-            </el-button>
-          </div>
+            加入电报频道
+          </a>
+          <a
+            v-if="onlineCustomerServiceUrl"
+            :href="onlineCustomerServiceHref"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-link-button online-service-button"
+          >
+            在线客服
+          </a>
         </div>
-      </section>
-
-      <article class="panel-card compact-card overview-card">
-        <div class="panel-head">
-          <div>
-            <h2 class="panel-title">账户概览</h2>
-          </div>
-        </div>
-
-        <div class="overview-list">
-          <div class="overview-item">
-            <span class="overview-label">邮箱</span>
-            <span class="overview-value">{{ userInfo.email || '-' }}</span>
-          </div>
-
-          <div class="overview-inline-row">
-            <div class="overview-item">
-              <span class="overview-label">套餐</span>
-              <span class="overview-value">{{ userInfo.plan_name || '未订阅' }}</span>
-            </div>
-            <div class="overview-item">
-              <span class="overview-label">状态</span>
-              <span class="overview-value">{{ accountStatusText }}</span>
-            </div>
-          </div>
-
-          <div class="overview-item">
-            <span class="overview-label">流量</span>
-            <span class="overview-value">{{ trafficSummaryText }}</span>
-          </div>
-        </div>
-
-        <el-progress
-          :percentage="userInfo.traffic_percent || 0"
-          :stroke-width="16"
-        />
       </article>
-    </section>
 
-    <section class="dashboard-grid">
-      <div class="main-column">
-        <article class="panel-card subscription-workspace">
-          <div class="panel-head subscription-workspace-head">
-            <div>
-              <h2 class="panel-title">订阅工作区</h2>
-              <p class="panel-subtitle">请按顺序完成优选和订阅生成，避免节点不可用。</p>
-            </div>
-            <div class="subscription-head-actions">
-              <el-button
-                class="guide-button share-friend-button"
-                @click="referralPosterRef?.open()"
-              >
-                分享给好友
-              </el-button>
-              <el-button
-                v-if="userInfo.subscription_ready"
-                class="guide-button replace-subscription-button"
-                :disabled="actionBusy"
-                @click="confirmReplaceSubscriptionLink"
-              >
-                更换订阅链接
-              </el-button>
-            </div>
+      <article class="panel-card dashboard-card package-card">
+        <div class="dashboard-card-head">
+          <span class="dashboard-card-label">套餐信息</span>
+          <el-tag class="package-status-tag" :type="accountStatusType">
+            {{ accountStatusText }}
+          </el-tag>
+        </div>
+        <div class="package-block">
+          <div class="metric-row">
+            <dt>流量用量</dt>
+            <dd>{{ compactTrafficUsageText }}</dd>
           </div>
-
-          <div class="step-actions">
-            <button
-              type="button"
-              class="step-action-card optimize-action"
-              :class="{ disabled: actionBusy }"
-              :disabled="actionBusy"
-              @click="startOptimize"
-            >
-              <span class="step-action-index">1</span>
-              <span class="step-action-name">{{ cfOptimized ? '重新优选极速通道' : '一键开启极速通道' }}</span>
-            </button>
-
-            <button
-              type="button"
-              class="step-action-card generate-action"
-              :class="{ disabled: actionBusy }"
-              :disabled="actionBusy"
-              @click="generateSubscription"
-            >
-              <span class="step-action-index">2</span>
-              <span class="step-action-name">{{ generatingSubscription ? '生成中...' : '生成订阅链接' }}</span>
-            </button>
+          <el-progress
+            :percentage="userInfo.traffic_percent || 0"
+            :stroke-width="8"
+            :show-text="false"
+          />
+          <div class="metric-row">
+            <dt>到期时间</dt>
+            <dd>{{ userInfo.expire_text || '暂无可订阅' }}</dd>
           </div>
-
-          <div v-if="userInfo.subscription_ready" class="subscription-links">
-            <div class="subscription-copy-target">
-              <div class="link-group">
-                <span class="link-label">通用订阅</span>
-                <el-input
-                  :model-value="userInfo.subscription_url"
-                  readonly
-                  size="large"
-                >
-                  <template #append>
-                    <el-button @click="copyLink(userInfo.subscription_url)">
-                      <el-icon><CopyDocument /></el-icon>
-                      复制
-                    </el-button>
-                  </template>
-                </el-input>
-                <p class="link-tip">适用于 v2rayN、v2rayNG、Shadowrocket、Quantumult X 等客户端。</p>
-              </div>
-
-              <div class="link-group">
-                <span class="link-label">Clash 订阅</span>
-                <el-input
-                  :model-value="userInfo.clash_url"
-                  readonly
-                  size="large"
-                >
-                  <template #append>
-                    <el-button @click="copyLink(userInfo.clash_url)">
-                      <el-icon><CopyDocument /></el-icon>
-                      复制
-                    </el-button>
-                  </template>
-                </el-input>
-                <p class="link-tip">适用于 Clash、Clash Verge、ClashX、Clash for Windows 等客户端。</p>
-              </div>
-            </div>
-
-            <div class="inline-tip">
-              <el-icon><InfoFilled /></el-icon>
-              <span>如果链接失效，可先重新优选极速通道，再重新生成订阅链接。</span>
-            </div>
+        </div>
+        <div class="package-block home-package-block">
+          <div class="package-title-row">
+            <strong>家宽IP套餐</strong>
           </div>
-
-        </article>
-      </div>
-
-      <div class="side-column">
-        <article class="panel-card compact-card announcement-card">
-          <div class="panel-head">
-            <div>
-              <h2 class="panel-title">系统公告</h2>
-            </div>
-            <span class="panel-extra">最近更新</span>
+          <div class="metric-row">
+            <dt>套餐名称</dt>
+            <dd>{{ userInfo.home_plan_name || '暂无可订阅' }}</dd>
           </div>
-
-          <div v-if="announcements.length > 0" class="announcement-list">
-            <div
-              v-for="announcement in announcements"
-              :key="announcement.id"
-              class="announcement-item"
-            >
-              <div class="announcement-head">
-                <div class="announcement-title-row">
-                  <el-tag v-if="announcement.pinned" type="danger" size="small">置顶</el-tag>
-                  <h3 class="announcement-title">{{ announcement.title }}</h3>
-                </div>
-                <span class="announcement-time">{{ formatDate(announcement.created_at) }}</span>
-              </div>
-              <div class="announcement-content" v-html="renderMarkdown(announcement.content)"></div>
-            </div>
+          <div class="metric-row">
+            <dt>到期时间</dt>
+            <dd>{{ homeExpireText }}</dd>
           </div>
+        </div>
+      </article>
 
-          <el-empty v-else description="暂无公告" />
-        </article>
-      </div>
+      <article class="panel-card dashboard-card mini-subscription-card">
+        <div class="dashboard-card-head">
+          <span class="dashboard-card-label">订阅工作区</span>
+          <el-button
+            v-if="userInfo.subscription_ready"
+            link
+            type="primary"
+            class="replace-subscription-button"
+            :disabled="actionBusy"
+            @click="confirmReplaceSubscriptionLink"
+          >
+            更换订阅链接
+          </el-button>
+        </div>
+        <div class="mini-subscription-actions">
+          <button
+            type="button"
+            class="step-action-card optimize-action"
+            :class="{ disabled: actionBusy }"
+            :disabled="actionBusy"
+            @click="startOptimize"
+          >
+            <span class="step-action-index">步骤1</span>
+            <span class="step-action-name">{{ cfOptimized ? '重新优选极速通道' : '一键开启极速通道' }}</span>
+          </button>
+
+          <button
+            type="button"
+            class="step-action-card generate-action"
+            :class="{ disabled: actionBusy }"
+            :disabled="actionBusy"
+            @click="generateSubscription"
+          >
+            <span class="step-action-index">步骤2</span>
+            <span class="step-action-name">{{ generatingSubscription ? '生成中...' : '生成订阅链接' }}</span>
+          </button>
+        </div>
+        <div class="subscription-copy-target mini-copy-list">
+          <div class="mini-copy-row">
+            <div class="mini-copy-text">
+              <span class="mini-copy-title">通用订阅</span>
+              <span class="mini-copy-desc" aria-label="适用于 v2rayN、v2rayNG、Shadowrocket等客户端">
+                <span>适用于 v2rayN、v2rayNG、</span>
+                <span>Shadowrocket等客户端</span>
+              </span>
+            </div>
+            <el-button size="small" @click="copyLink(userInfo.subscription_url)">
+              <el-icon><CopyDocument /></el-icon>
+              复制
+            </el-button>
+          </div>
+          <div class="mini-copy-row">
+            <div class="mini-copy-text">
+              <span class="mini-copy-title">Clash订阅</span>
+              <span class="mini-copy-desc" aria-label="适用于 FlClash、Clash Verge、Clash Mi等客户端">
+                <span>适用于 FlClash、Clash Verge、</span>
+                <span>Clash Mi等客户端</span>
+              </span>
+            </div>
+            <el-button size="small" @click="copyLink(userInfo.clash_url)">
+              <el-icon><CopyDocument /></el-icon>
+              复制
+            </el-button>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel-card dashboard-card announcement-card">
+        <div class="dashboard-card-head announcement-card-title">
+          <div class="announcement-title-with-icon">
+            <el-icon><Bell /></el-icon>
+            <span>系统公告</span>
+          </div>
+        </div>
+
+        <div v-if="announcements.length > 0" class="announcement-list">
+          <button
+            v-for="announcement in announcements"
+            :key="announcement.id"
+            type="button"
+            class="announcement-item"
+            @click="openAnnouncementDetail(announcement)"
+          >
+            <span class="announcement-title-row">
+              <span class="announcement-dot" :class="{ pinned: announcement.pinned }"></span>
+              <span class="announcement-title">{{ announcement.title }}</span>
+            </span>
+            <span class="announcement-time">{{ formatDate(announcement.created_at) }}</span>
+          </button>
+        </div>
+
+        <el-empty v-else description="暂无公告" />
+      </article>
     </section>
 
     <el-dialog
@@ -261,6 +215,28 @@
         <div
           class="announcement-popup-content"
           v-html="renderMarkdown(popupAnnouncement.content)"
+        ></div>
+      </div>
+    </el-dialog>
+
+    <el-dialog
+      v-model="announcementDetailVisible"
+      :width="announcementDialogWidth"
+      class="announcement-detail-dialog"
+    >
+      <template #header>
+        <div class="announcement-popup-dialog-header">
+          <span class="announcement-popup-dialog-title">系统公告</span>
+        </div>
+      </template>
+      <div v-if="selectedAnnouncement" class="announcement-popup-body">
+        <div class="announcement-popup-head">
+          <h3 class="announcement-popup-title">{{ selectedAnnouncement.title }}</h3>
+          <span class="announcement-popup-time">{{ formatDate(selectedAnnouncement.created_at) }}</span>
+        </div>
+        <div
+          class="announcement-popup-content"
+          v-html="renderMarkdown(selectedAnnouncement.content)"
         ></div>
       </div>
     </el-dialog>
@@ -428,15 +404,13 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { onBeforeRouteLeave, useRouter } from 'vue-router'
+import { onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  Bell,
   CopyDocument,
-  InfoFilled,
   Loading,
-  Promotion,
-  Refresh,
-  Service
+  User
 } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { useUserStore } from '@/stores/user'
@@ -456,10 +430,9 @@ import { selectFallbackCfIp, selectRecommendedCfIps } from '@/utils/cf-ip-optimi
 import { getSubscriptionGenerationErrorMessage } from '@/utils/subscription-error'
 
 const userStore = useUserStore()
-const router = useRouter()
-
 const userInfo = ref({})
 const referralUrl = ref('')
+const referralSummary = ref({})
 const referralPosterRef = ref(null)
 const announcements = ref([])
 const loading = ref(false)
@@ -472,6 +445,8 @@ const generatingSubscription = ref(false)
 const replacingSubscription = ref(false)
 const announcementPopupVisible = ref(false)
 const popupAnnouncement = ref(null)
+const announcementDetailVisible = ref(false)
+const selectedAnnouncement = ref(null)
 const popupClosing = ref(false)
 const syncLoading = ref(false)
 const syncTimer = ref(null)
@@ -527,13 +502,24 @@ const greetingText = computed(() => {
   return '晚上好'
 })
 
-const trafficSummaryText = computed(() => {
+const compactTrafficUsageText = computed(() => {
   const usedTrafficText = userInfo.value.traffic_used_text || '0 B'
   const totalTrafficText = userInfo.value.total_traffic_limit_text || userInfo.value.traffic_limit_text || '0 B'
-  const planTrafficText = userInfo.value.plan_traffic_limit_text || '0 B'
-  const referralBalanceText = userInfo.value.balance_text || '0.00 元'
 
-  return `${usedTrafficText} / ${totalTrafficText}（套餐：${planTrafficText} + 推广：${referralBalanceText}）`
+  return `${usedTrafficText} / ${totalTrafficText}`
+})
+
+const rewardAmountText = computed(() => {
+  if (referralSummary.value.reward_amount_text) {
+    return referralSummary.value.reward_amount_text
+  }
+
+  return `${((Number(referralSummary.value.reward_amount) || 0) / 100).toFixed(2)} 元`
+})
+
+const homeExpireText = computed(() => {
+  if (!userInfo.value.home_plan_name) return '暂无可订阅'
+  return formatTime(userInfo.value.home_expire_at) || '暂无可订阅'
 })
 
 const accountStatusText = computed(() => {
@@ -932,9 +918,18 @@ function renderMarkdown(content) {
   return marked(content)
 }
 
+/**
+ * 打开公告详情弹窗。
+ * @param {Object} announcement - 当前点击的公告对象。
+ */
+function openAnnouncementDetail(announcement) {
+  selectedAnnouncement.value = announcement
+  announcementDetailVisible.value = true
+}
+
 async function copyLink(link) {
   if (!link) {
-    ElMessage.warning('请先生成订阅链接')
+    ElMessage.warning('没有订阅链接，需要先生成')
     return
   }
 
@@ -1218,16 +1213,6 @@ function pingIp(ip) {
   return createCfLatencySample(ip)
 }
 
-/**
- * 跳转到独立套餐页面。
- * 职责：把首页续费入口交给套餐页承载，保留当前按钮的未订阅禁用逻辑。
- *
- * @returns {Promise<void>}
- */
-async function goToPlansPage() {
-  await router.push('/user/plans')
-}
-
 function formatDate(timestamp) {
   if (!timestamp) return ''
   const date = new Date(timestamp * 1000)
@@ -1235,6 +1220,20 @@ function formatDate(timestamp) {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
+  })
+}
+
+function formatTime(timestamp) {
+  if (!timestamp) return ''
+  const date = new Date(timestamp * 1000)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
   })
 }
 
@@ -1247,6 +1246,7 @@ async function fetchReferralUrl() {
   try {
     const response = await api.user.getReferralSummary()
     if (response.code === 0) {
+      referralSummary.value = response.data || {}
       referralUrl.value = response.data?.referral_url || ''
     }
   } catch (error) {
@@ -1287,23 +1287,306 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .profile-container {
+  --dashboard-card-radius: 8px;
+  --dashboard-border: #e5e7eb;
+  --dashboard-muted: #64748b;
+  --dashboard-title: #0f172a;
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
-.top-grid {
+.dashboard-card-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 20px;
-  align-items: stretch;
+  width: 100%;
+  max-width: 1680px;
+  margin: 0 auto;
 }
 
 .welcome-card,
 .panel-card {
   background: #fff;
-  border-radius: 20px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  border: 1px solid var(--dashboard-border);
+  border-radius: var(--dashboard-card-radius);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.dashboard-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: clamp(188px, 18vw, 260px);
+  min-height: 0;
+  padding: 18px;
+}
+
+.dashboard-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.dashboard-card-label {
+  color: #475569;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dashboard-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 14px;
+  font-size: 22px;
+}
+
+.dashboard-icon.blue {
+  background: #eef2ff;
+  color: #2563eb;
+}
+
+.dashboard-icon.green {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.package-status-tag {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 22px;
+}
+
+.account-email {
+  margin-bottom: 14px;
+  color: #020617;
+  font-size: 23px;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.metric-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+
+.metric-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  color: var(--dashboard-muted);
+  font-size: 14px;
+}
+
+.metric-row dt {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.metric-row dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--dashboard-title);
+  font-weight: 800;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.text-link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  margin-top: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.text-link-button:hover,
+.text-link-button:focus-visible {
+  color: #1d4ed8;
+  outline: none;
+  text-decoration: underline;
+}
+
+.referral-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: auto;
+}
+
+.referral-action-row .text-link-button {
+  margin-top: 0;
+  line-height: 1.3;
+  text-decoration: none;
+}
+
+.referral-action-row .text-link-button:hover,
+.referral-action-row .text-link-button:focus-visible {
+  text-decoration: underline;
+}
+
+.referral-action-row .telegram-channel-button,
+.referral-action-row .online-service-button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.referral-action-row .telegram-channel-button:hover,
+.referral-action-row .telegram-channel-button:focus,
+.referral-action-row .online-service-button:hover,
+.referral-action-row .online-service-button:focus {
+  background: transparent;
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.package-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.package-block + .package-block {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #eef2f7;
+}
+
+.package-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--dashboard-title);
+}
+
+.package-title-row strong {
+  min-width: 0;
+  font-size: 20px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.package-title-row span {
+  flex: 0 0 auto;
+  font-weight: 800;
+}
+
+.mini-subscription-card {
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.mini-subscription-card .dashboard-card-head {
+  margin-bottom: 2px;
+}
+
+.replace-subscription-button {
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 0;
+  font-weight: 700;
+}
+
+.mini-subscription-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.mini-copy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.mini-copy-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  height: 42px;
+  padding: 5px 10px;
+  border: 1px solid #eef2f7;
+  border-radius: var(--dashboard-card-radius);
+  background: #f8fafc;
+  box-sizing: border-box;
+}
+
+.mini-copy-text {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mini-copy-title {
+  flex: 0 0 auto;
+}
+
+.mini-copy-desc {
+  min-width: 0;
+  margin-left: 12px;
+  color: #64748b;
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.15;
+}
+
+.mini-copy-row span {
+  min-width: 0;
+  color: var(--dashboard-title);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.mini-copy-row .mini-copy-desc span {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+.mini-copy-row .mini-copy-desc {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.mini-copy-row :deep(.el-button) {
+  margin-left: 0;
 }
 
 .welcome-card {
@@ -1373,27 +1656,6 @@ onBeforeUnmount(() => {
 
 .support-actions :deep(.el-button + .el-button) {
   margin-left: 0;
-}
-
-.renew-button {
-  border: none;
-  border-radius: 16px;
-  background: linear-gradient(135deg, #38bdf8 0%, #2563eb 100%);
-  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.2);
-}
-
-.renew-button:not(.is-disabled):hover {
-  background: linear-gradient(135deg, #22c55e 0%, #0f766e 100%);
-}
-
-.renew-button:deep(span),
-.renew-button:deep(.el-icon) {
-  color: #fff;
-}
-
-.renew-button.is-disabled {
-  background: linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%);
-  box-shadow: none;
 }
 
 .telegram-channel-button,
@@ -1542,6 +1804,24 @@ onBeforeUnmount(() => {
   gap: 14px;
 }
 
+.mini-subscription-actions .step-action-card {
+  min-height: 40px;
+  padding: 8px 12px 8px 64px;
+  border-radius: var(--dashboard-card-radius);
+}
+
+.mini-subscription-actions .step-action-index {
+  left: 12px;
+  min-width: 42px;
+  padding-right: 10px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.mini-subscription-actions .step-action-name {
+  font-size: 13px;
+}
+
 .step-action-card {
   position: relative;
   width: 100%;
@@ -1672,21 +1952,54 @@ onBeforeUnmount(() => {
 .announcement-list {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 0;
+  margin: 0 -18px -18px;
 }
 
 .announcement-card {
   min-height: 100%;
 }
 
-.announcement-item {
-  padding-bottom: 18px;
+.announcement-card-title {
+  padding-bottom: 14px;
   border-bottom: 1px solid #eef2f7;
 }
 
+.announcement-title-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--dashboard-title);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.announcement-title-with-icon .el-icon {
+  color: #2563eb;
+  font-size: 20px;
+}
+
+.announcement-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 18px;
+  border: 0;
+  border-bottom: 1px solid #eef2f7;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
 .announcement-item:last-child {
-  padding-bottom: 0;
   border-bottom: none;
+}
+
+.announcement-item:hover .announcement-title {
+  color: #2563eb;
 }
 
 .announcement-head {
@@ -1700,19 +2013,36 @@ onBeforeUnmount(() => {
 .announcement-title-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
+.announcement-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #4f63ff;
+}
+
+.announcement-dot.pinned {
+  background: #f59e0b;
+}
+
 .announcement-title {
+  overflow: hidden;
   margin: 0;
   color: #0f172a;
-  font-size: 18px;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .announcement-time {
   color: #94a3b8;
-  font-size: 13px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
@@ -1773,13 +2103,15 @@ onBeforeUnmount(() => {
   text-decoration: none;
 }
 
-.announcement-popup-dialog :deep(.el-dialog) {
+.announcement-popup-dialog :deep(.el-dialog),
+.announcement-detail-dialog :deep(.el-dialog) {
   max-width: 92vw;
-  border-radius: 22px;
+  border-radius: var(--dashboard-card-radius);
   box-sizing: border-box;
 }
 
-.announcement-popup-dialog :deep(.el-dialog__body) {
+.announcement-popup-dialog :deep(.el-dialog__body),
+.announcement-detail-dialog :deep(.el-dialog__body) {
   overflow: hidden;
 }
 
@@ -2228,20 +2560,91 @@ onBeforeUnmount(() => {
   }
 }
 
+@media (min-width: 1600px) {
+  .profile-container {
+    padding-top: clamp(12px, 1.5vw, 28px);
+  }
+
+  .dashboard-card-grid {
+    gap: 32px;
+  }
+
+  .mini-copy-list {
+    margin-top: 0;
+  }
+}
+
 @media (max-width: 1024px) {
-  .top-grid,
-  .dashboard-grid {
-    grid-template-columns: 1fr;
+  .dashboard-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-height: 0;
   }
 }
 
 @media (max-width: 768px) {
   .profile-container,
-  .top-grid,
+  .dashboard-card-grid,
   .dashboard-grid,
   .main-column,
   .side-column {
     gap: 14px;
+  }
+
+  .dashboard-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-card {
+    height: auto;
+    min-height: 0;
+    padding: 15px;
+  }
+
+  .account-email {
+    font-size: 18px;
+  }
+
+  .referral-card {
+    padding-bottom: 12px;
+  }
+
+  .referral-action-row {
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 18px;
+    margin-bottom: 0;
+  }
+
+  .referral-action-row .text-link-button {
+    flex: 0 0 auto;
+    min-width: 0;
+    padding: 0;
+    font-size: 13px;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .metric-row {
+    align-items: flex-start;
+    font-size: 13px;
+  }
+
+  .package-title-row strong {
+    font-size: 18px;
+  }
+
+  .mini-copy-list {
+    margin-top: 0;
+  }
+
+  .announcement-list {
+    margin: 0 -15px -15px;
+  }
+
+  .announcement-item {
+    min-height: 50px;
+    padding: 0 15px;
   }
 
   .subscription-workspace-head {
@@ -2253,7 +2656,7 @@ onBeforeUnmount(() => {
   .panel-card,
   .compact-card {
     padding: 15px;
-    border-radius: 16px;
+    border-radius: var(--dashboard-card-radius);
   }
 
   .welcome-badge {
@@ -2335,16 +2738,6 @@ onBeforeUnmount(() => {
     border-color: rgba(37, 99, 235, 0.28);
     background: #dbeafe;
     color: #1d4ed8;
-  }
-
-  .share-friend-button {
-    position: static;
-    flex: 0 0 auto !important;
-    width: auto !important;
-    min-width: 0 !important;
-    padding: 4px 10px !important;
-    border-radius: 999px;
-    font-size: 12px;
   }
 
   .subscription-head-actions {

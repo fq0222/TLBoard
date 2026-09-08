@@ -25,17 +25,17 @@ export function getOnboardingGuideMode(windowWidth) {
  */
 export function getOnboardingGuideSteps(options) {
   const { isMobile, subscriptionReady } = options
-  const copyTarget = subscriptionReady
-    ? (isMobile ? '.subscription-copy-target' : '.subscription-links')
-    : '.subscription-workspace'
+  const copyTarget = isMobile || subscriptionReady
+    ? '.subscription-copy-target'
+    : '.mini-subscription-card'
   const helpTarget = isMobile ? '.onboarding-help-bottom-nav' : '.onboarding-help-nav'
 
   return [
     {
       key: 'optimize',
       target: '.optimize-action',
-      title: '第一步：优选 CF IP',
-      description: '先点击这里测试并保存更适合当前网络的优选 IP，后续订阅节点会使用这些结果。',
+      title: '第一步：优选极速通道',
+      description: '先点击这里测试并保存更适合当前网络的优选极速通道，后续订阅节点会使用这些结果。',
       placement: isMobile ? 'top' : 'bottom',
       nextText: '下一步',
       mobilePanel: isMobile

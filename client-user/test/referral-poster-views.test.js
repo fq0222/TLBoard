@@ -77,10 +77,10 @@ test('我的页面复用共享海报弹窗且不再自行生成二维码', () =>
   assert.doesNotMatch(mySource, /QRCode\.toDataURL/)
 })
 
-test('个人中心订阅工作区提供分享好友入口', () => {
+test('个人中心账户信息卡提供分享好友入口', () => {
   assert.match(
     profileSource,
-    /class\s*=\s*["']panel-head subscription-workspace-head["']/
+    /class\s*=\s*["']panel-card dashboard-card referral-card["']/
   )
   assert.match(profileSource, />\s*分享给好友\s*</)
   assert.match(profileSource, /<ReferralPosterDialog/)
@@ -98,7 +98,8 @@ test('个人中心订阅工作区提供分享好友入口', () => {
   )
 })
 
-test('个人中心加载推广信息并适配移动端分享按钮', () => {
+test('个人中心加载推广信息并在移动端统一快捷入口样式', () => {
   assert.match(profileSource, /api\.user\.getReferralSummary\(\s*\)/)
-  assert.match(profileMobileSource, /\.share-friend-button\b/)
+  assert.match(profileMobileSource, /\.referral-action-row\s+\.text-link-button\b/)
+  assert.doesNotMatch(profileMobileSource, /\.share-friend-button\s*\{[\s\S]*font-size:\s*12px/)
 })

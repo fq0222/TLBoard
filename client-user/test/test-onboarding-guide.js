@@ -25,22 +25,46 @@ test('mobile onboarding steps keep stable targets for scroll and highlight', () 
 
   assert.equal(steps.length, 4)
   assert.equal(steps[0].target, '.optimize-action')
+  assert.equal(steps[0].title, '第一步：优选极速通道')
+  assert.doesNotMatch(steps[0].description, /CF IP|优选 IP/)
+  assert.match(steps[0].description, /优选极速通道/)
   assert.equal(steps[1].target, '.generate-action')
   assert.equal(steps[2].target, '.subscription-copy-target')
   assert.equal(steps[3].target, '.onboarding-help-bottom-nav')
   assert.equal(steps.every(step => step.mobilePanel === true), true)
 })
 
+test('mobile onboarding copy step only highlights the copy area before subscription links are generated', () => {
+  const steps = getOnboardingGuideSteps({
+    isMobile: true,
+    subscriptionReady: false
+  })
+
+  assert.equal(steps[2].target, '.subscription-copy-target')
+})
+
 test('desktop onboarding keeps tour placements and sidebar help target', () => {
+  const steps = getOnboardingGuideSteps({
+    isMobile: false,
+    subscriptionReady: true
+  })
+
+  assert.equal(steps[0].title, '第一步：优选极速通道')
+  assert.doesNotMatch(steps[0].description, /CF IP|优选 IP/)
+  assert.match(steps[0].description, /优选极速通道/)
+  assert.equal(steps[2].target, '.subscription-copy-target')
+  assert.equal(steps[3].target, '.onboarding-help-nav')
+  assert.equal(steps[0].placement, 'bottom')
+  assert.equal(steps[2].placement, 'right')
+})
+
+test('desktop onboarding falls back to mini subscription card before links are generated', () => {
   const steps = getOnboardingGuideSteps({
     isMobile: false,
     subscriptionReady: false
   })
 
-  assert.equal(steps[2].target, '.subscription-workspace')
-  assert.equal(steps[3].target, '.onboarding-help-nav')
-  assert.equal(steps[0].placement, 'bottom')
-  assert.equal(steps[2].placement, 'right')
+  assert.equal(steps[2].target, '.mini-subscription-card')
 })
 
 test('route leave completes onboarding when user is on help step', () => {

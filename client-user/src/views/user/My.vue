@@ -119,7 +119,7 @@
           <el-icon><ArrowRight /></el-icon>
         </router-link>
 
-        <router-link v-if="subscriptionReady" to="/user/cf-optimize" class="action-item">
+        <router-link to="/user/cf-optimize" class="action-item">
           <div class="action-main">
             <span class="action-title">线路优选</span>
             <span class="action-desc">测试并应用更优节点入口，改善连接体验</span>

@@ -27,6 +27,16 @@ test('我的服务第一项是我的订单，并移除帮助中心、订阅信�
   assert.doesNotMatch(serviceSection, /帮助中心|订阅信息|套餐与续费/)
 })
 
+test('我的服务始终展示线路优选入口，不依赖订阅链接是否已生成', () => {
+  const serviceSection = mySource.match(
+    /<h2 class="section-title">我的服务<\/h2>[\s\S]*?<section class="content-card">/
+  )?.[0]
+
+  assert.ok(serviceSection, '应存在我的服务区块')
+  assert.match(serviceSection, /<router-link to="\/user\/cf-optimize" class="action-item">/)
+  assert.doesNotMatch(serviceSection, /v-if="subscriptionReady"[\s\S]*to="\/user\/cf-optimize"/)
+})
+
 test('用户端存在我的订单路由并加载订单列表页', () => {
   assert.match(routerSource, /path:\s*'orders'/)
   assert.match(routerSource, /name:\s*'UserOrders'/)
