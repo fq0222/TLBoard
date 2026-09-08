@@ -6,6 +6,10 @@ const HOME_ROUTING_SYNC_CONCURRENCY = 10;
 const HOME_ROUTING_COOLDOWN_SECONDS = 5 * 60;
 const XUI_XRAY_TIMEOUT = 30000;
 const XUI_INBOUNDS_TIMEOUT = 30000;
+const HOME_STATUS = {
+  NORMAL: 'normal',
+  EXPIRED: 'expired'
+};
 
 let xuiServiceFactory = XuiService.getInstance.bind(XuiService);
 
@@ -381,6 +385,28 @@ function getCooldownRemaining(route, now = getNowTimestamp()) {
   return Math.max(0, lastSyncedAt + HOME_ROUTING_COOLDOWN_SECONDS - now);
 }
 
+/**
+ * 计算家宽权益展示状态。
+ * 核心分支：数据库已标记 expired 或到期时间已过都展示为过期，避免定时任务未跑时误导用户。
+ *
+ * @param {Object} entitlement - 用户家宽权益记录
+ * @param {number} now - 当前秒级时间戳
+ * @returns {'normal'|'expired'} 家宽权益状态
+ */
+function resolveHomeStatus(entitlement, now) {
+  if (entitlement?.home_status === HOME_STATUS.EXPIRED) {
+    return HOME_STATUS.EXPIRED;
+  }
+  if (Number(entitlement?.home_expire_at || 0) <= now) {
+    return HOME_STATUS.EXPIRED;
+  }
+  return HOME_STATUS.NORMAL;
+}
+
+function getHomeStatusText(homeStatus) {
+  return homeStatus === HOME_STATUS.EXPIRED ? '过期' : '正常';
+}
+
 function formatServer(server) {
   return {
     id: Number(server.id),
@@ -423,19 +449,35 @@ async function formatRoute(db, route) {
 async function getHomeRoutingOptions(db, userId) {
   const now = getNowTimestamp();
   const entitlement = await repository.findHomeRoutingEntitlement(db, userId);
-  let activeEntitlement;
-
-  try {
-    activeEntitlement = assertActiveHomeEntitlement(entitlement, now);
-  } catch (error) {
-    if (error && error.isLegacyBusinessError) {
-      return {
-        available: false,
-        message: error.message
-      };
-    }
-    throw error;
+  if (!entitlement || !entitlement.home_plan_id) {
+    return {
+      available: false,
+      editable: false,
+      home_status: HOME_STATUS.NORMAL,
+      home_status_text: getHomeStatusText(HOME_STATUS.NORMAL),
+      message: '购买家宽 IP 套餐后可配置'
+    };
   }
+
+  const homeStatus = resolveHomeStatus(entitlement, now);
+  if (homeStatus === HOME_STATUS.EXPIRED) {
+    const route = await repository.findUserHomeRoute(db, userId);
+    return {
+      available: true,
+      editable: false,
+      home_proxy_tag: String(entitlement.home_proxy_tag || '').trim(),
+      home_plan_name: entitlement.home_plan_name || '',
+      home_expire_at: Number(entitlement.home_expire_at || 0),
+      home_status: homeStatus,
+      home_status_text: getHomeStatusText(homeStatus),
+      servers: [],
+      route: await formatRoute(db, route),
+      cooldown_remaining_seconds: 0,
+      message: '家宽 IP 套餐已到期，请先续费'
+    };
+  }
+
+  const activeEntitlement = assertActiveHomeEntitlement(entitlement, now);
 
   const [onlineServers, route] = await Promise.all([
     repository.listOnlineServers(db),
@@ -447,6 +489,9 @@ async function getHomeRoutingOptions(db, userId) {
     home_proxy_tag: activeEntitlement.homeProxyTag,
     home_plan_name: activeEntitlement.homePlanName,
     home_expire_at: activeEntitlement.homeExpireAt,
+    home_status: HOME_STATUS.NORMAL,
+    home_status_text: getHomeStatusText(HOME_STATUS.NORMAL),
+    editable: true,
     servers: onlineServers.map(formatServer),
     route: await formatRoute(db, route),
     cooldown_remaining_seconds: getCooldownRemaining(route, now)
@@ -663,16 +708,21 @@ async function updateHomeRouting(db, userId, payload = {}, logger = console) {
 }
 
 /**
- * 删除当前用户家宽 IP routing 绑定并同步清理 3X-UI。
- * 核心分支：删除同样遵守 5 分钟冷却；远端全部清理成功后才删除本地记录。
+ * 清理当前用户家宽 IP routing 绑定并同步 3X-UI。
+ * 职责：复用用户手动删除和套餐到期自动清理的远端 routing 删除流程。
+ * 核心分支：手动删除默认遵守冷却并抛业务错误；到期清理可跳过冷却并返回失败结果。
  *
  * @param {Object} db - 数据库代理对象
  * @param {number} userId - 当前用户 ID
- * @param {Object} logger - 日志实例
- * @returns {Promise<Object>} 删除后的绑定选项
+ * @param {Object} options - 清理选项
+ * @returns {Promise<{success:boolean,retryable?:boolean,message?:string}>} 清理结果
  */
-async function deleteHomeRouting(db, userId, logger = console) {
-  const now = getNowTimestamp();
+async function cleanupHomeRoutingForUser(db, userId, options = {}) {
+  const logger = options.logger || console;
+  const now = options.now || getNowTimestamp();
+  const skipCooldown = options.skipCooldown === true;
+  const throwOnMissing = options.throwOnMissing !== false;
+  const throwOnFailure = options.throwOnFailure !== false;
   const [currentRoute, userContext, onlineServers] = await Promise.all([
     repository.findUserHomeRoute(db, userId),
     repository.findUserHomeRoutingContext(db, userId),
@@ -680,6 +730,9 @@ async function deleteHomeRouting(db, userId, logger = console) {
   ]);
 
   if (!currentRoute) {
+    if (!throwOnMissing) {
+      return { success: true, message: '家宽 IP routing 配置不存在，视为已清理' };
+    }
     throw createLegacyBusinessError('家宽 IP routing 配置不存在', { statusCode: 404, code: 404 });
   }
   if (!userContext || !userContext.email) {
@@ -687,7 +740,7 @@ async function deleteHomeRouting(db, userId, logger = console) {
   }
 
   const cooldownRemaining = getCooldownRemaining(currentRoute, now);
-  if (cooldownRemaining > 0) {
+  if (!skipCooldown && cooldownRemaining > 0) {
     throw createLegacyBusinessError(`请稍后再修改，剩余 ${Math.ceil(cooldownRemaining / 60)} 分钟`, {
       statusCode: 429,
       code: 4109,
@@ -715,6 +768,14 @@ async function deleteHomeRouting(db, userId, logger = console) {
     failedServers.forEach((server) => {
       logger.warn(`家宽 IP routing 删除失败: user=${userContext.email}, serverId=${server.id}, server=${server.name}, tag=${currentRoute.home_proxy_tag}, error=${server.message}`);
     });
+    if (!throwOnFailure) {
+      return {
+        success: false,
+        retryable: true,
+        message: '家宽 IP routing 删除失败，请重试',
+        failed_servers: failedServers
+      };
+    }
     throw createLegacyBusinessError('家宽 IP routing 删除失败，请重试', {
       code: 4110,
       data: {
@@ -725,6 +786,20 @@ async function deleteHomeRouting(db, userId, logger = console) {
   }
 
   await deleteSuccessfulRoute(db, userId);
+  return { success: true, message: '家宽 IP routing 已清理' };
+}
+
+/**
+ * 删除当前用户家宽 IP routing 绑定并同步清理 3X-UI。
+ * 核心分支：删除同样遵守 5 分钟冷却；远端全部清理成功后才删除本地记录。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 当前用户 ID
+ * @param {Object} logger - 日志实例
+ * @returns {Promise<Object>} 删除后的绑定选项
+ */
+async function deleteHomeRouting(db, userId, logger = console) {
+  await cleanupHomeRoutingForUser(db, userId, { logger });
   return getHomeRoutingOptions(db, userId);
 }
 
@@ -743,8 +818,10 @@ function resetTestDependencies() {
 
 module.exports = {
   HOME_ROUTING_COOLDOWN_SECONDS,
+  HOME_STATUS,
   getHomeRoutingOptions,
   updateHomeRouting,
+  cleanupHomeRoutingForUser,
   deleteHomeRouting,
   __testables: {
     normalizeServerIds,
@@ -757,7 +834,8 @@ module.exports = {
     normalizeRuleUsers,
     removeMatchingHomeRules,
     upsertHomeRoutingRule,
-    assertActiveHomeEntitlement
+    assertActiveHomeEntitlement,
+    resolveHomeStatus
   },
   setRepositoryForTest,
   setXuiServiceFactoryForTest,

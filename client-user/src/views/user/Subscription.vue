@@ -80,7 +80,7 @@
             <h2 class="card-title">家宽 IP 控制</h2>
             <el-button
               type="primary"
-              :disabled="actionBusy || homeRoutingBusy || homeRoutingCooldownRemaining > 0"
+              :disabled="actionBusy || homeRoutingBusy || homeRoutingExpired || homeRoutingCooldownRemaining > 0"
               @click="openHomeRoutingDialog"
             >
               {{ homeRoutingRoute ? '修改' : '添加' }}
@@ -104,12 +104,19 @@
                 {{ row.servers?.[1]?.name || '-' }}
               </template>
             </el-table-column>
+            <el-table-column label="状态" width="100">
+              <template #default>
+                <el-tag :type="homeRoutingStatusTagType" size="small">
+                  {{ homeRoutingStatusText }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="操作" width="140">
               <template #default>
                 <el-button
                   link
                   type="primary"
-                  :disabled="homeRoutingCooldownRemaining > 0"
+                  :disabled="homeRoutingExpired || homeRoutingCooldownRemaining > 0"
                   @click="openHomeRoutingDialog"
                 >
                   修改
@@ -117,7 +124,7 @@
                 <el-button
                   link
                   type="danger"
-                  :disabled="homeRoutingCooldownRemaining > 0 || homeRoutingBusy"
+                  :disabled="homeRoutingExpired || homeRoutingCooldownRemaining > 0 || homeRoutingBusy"
                   @click="deleteHomeRouting"
                 >
                   删除
@@ -144,11 +151,20 @@
                 </div>
               </div>
 
+              <div class="home-routing-mobile-field">
+                <span class="home-routing-mobile-label">状态</span>
+                <span class="home-routing-mobile-value">
+                  <el-tag :type="homeRoutingStatusTagType" size="small">
+                    {{ homeRoutingStatusText }}
+                  </el-tag>
+                </span>
+              </div>
+
               <div class="home-routing-mobile-actions">
                 <el-button
                   type="primary"
                   size="large"
-                  :disabled="homeRoutingCooldownRemaining > 0"
+                  :disabled="homeRoutingExpired || homeRoutingCooldownRemaining > 0"
                   @click="openHomeRoutingDialog"
                 >
                   修改
@@ -156,7 +172,7 @@
                 <el-button
                   type="danger"
                   size="large"
-                  :disabled="homeRoutingCooldownRemaining > 0 || homeRoutingBusy"
+                  :disabled="homeRoutingExpired || homeRoutingCooldownRemaining > 0 || homeRoutingBusy"
                   @click="deleteHomeRouting"
                 >
                   删除
@@ -167,6 +183,9 @@
 
           <el-empty v-else description="暂未配置家宽 IP 服务器" />
 
+          <p v-if="homeRoutingExpired" class="home-routing-tip expired">
+            家宽 IP 套餐已过期，请续费后再配置。
+          </p>
           <p v-if="homeRoutingCooldownRemaining > 0" class="home-routing-tip">
             距离下次修改还需等待 {{ homeRoutingCooldownText }}
           </p>
@@ -427,6 +446,9 @@ const secondHomeRoutingServers = computed(() => (
   homeRoutingServers.value.filter((server) => Number(server.id) !== Number(homeRoutingForm.value.server_id_1))
 ))
 const homeRoutingCooldownRemaining = computed(() => Number(homeRoutingOptions.value.cooldown_remaining_seconds || 0))
+const homeRoutingExpired = computed(() => homeRoutingOptions.value.home_status === 'expired')
+const homeRoutingStatusText = computed(() => homeRoutingOptions.value.home_status_text || (homeRoutingExpired.value ? '过期' : '正常'))
+const homeRoutingStatusTagType = computed(() => (homeRoutingExpired.value ? 'danger' : 'success'))
 const homeRoutingCooldownText = computed(() => {
   const seconds = homeRoutingCooldownRemaining.value
   const minutes = Math.ceil(seconds / 60)
@@ -514,6 +536,11 @@ function fallbackCopyText(text) {
  * 核心分支：已有绑定时回填服务器选择；未绑定时仅预选当前家宽 IP tag。
  */
 function openHomeRoutingDialog() {
+  if (homeRoutingExpired.value) {
+    ElMessage.warning('家宽 IP 套餐已过期，请先续费')
+    return
+  }
+
   const routeServerIds = homeRoutingRoute.value?.server_ids || []
   homeRoutingForm.value = {
     home_proxy_tag: homeRoutingOptions.value.home_proxy_tag || '',
@@ -538,6 +565,11 @@ function buildHomeRoutingServerIds() {
  * 核心分支：后端远端同步失败时保留弹窗，用户可以立即重试。
  */
 async function submitHomeRouting() {
+  if (homeRoutingExpired.value) {
+    ElMessage.warning('家宽 IP 套餐已过期，请先续费')
+    return
+  }
+
   const serverIds = buildHomeRoutingServerIds()
   if (serverIds.length === 0) {
     ElMessage.warning('请选择至少一台服务器')
@@ -579,6 +611,10 @@ async function submitHomeRouting() {
 async function deleteHomeRouting() {
   if (!homeRoutingRoute.value) {
     ElMessage.warning('暂无可删除的家宽 IP 配置')
+    return
+  }
+  if (homeRoutingExpired.value) {
+    ElMessage.warning('家宽 IP 套餐已过期，请先续费')
     return
   }
   if (homeRoutingCooldownRemaining.value > 0) {
@@ -1099,6 +1135,10 @@ onBeforeUnmount(() => {
   color: #b45309;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.home-routing-tip.expired {
+  color: #dc2626;
 }
 
 .protocol-tag {

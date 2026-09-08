@@ -389,10 +389,13 @@ async function findUsersByIds(db, userIds) {
  */
 async function findEmailUserProfileById(db, userId) {
   return db.prepare(
-    `SELECT u.email, u.plan_id, u.traffic_used, u.traffic_limit, u.expire_at,
-            p.name as plan_name
+    `SELECT u.email, u.plan_id, u.home_plan_id, u.home_expire_at,
+            u.traffic_used, u.traffic_limit, u.expire_at,
+            p.name as plan_name,
+            hp.name as home_plan_name
      FROM users u
      LEFT JOIN plans p ON u.plan_id = p.id
+     LEFT JOIN plans hp ON u.home_plan_id = hp.id
      WHERE u.id = ?`
   ).get(userId);
 }

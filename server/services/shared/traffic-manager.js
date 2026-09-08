@@ -14,6 +14,7 @@ const trafficUsageStatsRepository = require('../../repositories/traffic-usage-st
 const trafficUsageStatsService = require('../admin/traffic-usage-stats-service');
 const trafficUsagePushService = require('../admin/traffic-usage-push-service');
 const renewalRequiredEmailService = require('./renewal-required-email-service');
+const homeIpExpirationService = require('./home-ip-expiration-service');
 const { getStrategyFromRemark } = require('./subscription-strategy');
 
 const logger = createLogger('TRAFFIC-MANAGER');
@@ -1055,6 +1056,7 @@ async function syncTrafficAndHandleDisable(db) {
     }
 
     await checkAndDisableExpiredUsers(db);
+    await homeIpExpirationService.cleanupExpiredHomeIpPlans(db);
 
     logger.info('流量同步与禁用检查任务完成');
   } catch (error) {

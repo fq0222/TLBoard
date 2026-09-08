@@ -302,6 +302,79 @@ async function disableUserByExpired(
 }
 
 /**
+ * 查询家宽 IP 已到期且仍保留 routing 绑定的用户。
+ * 职责：只返回尚未标记为 expired 的家宽权益，避免重复清理已经完成的周期。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} now - 当前秒级时间戳
+ * @returns {Promise<Array>} 家宽到期用户列表
+ */
+async function listExpiredHomeIpUsers(db, now) {
+  return db.prepare(`
+    SELECT
+      u.id,
+      u.email,
+      u.home_plan_id,
+      u.home_expire_at,
+      u.home_status,
+      u.home_expired_notice_sent_at
+    FROM users u
+    JOIN user_home_proxy_routes r ON r.user_id = u.id
+    WHERE u.home_plan_id IS NOT NULL
+      AND u.home_expire_at IS NOT NULL
+      AND u.home_expire_at != 0
+      AND u.home_expire_at <= ?
+      AND COALESCE(u.home_status, 'normal') != 'expired'
+  `).all(now);
+}
+
+/**
+ * 将家宽 IP 权益标记为过期。
+ * 职责：远端 routing 清理成功后才写入 expired，避免失败时丢失待重试上下文。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number|string} userId - 用户 ID
+ * @param {number} now - 当前秒级时间戳
+ * @returns {Promise<{expired:boolean}>} 是否命中并写入过期状态
+ */
+async function markHomeIpExpired(db, userId, now) {
+  const result = await db.prepare(`
+    UPDATE users
+    SET home_status = 'expired',
+        updated_at = ?
+    WHERE id = ?
+      AND home_plan_id IS NOT NULL
+      AND home_expire_at IS NOT NULL
+      AND home_expire_at != 0
+      AND home_expire_at <= ?
+      AND COALESCE(home_status, 'normal') != 'expired'
+  `).run(now, userId, now);
+
+  return { expired: Number(result?.changes || result?.rowCount || 0) > 0 };
+}
+
+/**
+ * 领取家宽过期邮件发送资格。
+ * 核心分支：无论后续发送成功或失败，本周期只尝试一次，防止定时任务反复发信。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number|string} userId - 用户 ID
+ * @param {number} now - 本次提醒尝试时间
+ * @returns {Promise<{claimed:boolean}>} 是否领取到发送资格
+ */
+async function claimHomeIpExpiredNotice(db, userId, now) {
+  const result = await db.prepare(`
+    UPDATE users
+    SET home_expired_notice_sent_at = ?
+    WHERE id = ?
+      AND COALESCE(home_status, 'normal') = 'expired'
+      AND home_expired_notice_sent_at IS NULL
+  `).run(now, userId);
+
+  return { claimed: Number(result?.changes || result?.rowCount || 0) > 0 };
+}
+
+/**
  * 在专用事务连接中锁定用户行并校验本次续费提醒 claim，命中后才执行发送回调。
  * 核心分支：支付先提交会使校验不命中；提醒先锁行则支付等待发送尝试提交后再更新。
  *
@@ -380,6 +453,9 @@ module.exports = {
   disableUserByTrafficLimit,
   listExpiredEnabledUsers,
   disableUserByExpired,
+  listExpiredHomeIpUsers,
+  markHomeIpExpired,
+  claimHomeIpExpiredNotice,
   withClaimedRenewalNotice,
   enableUserAfterTrafficLimitRecovery,
   findUserEmailById

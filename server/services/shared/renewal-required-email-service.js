@@ -15,7 +15,7 @@ const {
 } = require('./order-activation-email-service');
 
 const logger = createLogger('RENEWAL-REQUIRED-EMAIL');
-const SUPPORTED_REASONS = new Set(['traffic_limit', 'expired']);
+const SUPPORTED_REASONS = new Set(['traffic_limit', 'expired', 'home_ip_expired']);
 const RENEWAL_EMAIL_SEND_TIMEOUT_MS = 15 * 1000;
 
 /**
@@ -88,7 +88,7 @@ function buildRenewalRequiredEmailSubject(email) {
  * @param {*} profile.traffic_used - 已用流量字节数
  * @param {*} profile.traffic_limit - 流量上限字节数
  * @param {*} profile.expire_at - 秒级到期时间戳
- * @param {'traffic_limit'|'expired'} reason - 提醒原因
+ * @param {'traffic_limit'|'expired'|'home_ip_expired'} reason - 提醒原因
  * @returns {string} 邮件 HTML
  */
 function buildRenewalRequiredEmailContent(profile, reason) {
@@ -96,17 +96,26 @@ function buildRenewalRequiredEmailContent(profile, reason) {
     throw new Error(`不支持的续费提醒 reason: ${reason}`);
   }
 
-  const reasonText = reason === 'traffic_limit'
-    ? '您的魔法传送能量已经耗尽，请及时续费以恢复服务。'
-    : '您的限时套餐已经到期，请及时续费以继续使用服务。';
+  const reasonTextMap = {
+    traffic_limit: '您的魔法传送能量已经耗尽，请及时续费以恢复服务。',
+    expired: '您的限时套餐已经到期，请及时续费以继续使用服务。',
+    home_ip_expired: '您的家宽 IP 套餐已经到期，请及时续费以继续使用家宽 IP 服务。'
+  };
   const userCenterUrl = getUserAppBaseUrl();
-  const rows = [
-    ['账号', profile.email],
-    ['套餐', profile.plan_name || '未命名套餐'],
-    ['已用流量', formatTraffic(profile.traffic_used)],
-    ['流量上限', formatTraffic(profile.traffic_limit)],
-    ['到期时间', formatExpireAt(profile.expire_at)]
-  ].map(([label, value]) => `
+  const rowsSource = reason === 'home_ip_expired'
+    ? [
+        ['账号', profile.email],
+        ['家宽套餐', profile.home_plan_name || profile.plan_name || '未命名家宽套餐'],
+        ['到期时间', formatExpireAt(profile.home_expire_at)]
+      ]
+    : [
+        ['账号', profile.email],
+        ['套餐', profile.plan_name || '未命名套餐'],
+        ['已用流量', formatTraffic(profile.traffic_used)],
+        ['流量上限', formatTraffic(profile.traffic_limit)],
+        ['到期时间', formatExpireAt(profile.expire_at)]
+      ];
+  const rows = rowsSource.map(([label, value]) => `
     <tr>
       <td style="width:120px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;">${label}</td>
       <td style="padding:10px 12px;border:1px solid #e2e8f0;">${escapeHtml(value)}</td>
@@ -121,7 +130,7 @@ function buildRenewalRequiredEmailContent(profile, reason) {
         <div style="padding:28px;">
           <p style="margin:0 0 18px;color:#334155;">亲爱的 ${escapeHtml(getUsernameFromEmail(profile.email))}：</p>
           <div style="padding:14px 16px;background:#f0fdf4;border-left:4px solid #16a34a;border-radius:8px;color:#166534;">
-            ${reasonText}
+            ${reasonTextMap[reason]}
           </div>
           <table style="width:100%;border-collapse:collapse;margin:20px 0;font-size:14px;color:#334155;">
             <tbody>${rows}</tbody>
@@ -145,7 +154,7 @@ function buildRenewalRequiredEmailContent(profile, reason) {
  * @param {Object} db - 数据库代理对象
  * @param {Object} payload - 发送参数
  * @param {number|string} payload.userId - 用户 ID
- * @param {'traffic_limit'|'expired'} payload.reason - 提醒原因
+ * @param {'traffic_limit'|'expired'|'home_ip_expired'} payload.reason - 提醒原因
  * @param {Object} [options={}] - 续费提醒发送选项
  * @param {number} [options.sendTimeoutMs=15000] - 底层邮件调用最大等待毫秒数
  * @returns {Promise<{sent:boolean,status:string,error?:string}>} 发送审计结果

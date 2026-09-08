@@ -17,6 +17,8 @@ async function findHomeRoutingEntitlement(db, userId) {
       u.email,
       u.home_plan_id,
       u.home_expire_at,
+      u.home_status,
+      u.home_expired_notice_sent_at,
       p.name AS home_plan_name,
       p.plan_type,
       p.home_proxy_tag,

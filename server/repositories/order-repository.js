@@ -446,6 +446,8 @@ async function updateUserHomePlanAfterPaidOrder(db, payload) {
     UPDATE users SET
       home_plan_id = ?,
       home_expire_at = ?,
+      home_status = 'normal',
+      home_expired_notice_sent_at = NULL,
       updated_at = ?
     WHERE id = ?
   `).run(payload.homePlanId, payload.homeExpireAt, payload.updatedAt, payload.userId);

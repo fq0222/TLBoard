@@ -19,6 +19,8 @@ const tableDefinitions = [
         referral_traffic_limit BIGINT DEFAULT 0,
         home_plan_id INTEGER,
         home_expire_at BIGINT,
+        home_status VARCHAR(20) DEFAULT 'normal',
+        home_expired_notice_sent_at BIGINT,
         balance INTEGER DEFAULT 0,
         traffic_used_at BIGINT,
         disable_reason VARCHAR(50),
