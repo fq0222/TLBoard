@@ -208,6 +208,37 @@ test('admin user list returns formatted ip location text', async () => {
   assert.equal(result.list[1].ip_location_text, '暂未获取');
 });
 
+test('admin user list returns home ip plan and expire fields', async () => {
+  const { db, getListSql } = createListUsersDb([
+    {
+      id: 5,
+      email: 'home-user@example.com',
+      plan_id: 1,
+      plan_name: '流量月卡',
+      home_plan_id: 9,
+      home_plan_name: '家宽月卡',
+      home_expire_at: 1900000000,
+      traffic_used: 0,
+      traffic_limit: 1024,
+      expire_at: 1800000000,
+      enabled: 1,
+      disable_reason: null,
+      ip_location: '{}',
+      created_at: 5
+    }
+  ]);
+
+  const result = await usersService.listUsers(db, { page: 1, limit: 15 });
+
+  assert.match(getListSql(), /u\.home_plan_id/);
+  assert.match(getListSql(), /u\.home_expire_at/);
+  assert.match(getListSql(), /hp\.name as home_plan_name/);
+  assert.equal(result.list[0].home_plan_id, 9);
+  assert.equal(result.list[0].home_plan_name, '家宽月卡');
+  assert.equal(result.list[0].home_expire_at, 1900000000);
+  assert.equal(result.list[0].home_expire_text, '2030/3/18 01:46:40');
+});
+
 test('admin user update preserves disable reason when enabled value is unchanged and updates traffic used', async () => {
   const originalUser = {
     id: 10,

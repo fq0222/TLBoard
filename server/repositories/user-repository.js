@@ -418,11 +418,14 @@ async function listUsers(db, whereClause, params, limit, offset, sort) {
 
   return db.prepare(`
     SELECT
-      u.id, u.email, u.plan_id, u.traffic_used, u.traffic_limit,
-      u.expire_at, u.enabled, u.disable_reason, u.ip_location, u.created_at,
-      p.name as plan_name
+      u.id, u.email, u.plan_id, u.home_plan_id, u.home_expire_at,
+      u.traffic_used, u.traffic_limit, u.expire_at, u.enabled,
+      u.disable_reason, u.ip_location, u.created_at,
+      p.name as plan_name,
+      hp.name as home_plan_name
     FROM users u
     LEFT JOIN plans p ON u.plan_id = p.id
+    LEFT JOIN plans hp ON u.home_plan_id = hp.id
     ${whereClause}
     ${orderBy}
     LIMIT ? OFFSET ?

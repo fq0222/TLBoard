@@ -33,7 +33,18 @@
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="email" label="邮箱" />
         <el-table-column prop="ip_location_text" label="IP归属地" />
-        <el-table-column prop="plan_name" label="套餐" />
+        <el-table-column prop="plan_name" label="流量套餐" />
+        <el-table-column prop="expire_text" label="流量过期时间" />
+        <el-table-column label="家宽套餐">
+          <template #default="scope">
+            {{ scope.row.home_plan_name || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="家宽过期时间">
+          <template #default="scope">
+            {{ scope.row.home_plan_id ? scope.row.home_expire_text : '-' }}
+          </template>
+        </el-table-column>
         <el-table-column
           prop="traffic_used"
           label="已用流量"
@@ -45,7 +56,6 @@
           </template>
         </el-table-column>
         <el-table-column prop="traffic_limit_text" label="流量上限" />
-        <el-table-column prop="expire_text" label="到期时间" />
         <el-table-column prop="status_text" label="状态" width="100">
           <template #default="scope">
             <el-tag :type="getStatusType(scope.row.status)">{{ scope.row.status_text }}</el-tag>
