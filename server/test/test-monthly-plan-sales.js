@@ -93,6 +93,9 @@ test('admin plan service formats plan type and show on home', async () => {
     prepare(sql) {
       return {
         all() {
+          if (sql.includes('FROM users')) {
+            return [];
+          }
           assert.match(sql, /SELECT \*/);
           return [{
             id: 1,
@@ -160,7 +163,7 @@ test('admin plan service stores string false show on home as 0 on create', async
             duration_days: 30,
             traffic_limit: 1024,
             plan_type: 'timed',
-            show_on_home: insertValues[6],
+            show_on_home: insertValues[7],
             sort_order: 0,
             enabled: 1,
             sales_limit: -1,
@@ -182,7 +185,7 @@ test('admin plan service stores string false show on home as 0 on create', async
     show_on_home: 'false'
   });
 
-  assert.equal(insertValues[6], 0);
+  assert.equal(insertValues[7], 0);
   assert.equal(result.show_on_home, 0);
 });
 
@@ -370,6 +373,9 @@ test('renew plan list filters by current user plan type', async () => {
       if (sql.includes('plan_type = ?')) {
         return {
           all(planType) {
+            if (planType === 'home_ip') {
+              return [];
+            }
             assert.equal(planType, 'timed');
             return [{
               id: 3,
@@ -384,6 +390,13 @@ test('renew plan list filters by current user plan type', async () => {
               sales_limit: -1,
               sales_count: 0
             }];
+          }
+        };
+      }
+      if (sql.includes('FROM users') && sql.includes('GROUP BY')) {
+        return {
+          all() {
+            return [];
           }
         };
       }
@@ -437,6 +450,9 @@ test('renew plan list includes same type plans hidden from home', async () => {
         assert.doesNotMatch(sql, /show_on_home = 1/);
         return {
           all(planType) {
+            if (planType === 'home_ip') {
+              return [];
+            }
             assert.equal(planType, 'timed');
             return [{
               id: 7,
@@ -451,6 +467,13 @@ test('renew plan list includes same type plans hidden from home', async () => {
               sales_limit: -1,
               sales_count: 0
             }];
+          }
+        };
+      }
+      if (sql.includes('FROM users') && sql.includes('GROUP BY')) {
+        return {
+          all() {
+            return [];
           }
         };
       }
@@ -766,6 +789,108 @@ test('traffic limit disabled renew keeps old allowance and is not abnormal', asy
       return /余额不足/.test(error.message);
     }
   );
+});
+
+test('same traffic plan renew ignores sales limit after renew window', () => {
+  const { evaluateRenewEligibility, DISABLE_REASONS, RENEW_WINDOW_SECONDS } = require('../services/shared/renew-policy');
+  const now = 1_000_000;
+  const result = evaluateRenewEligibility(
+    {
+      enabled: 0,
+      plan_id: 3,
+      disable_reason: DISABLE_REASONS.TRAFFIC_LIMIT,
+      traffic_used_at: now - RENEW_WINDOW_SECONDS - 60
+    },
+    {
+      id: 3,
+      plan_type: 'timed',
+      sales_limit: 1,
+      sales_count: 1
+    },
+    now
+  );
+
+  assert.equal(result.allowed, true);
+  assert.equal(result.skipSalesLimit, true);
+});
+
+test('same home ip plan renew ignores sales limit', () => {
+  const { evaluateRenewEligibility } = require('../services/shared/renew-policy');
+  const result = evaluateRenewEligibility(
+    {
+      enabled: 1,
+      plan_id: 3,
+      home_plan_id: 8
+    },
+    {
+      id: 8,
+      plan_type: 'home_ip',
+      sales_limit: 5,
+      sales_count: 5
+    },
+    1_000_000
+  );
+
+  assert.equal(result.allowed, true);
+  assert.equal(result.skipSalesLimit, true);
+});
+
+test('plan sales service counts paid users from current ownership fields', async () => {
+  const planSalesService = require('../services/shared/plan-sales-service');
+  const users = [
+    { id: 1, plan_id: 2, home_plan_id: 9, payment_count: 1 },
+    { id: 2, plan_id: 2, home_plan_id: null, payment_count: 2 },
+    { id: 3, plan_id: 3, home_plan_id: 9, payment_count: 1 },
+    { id: 4, plan_id: 2, home_plan_id: 9, payment_count: 0 }
+  ];
+  const db = {
+    prepare(sql) {
+      return {
+        get(planId) {
+          const field = sql.includes('home_plan_id') ? 'home_plan_id' : 'plan_id';
+          return {
+            count: users.filter((user) => (
+              Number(user[field]) === Number(planId)
+              && Number(user.payment_count || 0) > 0
+            )).length
+          };
+        },
+        all() {
+          const field = sql.includes('home_plan_id') ? 'home_plan_id' : 'plan_id';
+          const groups = new Map();
+          for (const user of users) {
+            if (Number(user.payment_count || 0) <= 0) {
+              continue;
+            }
+            const value = user[field];
+            if (value === null || value === undefined || value === '') {
+              continue;
+            }
+            groups.set(Number(value), (groups.get(Number(value)) || 0) + 1);
+          }
+          return Array.from(groups.entries()).map(([plan_id, count]) => ({ plan_id, count }));
+        }
+      };
+    }
+  };
+
+  const plans = await planSalesService.annotatePlansWithCurrentSalesCount(db, [
+    { id: 2, plan_type: 'timed', sales_count: 99 },
+    { id: 9, plan_type: 'home_ip', sales_count: 0 }
+  ]);
+  const trafficCount = await planSalesService.getCurrentSalesCount(db, {
+    id: 2,
+    plan_type: 'timed'
+  });
+  const homeIpCount = await planSalesService.getCurrentSalesCount(db, {
+    id: 9,
+    plan_type: 'home_ip'
+  });
+
+  assert.equal(plans[0].sales_count, 2);
+  assert.equal(plans[1].sales_count, 2);
+  assert.equal(trafficCount, 2);
+  assert.equal(homeIpCount, 2);
 });
 
 test('paid lifetime renew keeps existing traffic accumulation contract', async () => {
@@ -1269,7 +1394,7 @@ test('paid expired timed renew enqueues renew sync with enabled user snapshot', 
   }
 });
 
-test('renew switch plan records new plan historical sale without decreasing old plan', async () => {
+test('renew switch plan does not write plan sales count', async () => {
   const orderRepository = require('../repositories/order-repository');
   const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
   const orderActivationEmailService = require('../services/shared/order-activation-email-service');
@@ -1344,13 +1469,12 @@ test('renew switch plan records new plan historical sale without decreasing old 
       logs.push(String(message));
     };
     await orderService.completePaidOrder(db, 'REN-SWITCH', 'TRADE-3');
-    assert.deepEqual(increments, [8]);
+    assert.deepEqual(increments, []);
     assert.deepEqual(decrements, []);
     assert.match(
       logs.join('\n'),
-      /续费切换套餐: 新套餐 年卡套餐 \+1，旧套餐 尝鲜套餐 保持历史销量不变/
+      /续费订单已更新用户套餐归属，套餐占用数由 users 表实时统计: 年卡套餐/
     );
-    assert.doesNotMatch(logs.join('\n'), /新套餐 8|旧套餐 7/);
   } finally {
     console.log = originalLog;
     Object.assign(orderRepository, originalRepository);
@@ -1359,11 +1483,12 @@ test('renew switch plan records new plan historical sale without decreasing old 
   }
 });
 
-test('new purchase sales log uses plan name instead of plan id', async () => {
+test('new purchase does not write plan sales count', async () => {
   const orderRepository = require('../repositories/order-repository');
   const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
   const orderService = require('../services/shared/order-service');
   const logs = [];
+  const increments = [];
   const originalLog = console.log;
 
   const originalRepository = {
@@ -1402,7 +1527,9 @@ test('new purchase sales log uses plan name instead of plan id', async () => {
   });
   orderRepository.markOrderPaid = async () => {};
   orderRepository.updateUserAfterPaidOrder = async () => {};
-  orderRepository.incrementPlanSalesCount = async () => {};
+  orderRepository.incrementPlanSalesCount = async (_db, planId) => {
+    increments.push(planId);
+  };
   xuiSyncTaskService.enqueueTask = async () => 92;
   xuiSyncTaskService.processTask = () => Promise.resolve();
 
@@ -1417,8 +1544,11 @@ test('new purchase sales log uses plan name instead of plan id', async () => {
       logs.push(String(message));
     };
     await orderService.completePaidOrder(db, 'ORD-NEW', 'TRADE-4');
-    assert.match(logs.join('\n'), /新购订单: 基础套餐 \+1/);
-    assert.doesNotMatch(logs.join('\n'), /新购订单: 9 \+1/);
+    assert.deepEqual(increments, []);
+    assert.match(
+      logs.join('\n'),
+      /新购订单已更新用户套餐归属，套餐占用数由 users 表实时统计: 基础套餐/
+    );
   } finally {
     console.log = originalLog;
     Object.assign(orderRepository, originalRepository);
@@ -1426,7 +1556,7 @@ test('new purchase sales log uses plan name instead of plan id', async () => {
   }
 });
 
-test('jobs no longer register expired sales release because sales count is historical', () => {
+test('jobs no longer register expired sales release because sales count is real-time user ownership', () => {
   const fs = require('fs');
   const path = require('path');
   const jobsIndex = fs.readFileSync(

@@ -832,7 +832,6 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   const finalTradeNo = tradeNo || order.trade_no;
   const isRenewOrder = order.out_trade_no.startsWith('REN');
   const planLogName = plan.name || `套餐${plan.id}`;
-  const currentPlanLogName = order.current_plan_name || `套餐${order.current_plan_id}`;
 
   if (entitlement.isHomeIp) {
     const transaction = db.transaction(async (transactionDb) => {
@@ -849,7 +848,6 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
         updatedAt: now
       });
 
-      await orderRepository.incrementPlanSalesCount(transactionDb, plan.id);
     });
 
     await transaction();
@@ -879,19 +877,7 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
       updatedAt: now
     });
 
-    if (isRenewOrder) {
-      const currentPlanId = order.current_plan_id;
-      if (currentPlanId && currentPlanId !== plan.id) {
-        await orderRepository.incrementPlanSalesCount(transactionDb, plan.id);
-        logger.info(`续费切换套餐: 新套餐 ${planLogName} +1，旧套餐 ${currentPlanLogName} 保持历史销量不变`);
-      } else if (!currentPlanId) {
-        await orderRepository.incrementPlanSalesCount(transactionDb, plan.id);
-        logger.info(`续费新套餐 ${planLogName} +1`);
-      }
-    } else {
-      await orderRepository.incrementPlanSalesCount(transactionDb, plan.id);
-      logger.info(`新购订单: ${planLogName} +1`);
-    }
+    logger.info(`${isRenewOrder ? '续费' : '新购'}订单已更新用户套餐归属，套餐占用数由 users 表实时统计: ${planLogName}`);
 
     // 首单奖励：仅新购、支付前 payment_count 为 0 且订单带推广人时，在同一事务内发放。
     if (!isRenewOrder && Number(order.current_payment_count || 0) === 0 && order.referrer_user_id) {

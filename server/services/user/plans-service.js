@@ -1,5 +1,6 @@
 const { formatTraffic } = require('../../shared/utils/format-traffic');
 const planRepository = require('../../repositories/plan-repository');
+const planSalesService = require('../shared/plan-sales-service');
 const { normalizePlanType, isHomeIpPlan } = require('../shared/plan-type');
 
 /**
@@ -14,7 +15,10 @@ const { normalizePlanType, isHomeIpPlan } = require('../shared/plan-type');
  * @returns {Promise<Array<Object>>} 格式化后的套餐列表
  */
 async function listAvailablePlans(db) {
-  const plans = await planRepository.findEnabledPlans(db);
+  const plans = await planSalesService.annotatePlansWithCurrentSalesCount(
+    db,
+    await planRepository.findEnabledPlans(db)
+  );
 
   return plans.map((plan) => ({
     id: plan.id,
@@ -31,7 +35,7 @@ async function listAvailablePlans(db) {
     sort_order: plan.sort_order,
     sales_limit: plan.sales_limit,
     sales_count: plan.sales_count,
-    is_soldout: plan.sales_limit !== -1 && plan.sales_count >= plan.sales_limit
+    is_soldout: Number(plan.sales_limit) !== -1 && Number(plan.sales_count) >= Number(plan.sales_limit)
   }));
 }
 

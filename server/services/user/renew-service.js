@@ -3,7 +3,12 @@ const vmqService = require('../../integrations/vmq/vmq-service');
 const orderRepository = require('../../repositories/order-repository');
 const planRepository = require('../../repositories/plan-repository');
 const orderService = require('../shared/order-service');
-const { evaluateRenewEligibility, DISABLE_REASONS } = require('../shared/renew-policy');
+const planSalesService = require('../shared/plan-sales-service');
+const {
+  evaluateRenewEligibility,
+  isRenewingOwnedPlan,
+  DISABLE_REASONS
+} = require('../shared/renew-policy');
 const {
   PLAN_TYPES,
   normalizePlanType,
@@ -88,7 +93,7 @@ function formatRenewPlan(plan) {
     sort_order: plan.sort_order,
     sales_limit: plan.sales_limit,
     sales_count: plan.sales_count,
-    is_soldout: plan.sales_limit !== -1 && Number(plan.sales_count) >= Number(plan.sales_limit)
+    is_soldout: Number(plan.sales_limit) !== -1 && Number(plan.sales_count) >= Number(plan.sales_limit)
   };
 }
 
@@ -111,10 +116,10 @@ async function listRenewPlans(db, userId) {
   }
 
   const currentPlanType = normalizePlanType(currentPlan.plan_type);
-  const plans = [
+  const plans = await planSalesService.annotatePlansWithCurrentSalesCount(db, [
     ...await planRepository.findEnabledPlansByType(db, currentPlanType),
     ...await planRepository.findEnabledPlansByType(db, PLAN_TYPES.HOME_IP)
-  ];
+  ]);
 
   return plans.map(formatRenewPlan);
 }
@@ -164,6 +169,10 @@ async function createRenewOrder(db, userId, payload) {
         code: 1003
       });
     }
+  }
+
+  if (!isRenewingOwnedPlan(user, plan) && Number(plan.sales_limit) !== -1) {
+    plan.sales_count = await planSalesService.getCurrentSalesCount(db, plan);
   }
 
   const renewEligibility = evaluateRenewEligibility(user, plan);

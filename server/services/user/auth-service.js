@@ -7,6 +7,7 @@ const sharedEmailService = require('../../integrations/email/email-service');
 const userRepository = require('../../repositories/user-repository');
 const emailRepository = require('../../repositories/email-repository');
 const referralService = require('../referral-service');
+const planSalesService = require('../shared/plan-sales-service');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
 const { isTimedPlan, isHomeIpPlan } = require('../shared/plan-type');
 const { generatePublicSubscriptionId } = require('../../utils/subscription-id');
@@ -422,8 +423,11 @@ async function registerAndPay(db, payload) {
       code: 1004
     });
   }
+  if (Number(plan.sales_limit) !== -1) {
+    plan.sales_count = await planSalesService.getCurrentSalesCount(db, plan);
+  }
 
-  if (plan.sales_limit !== -1 && plan.sales_count >= plan.sales_limit) {
+  if (Number(plan.sales_limit) !== -1 && Number(plan.sales_count) >= Number(plan.sales_limit)) {
     throw createLegacyBusinessError('该套餐已售罄', {
       code: 1002
     });

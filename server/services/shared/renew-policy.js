@@ -15,6 +15,20 @@ const DISABLE_REASONS = {
 const RENEW_WINDOW_SECONDS = 3 * 24 * 60 * 60;
 
 /**
+ * 判断用户是否已经占用目标套餐名额。
+ * @param {Object} user - 用户记录。
+ * @param {Object} plan - 目标套餐。
+ * @returns {boolean} 已占用返回 true。
+ */
+function isRenewingOwnedPlan(user, plan) {
+  if (plan.plan_type === 'home_ip') {
+    return Number(user.home_plan_id) === Number(plan.id);
+  }
+
+  return Number(user.plan_id) === Number(plan.id);
+}
+
+/**
  * 判断用户是否允许续费
  * @param {Object} user - 用户记录
  * @param {Object} plan - 目标套餐
@@ -24,7 +38,7 @@ const RENEW_WINDOW_SECONDS = 3 * 24 * 60 * 60;
 function evaluateRenewEligibility(user, plan, now = Math.floor(Date.now() / 1000)) {
   const disableReason = user.disable_reason || null;
   const isDisabled = !user.enabled;
-  const isRenewCurrentPlan = Number(user.plan_id) === Number(plan.id);
+  const isRenewCurrentPlan = isRenewingOwnedPlan(user, plan);
   const trafficUsedAt = Number(user.traffic_used_at || 0);
   const inRenewWindow = trafficUsedAt > 0 && (now - trafficUsedAt) <= RENEW_WINDOW_SECONDS;
 
@@ -46,7 +60,7 @@ function evaluateRenewEligibility(user, plan, now = Math.floor(Date.now() / 1000
     }
   }
 
-  if (isRenewCurrentPlan && inRenewWindow) {
+  if (isRenewCurrentPlan) {
     return {
       allowed: true,
       skipSalesLimit: true
@@ -70,5 +84,9 @@ function evaluateRenewEligibility(user, plan, now = Math.floor(Date.now() / 1000
 module.exports = {
   DISABLE_REASONS,
   RENEW_WINDOW_SECONDS,
-  evaluateRenewEligibility
+  evaluateRenewEligibility,
+  isRenewingOwnedPlan,
+  __testables: {
+    isRenewingOwnedPlan
+  }
 };

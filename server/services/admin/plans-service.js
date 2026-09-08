@@ -1,5 +1,6 @@
 const { formatTraffic } = require('../../shared/utils/format-traffic');
 const plansRepository = require('../../repositories/plans-repository');
+const planSalesService = require('../shared/plan-sales-service');
 const {
   PLAN_TYPES,
   normalizePlanType,
@@ -130,7 +131,10 @@ function formatPlan(plan) {
 }
 
 async function listPlans(db) {
-  const plans = await plansRepository.listPlans(db);
+  const plans = await planSalesService.annotatePlansWithCurrentSalesCount(
+    db,
+    await plansRepository.listPlans(db)
+  );
 
   return {
     list: plans.map(formatPlan)
@@ -175,6 +179,7 @@ async function createPlan(db, payload) {
   });
 
   const createdPlan = await plansRepository.findPlanById(db, result.lastInsertRowid);
+  createdPlan.sales_count = await planSalesService.getCurrentSalesCount(db, createdPlan);
   return formatPlan(createdPlan);
 }
 
@@ -259,6 +264,7 @@ async function updatePlan(db, planId, payload) {
 
   await plansRepository.updatePlanFields(db, planId, updates, values);
   const updatedPlan = await plansRepository.findPlanById(db, planId);
+  updatedPlan.sales_count = await planSalesService.getCurrentSalesCount(db, updatedPlan);
   return formatPlan(updatedPlan);
 }
 
