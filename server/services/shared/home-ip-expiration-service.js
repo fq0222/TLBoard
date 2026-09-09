@@ -97,7 +97,7 @@ async function cleanupExpiredHomeIpUser(db, user, now) {
  *
  * @param {Object} db - 数据库代理对象
  * @param {number} [now=Math.floor(Date.now() / 1000)] - 当前秒级时间戳，测试可传固定值
- * @returns {Promise<{expiredCount:number,skippedCount:number,failedCount:number,retryCount:number,emailCount:number}>} 清理统计
+ * @returns {Promise<{expiredCount:number,skippedCount:number,failedCount:number,retryCount:number,emailCount:number,releasedCount:number}>} 清理统计
  */
 async function cleanupExpiredHomeIpPlans(db, now = Math.floor(Date.now() / 1000)) {
   const stats = {
@@ -105,13 +105,16 @@ async function cleanupExpiredHomeIpPlans(db, now = Math.floor(Date.now() / 1000)
     skippedCount: 0,
     failedCount: 0,
     retryCount: 0,
-    emailCount: 0
+    emailCount: 0,
+    releasedCount: 0
   };
 
   try {
     const users = await trafficRepository.listExpiredHomeIpUsers(db, now);
     if (users.length === 0) {
       logger.info('没有需要清理的家宽 IP 到期用户');
+      const releaseResult = await trafficRepository.releaseExpiredHomeIpSlots(db, now);
+      stats.releasedCount = releaseResult.releasedCount;
       return stats;
     }
 
@@ -150,6 +153,11 @@ async function cleanupExpiredHomeIpPlans(db, now = Math.floor(Date.now() / 1000)
     logger.info(
       `家宽 IP 到期清理完成，过期 ${stats.expiredCount} 个，跳过 ${stats.skippedCount} 个，失败 ${stats.failedCount} 个，待重试 ${stats.retryCount} 个，邮件 ${stats.emailCount} 封`
     );
+    const releaseResult = await trafficRepository.releaseExpiredHomeIpSlots(db, now);
+    stats.releasedCount = releaseResult.releasedCount;
+    if (stats.releasedCount > 0) {
+      logger.info(`家宽 IP 过期超过 1 天释放 ${stats.releasedCount} 个套餐名额`);
+    }
     return stats;
   } catch (error) {
     logger.error(`家宽 IP 到期清理任务错误: ${error.message}`);

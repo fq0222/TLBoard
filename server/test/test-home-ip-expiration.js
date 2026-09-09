@@ -151,6 +151,20 @@ test('家宽过期标记会二次确认权益仍然到期', async () => {
   assert.deepEqual(calls[0].params, [2000, 8, 2000]);
 });
 
+test('家宽过期超过一天才释放用户表套餐占用', async () => {
+  const trafficRepository = require('../repositories/traffic-repository');
+  const { db, calls } = createDbStub();
+
+  const result = await trafficRepository.releaseExpiredHomeIpSlots(db, 200000);
+
+  assert.deepEqual(result, { releasedCount: 1 });
+  assert.match(calls[0].sql, /home_plan_id = NULL/);
+  assert.match(calls[0].sql, /home_expire_at = NULL/);
+  assert.match(calls[0].sql, /COALESCE\(home_status, 'normal'\) = 'expired'/);
+  assert.match(calls[0].sql, /home_expire_at < \?/);
+  assert.deepEqual(calls[0].params, [200000, 113600]);
+});
+
 test('家宽到期清理成功后标记过期并只触发一次邮件', async () => {
   const trafficRepository = require('../repositories/traffic-repository');
   const homeRoutingService = require('../services/shared/home-routing-service');
@@ -160,6 +174,7 @@ test('家宽到期清理成功后标记过期并只触发一次邮件', async ()
     listExpiredHomeIpUsers: trafficRepository.listExpiredHomeIpUsers,
     markHomeIpExpired: trafficRepository.markHomeIpExpired,
     claimHomeIpExpiredNotice: trafficRepository.claimHomeIpExpiredNotice,
+    releaseExpiredHomeIpSlots: trafficRepository.releaseExpiredHomeIpSlots,
     cleanupHomeRoutingForUser: homeRoutingService.cleanupHomeRoutingForUser,
     sendRenewalRequiredEmail: emailService.sendRenewalRequiredEmail
   };
@@ -181,6 +196,10 @@ test('家宽到期清理成功后标记过期并只触发一次邮件', async ()
     events.push(['claim-notice', receivedDb === db, userId, now]);
     return { claimed: true };
   };
+  trafficRepository.releaseExpiredHomeIpSlots = async (receivedDb, now) => {
+    events.push(['release-slots', receivedDb === db, now]);
+    return { releasedCount: 2 };
+  };
   emailService.sendRenewalRequiredEmail = async (receivedDb, payload) => {
     events.push(['email', receivedDb === db, payload.userId, payload.reason]);
     return { sent: true, status: 'email_sent' };
@@ -194,19 +213,22 @@ test('家宽到期清理成功后标记过期并只触发一次邮件', async ()
       skippedCount: 0,
       failedCount: 0,
       retryCount: 0,
-      emailCount: 1
+      emailCount: 1,
+      releasedCount: 2
     });
     assert.deepEqual(events, [
       ['cleanup', true, 12, true],
       ['mark-expired', true, 12, 2000],
       ['claim-notice', true, 12, 2000],
-      ['email', true, 12, 'home_ip_expired']
+      ['email', true, 12, 'home_ip_expired'],
+      ['release-slots', true, 2000]
     ]);
   } finally {
     Object.assign(trafficRepository, {
       listExpiredHomeIpUsers: originals.listExpiredHomeIpUsers,
       markHomeIpExpired: originals.markHomeIpExpired,
-      claimHomeIpExpiredNotice: originals.claimHomeIpExpiredNotice
+      claimHomeIpExpiredNotice: originals.claimHomeIpExpiredNotice,
+      releaseExpiredHomeIpSlots: originals.releaseExpiredHomeIpSlots
     });
     homeRoutingService.cleanupHomeRoutingForUser = originals.cleanupHomeRoutingForUser;
     emailService.sendRenewalRequiredEmail = originals.sendRenewalRequiredEmail;
@@ -222,6 +244,7 @@ test('家宽到期清理失败时不标记过期也不发送邮件', async () =>
     listExpiredHomeIpUsers: trafficRepository.listExpiredHomeIpUsers,
     markHomeIpExpired: trafficRepository.markHomeIpExpired,
     claimHomeIpExpiredNotice: trafficRepository.claimHomeIpExpiredNotice,
+    releaseExpiredHomeIpSlots: trafficRepository.releaseExpiredHomeIpSlots,
     cleanupHomeRoutingForUser: homeRoutingService.cleanupHomeRoutingForUser,
     sendRenewalRequiredEmail: emailService.sendRenewalRequiredEmail
   };
@@ -242,6 +265,7 @@ test('家宽到期清理失败时不标记过期也不发送邮件', async () =>
     return { expired: true };
   };
   trafficRepository.claimHomeIpExpiredNotice = async () => ({ claimed: true });
+  trafficRepository.releaseExpiredHomeIpSlots = async () => ({ releasedCount: 0 });
   emailService.sendRenewalRequiredEmail = async () => {
     emailed += 1;
   };
@@ -254,7 +278,8 @@ test('家宽到期清理失败时不标记过期也不发送邮件', async () =>
       skippedCount: 0,
       failedCount: 1,
       retryCount: 1,
-      emailCount: 0
+      emailCount: 0,
+      releasedCount: 0
     });
     assert.equal(marked, 0);
     assert.equal(emailed, 0);
@@ -262,7 +287,8 @@ test('家宽到期清理失败时不标记过期也不发送邮件', async () =>
     Object.assign(trafficRepository, {
       listExpiredHomeIpUsers: originals.listExpiredHomeIpUsers,
       markHomeIpExpired: originals.markHomeIpExpired,
-      claimHomeIpExpiredNotice: originals.claimHomeIpExpiredNotice
+      claimHomeIpExpiredNotice: originals.claimHomeIpExpiredNotice,
+      releaseExpiredHomeIpSlots: originals.releaseExpiredHomeIpSlots
     });
     homeRoutingService.cleanupHomeRoutingForUser = originals.cleanupHomeRoutingForUser;
     emailService.sendRenewalRequiredEmail = originals.sendRenewalRequiredEmail;

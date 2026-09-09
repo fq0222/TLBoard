@@ -375,6 +375,32 @@ async function claimHomeIpExpiredNotice(db, userId, now) {
 }
 
 /**
+ * 释放过期超过一天的家宽 IP 套餐占用。
+ * 职责：清空 users 上的家宽套餐归属字段，让实时 sales_count 统计释放共享名额。
+ * 核心分支：仅处理已完成到期清理并标记 expired 的用户，且 home_expire_at 必须严格早于一天宽限截止点。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} now - 当前秒级时间戳
+ * @returns {Promise<{releasedCount:number}>} 本轮释放的用户数量
+ */
+async function releaseExpiredHomeIpSlots(db, now) {
+  const graceCutoff = Number(now) - 24 * 60 * 60;
+  const result = await db.prepare(`
+    UPDATE users
+    SET home_plan_id = NULL,
+        home_expire_at = NULL,
+        updated_at = ?
+    WHERE home_plan_id IS NOT NULL
+      AND home_expire_at IS NOT NULL
+      AND home_expire_at != 0
+      AND home_expire_at < ?
+      AND COALESCE(home_status, 'normal') = 'expired'
+  `).run(now, graceCutoff);
+
+  return { releasedCount: Number(result?.changes || result?.rowCount || 0) };
+}
+
+/**
  * 在专用事务连接中锁定用户行并校验本次续费提醒 claim，命中后才执行发送回调。
  * 核心分支：支付先提交会使校验不命中；提醒先锁行则支付等待发送尝试提交后再更新。
  *
@@ -456,6 +482,7 @@ module.exports = {
   listExpiredHomeIpUsers,
   markHomeIpExpired,
   claimHomeIpExpiredNotice,
+  releaseExpiredHomeIpSlots,
   withClaimedRenewalNotice,
   enableUserAfterTrafficLimitRecovery,
   findUserEmailById
