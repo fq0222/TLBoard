@@ -186,6 +186,28 @@ function buildPayloadPlan(plan) {
 }
 
 /**
+ * 判断订单是否为普通续费订单。
+ *
+ * @param {Object} order - 订单记录，需包含 out_trade_no
+ * @returns {boolean} 仅 REN 前缀视为普通续费订单
+ */
+function isRenewOrder(order) {
+  const outTradeNo = String(order?.out_trade_no || '');
+  return outTradeNo.startsWith('REN');
+}
+
+/**
+ * 判断订单是否为家宽 IP 套餐订单。
+ *
+ * @param {Object} order - 订单记录，需包含 out_trade_no
+ * @returns {boolean} 仅 HIP 前缀视为家宽 IP 加购或续费订单
+ */
+function isHomeIpOrder(order) {
+  const outTradeNo = String(order?.out_trade_no || '');
+  return outTradeNo.startsWith('HIP');
+}
+
+/**
  * 确保用户在某个 3X-UI inbound 上有本地节点配置
  *
  * 如果 3X-UI 已有客户端，优先沿用已有 UUID/subId，避免覆盖用户当前可用配置；
@@ -749,7 +771,7 @@ async function enqueueAndTryUserSync(db, taskType, userInfo, plan) {
  * @returns {{trafficLimit:number,expireAt:number,resetTrafficUsed:boolean}} 用户权益结果
  */
 function calculatePaidOrderEntitlement(order, plan, now = Math.floor(Date.now() / 1000)) {
-  const isRenewOrder = order.out_trade_no.startsWith('REN');
+  const isRenewOrHomeIpOrder = isRenewOrder(order) || isHomeIpOrder(order);
 
   if (isHomeIpPlan(plan)) {
     const currentHomeExpireAt = Number(order.current_home_expire_at || 0);
@@ -763,7 +785,7 @@ function calculatePaidOrderEntitlement(order, plan, now = Math.floor(Date.now() 
     };
   }
 
-  if (isRenewOrder && isTimedPlan(plan)) {
+  if (isRenewOrHomeIpOrder && isTimedPlan(plan)) {
     return {
       trafficLimit: Number(plan.traffic_limit || 0),
       expireAt: now + (Number(plan.duration_days) * 24 * 60 * 60),
@@ -776,7 +798,7 @@ function calculatePaidOrderEntitlement(order, plan, now = Math.floor(Date.now() 
   const baseExpireAt = currentExpireAt > now ? currentExpireAt : now;
   const expireAt = plan.duration_days === 0 ? 0 : baseExpireAt + (Number(plan.duration_days) * 24 * 60 * 60);
 
-  if (isRenewOrder) {
+  if (isRenewOrHomeIpOrder) {
     const currentTrafficLimit = Number(order.current_traffic_limit || 0);
     const planTrafficLimit = Number(plan.traffic_limit || 0);
     return {
@@ -830,7 +852,7 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
   const newTrafficLimit = entitlement.trafficLimit;
   const resetTrafficUsed = entitlement.resetTrafficUsed;
   const finalTradeNo = tradeNo || order.trade_no;
-  const isRenewOrder = order.out_trade_no.startsWith('REN');
+  const isRenewOrHomeIpOrder = isRenewOrder(order) || isHomeIpOrder(order);
   const planLogName = plan.name || `套餐${plan.id}`;
 
   if (entitlement.isHomeIp) {
@@ -856,14 +878,14 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
       order,
       plan,
       expireAt: entitlement.homeExpireAt,
-      isRenewOrder
+      isRenewOrder: isRenewOrHomeIpOrder
     });
     return { handled: true, alreadyPaid: false, order, plan, expireAt: entitlement.homeExpireAt };
   }
 
-  if (isRenewOrder && resetTrafficUsed) {
+  if (isRenewOrHomeIpOrder && resetTrafficUsed) {
     logger.info(`限时套餐续费重置权益: traffic_limit=${newTrafficLimit}, expire_at=${expireAt}`);
-  } else if (isRenewOrder) {
+  } else if (isRenewOrHomeIpOrder) {
     logger.info(`续费订单流量累加: traffic_limit=${newTrafficLimit}, expire_at=${expireAt}`);
   }
 
@@ -883,10 +905,10 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
       updatedAt: now
     });
 
-    logger.info(`${isRenewOrder ? '续费' : '新购'}订单已更新用户套餐归属，套餐占用数由 users 表实时统计: ${planLogName}`);
+    logger.info(`${isRenewOrHomeIpOrder ? '续费' : '新购'}订单已更新用户套餐归属，套餐占用数由 users 表实时统计: ${planLogName}`);
 
     // 首单奖励：仅新购、支付前 payment_count 为 0 且订单带推广人时，在同一事务内发放。
-    if (!isRenewOrder && Number(order.current_payment_count || 0) === 0 && order.referrer_user_id) {
+    if (!isRenewOrHomeIpOrder && Number(order.current_payment_count || 0) === 0 && order.referrer_user_id) {
       await referralService.issueFirstPaymentReward(transactionDb, order);
     }
   });
@@ -912,7 +934,7 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
     reset_client_traffic: entitlement.resetClientTraffic === true
   };
 
-  const syncTaskType = isRenewOrder
+  const syncTaskType = isRenewOrHomeIpOrder
     ? xuiSyncTaskService.TASK_TYPES.RENEW_SYNC
     : xuiSyncTaskService.TASK_TYPES.INITIAL_USER_SYNC;
 
@@ -924,13 +946,13 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
     });
   });
 
-  const shouldSendActivationEmail = isRenewOrder || Number(order.current_payment_count || 0) === 0;
+  const shouldSendActivationEmail = isRenewOrHomeIpOrder || Number(order.current_payment_count || 0) === 0;
   if (shouldSendActivationEmail) {
     await orderActivationEmailService.sendOrderActivationEmail(db, {
       order,
       plan,
       expireAt,
-      isRenewOrder
+      isRenewOrder: isRenewOrHomeIpOrder
     });
   }
 

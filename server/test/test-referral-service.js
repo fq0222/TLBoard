@@ -1555,7 +1555,7 @@ async function testRenewActivationEmailUsesCurrentPlanTrafficOnly() {
  * 验证家宽 IP 支付完成后复用账号开通提醒邮件。
  *
  * 职责：覆盖 completePaidOrder 的家宽套餐分支，避免独立落库后提前返回导致邮件缺失。
- * 关键参数：current_home_expire_at 和 duration_days 共同决定邮件中的到期时间。
+ * 关键参数：HIP 前缀、current_home_expire_at 和 duration_days 共同决定邮件中的续费语义与到期时间。
  * 核心分支：家宽套餐只更新 home_plan_id/home_expire_at，不创建 3X-UI 同步任务，但仍触发开通提醒。
  *
  * @returns {Promise<void>}
@@ -1565,7 +1565,7 @@ async function testHomeIpPaidOrderSendsAccountActivationEmail() {
   const emailCalls = [];
   const baseOrder = {
     id: 59,
-    out_trade_no: 'REN-HOME-59',
+    out_trade_no: 'HIP-HOME-59',
     status: 'pending',
     user_id: 24,
     email: 'home-renew@example.com',
@@ -1620,7 +1620,7 @@ async function testHomeIpPaidOrderSendsAccountActivationEmail() {
           return { sent: true, status: 'mocked' };
         }
       }, async () => {
-        await orderService.completePaidOrder(createTransactionDb(transactionDb), 'REN-HOME-59', 'VMQ-HOME-59');
+        await orderService.completePaidOrder(createTransactionDb(transactionDb), 'HIP-HOME-59', 'VMQ-HOME-59');
 
         assert.strictEqual(emailCalls.length, 1);
         assert.strictEqual(emailCalls[0].payload.order.email, 'home-renew@example.com');
@@ -1628,6 +1628,75 @@ async function testHomeIpPaidOrderSendsAccountActivationEmail() {
         assert.strictEqual(emailCalls[0].payload.expireAt, 1900000000 + 30 * 86400);
         assert.strictEqual(emailCalls[0].payload.isRenewOrder, true);
       });
+    });
+  });
+}
+
+/**
+ * 验证家宽 IP 套餐下单使用独立 HIP 前缀。
+ *
+ * 职责：覆盖 createRenewOrder 的家宽 IP 分支，避免家宽加购继续混用普通续费 REN 订单号。
+ * 关键参数：plan_type=home_ip 决定订单号前缀，pay_type=9 使用余额支付以避开外部 VMQ 依赖。
+ * 核心分支：创建待支付订单、扣减余额、完结订单三处都应收到同一个 HIP 前缀订单号。
+ *
+ * @returns {Promise<void>}
+ */
+async function testHomeIpRenewOrderUsesHipPrefix() {
+  const transactionDb = { name: 'home-ip-renew-prefix-transaction-db' };
+  const calls = [];
+
+  await withObjectMocks(orderRepository, {
+    findUserById: async () => ({
+      id: 8,
+      email: 'user@example.com',
+      plan_id: 1,
+      home_plan_id: 9,
+      home_expire_at: 1900000000,
+      enabled: 1,
+      disable_reason: null,
+      traffic_limit: 1024,
+      balance: 3000
+    }),
+    findEnabledPlanById: async () => ({
+      id: 9,
+      price: 1500,
+      traffic_limit: 0,
+      duration_days: 30,
+      plan_type: 'home_ip',
+      sales_limit: -1,
+      sales_count: 0
+    }),
+    findPlanById: async () => ({
+      id: 1,
+      plan_type: 'lifetime',
+      duration_days: 0
+    }),
+    createPendingRenewOrder: async (db, payload) => {
+      calls.push(['createOrder', db, payload]);
+      return { lastInsertRowid: 67 };
+    },
+    decrementUserBalance: async (db, payload) => {
+      calls.push(['decrementBalance', db, payload]);
+      return { changes: 1 };
+    }
+  }, async () => {
+    await withObjectMocks(orderService, {
+      completePaidOrder: async (db, outTradeNo, tradeNo) => {
+        calls.push(['completeOrder', db, { outTradeNo, tradeNo }]);
+        return { handled: true };
+      }
+    }, async () => {
+      const result = await renewService.createRenewOrder(
+        createTransactionDb(transactionDb),
+        8,
+        { plan_id: 9, pay_type: 9 }
+      );
+
+      assert.match(result.out_trade_no, /^HIP\d+[0-9a-f]{6}$/);
+      assert.match(calls[0][2].outTradeNo, /^HIP\d+[0-9a-f]{6}$/);
+      assert.strictEqual(calls[0][2].outTradeNo, result.out_trade_no);
+      assert.strictEqual(calls[2][2].outTradeNo, result.out_trade_no);
+      assert.strictEqual(calls[2][2].tradeNo, `BALANCE-${result.out_trade_no}`);
     });
   });
 }
@@ -1880,6 +1949,7 @@ async function main() {
   await testCompletePaidOrderSendsAccountActivationEmail();
   await testRenewActivationEmailUsesCurrentPlanTrafficOnly();
   await testHomeIpPaidOrderSendsAccountActivationEmail();
+  await testHomeIpRenewOrderUsesHipPrefix();
   await testCompletePaidOrderKeepsEntitlementAndSyncWhenEmailFails();
   await testBalanceRenewCompletesWithoutVmq();
   await testBalanceRenewRejectsInsufficientBalance();

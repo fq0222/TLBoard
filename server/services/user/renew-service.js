@@ -72,6 +72,17 @@ function normalizeResetConfirmation(value) {
 }
 
 /**
+ * 生成用户续费入口的商户订单号。
+ *
+ * @param {Object} plan - 当前下单套餐，读取 plan_type 判断业务线
+ * @returns {string} 家宽 IP 使用 HIP 前缀，普通续费继续使用 REN 前缀
+ */
+function generateRenewOutTradeNo(plan) {
+  const prefix = isHomeIpPlan(plan) ? 'HIP' : 'REN';
+  return `${prefix}${Date.now()}${crypto.randomBytes(3).toString('hex')}`;
+}
+
+/**
  * 格式化续费套餐列表项。
  *
  * @param {Object} plan - plans 表套餐记录，包含价格、流量、类型和销售限制字段
@@ -200,7 +211,7 @@ async function createRenewOrder(db, userId, payload) {
     // 保持旧语义：仅作为业务判断结果，不额外改写数据流。
   }
 
-  const outTradeNo = `REN${Date.now()}${crypto.randomBytes(3).toString('hex')}`;
+  const outTradeNo = generateRenewOutTradeNo(plan);
   let orderId;
   const createdAt = getNowTimestamp();
 
