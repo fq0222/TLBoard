@@ -187,22 +187,24 @@
               <div class="home-routing-editor">
                 <div class="home-routing-row">
                   <el-select
-                    v-model="homeRoutingForm.home_proxy_tag"
-                    disabled
-                    placeholder="暂无家宽 IP"
+                    v-model="homeRoutingForm.home_plan_id"
+                    placeholder="请选择家宽套餐"
                     class="home-routing-select"
+                    :disabled="homeRoutingBusy"
+                    @change="handleHomePlanChange"
                   >
                     <el-option
-                      v-if="homeRoutingOptions.home_proxy_tag"
-                      :label="homeRoutingOptions.home_proxy_tag"
-                      :value="homeRoutingOptions.home_proxy_tag"
+                      v-for="plan in homeRoutingPlans"
+                      :key="plan.id"
+                      :label="`${plan.name}（${plan.home_proxy_tag || '未绑定IP'}）`"
+                      :value="plan.id"
                     />
                   </el-select>
                   <el-select
                     v-model="homeRoutingForm.server_id_1"
                     placeholder="请选择服务器"
                     class="home-routing-select"
-                    :disabled="!homeRoutingEditable || homeRoutingBusy"
+                    :disabled="homeRoutingBusy"
                   >
                     <el-option
                       v-for="server in homeRoutingServers"
@@ -216,7 +218,7 @@
                     clearable
                     placeholder="可选第二台服务器"
                     class="home-routing-select"
-                    :disabled="!homeRoutingEditable || homeRoutingBusy"
+                    :disabled="homeRoutingBusy"
                   >
                     <el-option
                       v-for="server in secondHomeRoutingServers"
@@ -233,14 +235,14 @@
                     type="datetime"
                     placeholder="选择到期时间"
                     class="home-routing-expire-picker"
-                    :disabled="!homeRoutingEditable || homeRoutingBusy"
+                    :disabled="homeRoutingBusy"
                   />
                 </div>
                 <div class="section-actions">
                   <el-button
                     type="primary"
                     :loading="homeRoutingBusy && homeRoutingAction === 'apply'"
-                    :disabled="!homeRoutingEditable || submitting || generatingSubscription || isHomeRoutingDeleting"
+                    :disabled="submitting || generatingSubscription || isHomeRoutingDeleting || isHomeRoutingClearing"
                     @click="applyHomeRouting"
                   >
                     应用
@@ -252,6 +254,14 @@
                     @click="deleteHomeRouting"
                   >
                     删除
+                  </el-button>
+                  <el-button
+                    type="warning"
+                    :loading="isHomeRoutingClearing"
+                    :disabled="submitting || generatingSubscription || isHomeRoutingApplying || isHomeRoutingDeleting"
+                    @click="clearHomeRoutingEntitlement"
+                  >
+                    清除
                   </el-button>
                 </div>
                 <div v-if="homeRoutingMessage" class="home-routing-tip">
@@ -435,6 +445,7 @@ const batchSocket = ref(null)
 const batchReconnectTimer = ref(null)
 const homeRoutingOptions = ref({ available: false })
 const homeRoutingForm = reactive({
+  home_plan_id: null,
   home_proxy_tag: '',
   server_id_1: null,
   server_id_2: null,
@@ -478,6 +489,7 @@ const basicInfoSnapshot = reactive({
 })
 
 const homeRoutingRoute = computed(() => homeRoutingOptions.value.route || null)
+const homeRoutingPlans = computed(() => homeRoutingOptions.value.home_plans || [])
 const homeRoutingServers = computed(() => homeRoutingOptions.value.servers || [])
 const secondHomeRoutingServers = computed(() => (
   homeRoutingServers.value.filter((server) => Number(server.id) !== Number(homeRoutingForm.server_id_1))
@@ -486,6 +498,7 @@ const homeRoutingEditable = computed(() => !!homeRoutingOptions.value.available 
 const homeRoutingMessage = computed(() => homeRoutingOptions.value.message || '')
 const isHomeRoutingApplying = computed(() => homeRoutingBusy.value && homeRoutingAction.value === 'apply')
 const isHomeRoutingDeleting = computed(() => homeRoutingBusy.value && homeRoutingAction.value === 'delete')
+const isHomeRoutingClearing = computed(() => homeRoutingBusy.value && homeRoutingAction.value === 'clear')
 
 // 单位到字节的转换系数
 const unitMultipliers = {
@@ -653,10 +666,20 @@ function applyHomeRoutingOptions(options) {
   homeRoutingOptions.value = options || { available: false }
   const routeServerIds = homeRoutingOptions.value.route?.server_ids || []
   const homeExpireAt = Number(homeRoutingOptions.value.home_expire_at) || 0
+  homeRoutingForm.home_plan_id = homeRoutingOptions.value.home_plan_id || null
   homeRoutingForm.home_proxy_tag = homeRoutingOptions.value.home_proxy_tag || ''
   homeRoutingForm.server_id_1 = routeServerIds[0] || null
   homeRoutingForm.server_id_2 = routeServerIds[1] || null
   homeRoutingForm.home_expire_at = homeExpireAt > 0 ? new Date(homeExpireAt * 1000) : null
+}
+
+/**
+ * 管理端切换家宽套餐时同步表单中的 outbound tag。
+ * 核心分支：套餐不存在时清空 tag，应用前由后端再次校验套餐类型和 tag。
+ */
+function handleHomePlanChange() {
+  const selectedPlan = homeRoutingPlans.value.find((plan) => Number(plan.id) === Number(homeRoutingForm.home_plan_id))
+  homeRoutingForm.home_proxy_tag = selectedPlan?.home_proxy_tag || ''
 }
 
 /**
@@ -1002,6 +1025,10 @@ async function showEditDialog(user) {
  * 核心分支：管理员操作由后端跳过冷却；前端仍校验至少一台服务器且两台不重复。
  */
 async function applyHomeRouting() {
+  if (!homeRoutingForm.home_plan_id) {
+    ElMessage.warning('请选择家宽 IP 套餐')
+    return
+  }
   const serverIds = buildHomeRoutingServerIds()
   if (serverIds.length === 0) {
     ElMessage.warning('请选择至少一台服务器')
@@ -1016,6 +1043,7 @@ async function applyHomeRouting() {
   homeRoutingAction.value = 'apply'
   try {
     const response = await api.admin.updateUserHomeRouting(editingId.value, {
+      home_plan_id: homeRoutingForm.home_plan_id,
       server_ids: serverIds,
       home_expire_at: toExpireTimestamp(homeRoutingForm.home_expire_at) || 0
     })
@@ -1034,6 +1062,45 @@ async function applyHomeRouting() {
     } else {
       ElMessage.error(error.response?.data?.message || '家宽 IP 配置同步失败')
     }
+  } finally {
+    homeRoutingBusy.value = false
+    homeRoutingAction.value = ''
+  }
+}
+
+/**
+ * 管理端清除当前用户家宽 IP 套餐字段。
+ * 核心分支：只调用清除权益接口，不删除 routing；远端 routing 仍由“删除”按钮单独处理。
+ */
+async function clearHomeRoutingEntitlement() {
+  try {
+    await ElMessageBox.confirm(
+      '清除后，该用户首页不再显示家宽 IP 套餐，并释放套餐名额；已有 routing 不会自动删除。确定继续清除？',
+      '清除确认',
+      {
+        confirmButtonText: '确定清除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+
+  homeRoutingBusy.value = true
+  homeRoutingAction.value = 'clear'
+  try {
+    const response = await api.admin.clearUserHomeRoutingEntitlement(editingId.value)
+    if (response.code === 0) {
+      applyHomeRoutingOptions(response.data)
+      ElMessage.success('家宽 IP 套餐字段已清除')
+      await fetchUsers()
+    } else {
+      ElMessage.error(response.message || '家宽 IP 套餐字段清除失败')
+    }
+  } catch (error) {
+    console.error('清除用户家宽 IP 套餐字段失败:', error)
+    ElMessage.error(error.response?.data?.message || '家宽 IP 套餐字段清除失败')
   } finally {
     homeRoutingBusy.value = false
     homeRoutingAction.value = ''

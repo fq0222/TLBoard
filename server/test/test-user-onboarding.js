@@ -11,6 +11,9 @@ const path = require('node:path');
 const authService = require('../services/user/auth-service');
 const usersService = require('../services/admin/users-service');
 const userRepository = require('../repositories/user-repository');
+const planRepository = require('../repositories/plan-repository');
+const plansRepository = require('../repositories/plans-repository');
+const userHomeRoutingRepository = require('../repositories/user-home-routing-repository');
 const homeRoutingService = require('../services/shared/home-routing-service');
 const { DISABLE_REASONS } = require('../services/shared/renew-policy');
 
@@ -369,11 +372,27 @@ test('admin home routing actions update expire time and reuse shared service wit
       calls.push({ method: 'updateExpire', db, userId, homeExpireAt });
     }
   });
-  const restoreHomeRouting = replaceMethods(homeRoutingService, {
-    getHomeRoutingOptions: async (db, userId) => {
-      calls.push({ method: 'get', db, userId });
-      return { available: true };
+  const restoreHomeRoutingRepository = replaceMethods(userHomeRoutingRepository, {
+    findHomeRoutingEntitlement: async (db, userId) => {
+      calls.push({ method: 'findEntitlement', db, userId });
+      return { user_id: userId, home_plan_id: 9, home_expire_at: 1900000000 };
     },
+    findUserHomeRoute: async (db, userId) => {
+      calls.push({ method: 'findRoute', db, userId });
+      return null;
+    },
+    listOnlineServers: async (db) => {
+      calls.push({ method: 'listServers', db });
+      return [];
+    }
+  });
+  const restorePlanRepository = replaceMethods(planRepository, {
+    findEnabledPlansByType: async (db, planType) => {
+      calls.push({ method: 'listPlans', db, planType });
+      return [];
+    },
+  });
+  const restoreHomeRouting = replaceMethods(homeRoutingService, {
     updateHomeRouting: async (db, userId, payload, logger, options) => {
       calls.push({ method: 'update', db, userId, payload, options });
       return { route: { server_ids: payload.server_ids } };
@@ -391,13 +410,320 @@ test('admin home routing actions update expire time and reuse shared service wit
     await usersService.deleteHomeRouting(db, 42);
 
     assert.deepEqual(calls, [
-      { method: 'get', db, userId: 42 },
+      { method: 'findEntitlement', db, userId: 42 },
+      { method: 'findRoute', db, userId: 42 },
+      { method: 'listServers', db },
+      { method: 'listPlans', db, planType: 'home_ip' },
       { method: 'updateExpire', db, userId: 42, homeExpireAt: 1900000000 },
       { method: 'update', db, userId: 42, payload: { server_ids: [1, 2], home_expire_at: 1900000000 }, options: { skipCooldown: true } },
+      { method: 'findEntitlement', db, userId: 42 },
+      { method: 'findRoute', db, userId: 42 },
+      { method: 'listServers', db },
+      { method: 'listPlans', db, planType: 'home_ip' },
       { method: 'delete', db, userId: 42, options: { skipCooldown: true } }
     ]);
   } finally {
     restoreHomeRouting();
+    restorePlanRepository();
+    restoreHomeRoutingRepository();
+    restoreRepository();
+  }
+});
+
+test('admin home routing options allow any user to choose home ip plans', async () => {
+  const calls = [];
+  const db = { marker: 'admin-db' };
+  const restoreHomeRoutingRepository = replaceMethods(userHomeRoutingRepository, {
+    findHomeRoutingEntitlement: async (receivedDb, userId) => {
+      calls.push({ method: 'findEntitlement', db: receivedDb, userId });
+      return { user_id: userId, email: 'plain@example.com', home_plan_id: null };
+    },
+    findUserHomeRoute: async (receivedDb, userId) => {
+      calls.push({ method: 'findRoute', db: receivedDb, userId });
+      return null;
+    },
+    listOnlineServers: async (receivedDb) => {
+      calls.push({ method: 'listServers', db: receivedDb });
+      return [{ id: 3, name: '节点3', status: 1 }];
+    }
+  });
+  const restorePlanRepository = replaceMethods(planRepository, {
+    findEnabledPlansByType: async (receivedDb, planType) => {
+      calls.push({ method: 'listPlans', db: receivedDb, planType });
+      return [{
+        id: 9,
+        name: '家宽月卡',
+        duration_days: 30,
+        price: 2000,
+        plan_type: 'home_ip',
+        home_proxy_tag: 'home-lax',
+        sales_limit: 5,
+        sales_count: 4
+      }];
+    }
+  });
+
+  try {
+    const result = await usersService.getHomeRoutingOptions(db, 42);
+
+    assert.equal(result.available, true);
+    assert.equal(result.editable, true);
+    assert.deepEqual(result.servers, [{ id: 3, name: '节点3', status: 1 }]);
+    assert.deepEqual(result.home_plans, [{
+      id: 9,
+      name: '家宽月卡',
+      duration_days: 30,
+      price: 2000,
+      price_text: '20.00',
+      plan_type: 'home_ip',
+      home_proxy_tag: 'home-lax',
+      sales_limit: 5,
+      sales_count: 4
+    }]);
+    assert.deepEqual(calls.map((call) => call.method), [
+      'findEntitlement',
+      'findRoute',
+      'listServers',
+      'listPlans'
+    ]);
+  } finally {
+    restorePlanRepository();
+    restoreHomeRoutingRepository();
+  }
+});
+
+test('admin home routing apply writes selected home ip plan before syncing route', async () => {
+  const calls = [];
+  const db = { marker: 'admin-db' };
+  const restoreRepository = replaceMethods(userRepository, {
+    updateUserHomePlanForAdmin: async (receivedDb, userId, payload) => {
+      calls.push({ method: 'updateHomePlan', db: receivedDb, userId, payload });
+    }
+  });
+  const restorePlansRepository = replaceMethods(plansRepository, {
+    findPlanById: async (receivedDb, planId) => {
+      calls.push({ method: 'findPlan', db: receivedDb, planId });
+      return {
+        id: 9,
+        name: '家宽月卡',
+        plan_type: 'home_ip',
+        home_proxy_tag: 'home-lax'
+      };
+    }
+  });
+  const restoreHomeRouting = replaceMethods(homeRoutingService, {
+    updateHomeRouting: async (receivedDb, userId, payload, logger, options) => {
+      calls.push({ method: 'updateRoute', db: receivedDb, userId, payload, options });
+      return { route: { server_ids: payload.server_ids } };
+    }
+  });
+  const restoreHomeRoutingRepository = replaceMethods(userHomeRoutingRepository, {
+    findHomeRoutingEntitlement: async (receivedDb, userId) => {
+      calls.push({ method: 'findEntitlement', db: receivedDb, userId });
+      return {
+        user_id: userId,
+        home_plan_id: 9,
+        home_expire_at: 1900000000,
+        home_plan_name: '家宽月卡',
+        home_proxy_tag: 'home-lax'
+      };
+    },
+    findUserHomeRoute: async (receivedDb, userId) => {
+      calls.push({ method: 'findRoute', db: receivedDb, userId });
+      return { home_proxy_tag: 'home-lax', server_ids: '[1,2]', last_synced_at: 1800000000 };
+    },
+    listOnlineServers: async (receivedDb) => {
+      calls.push({ method: 'listServers', db: receivedDb });
+      return [{ id: 1, name: '节点1', status: 1 }, { id: 2, name: '节点2', status: 1 }];
+    },
+    listServersByIds: async (receivedDb, ids) => {
+      calls.push({ method: 'listServersByIds', db: receivedDb, ids });
+      return [{ id: 1, name: '节点1', status: 1 }, { id: 2, name: '节点2', status: 1 }];
+    }
+  });
+  const restorePlanRepository = replaceMethods(planRepository, {
+    findEnabledPlansByType: async (receivedDb, planType) => {
+      calls.push({ method: 'listPlans', db: receivedDb, planType });
+      return [{
+        id: 9,
+        name: '家宽月卡',
+        duration_days: 30,
+        price: 2000,
+        plan_type: 'home_ip',
+        home_proxy_tag: 'home-lax',
+        sales_limit: 5,
+        sales_count: 1
+      }];
+    }
+  });
+
+  try {
+    const result = await usersService.updateHomeRouting(db, 42, {
+      home_plan_id: 9,
+      home_expire_at: 1900000000,
+      server_ids: [1, 2]
+    });
+
+    assert.equal(result.home_plan_id, 9);
+    assert.equal(result.home_proxy_tag, 'home-lax');
+    assert.deepEqual(result.route.server_ids, [1, 2]);
+    assert.deepEqual(result.home_plans.map((plan) => plan.id), [9]);
+    assert.deepEqual(calls, [
+      { method: 'findPlan', db, planId: 9 },
+      {
+        method: 'updateHomePlan',
+        db,
+        userId: 42,
+        payload: { homePlanId: 9, homeExpireAt: 1900000000 }
+      },
+      {
+        method: 'updateRoute',
+        db,
+        userId: 42,
+        payload: { home_plan_id: 9, home_expire_at: 1900000000, server_ids: [1, 2] },
+        options: { skipCooldown: true }
+      },
+      { method: 'findEntitlement', db, userId: 42 },
+      { method: 'findRoute', db, userId: 42 },
+      { method: 'listServers', db },
+      { method: 'listPlans', db, planType: 'home_ip' },
+      { method: 'listServersByIds', db, ids: [1, 2] }
+    ]);
+  } finally {
+    restorePlanRepository();
+    restoreHomeRoutingRepository();
+    restoreHomeRouting();
+    restorePlansRepository();
+    restoreRepository();
+  }
+});
+
+test('admin home routing apply can read selected home ip plan from real repository module', async () => {
+  const calls = [];
+  const db = {
+    prepare(sql) {
+      const normalizedSql = sql.replace(/\s+/g, ' ').trim();
+      return {
+        async get(...params) {
+          calls.push({ method: 'get', sql: normalizedSql, params });
+          if (normalizedSql.includes('FROM plans WHERE id = ?')) {
+            return {
+              id: params[0],
+              name: '家宽月卡',
+              plan_type: 'home_ip',
+              home_proxy_tag: 'home-lax'
+            };
+          }
+          if (normalizedSql.includes('FROM users u') && normalizedSql.includes('LEFT JOIN plans p ON p.id = u.home_plan_id')) {
+            return {
+              user_id: params[0],
+              email: 'plain@example.com',
+              home_plan_id: 9,
+              home_expire_at: 1900000000,
+              home_status: 'normal',
+              home_plan_name: '家宽月卡',
+              plan_type: 'home_ip',
+              home_proxy_tag: 'home-lax',
+              home_proxy_id: 1,
+              proxy_tag: 'home-lax'
+            };
+          }
+          if (normalizedSql.includes('FROM user_home_proxy_routes WHERE user_id = ?')) {
+            return null;
+          }
+          throw new Error(`unexpected get sql: ${normalizedSql}`);
+        },
+        async run(...params) {
+          calls.push({ method: 'run', sql: normalizedSql, params });
+          return { changes: 1 };
+        },
+        async all(...params) {
+          calls.push({ method: 'all', sql: normalizedSql, params });
+          if (normalizedSql.includes('FROM xui_servers')) {
+            return [];
+          }
+          if (normalizedSql.includes('FROM plans') && normalizedSql.includes('plan_type = ?')) {
+            return [];
+          }
+          throw new Error(`unexpected all sql: ${normalizedSql}`);
+        }
+      };
+    }
+  };
+  const restoreHomeRouting = replaceMethods(homeRoutingService, {
+    updateHomeRouting: async (receivedDb, userId, payload, logger, options) => {
+      calls.push({ method: 'updateRoute', db: receivedDb, userId, payload, options });
+      return { route: { server_ids: payload.server_ids } };
+    }
+  });
+
+  try {
+    await usersService.updateHomeRouting(db, 42, {
+      home_plan_id: 9,
+      home_expire_at: 1900000000,
+      server_ids: [1]
+    });
+
+    assert.ok(calls.some((call) => call.method === 'get' && call.sql.includes('FROM plans WHERE id = ?')));
+    assert.ok(calls.some((call) => call.method === 'run' && call.sql.includes('home_plan_id = ?')));
+    assert.ok(calls.some((call) => call.method === 'updateRoute'));
+  } finally {
+    restoreHomeRouting();
+  }
+});
+
+test('admin home routing clear only removes user home plan fields', async () => {
+  const calls = [];
+  const db = { marker: 'admin-db' };
+  const restoreRepository = replaceMethods(userRepository, {
+    clearUserHomePlanForAdmin: async (receivedDb, userId) => {
+      calls.push({ method: 'clearHomePlan', db: receivedDb, userId });
+    }
+  });
+  const restoreHomeRoutingRepository = replaceMethods(userHomeRoutingRepository, {
+    findHomeRoutingEntitlement: async (receivedDb, userId) => {
+      calls.push({ method: 'findEntitlement', db: receivedDb, userId });
+      return { user_id: userId, home_plan_id: null };
+    },
+    findUserHomeRoute: async (receivedDb, userId) => {
+      calls.push({ method: 'findRoute', db: receivedDb, userId });
+      return null;
+    },
+    listOnlineServers: async (receivedDb) => {
+      calls.push({ method: 'listServers', db: receivedDb });
+      return [];
+    }
+  });
+  const restorePlanRepository = replaceMethods(planRepository, {
+    findEnabledPlansByType: async (receivedDb, planType) => {
+      calls.push({ method: 'listPlans', db: receivedDb, planType });
+      return [];
+    }
+  });
+  const restoreHomeRouting = replaceMethods(homeRoutingService, {
+    deleteHomeRouting: async () => {
+      calls.push({ method: 'deleteRoute' });
+    }
+  });
+
+  try {
+    const result = await usersService.clearHomeRoutingEntitlement(db, 42);
+
+    assert.equal(result.available, true);
+    assert.equal(result.editable, true);
+    assert.equal(result.home_plan_id, null);
+    assert.equal(result.message, '家宽 IP 套餐字段已清除');
+    assert.deepEqual(calls, [
+      { method: 'clearHomePlan', db, userId: 42 },
+      { method: 'findEntitlement', db, userId: 42 },
+      { method: 'findRoute', db, userId: 42 },
+      { method: 'listServers', db },
+      { method: 'listPlans', db, planType: 'home_ip' }
+    ]);
+  } finally {
+    restoreHomeRouting();
+    restorePlanRepository();
+    restoreHomeRoutingRepository();
     restoreRepository();
   }
 });

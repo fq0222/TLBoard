@@ -6,6 +6,9 @@ const ipLocationService = require('../shared/ip-location-service');
 const { getStrategyFromRemark } = require('../shared/subscription-strategy');
 const { parsePagination } = require('../../shared/utils/pagination');
 const userRepository = require('../../repositories/user-repository');
+const planRepository = require('../../repositories/plan-repository');
+const plansRepository = require('../../repositories/plans-repository');
+const userHomeRoutingRepository = require('../../repositories/user-home-routing-repository');
 const subscriptionRepository = require('../../repositories/subscription-repository');
 
 /**
@@ -71,6 +74,114 @@ function normalizeExpireAt(value) {
  */
 function hasHomeExpireAtChange(payload = {}) {
   return Object.prototype.hasOwnProperty.call(payload, 'home_expire_at');
+}
+
+/**
+ * 将家宽 IP 套餐格式化为管理端选择项。
+ *
+ * @param {Object} plan - 套餐记录
+ * @returns {Object} 管理端家宽套餐选项
+ */
+function formatAdminHomePlanOption(plan) {
+  return {
+    id: plan.id,
+    name: plan.name,
+    duration_days: plan.duration_days,
+    price: plan.price,
+    price_text: (Number(plan.price || 0) / 100).toFixed(2),
+    plan_type: plan.plan_type,
+    home_proxy_tag: plan.home_proxy_tag || '',
+    sales_limit: plan.sales_limit,
+    sales_count: plan.sales_count
+  };
+}
+
+/**
+ * 将服务器记录格式化为管理端家宽 routing 选择项。
+ *
+ * @param {Object} server - 服务器记录
+ * @returns {Object} 管理端服务器选项
+ */
+function formatAdminHomeRoutingServer(server) {
+  return {
+    id: server.id,
+    name: server.name,
+    status: server.status
+  };
+}
+
+/**
+ * 解析用户家宽 routing 中保存的服务器 ID。
+ *
+ * @param {Object|undefined} route - user_home_proxy_routes 记录
+ * @returns {number[]} 服务器 ID 列表
+ */
+function parseHomeRoutingServerIds(route) {
+  if (!route) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(route.server_ids || '[]');
+    return Array.isArray(parsed)
+      ? parsed.map(Number).filter((id) => Number.isInteger(id) && id > 0)
+      : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+/**
+ * 格式化管理端当前用户家宽 routing 记录。
+ * 核心分支：route 不存在返回 null；存在时带出服务器 ID 和可读名称，便于管理员删除或调整。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Object|undefined} route - user_home_proxy_routes 记录
+ * @returns {Promise<Object|null>} 前端展示用 route
+ */
+async function formatAdminHomeRoute(db, route) {
+  if (!route) {
+    return null;
+  }
+
+  const serverIds = parseHomeRoutingServerIds(route);
+  const servers = await userHomeRoutingRepository.listServersByIds(db, serverIds);
+  const serverMap = new Map(servers.map((server) => [Number(server.id), server]));
+
+  return {
+    home_proxy_tag: route.home_proxy_tag,
+    server_ids: serverIds,
+    servers: serverIds.map((id) => {
+      const server = serverMap.get(Number(id));
+      return {
+        id,
+        name: server?.name || `服务器 ${id}`,
+        status: server?.status
+      };
+    }),
+    last_synced_at: route.last_synced_at
+  };
+}
+
+/**
+ * 校验管理端选择的家宽 IP 套餐。
+ * 核心分支：仅允许 plan_type=home_ip 且已绑定 home_proxy_tag 的套餐参与 routing 同步。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number|string} homePlanId - 家宽套餐 ID
+ * @returns {Promise<Object>} 套餐记录
+ */
+async function assertAdminHomeIpPlan(db, homePlanId) {
+  const plan = await plansRepository.findPlanById(db, homePlanId);
+  if (!plan) {
+    throw createLegacyBusinessError('家宽 IP 套餐不存在', { code: 4101 });
+  }
+  if (String(plan.plan_type || '') !== 'home_ip') {
+    throw createLegacyBusinessError('请选择家宽 IP 套餐', { code: 4103 });
+  }
+  if (!String(plan.home_proxy_tag || '').trim()) {
+    throw createLegacyBusinessError('家宽 IP 套餐未绑定 tag，请先维护套餐配置', { code: 4104 });
+  }
+  return plan;
 }
 
 /**
@@ -591,7 +702,28 @@ function getNodeUpdateStrategy(node = {}) {
  * @returns {Promise<Object>} 家宽权益、可选服务器和当前绑定
  */
 async function getHomeRoutingOptions(db, userId) {
-  return homeRoutingService.getHomeRoutingOptions(db, userId);
+  const [entitlement, route, onlineServers, homePlans] = await Promise.all([
+    userHomeRoutingRepository.findHomeRoutingEntitlement(db, userId),
+    userHomeRoutingRepository.findUserHomeRoute(db, userId),
+    userHomeRoutingRepository.listOnlineServers(db),
+    planRepository.findEnabledPlansByType(db, 'home_ip')
+  ]);
+
+  return {
+    available: true,
+    editable: true,
+    home_plan_id: entitlement?.home_plan_id || null,
+    home_proxy_tag: entitlement?.home_proxy_tag || route?.home_proxy_tag || '',
+    home_plan_name: entitlement?.home_plan_name || '',
+    home_expire_at: Number(entitlement?.home_expire_at || 0),
+    home_status: entitlement?.home_status || 'normal',
+    home_status_text: entitlement?.home_status === 'expired' ? '过期' : '正常',
+    home_plans: homePlans.map(formatAdminHomePlanOption),
+    servers: onlineServers.map(formatAdminHomeRoutingServer),
+    route: await formatAdminHomeRoute(db, route),
+    cooldown_remaining_seconds: 0,
+    message: ''
+  };
 }
 
 /**
@@ -605,13 +737,36 @@ async function getHomeRoutingOptions(db, userId) {
  * @returns {Promise<Object>} 更新后的绑定选项
  */
 async function updateHomeRouting(db, userId, payload = {}, logger = console) {
-  if (hasHomeExpireAtChange(payload)) {
+  if (payload.home_plan_id !== undefined) {
+    await assertAdminHomeIpPlan(db, payload.home_plan_id);
+    await userRepository.updateUserHomePlanForAdmin(db, userId, {
+      homePlanId: Number(payload.home_plan_id),
+      homeExpireAt: normalizeExpireAt(payload.home_expire_at)
+    });
+  } else if (hasHomeExpireAtChange(payload)) {
     await userRepository.updateUserHomeExpireAt(db, userId, normalizeExpireAt(payload.home_expire_at));
   }
 
-  return homeRoutingService.updateHomeRouting(db, userId, payload, logger, {
+  await homeRoutingService.updateHomeRouting(db, userId, payload, logger, {
     skipCooldown: true
   });
+  return getHomeRoutingOptions(db, userId);
+}
+
+/**
+ * 管理端清除指定用户的家宽 IP 套餐权益。
+ * 核心分支：只清空 users.home_plan_id/home_expire_at，不删除已有 routing，远端清理由删除按钮负责。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<Object>} 清除后的管理端家宽配置选项
+ */
+async function clearHomeRoutingEntitlement(db, userId) {
+  await userRepository.clearUserHomePlanForAdmin(db, userId);
+  return {
+    ...(await getHomeRoutingOptions(db, userId)),
+    message: '家宽 IP 套餐字段已清除'
+  };
 }
 
 /**
@@ -650,5 +805,6 @@ module.exports = {
   generateSubscription,
   getHomeRoutingOptions,
   updateHomeRouting,
+  clearHomeRoutingEntitlement,
   deleteHomeRouting
 };

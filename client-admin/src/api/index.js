@@ -402,6 +402,15 @@ const adminApi = {
   },
 
   /**
+   * 清除指定用户家宽 IP 套餐字段
+   * @param {number} id - 用户ID
+   * @returns {Promise<Object>} 清除后的家宽控制信息
+   */
+  clearUserHomeRoutingEntitlement(id) {
+    return apiClient.delete(`/users/${id}/home-routing/entitlement`)
+  },
+
+  /**
    * 启动批量生成用户订阅链接任务
    * @param {Object} data - 批处理选项
    * @param {boolean} data.cf_optimized_only - 是否仅处理已配置优选 CF IP 的用户

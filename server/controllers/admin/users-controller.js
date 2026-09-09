@@ -370,6 +370,36 @@ async function deleteHomeRouting(req, res) {
 }
 
 /**
+ * 管理端清除指定用户的家宽 IP 套餐字段。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<Object>} Express 响应结果
+ */
+async function clearHomeRoutingEntitlement(req, res) {
+  if (handleValidationFailure(req, res)) {
+    return;
+  }
+
+  try {
+    const userId = parseInt(req.params.id, 10);
+    const data = await usersService.clearHomeRoutingEntitlement(
+      req.app.locals.db,
+      userId
+    );
+
+    logger.info(`清除用户家宽 IP 套餐字段成功: user=${userId}`);
+    return res.json({
+      code: 0,
+      message: 'ok',
+      data
+    });
+  } catch (error) {
+    return handleControllerError(res, '清除用户家宽 IP 套餐字段', error);
+  }
+}
+
+/**
  * 获取最近一次批量重新生成订阅链接任务状态。
  *
  * @param {Object} req - Express 请求对象
@@ -398,6 +428,7 @@ module.exports = {
   generateSubscription,
   getHomeRoutingOptions,
   updateHomeRouting,
+  clearHomeRoutingEntitlement,
   deleteHomeRouting,
   startBatchGenerateSubscriptions,
   getBatchGenerateSubscriptionStatus

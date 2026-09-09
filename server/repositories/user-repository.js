@@ -521,6 +521,49 @@ async function updateUserHomeExpireAt(db, userId, homeExpireAt) {
 }
 
 /**
+ * 管理端写入用户家宽 IP 套餐权益。
+ * 职责：管理员可为任意用户指定家宽套餐和到期时间，恢复过期状态以便 shared routing 同步复用权益校验。
+ * 核心分支：homePlanId 必须由服务层校验为家宽套餐；homeExpireAt 为 0 时仍允许保存但后续 routing 会按到期处理。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {{homePlanId:number,homeExpireAt:number}} payload - 家宽套餐权益
+ * @returns {Promise<void>}
+ */
+async function updateUserHomePlanForAdmin(db, userId, payload) {
+  await db.prepare(`
+    UPDATE users
+    SET home_plan_id = ?,
+        home_expire_at = ?,
+        home_status = 'normal',
+        home_expired_notice_sent_at = NULL,
+        updated_at = ?
+    WHERE id = ?
+  `).run(payload.homePlanId, payload.homeExpireAt, Math.floor(Date.now() / 1000), userId);
+}
+
+/**
+ * 管理端清除用户家宽 IP 套餐权益字段。
+ * 职责：只释放 user 表上的家宽套餐归属和到期时间，不删除或同步 routing 记录。
+ * 核心分支：保留 routing 删除给独立删除按钮处理，避免管理员误点清除时触发远端变更。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @returns {Promise<void>}
+ */
+async function clearUserHomePlanForAdmin(db, userId) {
+  await db.prepare(`
+    UPDATE users
+    SET home_plan_id = NULL,
+        home_expire_at = NULL,
+        home_status = 'normal',
+        home_expired_notice_sent_at = NULL,
+        updated_at = ?
+    WHERE id = ?
+  `).run(Math.floor(Date.now() / 1000), userId);
+}
+
+/**
  * 查询用户 IP 归属地 JSON。
  *
  * @param {Object} db - 数据库代理对象
@@ -883,6 +926,8 @@ module.exports = {
   listUserCfIps,
   updateUserFields,
   updateUserHomeExpireAt,
+  updateUserHomePlanForAdmin,
+  clearUserHomePlanForAdmin,
   findUserIpLocationById,
   updateUserIpLocation,
   deleteUserLocalRelatedData,

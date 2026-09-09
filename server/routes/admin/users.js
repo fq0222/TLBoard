@@ -66,6 +66,9 @@ router.put('/:id/home-routing', authenticateAdmin, [
   param('id')
     .isInt({ min: 1 })
     .withMessage('ID必须是大于0的整数'),
+  body('home_plan_id')
+    .isInt({ min: 1 })
+    .withMessage('家宽套餐ID必须是大于0的整数'),
   body('server_ids')
     .isArray({ min: 1, max: 2 })
     .withMessage('最多选择两台服务器'),
@@ -77,6 +80,12 @@ router.put('/:id/home-routing', authenticateAdmin, [
     .isInt({ min: 0 })
     .withMessage('家宽到期时间必须是非负整数')
 ], usersController.updateHomeRouting);
+
+router.delete('/:id/home-routing/entitlement', authenticateAdmin, [
+  param('id')
+    .isInt({ min: 1 })
+    .withMessage('ID必须是大于0的整数')
+], usersController.clearHomeRoutingEntitlement);
 
 router.delete('/:id/home-routing', authenticateAdmin, [
   param('id')
