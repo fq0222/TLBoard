@@ -283,6 +283,7 @@ onBeforeUnmount(() => {
   }
 
   .content-card {
+    border-radius: 8px;
     padding: 18px;
   }
 

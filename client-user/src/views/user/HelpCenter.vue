@@ -271,7 +271,7 @@ onBeforeUnmount(() => {
 .content-card,
 .download-card {
   background: #fff;
-  border-radius: 16px;
+  border-radius: 8px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 
@@ -501,7 +501,7 @@ onBeforeUnmount(() => {
 @media (max-width: 768px) {
   .content-card,
   .download-card {
-    border-radius: 14px;
+    border-radius: 8px;
     padding: 16px;
   }
 

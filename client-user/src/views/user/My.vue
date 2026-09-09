@@ -342,7 +342,7 @@ onMounted(async () => {
 
 .content-card {
   background: #fff;
-  border-radius: 16px;
+  border-radius: 8px;
   padding: 20px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
 }
@@ -642,7 +642,7 @@ onMounted(async () => {
   }
 
   .content-card {
-    border-radius: 14px;
+    border-radius: 8px;
     padding: 15px;
   }
 

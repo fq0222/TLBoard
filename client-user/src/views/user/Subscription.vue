@@ -930,7 +930,7 @@ onBeforeUnmount(() => {
 
 .panel-card {
   background: #fff;
-  border-radius: 20px;
+  border-radius: 8px;
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
   padding: 24px;
   min-width: 0;
@@ -1429,7 +1429,7 @@ onBeforeUnmount(() => {
   .panel-card,
   .action-panel {
     padding: 18px;
-    border-radius: 18px;
+    border-radius: 8px;
   }
 
   .step-actions {
