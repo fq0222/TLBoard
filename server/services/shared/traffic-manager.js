@@ -803,6 +803,139 @@ async function checkAndDisableExpiredUsers(db, now = Math.floor(Date.now() / 100
 }
 
 /**
+ * 同步单台 3X-UI 服务器上的用户禁用状态。
+ *
+ * @param {Object} server - 服务器配置，需包含 api_url/api_token/panel_version。
+ * @param {Object} context - 同步上下文。
+ * @param {string} context.email - 目标用户邮箱。
+ * @param {boolean} context.desiredEnabled - 目标启用状态，禁用时为 false。
+ * @param {Object} [context.clientStatusSnapshot] - 流量同步阶段已采集的客户端状态快照。
+ * @returns {Promise<{successCount:number,skippedCount:number,failureCount:number}>} 单台服务器同步计数。
+ */
+async function syncDisableStatusToServer(server, context) {
+  const { email, desiredEnabled, clientStatusSnapshot = {} } = context;
+  const result = {
+    successCount: 0,
+    skippedCount: 0,
+    failureCount: 0
+  };
+
+  try {
+    const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
+      apiVersion: server.panel_version || '3.0.2'
+    });
+
+    if (isPanelVersionAtLeast(server.panel_version, '3.4.2')) {
+      const inboundsResult = await xuiService.getInbounds();
+      if (!inboundsResult.success) {
+        result.failureCount++;
+        logger.warn(`获取服务器 ${server.name} 的 inbounds 失败`);
+        return result;
+      }
+
+      const existing = await xuiService.getServerClientByEmail(email);
+      if (!existing.success) {
+        result.failureCount++;
+        logger.warn(`获取服务器 ${server.name} 的 canonical client 失败: ${existing.message}`);
+        return result;
+      }
+
+      if (existing.client.enable === desiredEnabled) {
+        result.skippedCount += (inboundsResult.data || []).length;
+        return result;
+      }
+
+      const inbounds = inboundsResult.data || [];
+      const requiresFlow = inbounds.some((inbound) => getInboundUpdateStrategy(inbound) === 'direct');
+      const updateClient = {
+        id: existing.client.uuid,
+        password: existing.client.password || '',
+        auth: existing.client.auth || '',
+        email,
+        enable: desiredEnabled,
+        expiryTime: existing.client.expiryTime || 0,
+        totalGB: existing.client.totalGB || 0,
+        limitIp: 0,
+        tgId: 0,
+        subId: existing.client.subId || ''
+      };
+      if (requiresFlow) {
+        updateClient.flow = 'xtls-rprx-vision';
+      }
+
+      const updateResult = await xuiService.upsertServerClient({
+        email,
+        inboundIds: inbounds.map((inbound) => inbound.id),
+        client: updateClient
+      });
+
+      if (updateResult.success) {
+        result.successCount += (inboundsResult.data || []).length;
+      } else {
+        result.failureCount++;
+        logger.warn(`同步服务器 ${server.name} 的 canonical client 失败: ${updateResult.message}`);
+      }
+      return result;
+    }
+
+    const snapshotEntries = Object.entries(clientStatusSnapshot[server.id] || {})
+      .filter(([snapshotEmail]) => snapshotEmail === email || snapshotEmail.startsWith(`${email}-`));
+    if (snapshotEntries.length > 0) {
+      for (const [nodeEmail, snapshotClient] of snapshotEntries) {
+        if (snapshotClient.enabledKnown && snapshotClient.enabled === desiredEnabled) {
+          result.skippedCount++;
+          continue;
+        }
+
+        const updateResult = await xuiService.updateClientByContext(snapshotClient.inboundId, nodeEmail, {
+          enabled: desiredEnabled,
+          protocol: snapshotClient.protocol || '',
+          strategy: snapshotClient.strategy || 'direct'
+        });
+
+        if (updateResult.success) {
+          result.successCount++;
+          logger.info(`同步服务器 ${server.name} 的 inbound ${snapshotClient.inboundId} 成功`);
+        } else {
+          result.failureCount++;
+          logger.warn(`同步服务器 ${server.name} 的 inbound ${snapshotClient.inboundId} 失败: ${updateResult.message}`);
+        }
+      }
+      return result;
+    }
+
+    const inboundsResult = await xuiService.getInbounds();
+    if (!inboundsResult.success) {
+      result.failureCount++;
+      logger.warn(`获取服务器 ${server.name} 的 inbounds 失败`);
+      return result;
+    }
+
+    for (const inbound of inboundsResult.data) {
+      const nodeEmail = `${email}-${inbound.remark || inbound.id}`;
+      const updateResult = await xuiService.updateClientByContext(inbound.id, nodeEmail, {
+        enabled: desiredEnabled,
+        protocol: inbound.protocol || '',
+        strategy: getInboundUpdateStrategy(inbound)
+      });
+
+      if (updateResult.success) {
+        result.successCount++;
+        logger.info(`同步服务器 ${server.name} 的 inbound ${inbound.id} 成功`);
+      } else {
+        result.failureCount++;
+        logger.warn(`同步服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${updateResult.message}`);
+      }
+    }
+  } catch (error) {
+    result.failureCount++;
+    logger.error(`同步服务器 ${server.name} 禁用状态错误: ${error.message}`);
+  }
+
+  return result;
+}
+
+/**
  * 同步禁用状态到 3X-UI
  * @param {Object} db - 数据库实例
  * @param {number} userId - 用户 ID
@@ -846,118 +979,28 @@ async function syncDisableStatusToXui(db, userId, disable, options = {}) {
     let successCount = 0;
     let skippedCount = 0;
     let failureCount = 0;
-    for (const server of servers) {
-      try {
-        const xuiService = await XuiService.getInstance(server.api_url, server.api_token, {
-          apiVersion: server.panel_version || '3.0.2'
-        });
 
-        if (isPanelVersionAtLeast(server.panel_version, '3.4.2')) {
-          const inboundsResult = await xuiService.getInbounds();
-          if (!inboundsResult.success) {
-            failureCount++;
-            logger.warn(`获取服务器 ${server.name} 的 inbounds 失败`);
-            continue;
-          }
+    const syncResults = await runWithConcurrency(
+      servers,
+      INBOUND_FETCH_CONCURRENCY,
+      (server) => syncDisableStatusToServer(server, {
+        email: user.email,
+        desiredEnabled,
+        clientStatusSnapshot
+      })
+    );
 
-          const existing = await xuiService.getServerClientByEmail(user.email);
-          if (!existing.success) {
-            failureCount++;
-            logger.warn(`获取服务器 ${server.name} 的 canonical client 失败: ${existing.message}`);
-            continue;
-          }
-
-          if (existing.client.enable === desiredEnabled) {
-            skippedCount += (inboundsResult.data || []).length;
-            continue;
-          }
-
-          const inbounds = inboundsResult.data || [];
-          const requiresFlow = inbounds.some((inbound) => getInboundUpdateStrategy(inbound) === 'direct');
-          const updateClient = {
-            id: existing.client.uuid,
-            password: existing.client.password || '',
-            auth: existing.client.auth || '',
-            email: user.email,
-            enable: desiredEnabled,
-            expiryTime: existing.client.expiryTime || 0,
-            totalGB: existing.client.totalGB || 0,
-            limitIp: 0,
-            tgId: 0,
-            subId: existing.client.subId || ''
-          };
-          if (requiresFlow) {
-            updateClient.flow = 'xtls-rprx-vision';
-          }
-
-          const updateResult = await xuiService.upsertServerClient({
-            email: user.email,
-            inboundIds: inbounds.map((inbound) => inbound.id),
-            client: updateClient
-          });
-
-          if (updateResult.success) {
-            successCount += (inboundsResult.data || []).length;
-          } else {
-            failureCount++;
-            logger.warn(`同步服务器 ${server.name} 的 canonical client 失败: ${updateResult.message}`);
-          }
-          continue;
-        }
-
-        const snapshotEntries = Object.entries(clientStatusSnapshot[server.id] || {})
-          .filter(([email]) => email === user.email || email.startsWith(`${user.email}-`));
-        if (snapshotEntries.length > 0) {
-          for (const [nodeEmail, snapshotClient] of snapshotEntries) {
-            if (snapshotClient.enabledKnown && snapshotClient.enabled === desiredEnabled) {
-              skippedCount++;
-              continue;
-            }
-
-            const updateResult = await xuiService.updateClientByContext(snapshotClient.inboundId, nodeEmail, {
-              enabled: desiredEnabled,
-              protocol: snapshotClient.protocol || '',
-              strategy: snapshotClient.strategy || 'direct'
-            });
-
-            if (updateResult.success) {
-              successCount++;
-              logger.info(`同步服务器 ${server.name} 的 inbound ${snapshotClient.inboundId} 成功`);
-            } else {
-              failureCount++;
-              logger.warn(`同步服务器 ${server.name} 的 inbound ${snapshotClient.inboundId} 失败: ${updateResult.message}`);
-            }
-          }
-          continue;
-        }
-
-        const inboundsResult = await xuiService.getInbounds();
-        if (!inboundsResult.success) {
-          failureCount++;
-          logger.warn(`获取服务器 ${server.name} 的 inbounds 失败`);
-          continue;
-        }
-
-        for (const inbound of inboundsResult.data) {
-          const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
-          const updateResult = await xuiService.updateClientByContext(inbound.id, nodeEmail, {
-            enabled: desiredEnabled,
-            protocol: inbound.protocol || '',
-            strategy: getInboundUpdateStrategy(inbound)
-          });
-
-          if (updateResult.success) {
-            successCount++;
-            logger.info(`同步服务器 ${server.name} 的 inbound ${inbound.id} 成功`);
-          } else {
-            failureCount++;
-            logger.warn(`同步服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${updateResult.message}`);
-          }
-        }
-      } catch (error) {
+    for (const [index, settledResult] of syncResults.entries()) {
+      if (settledResult.status === 'rejected') {
         failureCount++;
-        logger.error(`同步服务器 ${server.name} 禁用状态错误: ${error.message}`);
+        const server = servers[index];
+        logger.error(`同步服务器 ${server.name} 禁用状态错误: ${settledResult.reason?.message || String(settledResult.reason)}`);
+        continue;
       }
+
+      successCount += settledResult.value.successCount;
+      skippedCount += settledResult.value.skippedCount;
+      failureCount += settledResult.value.failureCount;
     }
 
     logger.info(`同步禁用状态完成: 用户 ${user.email}, 禁用 ${disable}, 成功 ${successCount} 个 inbound，跳过 ${skippedCount} 个 inbound，失败 ${failureCount} 个 inbound`);

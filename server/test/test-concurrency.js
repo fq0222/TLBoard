@@ -125,6 +125,62 @@ async function testTrafficInboundFetchConcurrencyLimit() {
 }
 
 /**
+ * 验证禁用状态同步按服务器维度并发执行，且最多同时处理 10 台服务器。
+ *
+ * @returns {Promise<void>}
+ */
+async function testDisableStatusSyncConcurrencyLimit() {
+  const originalListOnlineServers = trafficRepository.listOnlineServers;
+  const originalFindUserEmailById = trafficRepository.findUserEmailById;
+  const originalGetInstance = XuiService.getInstance;
+  const servers = Array.from({ length: 25 }, (_, index) => ({
+    id: index + 1,
+    name: `server-${index + 1}`,
+    api_url: `http://disable-server-${index + 1}`,
+    api_token: `token-${index + 1}`,
+    panel_version: '3.0.2'
+  }));
+  let activeRequests = 0;
+  let maxActiveRequests = 0;
+  let updateCount = 0;
+
+  trafficRepository.findUserEmailById = async () => ({ email: 'disabled@example.com' });
+  trafficRepository.listOnlineServers = async () => servers;
+  XuiService.getInstance = async () => ({
+    getInbounds: async () => {
+      activeRequests += 1;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      activeRequests -= 1;
+      return {
+        success: true,
+        data: [{
+          id: 1,
+          remark: 'direct',
+          protocol: 'vless'
+        }]
+      };
+    },
+    updateClientByContext: async () => {
+      updateCount += 1;
+      return { success: true };
+    }
+  });
+
+  try {
+    const result = await trafficManager.syncDisableStatusToXui({}, 7, true, { skipLock: true });
+
+    assert.strictEqual(result, true);
+    assert.strictEqual(maxActiveRequests, 10);
+    assert.strictEqual(updateCount, servers.length);
+  } finally {
+    trafficRepository.listOnlineServers = originalListOnlineServers;
+    trafficRepository.findUserEmailById = originalFindUserEmailById;
+    XuiService.getInstance = originalGetInstance;
+  }
+}
+
+/**
  * 运行通用并发任务池及流量同步并发边界测试；任一断言失败时以非零状态退出。
  *
  * @returns {Promise<void>}
@@ -134,6 +190,7 @@ async function main() {
   await testEmptyItems();
   await testArgumentValidation();
   await testTrafficInboundFetchConcurrencyLimit();
+  await testDisableStatusSyncConcurrencyLimit();
   console.log('concurrency tests passed');
 }
 
