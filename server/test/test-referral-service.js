@@ -1552,6 +1552,87 @@ async function testRenewActivationEmailUsesCurrentPlanTrafficOnly() {
 }
 
 /**
+ * 验证家宽 IP 支付完成后复用账号开通提醒邮件。
+ *
+ * 职责：覆盖 completePaidOrder 的家宽套餐分支，避免独立落库后提前返回导致邮件缺失。
+ * 关键参数：current_home_expire_at 和 duration_days 共同决定邮件中的到期时间。
+ * 核心分支：家宽套餐只更新 home_plan_id/home_expire_at，不创建 3X-UI 同步任务，但仍触发开通提醒。
+ *
+ * @returns {Promise<void>}
+ */
+async function testHomeIpPaidOrderSendsAccountActivationEmail() {
+  const transactionDb = { name: 'home-ip-payment-transaction-db' };
+  const emailCalls = [];
+  const baseOrder = {
+    id: 59,
+    out_trade_no: 'REN-HOME-59',
+    status: 'pending',
+    user_id: 24,
+    email: 'home-renew@example.com',
+    plan_id: 9,
+    current_expire_at: 0,
+    current_traffic_limit: 20 * 1024 * 1024 * 1024,
+    current_traffic_used: 0,
+    current_plan_id: 6,
+    current_home_plan_id: 9,
+    current_home_expire_at: 1900000000,
+    current_enabled: 1,
+    current_disable_reason: null,
+    subscription_token: 'sub-token',
+    trade_no: 'VMQ-OLD',
+    referrer_user_id: null,
+    current_payment_count: 2,
+    amount: 1900
+  };
+  const plan = {
+    id: 9,
+    name: '家宽 IP 月卡',
+    traffic_limit: 0,
+    duration_days: 30,
+    plan_type: 'home_ip'
+  };
+
+  await withObjectMocks(orderRepository, {
+    findPaidOrderContextByOutTradeNo: async () => ({ ...baseOrder }),
+    findPlanById: async () => plan,
+    markOrderPaid: async () => {},
+    updateUserAfterPaidOrder: async () => {
+      throw new Error('家宽套餐不应更新主流量套餐权益');
+    },
+    updateUserHomePlanAfterPaidOrder: async (db, payload) => {
+      assert.strictEqual(payload.userId, 24);
+      assert.strictEqual(payload.homePlanId, 9);
+      assert.strictEqual(payload.homeExpireAt, 1900000000 + 30 * 86400);
+    },
+    incrementPlanSalesCount: async () => {},
+    decrementPlanSalesCount: async () => {},
+    updateUserSyncStatus: async () => {}
+  }, async () => {
+    await withObjectMocks(xuiSyncTaskService, {
+      enqueueTask: async () => {
+        throw new Error('家宽套餐不应创建 3X-UI 用户同步任务');
+      },
+      processTask: () => Promise.resolve()
+    }, async () => {
+      await withObjectMocks(orderActivationEmailService, {
+        sendOrderActivationEmail: async (db, payload) => {
+          emailCalls.push({ db, payload });
+          return { sent: true, status: 'mocked' };
+        }
+      }, async () => {
+        await orderService.completePaidOrder(createTransactionDb(transactionDb), 'REN-HOME-59', 'VMQ-HOME-59');
+
+        assert.strictEqual(emailCalls.length, 1);
+        assert.strictEqual(emailCalls[0].payload.order.email, 'home-renew@example.com');
+        assert.strictEqual(emailCalls[0].payload.plan.name, '家宽 IP 月卡');
+        assert.strictEqual(emailCalls[0].payload.expireAt, 1900000000 + 30 * 86400);
+        assert.strictEqual(emailCalls[0].payload.isRenewOrder, true);
+      });
+    });
+  });
+}
+
+/**
  * 验证邮件异常不会影响支付落账结果和 3X-UI 同步任务创建。
  *
  * 职责：覆盖 Brevo 未配置或发送失败时的降级行为。
@@ -1798,6 +1879,7 @@ async function main() {
   await testCompletePaidOrderIssuesRewardOnlyForFirstAttributedPurchase();
   await testCompletePaidOrderSendsAccountActivationEmail();
   await testRenewActivationEmailUsesCurrentPlanTrafficOnly();
+  await testHomeIpPaidOrderSendsAccountActivationEmail();
   await testCompletePaidOrderKeepsEntitlementAndSyncWhenEmailFails();
   await testBalanceRenewCompletesWithoutVmq();
   await testBalanceRenewRejectsInsufficientBalance();

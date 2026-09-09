@@ -814,8 +814,11 @@ function shouldConfirmActiveHomeIpRenew() {
  * @returns {Promise<void>} 用户确认后 resolve，取消时 reject
  */
 async function confirmActiveHomeIpRenew() {
+  const currentRemainingText = formatRemainingTime(getHomeIpRemainingSeconds())
+  const afterRenewRemainingText = formatRemainingTime(getHomeIpRemainingAfterRenewSeconds())
+
   await ElMessageBox.confirm(
-    `你的家宽 IP 套餐还剩约 ${formatRemainingTime(getHomeIpRemainingSeconds())}。如果继续购买，系统会在支付成功后重新计算新的到期时间。是否继续？`,
+    `你的家宽 IP 套餐当前剩余约 ${currentRemainingText}，购买后预计剩余约 ${afterRenewRemainingText}。如果继续购买，支付成功后系统将在当前到期时间上顺延。是否继续？`,
     '确认支付',
     {
       confirmButtonText: '继续支付',
@@ -866,6 +869,23 @@ function getHomeIpRemainingSeconds() {
   }
 
   return Math.max(0, expireAt - Math.floor(Date.now() / 1000))
+}
+
+/**
+ * 计算家宽 IP 本次购买后预计剩余秒数。
+ * 职责：给支付前确认弹窗展示顺延后的剩余时长，不参与后端最终落账。
+ * 核心分支：只累加当前未过期剩余时间和选中家宽套餐天数，套餐天数异常时仅展示当前剩余。
+ *
+ * @returns {number} 购买后预计剩余秒数
+ */
+function getHomeIpRemainingAfterRenewSeconds() {
+  const remainingSeconds = getHomeIpRemainingSeconds()
+  const durationDays = Number(selectedPlan.value?.duration_days || 0)
+  const durationSeconds = Number.isFinite(durationDays) && durationDays > 0
+    ? durationDays * 24 * 60 * 60
+    : 0
+
+  return remainingSeconds + durationSeconds
 }
 
 /**

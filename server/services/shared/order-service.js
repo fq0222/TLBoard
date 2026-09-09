@@ -852,6 +852,12 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
 
     await transaction();
     logger.info(`家宽 IP 套餐支付完成: ${outTradeNo}, user=${order.email}, home_expire_at=${entitlement.homeExpireAt}`);
+    await orderActivationEmailService.sendOrderActivationEmail(db, {
+      order,
+      plan,
+      expireAt: entitlement.homeExpireAt,
+      isRenewOrder
+    });
     return { handled: true, alreadyPaid: false, order, plan, expireAt: entitlement.homeExpireAt };
   }
 
