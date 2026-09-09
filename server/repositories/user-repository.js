@@ -309,8 +309,9 @@ async function findUserProfileById(db, userId) {
       u.id, u.email, u.plan_id, u.home_plan_id, u.home_expire_at, u.subscription_token, u.sub_id,
       u.traffic_used, u.traffic_limit, u.referral_traffic_limit, u.balance, u.expire_at, u.enabled, u.disable_reason, u.created_at,
       u.payment_count, u.sync_status, u.onboarding_completed,
-      p.name as plan_name, p.plan_type as plan_type,
-      hp.name as home_plan_name, hp.home_proxy_tag as home_proxy_tag
+      p.name as plan_name, p.plan_type as plan_type, p.duration_days as plan_duration_days, p.price as plan_price,
+      hp.name as home_plan_name, hp.duration_days as home_plan_duration_days,
+      hp.price as home_plan_price, hp.home_proxy_tag as home_proxy_tag
     FROM users u
     LEFT JOIN plans p ON u.plan_id = p.id
     LEFT JOIN plans hp ON u.home_plan_id = hp.id

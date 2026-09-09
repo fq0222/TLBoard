@@ -5,12 +5,19 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const authService = require('../services/user/auth-service');
 const usersService = require('../services/admin/users-service');
 const userRepository = require('../repositories/user-repository');
 const homeRoutingService = require('../services/shared/home-routing-service');
 const { DISABLE_REASONS } = require('../services/shared/renew-policy');
+
+const authControllerSource = fs.readFileSync(
+  path.join(__dirname, '../controllers/user/auth-controller.js'),
+  'utf8'
+);
 
 /**
  * 临时替换对象方法，并在测试完成后恢复。
@@ -547,6 +554,82 @@ test('user profile repository selects disable reason for status display', async 
 
   await userRepository.findUserProfileById(db, 8);
   assert.match(profileSql, /u\.disable_reason/);
+});
+
+test('user profile exposes plan price and duration days for homepage plan card', async () => {
+  const restoreRepository = replaceMethods(userRepository, {
+    findUserProfileById: async () => ({
+      id: 12,
+      email: 'duration@example.com',
+      plan_id: 2,
+      plan_name: '月卡',
+      plan_type: null,
+      plan_duration_days: 30,
+      plan_price: 1000,
+      home_plan_id: 3,
+      home_plan_name: '家宽月卡',
+      home_plan_duration_days: 30,
+      home_plan_price: 2000,
+      home_expire_at: 1900000000,
+      sub_id: 'abcdef1234567894',
+      traffic_used: 1024,
+      traffic_limit: 4096,
+      referral_traffic_limit: 0,
+      expire_at: 1900000000,
+      enabled: 1,
+      disable_reason: null,
+      created_at: 1700000000,
+      payment_count: 1,
+      sync_status: 2,
+      onboarding_completed: 0
+    }),
+    hasUserCfIps: async () => false,
+    hasUserSubscriptionCache: async () => false,
+    findSystemSettingByKey: async () => null
+  });
+
+  try {
+    const profile = await authService.getProfile({}, 12);
+    assert.equal(profile.plan_type, 'lifetime');
+    assert.equal(profile.plan_duration_days, 30);
+    assert.equal(profile.plan_price, 1000);
+    assert.equal(profile.plan_price_text, '10.00');
+    assert.equal(profile.home_plan_duration_days, 30);
+    assert.equal(profile.home_plan_price, 2000);
+    assert.equal(profile.home_plan_price_text, '20.00');
+  } finally {
+    restoreRepository();
+  }
+});
+
+test('user profile repository selects plan price and duration days', async () => {
+  let profileSql = '';
+  const db = {
+    prepare(sql) {
+      profileSql = sql;
+      return {
+        get() {
+          return null;
+        }
+      };
+    }
+  };
+
+  await userRepository.findUserProfileById(db, 12);
+  assert.match(profileSql, /p\.duration_days as plan_duration_days/);
+  assert.match(profileSql, /p\.price as plan_price/);
+  assert.match(profileSql, /hp\.duration_days as home_plan_duration_days/);
+  assert.match(profileSql, /hp\.price as home_plan_price/);
+});
+
+test('user profile controller returns plan price and duration days to client', () => {
+  assert.match(authControllerSource, /plan_type:\s*profile\.plan_type/);
+  assert.match(authControllerSource, /plan_duration_days:\s*profile\.plan_duration_days/);
+  assert.match(authControllerSource, /plan_price:\s*profile\.plan_price/);
+  assert.match(authControllerSource, /plan_price_text:\s*profile\.plan_price_text/);
+  assert.match(authControllerSource, /home_plan_duration_days:\s*profile\.home_plan_duration_days/);
+  assert.match(authControllerSource, /home_plan_price:\s*profile\.home_plan_price/);
+  assert.match(authControllerSource, /home_plan_price_text:\s*profile\.home_plan_price_text/);
 });
 
 test('complete user onboarding updates current user only', async () => {

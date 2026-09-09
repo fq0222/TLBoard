@@ -187,6 +187,70 @@
       </article>
     </section>
 
+    <section class="current-plan-section">
+      <header class="current-plan-head">
+        <h2>我的套餐</h2>
+        <span class="current-plan-count">{{ currentPlanCount }}</span>
+      </header>
+
+      <div class="current-plan-filter" aria-label="我的套餐类型筛选">
+        <button
+          v-for="filter in currentPlanFilters"
+          :key="filter.value"
+          type="button"
+          class="current-plan-filter-button"
+          :class="{ active: selectedCurrentPlanFilter === filter.value }"
+          @click="selectedCurrentPlanFilter = filter.value"
+        >
+          <span v-if="filter.value === CURRENT_PLAN_FILTER_ALL">全部</span>
+          <span v-else>{{ filter.label }}</span>
+        </button>
+      </div>
+
+      <div class="current-plan-list">
+        <article
+          v-for="plan in filteredCurrentPlanCards"
+          :key="plan.type"
+          class="panel-card current-plan-card"
+        >
+          <div class="current-plan-top">
+            <div class="current-plan-title-block">
+              <h3 class="current-plan-name">{{ plan.name }}</h3>
+            </div>
+            <div class="current-plan-side">
+              <el-tag class="package-status-tag" :type="getPlanStatusType(plan)">
+                {{ getPlanStatusText(plan) }}
+              </el-tag>
+              <div class="current-plan-price">
+                <span class="current-plan-currency">¥</span>
+                <strong class="current-plan-amount">{{ plan.priceText }}</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="current-plan-body">
+            <div class="current-plan-metric">
+              <span>流量使用</span>
+              <strong>{{ plan.trafficText }}</strong>
+            </div>
+            <div class="current-plan-metric">
+              <span>时长周期</span>
+              <strong>{{ plan.durationText }}</strong>
+            </div>
+          </div>
+
+          <footer class="current-plan-footer">
+            <span class="current-plan-expire" :class="{ warning: isPlanExpireWarning(plan) }">
+              到期时间：{{ plan.expireText }}
+            </span>
+            <router-link :to="getCurrentPlanRenewRoute(plan)" class="renew-plan-button">
+              续费
+            </router-link>
+          </footer>
+        </article>
+      </div>
+    </section>
+
     <el-dialog
       v-model="announcementPopupVisible"
       :width="announcementDialogWidth"
@@ -459,6 +523,14 @@ const optimizeFailureCount = ref(0)
 const MOBILE_ONBOARDING_TARGET_CLASS = 'mobile-onboarding-target'
 const MOBILE_ONBOARDING_TARGET_HOST_CLASS = 'mobile-onboarding-target-host'
 const MAX_OPTIMIZE_FAILURE_COUNT = 3
+const CURRENT_PLAN_FILTER_ALL = 'all'
+const CURRENT_PLAN_TYPE_LABELS = {
+  timed: '限时套餐',
+  lifetime: '不限时套餐',
+  home_ip: '家宽套餐'
+}
+
+const selectedCurrentPlanFilter = ref('all')
 
 const actionBusy = computed(() => optimizing.value || generatingSubscription.value || replacingSubscription.value)
 const optimizeDialogWidth = computed(() => (windowWidth.value <= 768 ? '94%' : '420px'))
@@ -507,6 +579,62 @@ const compactTrafficUsageText = computed(() => {
   const totalTrafficText = userInfo.value.total_traffic_limit_text || userInfo.value.traffic_limit_text || '0 B'
 
   return `${usedTrafficText} / ${totalTrafficText}`
+})
+
+const currentPlanCards = computed(() => {
+  const cards = []
+  if (userInfo.value.plan_id) {
+    cards.push(createCurrentPlanCard({
+      type: 'traffic',
+      planId: userInfo.value.plan_id,
+      name: userInfo.value.plan_name,
+      price: userInfo.value.plan_price,
+      priceText: userInfo.value.plan_price_text,
+      durationDays: userInfo.value.plan_duration_days,
+      planType: resolveCurrentPlanType(userInfo.value.plan_type),
+      trafficText: compactTrafficUsageText.value,
+      expireAt: userInfo.value.expire_at
+    }))
+  }
+
+  if (userInfo.value.home_plan_id) {
+    cards.push(createCurrentPlanCard({
+      type: 'home_ip',
+      planId: userInfo.value.home_plan_id,
+      name: userInfo.value.home_plan_name,
+      price: userInfo.value.home_plan_price,
+      priceText: userInfo.value.home_plan_price_text,
+      durationDays: userInfo.value.home_plan_duration_days,
+      planType: 'home_ip',
+      trafficText: '无限制',
+      expireAt: userInfo.value.home_expire_at
+    }))
+  }
+
+  return cards
+})
+
+const currentPlanCount = computed(() => currentPlanCards.value.length)
+const currentPlanFilters = computed(() => {
+  const typeSet = new Set(currentPlanCards.value.map((plan) => plan.planType))
+  const typeFilters = Array.from(typeSet)
+    .filter((type) => CURRENT_PLAN_TYPE_LABELS[type])
+    .map((type) => ({
+      value: type,
+      label: CURRENT_PLAN_TYPE_LABELS[type]
+    }))
+
+  return [
+    { value: CURRENT_PLAN_FILTER_ALL, label: '全部' },
+    ...typeFilters
+  ]
+})
+const filteredCurrentPlanCards = computed(() => {
+  if (selectedCurrentPlanFilter.value === CURRENT_PLAN_FILTER_ALL) {
+    return currentPlanCards.value
+  }
+
+  return currentPlanCards.value.filter((plan) => plan.planType === selectedCurrentPlanFilter.value)
 })
 
 const rewardAmountText = computed(() => {
@@ -1213,6 +1341,154 @@ function pingIp(ip) {
   return createCfLatencySample(ip)
 }
 
+/**
+ * 构建“我的套餐”单张卡片展示数据。
+ * 核心分支：家宽套餐由调用方传入“无限制”流量文案，限时套餐按独立到期时间判断状态。
+ *
+ * @param {Object} options - 套餐字段集合
+ * @returns {Object} 套餐卡片展示对象
+ */
+function createCurrentPlanCard(options) {
+  const planType = resolveCurrentPlanType(options.planType)
+  const expireAt = Number(options.expireAt || 0)
+  return {
+    type: options.type,
+    planId: options.planId,
+    planType,
+    name: options.name || '暂无套餐',
+    priceText: formatPlanPriceText(options.priceText, options.price),
+    trafficText: options.trafficText,
+    durationText: formatPlanDurationText(options.durationDays, planType),
+    expireAt,
+    expireText: formatPlanExpireText(expireAt, planType)
+  }
+}
+
+/**
+ * 构建首页套餐卡片的定向续费路由。
+ * 核心分支：普通套餐和家宽套餐都使用数据库套餐 ID，套餐页再按 plan_type 切换对应分区。
+ *
+ * @param {Object} plan - 当前套餐卡片
+ * @returns {{path:string,query:Object}} 套餐页路由对象
+ */
+function getCurrentPlanRenewRoute(plan) {
+  return {
+    path: '/user/plans',
+    query: {
+      plan_id: plan.planId,
+      plan_type: plan.planType
+    }
+  }
+}
+
+/**
+ * 规范化当前套餐类型。
+ * 核心分支：数据库历史空类型按不限时套餐处理，仅显式 timed/home_ip 才进入对应分类。
+ *
+ * @param {string} planType - 后端返回的套餐类型
+ * @returns {'timed'|'lifetime'|'home_ip'} 前端筛选使用的稳定类型
+ */
+function resolveCurrentPlanType(planType) {
+  if (planType === 'timed') return 'timed'
+  if (planType === 'home_ip') return 'home_ip'
+  return 'lifetime'
+}
+
+/**
+ * 格式化套餐价格，优先使用后端已格式化金额。
+ *
+ * @param {string} priceText - 后端返回的价格文本
+ * @param {number|string} price - 分为单位的价格
+ * @returns {string} 两位小数金额
+ */
+function formatPlanPriceText(priceText, price) {
+  if (priceText) return priceText
+
+  const planPrice = Number(price)
+  if (Number.isFinite(planPrice)) {
+    return (planPrice / 100).toFixed(2)
+  }
+
+  return '0.00'
+}
+
+/**
+ * 格式化套餐周期。
+ *
+ * @param {number|string} durationDays - 周期天数
+ * @param {string} planType - 套餐类型
+ * @returns {string} 周期展示文本
+ */
+function formatPlanDurationText(durationDays, planType) {
+  const days = Number(durationDays)
+  if (Number.isFinite(days) && days > 0) {
+    return `${days} 天周期`
+  }
+  if ((Number.isFinite(days) && days === 0) || planType === 'lifetime') {
+    return '不限时套餐'
+  }
+
+  return '周期待确认'
+}
+
+/**
+ * 格式化套餐到期时间。
+ *
+ * @param {number} expireAt - 秒级到期时间
+ * @param {string} planType - 套餐类型
+ * @returns {string} 到期时间展示文本
+ */
+function formatPlanExpireText(expireAt, planType) {
+  if (planType === 'lifetime' || Number(expireAt || 0) === 0) {
+    return '长期有效'
+  }
+
+  return formatCurrentPlanExpireTime(expireAt) || '暂无可订阅'
+}
+
+/**
+ * 判断套餐是否已过期。
+ *
+ * @param {Object} plan - 当前套餐卡片
+ * @returns {boolean} 已过期返回 true
+ */
+function isPlanExpired(plan) {
+  const expireAt = Number(plan?.expireAt || 0)
+  return Number.isFinite(expireAt) && expireAt > 0 && expireAt <= Math.floor(Date.now() / 1000)
+}
+
+/**
+ * 判断套餐是否临近到期。
+ *
+ * @param {Object} plan - 当前套餐卡片
+ * @returns {boolean} 到期时间小于三天且未过期时返回 true
+ */
+function isPlanExpiringSoon(plan) {
+  if (isPlanExpired(plan)) {
+    return false
+  }
+
+  const expireAt = Number(plan?.expireAt || 0)
+  if (!Number.isFinite(expireAt) || expireAt <= 0) {
+    return false
+  }
+
+  const remainingSeconds = expireAt - Math.floor(Date.now() / 1000)
+  return remainingSeconds > 0 && remainingSeconds < 3 * 24 * 60 * 60
+}
+
+function isPlanExpireWarning(plan) {
+  return isPlanExpired(plan) || isPlanExpiringSoon(plan)
+}
+
+function getPlanStatusText(plan) {
+  return isPlanExpired(plan) ? '过期' : '正常'
+}
+
+function getPlanStatusType(plan) {
+  return isPlanExpired(plan) ? 'warning' : 'success'
+}
+
 function formatDate(timestamp) {
   if (!timestamp) return ''
   const date = new Date(timestamp * 1000)
@@ -1235,6 +1511,23 @@ function formatTime(timestamp) {
     second: '2-digit',
     hour12: false
   })
+}
+
+function formatCurrentPlanExpireTime(timestamp) {
+  if (!timestamp) return ''
+
+  const date = new Date(Number(timestamp) * 1000)
+  if (Number.isNaN(date.getTime())) return ''
+
+  const pad = (value) => String(value).padStart(2, '0')
+  const year = date.getFullYear()
+  const month = pad(date.getMonth() + 1)
+  const day = pad(date.getDate())
+  const hour = pad(date.getHours())
+  const minute = pad(date.getMinutes())
+  const second = pad(date.getSeconds())
+
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`
 }
 
 /**
@@ -1498,6 +1791,223 @@ onBeforeUnmount(() => {
 .package-title-row span {
   flex: 0 0 auto;
   font-weight: 800;
+}
+
+.current-plan-section {
+  width: 100%;
+  max-width: 1680px;
+  margin: 0 auto;
+}
+
+.current-plan-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.current-plan-head h2 {
+  margin: 0;
+  color: #020617;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.current-plan-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  background: #eff6ff;
+  color: #0b63ff;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.current-plan-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.current-plan-filter-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 62px;
+  height: 28px;
+  padding: 0 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+  color: #020617;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease;
+}
+
+.current-plan-filter-button:hover {
+  border-color: #bfdbfe;
+  color: #2563eb;
+}
+
+.current-plan-filter-button.active {
+  border-color: #2563eb;
+  background: #2563eb;
+  box-shadow: 0 6px 12px rgba(37, 99, 235, 0.22);
+  color: #ffffff;
+}
+
+.current-plan-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.current-plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 178px;
+  padding: 20px;
+}
+
+.current-plan-top,
+.current-plan-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.current-plan-name {
+  min-width: 0;
+  margin: 0;
+  color: var(--dashboard-title);
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.current-plan-title-block {
+  min-width: 0;
+}
+
+.current-plan-side {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.current-plan-price {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  margin-top: 16px;
+}
+
+.current-plan-currency {
+  color: #0f766e;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.current-plan-amount {
+  color: #0f766e;
+  font-size: 27px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.current-plan-body {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.current-plan-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid #eef2f7;
+  border-radius: var(--dashboard-card-radius);
+  background: #f8fafc;
+}
+
+.current-plan-metric span {
+  color: var(--dashboard-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.current-plan-metric strong {
+  color: var(--dashboard-title);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.current-plan-footer {
+  align-items: center;
+  margin-top: auto;
+}
+
+.current-plan-expire {
+  min-width: 0;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.current-plan-expire.warning {
+  color: #f59e0b;
+}
+
+.renew-plan-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 64px;
+  height: 30px;
+  padding: 0 13px;
+  border: 1px solid #b9efcc;
+  border-radius: 4px;
+  background: #e9f9ef;
+  color: #009b51;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.renew-plan-button:hover,
+.renew-plan-button:focus-visible {
+  border-color: #8ee5b1;
+  background: #dcf7e7;
+  color: #008b49;
+  outline: none;
+  text-decoration: none;
 }
 
 .mini-subscription-card {
@@ -2565,7 +3075,8 @@ onBeforeUnmount(() => {
     padding-top: clamp(12px, 1.5vw, 28px);
   }
 
-  .dashboard-card-grid {
+  .dashboard-card-grid,
+  .current-plan-list {
     gap: 32px;
   }
 
@@ -2575,7 +3086,8 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1024px) {
-  .dashboard-card-grid {
+  .dashboard-card-grid,
+  .current-plan-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     min-height: 0;
   }
@@ -2591,6 +3103,10 @@ onBeforeUnmount(() => {
   }
 
   .dashboard-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .current-plan-list {
     grid-template-columns: 1fr;
   }
 
@@ -2632,6 +3148,60 @@ onBeforeUnmount(() => {
 
   .package-title-row strong {
     font-size: 18px;
+  }
+
+  .current-plan-head {
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .current-plan-head h2 {
+    font-size: 25px;
+  }
+
+  .current-plan-count {
+    min-width: 34px;
+    height: 28px;
+    padding: 0 11px;
+    font-size: 14px;
+  }
+
+  .current-plan-filter {
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .current-plan-filter-button {
+    min-width: 56px;
+    height: 26px;
+    padding: 0 13px;
+    font-size: 13px;
+  }
+
+  .current-plan-card {
+    gap: 14px;
+    min-height: 0;
+    padding: 15px;
+  }
+
+  .current-plan-name {
+    font-size: 20px;
+  }
+
+  .current-plan-amount {
+    font-size: 24px;
+  }
+
+  .current-plan-metric {
+    padding: 12px;
+  }
+
+  .current-plan-metric strong {
+    font-size: 16px;
+  }
+
+  .current-plan-footer {
+    align-items: flex-end;
   }
 
   .mini-copy-list {

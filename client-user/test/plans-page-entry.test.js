@@ -39,11 +39,44 @@ test('电脑端和移动端导航都把套餐放在订阅与教程中间', () =>
 })
 
 test('个人首页续费套餐按钮跳转到套餐页面并移除弹窗入口', () => {
-  assert.match(profileSource, /@click="goToPlansPage"/)
-  assert.match(profileSource, /router\.push\('\/user\/plans'\)/)
+  assert.match(profileSource, /:to="getCurrentPlanRenewRoute\(plan\)"/)
+  assert.match(profileSource, /path:\s*'\/user\/plans'/)
+  assert.match(profileSource, /plan_id:\s*plan\.planId/)
+  assert.match(profileSource, /plan_type:\s*plan\.planType/)
   assert.doesNotMatch(profileSource, /<RenewDialog/)
   assert.doesNotMatch(profileSource, /showRenewDialog/)
   assert.doesNotMatch(profileSource, /import RenewDialog/)
+})
+
+test('套餐页根据首页续费跳转参数自动选中对应套餐', () => {
+  const plansSource = readFileSync(plansPageUrl, 'utf8')
+
+  assert.match(plansSource, /import \{ computed, nextTick, onMounted, ref \} from 'vue'/)
+  assert.match(plansSource, /import \{ useRoute, useRouter \} from 'vue-router'/)
+  assert.match(plansSource, /const route = useRoute\(\)/)
+  assert.match(plansSource, /applyRenewRouteSelection\(\)/)
+  assert.match(plansSource, /function applyRenewRouteSelection\(\)/)
+  assert.match(plansSource, /Number\(route\.query\.plan_id\)/)
+  assert.match(plansSource, /route\.query\.plan_type === 'home_ip'/)
+  assert.match(plansSource, /selectedPlanCategory\.value = 'broadband'/)
+  assert.match(plansSource, /selectedPlanCategory\.value = 'traffic'/)
+  assert.match(plansSource, /selectedPlanId\.value = routePlan\.id/)
+})
+
+test('移动端从首页点击家宽续费后定位到家宽套餐区块顶部', () => {
+  const plansSource = readFileSync(plansPageUrl, 'utf8')
+
+  assert.match(plansSource, /import \{ computed, nextTick, onMounted, ref \} from 'vue'/)
+  assert.match(plansSource, /ref="broadbandSectionRef"/)
+  assert.match(plansSource, /const broadbandSectionRef = ref\(null\)/)
+  assert.match(plansSource, /scrollBroadbandSectionToTopOnMobile\(\)/)
+  assert.match(plansSource, /function scrollBroadbandSectionToTopOnMobile\(\)/)
+  assert.match(plansSource, /window\.innerWidth > 768/)
+  assert.match(plansSource, /route\.query\.plan_type !== 'home_ip'/)
+  assert.match(plansSource, /await nextTick\(\)/)
+  assert.match(plansSource, /broadbandSectionRef\.value\?\.scrollIntoView\(\{/)
+  assert.match(plansSource, /block:\s*'start'/)
+  assert.match(plansSource, /behavior:\s*'smooth'/)
 })
 
 test('套餐页复用续费接口与支付跳转逻辑，并保留家宽 IP 未获取区域', () => {
@@ -57,7 +90,7 @@ test('套餐页复用续费接口与支付跳转逻辑，并保留家宽 IP 未�
   assert.match(plansSource, /余额支付成功，续费已完成/)
   assert.match(plansSource, /流量套餐/)
   assert.match(plansSource, /家宽IP套餐/)
-  assert.match(plansSource, /未获取/)
+  assert.match(plansSource, /暂无家宽 IP 套餐/)
 })
 
 test('套餐页不再展示顶部标题和当前套餐概览区域', () => {
@@ -74,7 +107,7 @@ test('套餐页已选摘要保留套餐名、流量和时长语义块', () => {
   assert.match(plansSource, /class="summary-name"/)
   assert.match(plansSource, /class="summary-traffic"/)
   assert.match(plansSource, /class="summary-duration"/)
-  assert.match(plansSource, /formatTraffic\(selectedPlan\.traffic_limit\)/)
+  assert.match(plansSource, /formatPlanTraffic\(selectedPlan\)/)
   assert.match(plansSource, /selectedPlan\.durationText/)
   assert.doesNotMatch(plansSource, /formatTraffic\(selectedPlan\.traffic_limit\)} \/ \$\{selectedPlan\.durationText/)
 })

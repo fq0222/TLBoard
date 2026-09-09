@@ -177,7 +177,7 @@
             </el-button>
           </aside>
 
-          <section class="plan-section broadband-section">
+          <section ref="broadbandSectionRef" class="plan-section broadband-section">
             <div class="section-head">
               <div>
                 <h2>家宽IP套餐</h2>
@@ -460,8 +460,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { CircleCheck, Loading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
@@ -473,6 +473,7 @@ import {
   resolveRecommendedTrafficPlanId
 } from '@/utils/plan-categories'
 
+const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
@@ -484,6 +485,7 @@ const payType = ref(1)
 const pageLoading = ref(false)
 const plansLoading = ref(false)
 const renewSubmitting = ref(false)
+const broadbandSectionRef = ref(null)
 
 const currentPlanId = computed(() => userInfo.value.plan_id || null)
 const selectedPlan = computed(() => displayPlans.value.find((plan) => plan.id === selectedPlanId.value) || null)
@@ -512,10 +514,63 @@ async function loadPageData() {
   pageLoading.value = true
   try {
     await Promise.all([fetchUserInfo(), fetchPlans()])
-    selectedPlanId.value = currentPlanId.value || recommendedPlanId.value
+    const hasRouteSelection = applyRenewRouteSelection()
+    if (!hasRouteSelection) {
+      selectedPlanCategory.value = 'traffic'
+      selectedPlanId.value = currentPlanId.value || recommendedPlanId.value
+    }
+    await scrollBroadbandSectionToTopOnMobile()
   } finally {
     pageLoading.value = false
   }
+}
+
+/**
+ * 根据首页套餐卡片携带的路由参数选中套餐。
+ * 核心分支：家宽套餐切换到 broadband 支付面板；普通套餐留在 traffic 分区；找不到套餐时交回默认推荐逻辑。
+ *
+ * @returns {boolean} 成功选中路由指定套餐时返回 true
+ */
+function applyRenewRouteSelection() {
+  const routePlanId = Number(route.query.plan_id)
+  if (!Number.isFinite(routePlanId) || routePlanId <= 0) {
+    return false
+  }
+
+  const routePlan = displayPlans.value.find((plan) => plan.id === routePlanId)
+  if (!routePlan) {
+    return false
+  }
+
+  if (route.query.plan_type === 'home_ip' || routePlan.plan_type === 'home_ip') {
+    selectedPlanCategory.value = 'broadband'
+  } else {
+    selectedPlanCategory.value = 'traffic'
+  }
+
+  selectedPlanId.value = routePlan.id
+  return true
+}
+
+/**
+ * 移动端从首页家宽续费进入套餐页时，将家宽套餐区块定位到屏幕顶部。
+ * 核心分支：只响应 home_ip 定向跳转，桌面端和普通套餐跳转保持原滚动位置。
+ *
+ * @returns {Promise<void>} DOM 更新后完成定位
+ */
+async function scrollBroadbandSectionToTopOnMobile() {
+  if (route.query.plan_type !== 'home_ip') {
+    return
+  }
+  if (window.innerWidth > 768) {
+    return
+  }
+
+  await nextTick()
+  broadbandSectionRef.value?.scrollIntoView({
+    block: 'start',
+    behavior: 'smooth'
+  })
 }
 
 /**

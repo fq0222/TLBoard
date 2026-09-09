@@ -9,7 +9,7 @@ const emailRepository = require('../../repositories/email-repository');
 const referralService = require('../referral-service');
 const planSalesService = require('../shared/plan-sales-service');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
-const { isTimedPlan, isHomeIpPlan } = require('../shared/plan-type');
+const { normalizePlanType, isTimedPlan, isHomeIpPlan } = require('../shared/plan-type');
 const { generatePublicSubscriptionId } = require('../../utils/subscription-id');
 
 const TELEGRAM_CHANNEL_URL_KEY = 'telegram_channel_url';
@@ -633,9 +633,19 @@ async function getProfile(db, userId) {
     email: user.email,
     plan_id: user.plan_id,
     plan_name: user.plan_name,
-    plan_type: user.plan_type,
+    plan_type: normalizePlanType(user.plan_type),
+    plan_duration_days: user.plan_duration_days,
+    plan_price: user.plan_price,
+    plan_price_text: user.plan_price === null || user.plan_price === undefined
+      ? ''
+      : (Number(user.plan_price) / 100).toFixed(2),
     home_plan_id: user.home_plan_id,
     home_plan_name: user.home_plan_name,
+    home_plan_duration_days: user.home_plan_duration_days,
+    home_plan_price: user.home_plan_price,
+    home_plan_price_text: user.home_plan_price === null || user.home_plan_price === undefined
+      ? ''
+      : (Number(user.home_plan_price) / 100).toFixed(2),
     home_expire_at: user.home_expire_at,
     home_proxy_tag: user.home_proxy_tag,
     sub_id: user.sub_id,
