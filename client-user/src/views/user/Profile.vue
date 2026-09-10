@@ -3094,6 +3094,10 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 768px) {
+  .profile-container {
+    padding-bottom: 52px;
+  }
+
   .profile-container,
   .dashboard-card-grid,
   .dashboard-grid,

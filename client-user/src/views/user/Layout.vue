@@ -710,7 +710,7 @@ onBeforeUnmount(() => {
 
   .ticket-reminder-button {
     right: 18px;
-    bottom: calc(92px + env(safe-area-inset-bottom));
+    bottom: calc(78px + env(safe-area-inset-bottom));
     width: 48px;
     height: 48px;
   }
