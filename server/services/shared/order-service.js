@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const XuiService = require('../../integrations/xui/xui-service');
 const { getServerInboundsSnapshot } = require('../../integrations/xui/xui-sync');
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
-const { isTimedPlan, isHomeIpPlan } = require('./plan-type');
+const { PLAN_TYPES, normalizePlanType, isTimedPlan, isHomeIpPlan } = require('./plan-type');
 const { getStrategyFromRemark } = require('./subscription-strategy');
 const { createLogger } = require('../../utils/logger');
 const { runWithConcurrency } = require('../../utils/concurrency');
@@ -763,7 +763,7 @@ async function enqueueAndTryUserSync(db, taskType, userInfo, plan) {
  *
  * 职责：按订单类型和套餐类型统一生成 traffic_limit、expire_at 和是否清零已用流量。
  * 关键参数：order 为支付订单及当前用户快照，plan 为目标套餐，now 为支付完成时间戳。
- * 核心分支：限时套餐续费从支付时间重置流量和到期；其他续费沿用不限时套餐累加契约。
+ * 核心分支：跨流量套餐类型切换先清空旧权益；同类型续费沿用原限时重置或不限时累加契约。
  *
  * @param {Object} order - 订单与当前用户权益快照
  * @param {Object} plan - 套餐记录
@@ -782,6 +782,24 @@ function calculatePaidOrderEntitlement(order, plan, now = Math.floor(Date.now() 
       homeExpireAt: baseExpireAt + (Number(plan.duration_days) * 24 * 60 * 60),
       resetTrafficUsed: false,
       resetClientTraffic: false
+    };
+  }
+
+  const targetPlanType = normalizePlanType(plan?.plan_type);
+  const hasCurrentPlanType = Object.prototype.hasOwnProperty.call(order, 'current_plan_type');
+  const currentPlanType = hasCurrentPlanType
+    ? normalizePlanType(order.current_plan_type)
+    : targetPlanType;
+  const isCrossTrafficPlanTypeRenew = isRenewOrHomeIpOrder && currentPlanType !== targetPlanType;
+
+  if (isCrossTrafficPlanTypeRenew) {
+    return {
+      trafficLimit: Number(plan.traffic_limit || 0),
+      expireAt: targetPlanType === PLAN_TYPES.LIFETIME
+        ? 0
+        : now + (Number(plan.duration_days) * 24 * 60 * 60),
+      resetTrafficUsed: true,
+      resetClientTraffic: true
     };
   }
 

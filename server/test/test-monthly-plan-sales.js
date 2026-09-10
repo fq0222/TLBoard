@@ -7,7 +7,8 @@ const {
   isLifetimePlan,
   isTimedPlan,
   validatePlanDuration,
-  buildTimedRenewResetPreview
+  buildTimedRenewResetPreview,
+  buildCrossTypeRenewResetPreview
 } = require('../services/shared/plan-type');
 
 /**
@@ -189,6 +190,38 @@ test('admin plan service stores string false show on home as 0 on create', async
   assert.equal(result.show_on_home, 0);
 });
 
+test('cross type renew preview requires confirmation and reports target entitlement', () => {
+  const preview = buildCrossTypeRenewResetPreview(
+    {
+      traffic_used: 2 * 1024,
+      traffic_limit: 10 * 1024,
+      expire_at: 0
+    },
+    {
+      id: 1,
+      name: '不限时套餐',
+      plan_type: 'lifetime'
+    },
+    {
+      id: 2,
+      name: '月卡',
+      plan_type: 'timed',
+      duration_days: 30,
+      traffic_limit: 20 * 1024
+    },
+    1700000000
+  );
+
+  assert.equal(preview.requires_confirm, true);
+  assert.equal(preview.current_plan_type, 'lifetime');
+  assert.equal(preview.target_plan_type, 'timed');
+  assert.equal(preview.remaining_traffic, 8 * 1024);
+  assert.equal(preview.remaining_seconds, 0);
+  assert.equal(preview.current_expire_text, '不限时');
+  assert.equal(preview.reset_traffic_limit, 20 * 1024);
+  assert.equal(preview.reset_expire_at, 1702592000);
+});
+
 test('admin plan service stores string 0 show on home as 0 on update', async () => {
   const plansService = require('../services/admin/plans-service');
   let updateValues = [];
@@ -352,7 +385,7 @@ test('user home plans query filters show_on_home', async () => {
   assert.match(capturedSql, /show_on_home = 1/);
 });
 
-test('renew plan list filters by current user plan type', async () => {
+test('renew plan list includes both lifetime and timed traffic plans', async () => {
   const renewService = require('../services/user/renew-service');
   const db = {
     prepare(sql) {
@@ -370,13 +403,9 @@ test('renew plan list filters by current user plan type', async () => {
           }
         };
       }
-      if (sql.includes('plan_type = ?')) {
+      if (sql.includes('COALESCE(plan_type')) {
         return {
-          all(planType) {
-            if (planType === 'home_ip') {
-              return [];
-            }
-            assert.equal(planType, 'timed');
+          all() {
             return [{
               id: 3,
               name: '月卡',
@@ -389,7 +418,27 @@ test('renew plan list filters by current user plan type', async () => {
               sort_order: 0,
               sales_limit: -1,
               sales_count: 0
+            }, {
+              id: 4,
+              name: '不限时包',
+              description: '',
+              price: 1990,
+              duration_days: 0,
+              traffic_limit: 2048,
+              plan_type: 'lifetime',
+              show_on_home: 1,
+              sort_order: 1,
+              sales_limit: -1,
+              sales_count: 0
             }];
+          }
+        };
+      }
+      if (sql.includes('plan_type = ?')) {
+        return {
+          all(planType) {
+            assert.equal(planType, 'home_ip');
+            return [];
           }
         };
       }
@@ -406,6 +455,7 @@ test('renew plan list filters by current user plan type', async () => {
 
   const plans = await renewService.listRenewPlans(db, 9);
   assert.equal(plans[0].plan_type, 'timed');
+  assert.equal(plans[1].plan_type, 'lifetime');
 });
 
 test('renew lifetime plan query includes legacy empty plan types', async () => {
@@ -446,14 +496,10 @@ test('renew plan list includes same type plans hidden from home', async () => {
           }
         };
       }
-      if (sql.includes('plan_type = ?')) {
+      if (sql.includes('COALESCE(plan_type')) {
         assert.doesNotMatch(sql, /show_on_home = 1/);
         return {
-          all(planType) {
-            if (planType === 'home_ip') {
-              return [];
-            }
-            assert.equal(planType, 'timed');
+          all() {
             return [{
               id: 7,
               name: '隐藏月卡',
@@ -467,6 +513,14 @@ test('renew plan list includes same type plans hidden from home', async () => {
               sales_limit: -1,
               sales_count: 0
             }];
+          }
+        };
+      }
+      if (sql.includes('plan_type = ?')) {
+        return {
+          all(planType) {
+            assert.equal(planType, 'home_ip');
+            return [];
           }
         };
       }
@@ -486,18 +540,29 @@ test('renew plan list includes same type plans hidden from home', async () => {
   assert.equal(plans[0].show_on_home, 0);
 });
 
-test('renew service rejects changing between lifetime and timed plans', async () => {
+test('renew service requires confirmation when changing between lifetime and timed plans', async () => {
   const renewService = require('../services/user/renew-service');
+  const now = Math.floor(Date.now() / 1000);
   const db = {
     prepare(sql) {
       if (sql.includes('FROM users WHERE id')) {
-        return { get: () => ({ id: 1, email: 'a@example.com', plan_id: 1, enabled: 1 }) };
+        return {
+          get: () => ({
+            id: 1,
+            email: 'a@example.com',
+            plan_id: 1,
+            enabled: 1,
+            traffic_used: 1024,
+            traffic_limit: 4096,
+            expire_at: 0
+          })
+        };
       }
       if (sql.includes('SELECT * FROM plans WHERE id = ? AND enabled = 1')) {
-        return { get: () => ({ id: 2, plan_type: 'timed', duration_days: 30, sales_limit: -1, sales_count: 0 }) };
+        return { get: () => ({ id: 2, name: '月卡', plan_type: 'timed', duration_days: 30, traffic_limit: 2048, sales_limit: -1, sales_count: 0 }) };
       }
       if (sql.includes('SELECT * FROM plans WHERE id = ?')) {
-        return { get: () => ({ id: 1, plan_type: 'lifetime', duration_days: 0 }) };
+        return { get: () => ({ id: 1, name: '不限时套餐', plan_type: 'lifetime', duration_days: 0 }) };
       }
       throw new Error(`unexpected sql: ${sql}`);
     }
@@ -505,7 +570,15 @@ test('renew service rejects changing between lifetime and timed plans', async ()
 
   await assert.rejects(
     () => renewService.createRenewOrder(db, 1, { plan_id: 2, pay_type: 9 }),
-    /不能跨套餐类型续费/
+    (error) => {
+      assert.equal(error.statusCode, 409);
+      assert.equal(error.code, 4092);
+      assert.equal(error.data.current_plan_type, 'lifetime');
+      assert.equal(error.data.target_plan_type, 'timed');
+      assert.equal(error.data.remaining_traffic, 3072);
+      assert.ok(error.data.reset_expire_at >= now);
+      return /切换套餐会清空当前套餐剩余权益/.test(error.message);
+    }
   );
 });
 
@@ -1392,6 +1465,48 @@ test('paid expired timed renew enqueues renew sync with enabled user snapshot', 
     Object.assign(orderRepository, originalRepository);
     Object.assign(xuiSyncTaskService, originalXuiSyncTaskService);
   }
+});
+
+test('paid renew switch from timed to lifetime replaces traffic and resets usage', async () => {
+  const { calculatePaidOrderEntitlement } = require('../services/shared/order-service');
+  const now = 1700000000;
+  const result = calculatePaidOrderEntitlement({
+    out_trade_no: 'REN789',
+    current_plan_type: 'timed',
+    current_traffic_limit: 8192,
+    current_expire_at: now + 86400
+  }, {
+    id: 3,
+    plan_type: 'lifetime',
+    duration_days: 0,
+    traffic_limit: 2048
+  }, now);
+
+  assert.equal(result.trafficLimit, 2048);
+  assert.equal(result.expireAt, 0);
+  assert.equal(result.resetTrafficUsed, true);
+  assert.equal(result.resetClientTraffic, true);
+});
+
+test('paid renew switch from lifetime to timed replaces traffic and starts new expiry', async () => {
+  const { calculatePaidOrderEntitlement } = require('../services/shared/order-service');
+  const now = 1700000000;
+  const result = calculatePaidOrderEntitlement({
+    out_trade_no: 'REN987',
+    current_plan_type: 'lifetime',
+    current_traffic_limit: 8192,
+    current_expire_at: 0
+  }, {
+    id: 4,
+    plan_type: 'timed',
+    duration_days: 30,
+    traffic_limit: 2048
+  }, now);
+
+  assert.equal(result.trafficLimit, 2048);
+  assert.equal(result.expireAt, 1702592000);
+  assert.equal(result.resetTrafficUsed, true);
+  assert.equal(result.resetClientTraffic, true);
 });
 
 test('renew switch plan does not write plan sales count', async () => {

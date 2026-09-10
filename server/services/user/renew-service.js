@@ -14,7 +14,8 @@ const {
   normalizePlanType,
   isTimedPlan,
   isHomeIpPlan,
-  buildTimedRenewResetPreview
+  buildTimedRenewResetPreview,
+  buildCrossTypeRenewResetPreview
 } = require('../shared/plan-type');
 const { formatTraffic } = require('../../shared/utils/format-traffic');
 
@@ -72,6 +73,21 @@ function normalizeResetConfirmation(value) {
 }
 
 /**
+ * 判断本次续费是否属于限时与不限时流量套餐互切。
+ *
+ * @param {Object} currentPlan - 当前流量套餐记录
+ * @param {Object} targetPlan - 目标套餐记录
+ * @returns {boolean} 类型不同且双方都不是家宽套餐时返回 true
+ */
+function isCrossTrafficPlanTypeRenew(currentPlan, targetPlan) {
+  if (isHomeIpPlan(currentPlan) || isHomeIpPlan(targetPlan)) {
+    return false;
+  }
+
+  return normalizePlanType(currentPlan?.plan_type) !== normalizePlanType(targetPlan?.plan_type);
+}
+
+/**
  * 生成用户续费入口的商户订单号。
  *
  * @param {Object} plan - 当前下单套餐，读取 plan_type 判断业务线
@@ -113,7 +129,7 @@ function formatRenewPlan(plan) {
  *
  * @param {Object} db - 数据库代理对象
  * @param {number} userId - 当前用户 ID，用于定位当前套餐类型
- * @returns {Promise<Array<Object>>} 与当前套餐类型一致的已上架套餐列表
+ * @returns {Promise<Array<Object>>} 全部已上架流量套餐与家宽 IP 套餐列表
  */
 async function listRenewPlans(db, userId) {
   const user = await orderRepository.findUserById(db, userId);
@@ -126,9 +142,8 @@ async function listRenewPlans(db, userId) {
     throw createLegacyBusinessError('当前套餐不存在，请联系管理员', { code: 2004 });
   }
 
-  const currentPlanType = normalizePlanType(currentPlan.plan_type);
   const plans = await planSalesService.annotatePlansWithCurrentSalesCount(db, [
-    ...await planRepository.findEnabledPlansByType(db, currentPlanType),
+    ...await planRepository.findEnabledTrafficRenewPlans(db),
     ...await planRepository.findEnabledPlansByType(db, PLAN_TYPES.HOME_IP)
   ]);
 
@@ -166,18 +181,12 @@ async function createRenewOrder(db, userId, payload) {
     throw createLegacyBusinessError('当前套餐不存在，请联系管理员', { code: 2004 });
   }
 
+  const isCrossTypeRenew = isCrossTrafficPlanTypeRenew(currentPlan, plan);
+
   if (isHomeIpPlan(plan)) {
     if (!user.plan_id) {
       throw createLegacyBusinessError('请先购买流量套餐后再购买家宽 IP 套餐', {
         code: 2004
-      });
-    }
-  } else {
-    const currentPlanType = normalizePlanType(currentPlan.plan_type);
-    const targetPlanType = normalizePlanType(plan.plan_type);
-    if (currentPlanType !== targetPlanType) {
-      throw createLegacyBusinessError('不能跨套餐类型续费，请选择当前套餐类型下的套餐', {
-        code: 1003
       });
     }
   }
@@ -193,7 +202,18 @@ async function createRenewOrder(db, userId, payload) {
     });
   }
 
-  if (isTimedPlan(plan)) {
+  if (isCrossTypeRenew && !normalizeResetConfirmation(payload.confirm_reset)) {
+    throw createLegacyBusinessError('切换套餐会清空当前套餐剩余权益并重置已用流量，请确认后再续费', {
+      statusCode: 409,
+      code: 4092,
+      data: {
+        plan_type: normalizePlanType(plan.plan_type),
+        ...buildCrossTypeRenewResetPreview(user, currentPlan, plan)
+      }
+    });
+  }
+
+  if (!isCrossTypeRenew && isTimedPlan(plan)) {
     const preview = buildTimedRenewResetPreview(user, plan);
     if (preview.requires_confirm && !normalizeResetConfirmation(payload.confirm_reset)) {
       throw createLegacyBusinessError('续费会重置当前剩余流量和时间，请确认后再续费', {

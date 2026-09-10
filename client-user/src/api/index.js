@@ -6,6 +6,20 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
+/**
+ * 判断错误响应是否应交给页面级流程处理，避免响应拦截器重复弹出全局错误。
+ * @param {number} status - HTTP 状态码。
+ * @param {Object} data - 后端错误响应体，读取业务 code。
+ * @returns {boolean} 需要页面自行处理时返回 true。
+ */
+export function shouldSuppressGlobalErrorMessage(status, data = {}) {
+  if (Number(status) !== 409) {
+    return false
+  }
+
+  return [4091, 4092].includes(Number(data?.code))
+}
+
 const apiClient = axios.create({
   baseURL: '/api/user',
   timeout: 10000,
@@ -44,8 +58,8 @@ apiClient.interceptors.response.use(
           // 400 多为表单校验错误，交给具体页面决定如何提示，避免重复弹窗
           break
         case 409:
-          // 4091 用于续费重置确认，交给续费页面弹出确认内容；其他 409 仍正常提示。
-          if (Number(data?.code) !== 4091) {
+          // 续费确认类冲突交给续费页面弹窗处理；其他 409 仍正常提示。
+          if (!shouldSuppressGlobalErrorMessage(status, data)) {
             ElMessage.error(userMessage)
           }
           break

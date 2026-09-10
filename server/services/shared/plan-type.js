@@ -110,6 +110,44 @@ function buildTimedRenewResetPreview(user, plan, now = Math.floor(Date.now() / 1
   };
 }
 
+/**
+ * 构建跨流量套餐类型切换确认预览。
+ * 职责：说明旧套餐剩余权益会被清空，新套餐权益会完整替换并触发 3X-UI 用量重置。
+ * 关键参数：currentPlan 和 targetPlan 用于标识类型与名称，user 提供当前剩余流量和到期时间。
+ * 核心分支：目标不限时套餐 reset_expire_at 为 0；目标限时套餐从确认时刻重新计算到期。
+ *
+ * @param {object} user - 用户当前用量与过期时间，读取 traffic_used、traffic_limit、expire_at
+ * @param {object} currentPlan - 当前套餐，读取 name 和 plan_type
+ * @param {object} targetPlan - 目标套餐，读取 name、plan_type、traffic_limit 和 duration_days
+ * @param {number} now - 当前秒级时间戳，默认使用系统当前时间
+ * @returns {object} 跨类型切换确认所需预览数据
+ */
+function buildCrossTypeRenewResetPreview(user, currentPlan, targetPlan, now = Math.floor(Date.now() / 1000)) {
+  const trafficUsed = Number(user?.traffic_used || 0);
+  const trafficLimit = Number(user?.traffic_limit || 0);
+  const expireAt = Number(user?.expire_at || 0);
+  const remainingTraffic = Math.max(0, trafficLimit - trafficUsed);
+  const targetPlanType = normalizePlanType(targetPlan?.plan_type);
+  const durationSeconds = Number(targetPlan?.duration_days || 0) * 24 * 60 * 60;
+  const resetExpireAt = targetPlanType === PLAN_TYPES.LIFETIME ? 0 : now + durationSeconds;
+
+  return {
+    requires_confirm: true,
+    current_plan_type: normalizePlanType(currentPlan?.plan_type),
+    current_plan_name: currentPlan?.name || '',
+    target_plan_type: targetPlanType,
+    target_plan_name: targetPlan?.name || '',
+    remaining_traffic: remainingTraffic,
+    remaining_traffic_text: formatTraffic(remainingTraffic),
+    remaining_seconds: expireAt > now ? expireAt - now : 0,
+    current_expire_at: expireAt,
+    current_expire_text: expireAt > 0 ? '' : '不限时',
+    reset_traffic_limit: Number(targetPlan?.traffic_limit || 0),
+    reset_traffic_limit_text: formatTraffic(targetPlan?.traffic_limit),
+    reset_expire_at: resetExpireAt
+  };
+}
+
 module.exports = {
   PLAN_TYPES,
   normalizePlanType,
@@ -117,5 +155,6 @@ module.exports = {
   isTimedPlan,
   isHomeIpPlan,
   validatePlanDuration,
-  buildTimedRenewResetPreview
+  buildTimedRenewResetPreview,
+  buildCrossTypeRenewResetPreview
 };

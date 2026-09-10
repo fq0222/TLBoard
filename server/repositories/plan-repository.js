@@ -45,7 +45,26 @@ async function findEnabledPlansByType(db, planType) {
   `).all();
 }
 
+/**
+ * 查询用户续费页可切换的全部流量套餐。
+ * 职责：返回 timed 与 lifetime 两类已启用流量套餐，续费页不受首页展示开关限制。
+ * 核心分支：历史空 plan_type 按 lifetime 处理，home_ip 套餐由独立查询追加。
+ *
+ * @param {Object} db - 数据库实例
+ * @returns {Promise<Array<Object>>} 可续费或切换的流量套餐记录
+ */
+async function findEnabledTrafficRenewPlans(db) {
+  return db.prepare(`
+    SELECT id, name, description, price, duration_days, traffic_limit, plan_type, home_proxy_tag, show_on_home, sort_order, sales_limit, sales_count
+    FROM plans
+    WHERE enabled = 1
+      AND COALESCE(plan_type, 'lifetime') != 'home_ip'
+    ORDER BY sort_order ASC, id ASC
+  `).all();
+}
+
 module.exports = {
   findEnabledPlans,
-  findEnabledPlansByType
+  findEnabledPlansByType,
+  findEnabledTrafficRenewPlans
 };

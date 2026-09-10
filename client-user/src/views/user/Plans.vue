@@ -489,9 +489,13 @@ const broadbandSectionRef = ref(null)
 
 const currentPlanId = computed(() => userInfo.value.plan_id || null)
 const selectedPlan = computed(() => displayPlans.value.find((plan) => plan.id === selectedPlanId.value) || null)
+const currentTrafficPlanType = computed(() => userInfo.value.plan_type || 'lifetime')
 const renewTipText = computed(() => {
   if (selectedPlan.value?.plan_type === 'home_ip') {
     return '家宽 IP 套餐会单独计算到期时间，不影响当前流量套餐。'
+  }
+  if (isCrossTrafficPlanSelection()) {
+    return '切换套餐类型会清空当前套餐剩余权益，并重置已用流量。'
   }
   if (selectedPlan.value?.plan_type === 'timed') {
     return '限时套餐续费会从支付完成时重新计算流量和到期时间。'
@@ -757,7 +761,11 @@ async function submitRenewRequest({ planId, payType, confirmReset = false }) {
     console.error('续费失败:', error)
     if (isRenewResetConfirmError(error)) {
       try {
-        await confirmTimedRenewReset(error.response.data.data)
+        if (isCrossTypeRenewConfirmError(error)) {
+          await confirmCrossTypeRenewReset(error.response.data.data)
+        } else {
+          await confirmTimedRenewReset(error.response.data.data)
+        }
       } catch {
         return
       }
@@ -769,12 +777,33 @@ async function submitRenewRequest({ planId, payType, confirmReset = false }) {
 }
 
 /**
- * 判断续费失败是否为限时套餐重置确认分支。
+ * 判断续费失败是否为需要用户确认的套餐重置分支。
  * @param {Error|Object} error - 续费接口错误对象。
  * @returns {boolean} 是否需要二次确认。
  */
 function isRenewResetConfirmError(error) {
-  return Number(error?.response?.status) === 409 && Number(error?.response?.data?.code) === 4091
+  return Number(error?.response?.status) === 409 && [4091, 4092].includes(Number(error?.response?.data?.code))
+}
+
+/**
+ * 判断续费失败是否为跨类型套餐切换确认分支。
+ * @param {Error|Object} error - 续费接口错误对象。
+ * @returns {boolean} 是否为跨类型切换确认。
+ */
+function isCrossTypeRenewConfirmError(error) {
+  return Number(error?.response?.data?.code) === 4092
+}
+
+/**
+ * 判断当前选中的流量套餐是否为跨类型切换。
+ * @returns {boolean} 限时与不限时互切时返回 true。
+ */
+function isCrossTrafficPlanSelection() {
+  if (!selectedPlan.value || selectedPlan.value.plan_type === 'home_ip') {
+    return false
+  }
+
+  return selectedPlan.value.plan_type !== currentTrafficPlanType.value
 }
 
 /**
@@ -788,6 +817,27 @@ async function confirmTimedRenewReset(preview = {}) {
     '确认续费',
     {
       confirmButtonText: '确认续费',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  )
+}
+
+/**
+ * 弹出跨类型套餐切换确认框。
+ * @param {Object} preview - 后端返回的切换预览数据。
+ * @returns {Promise<void>}
+ */
+async function confirmCrossTypeRenewReset(preview = {}) {
+  const targetExpireText = preview.target_plan_type === 'lifetime'
+    ? '不限时'
+    : formatRemainingTime(Number(preview.reset_expire_at || 0) - Math.floor(Date.now() / 1000))
+
+  await ElMessageBox.confirm(
+    `本次是不同类型套餐切换，支付成功后将清空当前剩余 ${formatBytes(preview.remaining_traffic)} 流量并重置已用流量，然后启用新套餐：${formatBytes(preview.reset_traffic_limit)}，${targetExpireText}。是否继续？`,
+    '确认切换套餐',
+    {
+      confirmButtonText: '确认切换',
       cancelButtonText: '取消',
       type: 'warning'
     }
