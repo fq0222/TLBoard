@@ -135,6 +135,12 @@
 
           <div v-if="homeRoutingRoute" class="home-routing-mobile-list">
             <article class="home-routing-mobile-card">
+              <div class="home-routing-mobile-status">
+                <el-tag :type="homeRoutingStatusTagType" size="small">
+                  {{ homeRoutingStatusText }}
+                </el-tag>
+              </div>
+
               <div class="home-routing-mobile-field">
                 <span class="home-routing-mobile-label">IP</span>
                 <span class="home-routing-mobile-value ip-value">{{ homeRoutingRoute.home_proxy_tag || '-' }}</span>
@@ -151,19 +157,9 @@
                 </div>
               </div>
 
-              <div class="home-routing-mobile-field">
-                <span class="home-routing-mobile-label">状态</span>
-                <span class="home-routing-mobile-value">
-                  <el-tag :type="homeRoutingStatusTagType" size="small">
-                    {{ homeRoutingStatusText }}
-                  </el-tag>
-                </span>
-              </div>
-
               <div class="home-routing-mobile-actions">
                 <el-button
                   type="primary"
-                  size="large"
                   :disabled="homeRoutingExpired || homeRoutingCooldownRemaining > 0"
                   @click="openHomeRoutingDialog"
                 >
@@ -171,7 +167,6 @@
                 </el-button>
                 <el-button
                   type="danger"
-                  size="large"
                   :disabled="homeRoutingExpired || homeRoutingCooldownRemaining > 0 || homeRoutingBusy"
                   @click="deleteHomeRouting"
                 >
@@ -1480,6 +1475,14 @@ onBeforeUnmount(() => {
     min-width: 0;
   }
 
+  .home-routing-mobile-status {
+    display: flex;
+    grid-column: 2;
+    grid-row: 1;
+    justify-content: flex-end;
+    align-self: start;
+  }
+
   .home-routing-mobile-grid {
     display: grid;
     grid-template-columns: 1fr;
@@ -1518,17 +1521,17 @@ onBeforeUnmount(() => {
     display: flex;
     flex-direction: column;
     grid-column: 2;
-    grid-row: 1 / span 2;
-    gap: 8px;
-    align-self: center;
+    grid-row: 2;
+    gap: 6px;
+    align-self: start;
   }
 
   .home-routing-mobile-actions :deep(.el-button) {
     width: 100%;
-    min-height: 40px;
+    min-height: 32px;
     margin-left: 0;
-    padding: 8px 10px;
-    font-size: 14px;
+    padding: 5px 11px;
+    font-size: 13px;
     font-weight: 700;
   }
 
