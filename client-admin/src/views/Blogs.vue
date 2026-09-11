@@ -1,5 +1,5 @@
 <template>
-  <div class="blogs-container">
+  <div class="blogs-container tw-min-w-0">
     <div class="page-header">
       <div>
         <h1 class="page-title">博客管理</h1>
@@ -769,5 +769,16 @@ onMounted(() => {
     max-height: 70vh;
     max-height: 70dvh;
   }
+}
+@media (max-width: 767px) {
+  .content-card { padding: 12px; overflow-x: auto; }
+  .page-header, .toolbar { align-items: stretch; flex-direction: column; }
+  .editor-toolbar { flex-wrap: wrap; }
+  .markdown-body, .preview-article { overflow-wrap: anywhere; }
+  .markdown-body :deep(img), .markdown-body :deep(video) { max-width: 100%; height: auto; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; max-height: 92vh; overflow-y: auto; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
 }
 </style>
