@@ -1,5 +1,5 @@
 <template>
-  <div class="email-campaigns-container">
+  <div class="email-campaigns-container tw-min-w-0">
     <el-card>
       <template #header>
         <div class="card-header">
@@ -8,7 +8,7 @@
         </div>
       </template>
 
-      <el-table :data="campaigns" v-loading="loading">
+      <el-table :data="campaigns" v-loading="loading" class="tw-overflow-x-auto">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="任务名称" />
         <el-table-column label="目标" width="120">
@@ -223,5 +223,9 @@ onMounted(() => {
 }
 .logs-section h4 {
   margin-bottom: 12px;
+}
+@media (max-width: 767px) {
+  :deep(.el-card__body) { padding: 12px; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; max-height: 92vh; overflow-y: auto; }
 }
 </style>

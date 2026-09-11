@@ -1,5 +1,5 @@
 <template>
-  <div class="resources-container">
+  <div class="resources-container tw-min-w-0">
     <div class="page-header">
       <h2>资源管理</h2>
       <el-button type="primary" @click="showUploadDialog">
@@ -9,7 +9,7 @@
     </div>
 
     <!-- 资源列表 -->
-    <el-table :data="resources" v-loading="loading" border stripe>
+    <el-table :data="resources" v-loading="loading" border stripe class="tw-overflow-x-auto">
       <el-table-column prop="name" label="资源名称" min-width="200" show-overflow-tooltip />
       <el-table-column prop="original_name" label="原始文件名" min-width="150" show-overflow-tooltip />
       <el-table-column label="文件大小" width="100" align="right">
@@ -654,5 +654,14 @@ onMounted(() => {
 
 .distributions-toolbar {
   margin-bottom: 15px;
+}
+@media (max-width: 767px) {
+  .resources-container { overflow-wrap: anywhere; }
+  .page-header, .toolbar { align-items: stretch; flex-direction: column; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; max-height: 92vh; overflow-y: auto; }
+  :deep(.el-upload), :deep(.el-upload-dragger) { max-width: 100%; }
 }
 </style>

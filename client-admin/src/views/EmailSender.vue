@@ -1,5 +1,5 @@
 <template>
-  <div class="email-sender-container">
+  <div class="email-sender-container tw-min-w-0">
     <el-card>
       <template #header>
         <span>发送邮件</span>
@@ -324,5 +324,12 @@ onMounted(() => {
   border: 1px solid #eee;
   padding: 16px;
   border-radius: 4px;
+}
+@media (max-width: 767px) {
+  :deep(.el-card__body) { padding: 12px; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; max-height: 92vh; overflow-y: auto; }
 }
 </style>

@@ -1,5 +1,5 @@
 <template>
-  <div class="email-templates-container">
+  <div class="email-templates-container tw-min-w-0">
     <el-card>
       <template #header>
         <div class="card-header">
@@ -8,7 +8,7 @@
         </div>
       </template>
 
-      <el-table :data="templates" v-loading="loading">
+      <el-table :data="templates" v-loading="loading" class="tw-overflow-x-auto">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="模板名称" />
         <el-table-column prop="subject" label="邮件主题" />
@@ -239,5 +239,12 @@ onMounted(() => {
   border: 1px solid #eee;
   padding: 16px;
   border-radius: 4px;
+}
+@media (max-width: 767px) {
+  :deep(.el-card__body) { padding: 12px; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; max-height: 92vh; overflow-y: auto; }
 }
 </style>

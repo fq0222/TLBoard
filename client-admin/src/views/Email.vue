@@ -1,5 +1,5 @@
 <template>
-  <div class="email-container">
+  <div class="email-container tw-min-w-0">
     <div class="page-header">
       <h1 class="page-title">邮件管理</h1>
       <p class="page-subtitle">发送邮件、管理模板和群发任务</p>
@@ -138,7 +138,7 @@
             <el-button type="primary" @click="activeTab = 'sender'">新建任务</el-button>
           </div>
 
-          <el-table :data="campaigns" v-loading="campaignsLoading">
+          <el-table :data="campaigns" v-loading="campaignsLoading" class="tw-overflow-x-auto">
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="name" label="任务名称" />
             <el-table-column label="目标" width="120">
@@ -962,5 +962,14 @@ onMounted(() => {
 .content-editor :deep(.el-textarea__inner) {
   height: 400px;
   resize: none;
+}
+@media (max-width: 767px) {
+  .email-container { overflow-wrap: anywhere; }
+  .toolbar { align-items: stretch; flex-direction: column; }
+  :deep(.el-tabs__nav-wrap) { overflow-x: auto; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; max-height: 92vh; overflow-y: auto; }
 }
 </style>

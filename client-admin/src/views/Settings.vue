@@ -1,5 +1,5 @@
 <template>
-  <div class="settings-container">
+  <div class="settings-container tw-min-w-0">
     <div class="page-header">
       <h1 class="page-title">系统设置</h1>
       <p class="page-subtitle">管理系统设置、管理员账号和推广奖励系数</p>
@@ -49,7 +49,7 @@
             </el-button>
           </div>
 
-          <el-table :data="admins" style="width: 100%">
+          <el-table :data="admins" style="width: 100%" class="tw-overflow-x-auto">
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="username" label="用户名" />
             <el-table-column prop="is_super" label="角色" width="140">
@@ -813,5 +813,14 @@ onMounted(() => {
   flex-direction: column;
   gap: 8px;
   margin-top: 8px;
+}
+@media (max-width: 767px) {
+  .settings-container { overflow-wrap: anywhere; }
+  .toolbar { align-items: stretch; flex-direction: column; }
+  :deep(.el-tabs__nav-wrap) { overflow-x: auto; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; max-height: 92vh; overflow-y: auto; }
 }
 </style>
