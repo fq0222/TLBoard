@@ -317,4 +317,11 @@ onMounted(() => {
   color: #666;
   font-size: 14px;
 }
+@media (max-width: 767px) {
+  .stats-grid, .content-grid { grid-template-columns: 1fr; gap: 12px; }
+  .page-header { margin-bottom: 20px; }
+  .page-title { font-size: 24px; }
+  .content-card { min-width: 0; padding: 12px; overflow-x: auto; }
+  .server-stats { flex-wrap: wrap; gap: 8px 16px; }
+}
 </style>

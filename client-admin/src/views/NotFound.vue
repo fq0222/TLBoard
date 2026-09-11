@@ -32,4 +32,10 @@ function goHome() {
 .error-code { font-size: 120px; font-weight: bold; margin: 0; line-height: 1; text-shadow: 0 4px 8px rgba(0,0,0,0.2); }
 .error-title { font-size: 36px; margin: 20px 0 10px; }
 .error-message { font-size: 18px; margin-bottom: 30px; opacity: 0.9; }
+@media (max-width: 767px) {
+  .not-found-container { padding: 12px; }
+  .error-code { font-size: 76px; }
+  .error-title { font-size: 26px; }
+  .error-message { font-size: 16px; }
+}
 </style>

@@ -299,6 +299,7 @@ onMounted(() => {
   color: #374151;
   word-break: break-word;
 }
+.message-text { overflow-wrap: anywhere; }
 
 .pagination {
   display: flex;

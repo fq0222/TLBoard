@@ -314,6 +314,13 @@ onMounted(() => {
   line-height: 1.6;
   white-space: pre-wrap;
 }
+.reply-content, .ticket-description { overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  .page-header, .info-header, .info-meta { align-items: flex-start; flex-direction: column; }
+  .header-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .content-card { padding: 12px; }
+  .reply-item { max-width: 95%; }
+}
 
 .reply-input {
   margin-top: 30px;

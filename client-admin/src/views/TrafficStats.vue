@@ -526,6 +526,7 @@ watch(servers, async () => {
 }
 
 .chart-shell {
+  min-width: 0;
   position: relative;
   padding: 18px;
   border: 1px solid #dcdfe6;
@@ -597,5 +598,9 @@ watch(servers, async () => {
     width: 100%;
     justify-content: space-between;
   }
+}
+@media (max-width: 767px) {
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; }
+  .chart-shell { min-width: 0; overflow-x: auto; }
 }
 </style>
