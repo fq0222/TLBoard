@@ -29,6 +29,7 @@
         </div>
       </div>
       
+      <div class="tw-hidden md:tw-block">
       <el-table :data="users" style="width: 100%" @sort-change="handleSortChange">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="email" label="邮箱" />
@@ -77,6 +78,26 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
+
+      <div class="tw-grid tw-gap-3 md:tw-hidden">
+        <article v-for="user in users" :key="user.id" class="mobile-record-card">
+          <div class="mobile-record-header">
+            <strong>{{ user.email }}</strong>
+            <el-tag :type="getStatusType(user.status)">{{ user.status_text }}</el-tag>
+          </div>
+          <dl class="mobile-record-fields">
+            <div><dt>流量套餐</dt><dd>{{ user.plan_name || '-' }}</dd></div>
+            <div><dt>已用 / 上限</dt><dd>{{ user.traffic_used_text }} / {{ user.traffic_limit_text }}</dd></div>
+            <div><dt>流量到期</dt><dd>{{ user.expire_text || '-' }}</dd></div>
+            <div><dt>家宽套餐</dt><dd>{{ user.home_plan_name || '-' }}</dd></div>
+          </dl>
+          <div class="mobile-record-actions">
+            <el-button size="small" type="primary" @click="showEditDialog(user)">编辑</el-button>
+            <el-button size="small" type="danger" :loading="deletingUserId === user.id" :disabled="deletingUserId !== null" @click="deleteUser(user)">删除</el-button>
+          </div>
+        </article>
+      </div>
       
       <div class="pagination">
         <el-pagination
@@ -1345,4 +1366,27 @@ onBeforeUnmount(() => {
     padding-left: 0;
   }
 }
+
+@media (max-width: 767px) {
+  .content-card { padding: 12px; }
+  .toolbar { align-items: stretch; gap: 10px; }
+  .toolbar :deep(.el-input), .toolbar :deep(.el-select) { width: 100% !important; margin-right: 0 !important; }
+  .pagination { overflow-x: auto; justify-content: flex-start; }
+  .edit-dialog-grid { max-height: calc(88vh - 120px); }
+  .traffic-edit-row { flex-wrap: wrap; }
+  .home-routing-row { grid-template-columns: 1fr; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; margin-top: 4vh; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
+}
+
+.mobile-record-card { padding: 14px; border: 1px solid #ebeef5; border-radius: 10px; background: #fff; }
+.mobile-record-header, .mobile-record-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mobile-record-header strong { min-width: 0; overflow-wrap: anywhere; }
+.mobile-record-fields { display: grid; gap: 8px; margin: 14px 0; }
+.mobile-record-fields div { display: flex; justify-content: space-between; gap: 16px; }
+.mobile-record-fields dt { color: #909399; }
+.mobile-record-fields dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.mobile-record-actions { justify-content: flex-end; }
 </style>

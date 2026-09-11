@@ -43,6 +43,7 @@
 
     <!-- 工单列表 -->
     <div class="content-card">
+      <div class="tw-hidden md:tw-block">
       <el-table :data="tickets" v-loading="loading" style="width: 100%">
         <el-table-column prop="title" label="工单标题" min-width="200">
           <template #default="{ row }">
@@ -76,6 +77,20 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
+
+      <div class="tw-grid tw-gap-3 md:tw-hidden" v-loading="loading">
+        <article v-for="ticket in tickets" :key="ticket.id" class="mobile-ticket-card">
+          <div class="mobile-ticket-header">
+            <router-link :to="`/admin/tickets/${ticket.id}`" class="ticket-link">{{ ticket.title }}</router-link>
+            <span v-if="ticket.is_action_required" class="unread-badge">未读</span>
+          </div>
+          <div class="mobile-ticket-row"><span>用户</span><b>{{ ticket.user_email }}</b></div>
+          <div class="mobile-ticket-row"><span>状态</span><el-tag :type="getStatusType(ticket.status)">{{ getStatusText(ticket.status) }}</el-tag></div>
+          <div class="mobile-ticket-row"><span>创建时间</span><b>{{ formatTime(ticket.created_at) }}</b></div>
+          <div class="mobile-ticket-actions"><el-button link type="primary" @click="$router.push(`/admin/tickets/${ticket.id}`)">查看</el-button><el-button link type="danger" @click="handleDelete(ticket)">删除</el-button></div>
+        </article>
+      </div>
 
       <div class="pagination" v-if="total > limit">
         <el-pagination
@@ -272,5 +287,11 @@ onMounted(() => {
   margin-top: 20px;
   display: flex;
   justify-content: center;
+}
+@media (max-width: 767px) {
+  .stats-row { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .filter-bar { align-items: stretch; flex-direction: column; gap: 10px; }
+  .filter-bar :deep(.el-input), .filter-bar :deep(.el-select) { width: 100% !important; }
+  .content-card { padding: 12px; }
 }
 </style>

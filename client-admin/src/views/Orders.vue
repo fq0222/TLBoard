@@ -48,6 +48,7 @@
         />
       </div>
 
+      <div class="tw-hidden md:tw-block">
       <el-table :data="orders" style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="out_trade_no" label="订单号" />
@@ -65,6 +66,17 @@
           <template #default="scope">{{ formatTime(scope.row.created_at) }}</template>
         </el-table-column>
       </el-table>
+      </div>
+
+      <div class="tw-grid tw-gap-3 md:tw-hidden">
+        <article v-for="order in orders" :key="order.id" class="mobile-order-card">
+          <div class="mobile-order-header"><strong>{{ order.out_trade_no }}</strong><el-tag :type="getStatusType(order.status)">{{ order.status_text }}</el-tag></div>
+          <div class="mobile-order-row"><span>用户</span><b>{{ order.email }}</b></div>
+          <div class="mobile-order-row"><span>套餐</span><b>{{ order.plan_name }}</b></div>
+          <div class="mobile-order-row"><span>金额</span><b>¥{{ order.amount_text }}</b></div>
+          <div class="mobile-order-row"><span>创建时间</span><b>{{ formatTime(order.created_at) }}</b></div>
+        </article>
+      </div>
 
       <div class="pagination">
         <el-pagination
@@ -200,4 +212,18 @@ onMounted(() => {
 @media (max-width: 960px) {
   .stats-row { grid-template-columns: 1fr; }
 }
+
+@media (max-width: 767px) {
+  .content-card { padding: 12px; }
+  .toolbar { display: grid; gap: 10px; }
+  .toolbar :deep(.el-input), .toolbar :deep(.el-select), .toolbar :deep(.el-date-editor) { width: 100% !important; margin-right: 0 !important; }
+  .pagination { overflow-x: auto; justify-content: flex-start; }
+}
+.mobile-order-card { padding: 14px; border: 1px solid #ebeef5; border-radius: 10px; }
+.mobile-order-header, .mobile-order-row { display: flex; justify-content: space-between; gap: 12px; }
+.mobile-order-header { align-items: center; margin-bottom: 12px; }
+.mobile-order-header strong { min-width: 0; overflow-wrap: anywhere; }
+.mobile-order-row { padding: 5px 0; }
+.mobile-order-row span { color: #909399; }
+.mobile-order-row b { text-align: right; overflow-wrap: anywhere; }
 </style>
