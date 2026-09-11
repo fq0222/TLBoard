@@ -1,2 +1,57 @@
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+  .mobile-ticket-card,
+  .mobile-plan-card,
+  .mobile-ip-card,
+  .mobile-user-card {
+    @apply tw-rounded-lg tw-border tw-border-solid tw-border-gray-200 tw-bg-white tw-p-3;
+  }
+
+  .mobile-ticket-header,
+  .mobile-ticket-row,
+  .mobile-plan-header,
+  .mobile-plan-fields > div,
+  .mobile-ip-header,
+  .mobile-user-header,
+  .mobile-user-row {
+    @apply tw-flex tw-justify-between tw-gap-3;
+  }
+
+  .mobile-ticket-header,
+  .mobile-plan-header,
+  .mobile-ip-header,
+  .mobile-user-header {
+    @apply tw-items-center tw-pb-3;
+  }
+
+  .mobile-ticket-row,
+  .mobile-plan-fields > div,
+  .mobile-user-row {
+    @apply tw-py-1;
+  }
+
+  .mobile-ticket-row > span,
+  .mobile-plan-fields dt,
+  .mobile-user-row > span {
+    @apply tw-text-gray-500;
+  }
+
+  .mobile-ticket-row b,
+  .mobile-plan-fields dd,
+  .mobile-user-row b {
+    @apply tw-m-0 tw-break-words tw-text-right;
+  }
+
+  .mobile-ticket-actions,
+  .mobile-plan-actions,
+  .mobile-ip-actions,
+  .mobile-user-actions {
+    @apply tw-flex tw-flex-wrap tw-justify-end tw-gap-2 tw-pt-3;
+  }
+
+  .mobile-plan-fields {
+    @apply tw-my-2 tw-grid tw-gap-1;
+  }
+}

@@ -18,6 +18,7 @@
         <span class="total-info">共 {{ total }} 条记录</span>
       </div>
       
+      <div class="tw-hidden md:tw-block">
       <el-table :data="ips" style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="ip" label="IP地址" />
@@ -35,6 +36,13 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
+      <div class="tw-grid tw-gap-3 md:tw-hidden">
+        <article v-for="ipItem in ips" :key="ipItem.id" class="mobile-ip-card">
+          <div class="mobile-ip-header"><strong>{{ ipItem.ip }}</strong><el-tag :type="ipItem.enabled ? 'success' : 'danger'">{{ ipItem.enabled ? '启用' : '禁用' }}</el-tag></div>
+          <div class="mobile-ip-actions"><el-button size="small" type="primary" @click="showEditDialog(ipItem)">编辑</el-button><el-button size="small" type="danger" @click="deleteIp(ipItem)">删除</el-button></div>
+        </article>
+      </div>
       
       <div class="pagination-wrapper">
         <el-pagination
@@ -222,5 +230,15 @@ onMounted(() => {
   justify-content: flex-end; 
   padding: 10px 0;
   background: #fff;
+}
+@media (max-width: 767px) {
+  .content-card { padding: 12px; }
+  .toolbar { flex-wrap: wrap; }
+  .total-info { width: 100%; margin-left: 0; }
+  .pagination-wrapper { justify-content: flex-start; overflow-x: auto; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
 }
 </style>

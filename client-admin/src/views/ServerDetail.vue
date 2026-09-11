@@ -53,6 +53,7 @@
           </div>
         </div>
         
+        <div class="tw-hidden md:tw-block">
         <el-table :data="node.users" style="width: 100%" size="small">
           <el-table-column prop="email" label="用户标识" min-width="120" />
           <el-table-column label="在线" width="60" align="center">
@@ -92,6 +93,14 @@
             </template>
           </el-table-column>
         </el-table>
+        </div>
+        <div class="tw-grid tw-gap-3 md:tw-hidden">
+          <article v-for="user in node.users" :key="user.email" class="mobile-user-card">
+            <div class="mobile-user-header"><strong>{{ user.email }}</strong><el-tag :type="user.enabled ? 'success' : 'danger'" size="small">{{ user.enabled ? '启用' : '禁用' }}</el-tag></div>
+            <div class="mobile-user-row"><span>在线</span><b>{{ user.is_online ? '在线' : '离线' }}</b></div><div class="mobile-user-row"><span>到期</span><b>{{ user.expire_text }}</b></div><div class="mobile-user-row"><span>流量</span><b>{{ user.traffic_used_text }} / {{ user.traffic_limit_text }}</b></div>
+            <div class="mobile-user-actions"><el-button size="small" type="primary" @click="editUser(node, user)">编辑</el-button><el-button size="small" :type="user.enabled ? 'warning' : 'success'" @click="toggleUser(node, user)">{{ user.enabled ? '禁用' : '启用' }}</el-button><el-button size="small" type="danger" @click="deleteUser(node, user)">删除</el-button></div>
+          </article>
+        </div>
       </div>
     </div>
 
@@ -371,5 +380,19 @@ onMounted(() => {
   height: 10px;
   border-radius: 50%;
   background-color: #dcdfe6;
+}
+@media (max-width: 767px) {
+  .content-card { padding: 14px; }
+  .server-info { grid-template-columns: 1fr; gap: 12px; }
+  .info-item { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .info-value { max-width: 100%; overflow-wrap: anywhere; }
+  .node-item { padding: 12px; }
+  .node-header, .node-stats { align-items: flex-start; flex-direction: column; }
+  .node-stats { gap: 8px; margin-top: 10px; }
+  .form-tip { flex-wrap: wrap; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
 }
 </style>

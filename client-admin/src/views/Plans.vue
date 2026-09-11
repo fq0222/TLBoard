@@ -13,6 +13,7 @@
         </el-button>
       </div>
       
+      <div class="tw-hidden md:tw-block">
       <el-table :data="plans" style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="套餐名称" />
@@ -80,6 +81,14 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
+      <div class="tw-grid tw-gap-3 md:tw-hidden">
+        <article v-for="plan in plans" :key="plan.id" class="mobile-plan-card">
+          <div class="mobile-plan-header"><strong>{{ plan.name }}</strong><el-tag :type="plan.enabled ? 'success' : 'danger'">{{ plan.enabled ? '已上架' : '已下架' }}</el-tag></div>
+          <dl class="mobile-plan-fields"><div><dt>类型</dt><dd>{{ plan.plan_type_text || getPlanTypeText(plan.plan_type) }}</dd></div><div><dt>价格</dt><dd>¥{{ plan.price_text }}</dd></div><div><dt>有效期</dt><dd>{{ formatDuration(plan) }}</dd></div><div><dt>流量</dt><dd>{{ plan.plan_type === 'home_ip' ? '不限制流量' : plan.traffic_text }}</dd></div><div><dt>销量</dt><dd>{{ plan.sales_count }} / {{ plan.sales_limit === -1 ? '不限' : plan.sales_limit }}</dd></div></dl>
+          <div class="mobile-plan-actions"><el-button size="small" type="primary" @click="showEditDialog(plan)">编辑</el-button><el-button size="small" type="danger" @click="deletePlan(plan)">删除</el-button></div>
+        </article>
+      </div>
     </div>
     
     <el-dialog 
@@ -440,4 +449,14 @@ onMounted(() => {
 .toolbar { margin-bottom: 20px; }
 .form-tip { margin-left: 10px; color: #999; font-size: 12px; }
 .traffic-input { display: flex; gap: 10px; align-items: center; }
+@media (max-width: 767px) {
+  .content-card { padding: 12px; }
+  .traffic-input { flex-wrap: wrap; }
+  .form-tip { display: block; margin: 6px 0 0; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
+  :deep(.el-radio-group) { display: grid; }
+}
 </style>

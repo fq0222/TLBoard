@@ -13,6 +13,7 @@
         </el-button>
       </div>
 
+      <div class="tw-hidden md:tw-block">
       <el-table :data="announcements" style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="title" label="标题" min-width="180" />
@@ -52,6 +53,15 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
+      <div class="tw-grid tw-gap-3 md:tw-hidden">
+        <article v-for="announcement in announcements" :key="announcement.id" class="mobile-card">
+          <div class="mobile-card-header"><strong>{{ announcement.title }}</strong><el-tag :type="announcement.enabled ? 'success' : 'danger'">{{ announcement.enabled ? '显示' : '隐藏' }}</el-tag></div>
+          <div class="mobile-card-tags"><el-tag :type="announcement.pinned ? 'danger' : 'info'" size="small">{{ announcement.pinned ? '已置顶' : '未置顶' }}</el-tag><el-tag :type="announcement.node_show ? 'warning' : 'info'" size="small">节点显示：{{ announcement.node_show ? '是' : '否' }}</el-tag></div>
+          <p>{{ formatTime(announcement.created_at) }}</p>
+          <div class="mobile-card-actions"><el-button size="small" type="primary" @click="showEditDialog(announcement)">编辑</el-button><el-button size="small" type="danger" @click="deleteAnnouncement(announcement)">删除</el-button></div>
+        </article>
+      </div>
     </div>
 
     <el-dialog v-model="dialogVisible" :title="isEditing ? '编辑公告' : '添加公告'" width="900px">
@@ -341,5 +351,20 @@ onMounted(() => {
 .preview-content :deep(th) {
   background: #f5f5f5;
   font-weight: 600;
+}
+
+.mobile-card { padding: 14px; border: 1px solid #ebeef5; border-radius: 10px; }
+.mobile-card-header, .mobile-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mobile-card-header strong { overflow-wrap: anywhere; }
+.mobile-card-tags { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.mobile-card p { margin: 0 0 12px; color: #909399; }
+.mobile-card-actions { justify-content: flex-end; }
+@media (max-width: 767px) {
+  .content-card { padding: 12px; }
+  .editor-container { flex-direction: column; min-height: 0; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
 }
 </style>
