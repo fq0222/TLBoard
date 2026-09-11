@@ -1,90 +1,100 @@
 <template>
   <div class="admin-layout">
-    <aside class="sidebar" :class="{ collapsed: isCollapsed }">
+    <aside
+      class="sidebar"
+      :class="{ collapsed: isCollapsed, 'mobile-open': mobileSidebarOpen }"
+    >
       <div class="sidebar-header">
-        <h1 v-if="!isCollapsed" class="sidebar-title">管理端</h1>
+        <h1 v-if="!isCollapsed || mobileSidebarOpen" class="sidebar-title">管理端</h1>
         <h1 v-else class="sidebar-title collapsed-title">管</h1>
       </div>
 
-      <nav class="sidebar-nav">
+      <nav class="sidebar-nav" @click="closeMobileSidebar">
         <router-link to="/admin" class="nav-item" exact-active-class="active">
           <el-icon><DataBoard /></el-icon>
-          <span v-if="!isCollapsed">仪表盘</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">仪表盘</span>
         </router-link>
         <router-link to="/admin/traffic-stats" class="nav-item" active-class="active">
           <el-icon><DataAnalysis /></el-icon>
-          <span v-if="!isCollapsed">数据统计</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">数据统计</span>
         </router-link>
         <router-link to="/admin/servers" class="nav-item" active-class="active">
           <el-icon><Monitor /></el-icon>
-          <span v-if="!isCollapsed">服务器管理</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">服务器管理</span>
         </router-link>
         <router-link to="/admin/home-proxies" class="nav-item" active-class="active">
           <el-icon><Link /></el-icon>
-          <span v-if="!isCollapsed">家宽 IP 管理</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">家宽 IP 管理</span>
         </router-link>
         <router-link to="/admin/plans" class="nav-item" active-class="active">
           <el-icon><Goods /></el-icon>
-          <span v-if="!isCollapsed">套餐管理</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">套餐管理</span>
         </router-link>
         <router-link to="/admin/users" class="nav-item" active-class="active">
           <el-icon><User /></el-icon>
-          <span v-if="!isCollapsed">用户管理</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">用户管理</span>
         </router-link>
         <router-link to="/admin/orders" class="nav-item" active-class="active">
           <el-icon><Document /></el-icon>
-          <span v-if="!isCollapsed">订单管理</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">订单管理</span>
         </router-link>
         <router-link to="/admin/announcements" class="nav-item" active-class="active">
           <el-icon><Bell /></el-icon>
-          <span v-if="!isCollapsed">公告管理</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">公告管理</span>
         </router-link>
         <router-link to="/admin/cf-ips" class="nav-item" active-class="active">
           <el-icon><Connection /></el-icon>
-          <span v-if="!isCollapsed">CF IP 池</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">CF IP 池</span>
         </router-link>
         <router-link to="/admin/tickets" class="nav-item" active-class="active">
           <el-icon><ChatDotRound /></el-icon>
-          <span v-if="!isCollapsed">工单管理</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">工单管理</span>
         </router-link>
         <router-link to="/admin/feedback" class="nav-item" active-class="active">
           <el-icon><ChatLineRound /></el-icon>
-          <span v-if="!isCollapsed">留言板管理</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">留言板管理</span>
         </router-link>
         <router-link to="/admin/email" class="nav-item" active-class="active">
           <el-icon><Message /></el-icon>
-          <span v-if="!isCollapsed">邮件管理</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">邮件管理</span>
         </router-link>
         <router-link to="/admin/resources" class="nav-item" active-class="active">
           <el-icon><Folder /></el-icon>
-          <span v-if="!isCollapsed">资源管理</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">资源管理</span>
         </router-link>
         <router-link to="/admin/blogs" class="nav-item" active-class="active">
           <el-icon><Reading /></el-icon>
-          <span v-if="!isCollapsed">博客管理</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">博客管理</span>
         </router-link>
         <router-link to="/admin/referrals" class="nav-item" active-class="active">
           <el-icon><Share /></el-icon>
-          <span v-if="!isCollapsed">推广管理</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">推广管理</span>
         </router-link>
         <router-link to="/admin/settings" class="nav-item" active-class="active">
           <el-icon><Setting /></el-icon>
-          <span v-if="!isCollapsed">系统设置</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">系统设置</span>
         </router-link>
       </nav>
 
       <div class="sidebar-footer">
         <el-button type="danger" plain :icon="SwitchButton" @click="handleLogout">
-          <span v-if="!isCollapsed">退出登录</span>
+          <span v-if="!isCollapsed || mobileSidebarOpen">退出登录</span>
         </el-button>
       </div>
     </aside>
 
-    <main class="main-content">
+    <main class="main-content tw-ml-0">
       <header class="header">
         <div class="header-left">
           <el-button
-            class="collapse-btn"
+            class="mobile-menu-btn md:tw-hidden"
+            :icon="Expand"
+            aria-label="打开导航菜单"
+            :aria-expanded="mobileSidebarOpen"
+            @click="openMobileSidebar"
+          />
+          <el-button
+            class="collapse-btn tw-hidden md:tw-inline-flex"
             :icon="isCollapsed ? Expand : Fold"
             @click="toggleCollapse"
           />
@@ -117,6 +127,14 @@
         <router-view />
       </div>
     </main>
+
+    <button
+      v-if="mobileSidebarOpen"
+      type="button"
+      class="sidebar-overlay md:tw-hidden"
+      aria-label="关闭导航菜单"
+      @click="closeMobileSidebar"
+    ></button>
 
     <button
       type="button"
@@ -170,11 +188,33 @@ const router = useRouter()
 const currentRoute = useRoute()
 const adminStore = useAdminStore()
 const isCollapsed = ref(false)
+const mobileSidebarOpen = ref(false)
 const actionRequiredTicketCount = ref(0)
 let ticketReminderRefresher = null
+let bodyOverflowBeforeSidebar = ''
 
 function toggleCollapse() {
   isCollapsed.value = !isCollapsed.value
+}
+
+/** 打开移动端侧栏，并锁定背景滚动。 */
+function openMobileSidebar() {
+  mobileSidebarOpen.value = true
+}
+
+/** 关闭移动端侧栏；桌面折叠状态不受影响。 */
+function closeMobileSidebar() {
+  mobileSidebarOpen.value = false
+}
+
+/**
+ * 处理移动端侧栏键盘操作。
+ * @param {KeyboardEvent} event 键盘事件；仅 Escape 会关闭侧栏。
+ */
+function handleSidebarKeydown(event) {
+  if (event.key === 'Escape') {
+    closeMobileSidebar()
+  }
 }
 
 function handleCommand(command) {
@@ -259,17 +299,32 @@ async function handleLogout() {
 }
 
 watch(() => currentRoute.path, () => {
+  closeMobileSidebar()
   refreshTicketReminderAfterRouteChange()
+})
+
+watch(mobileSidebarOpen, (isOpen) => {
+  if (isOpen) {
+    bodyOverflowBeforeSidebar = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return
+  }
+
+  document.body.style.overflow = bodyOverflowBeforeSidebar
 })
 
 onMounted(() => {
   refreshTicketReminderAfterRouteChange()
   document.addEventListener('visibilitychange', handleVisibilityChange)
+  document.addEventListener('keydown', handleSidebarKeydown)
   window.addEventListener('ticket-read-state-changed', handleTicketReadStateChanged)
 })
 
 onBeforeUnmount(() => {
+  closeMobileSidebar()
+  document.body.style.overflow = bodyOverflowBeforeSidebar
   document.removeEventListener('visibilitychange', handleVisibilityChange)
+  document.removeEventListener('keydown', handleSidebarKeydown)
   window.removeEventListener('ticket-read-state-changed', handleTicketReadStateChanged)
 })
 </script>
@@ -400,6 +455,21 @@ onBeforeUnmount(() => {
   font-size: 20px;
 }
 
+.mobile-menu-btn {
+  border: none;
+  background: none;
+  padding: 5px;
+  font-size: 20px;
+}
+
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  border: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
 .header-right {
   display: flex;
   align-items: center;
@@ -474,6 +544,63 @@ onBeforeUnmount(() => {
   }
   94% {
     transform: rotate(-4deg);
+  }
+}
+
+@media (max-width: 767px) {
+  .sidebar,
+  .sidebar.collapsed {
+    z-index: 101;
+    width: 280px;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-title,
+  .collapsed-title {
+    font-size: 20px;
+  }
+
+  .sidebar .nav-item span,
+  .sidebar .sidebar-footer span {
+    display: inline;
+  }
+
+  .main-content,
+  .sidebar.collapsed + .main-content {
+    min-width: 0;
+    margin-left: 0;
+  }
+
+  .header {
+    padding: 0 12px;
+  }
+
+  .header-left {
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .header-left :deep(.el-breadcrumb__item:first-child) {
+    display: none;
+  }
+
+  .user-info > span {
+    display: none;
+  }
+
+  .content {
+    min-width: 0;
+    padding: 12px;
+  }
+
+  .ticket-reminder-button {
+    right: 16px;
+    bottom: 16px;
   }
 }
 </style>
