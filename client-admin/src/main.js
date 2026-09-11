@@ -111,6 +111,7 @@ import 'element-plus/theme-chalk/el-tab-pane.css'
 import 'element-plus/theme-chalk/el-tabs.css'
 import 'element-plus/theme-chalk/el-tag.css'
 import 'element-plus/theme-chalk/el-upload.css'
+import './styles/tailwind.css'
 
 import App from './App.vue'
 import router from './router'
