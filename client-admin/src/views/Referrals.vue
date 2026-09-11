@@ -1,5 +1,5 @@
 <template>
-  <div class="referrals-container">
+  <div class="referrals-container tw-min-w-0">
     <div class="page-header">
       <h1 class="page-title">推广管理</h1>
       <p class="page-subtitle">查看用户推广链接、点击量、奖励余额，并管理推广开关和重置链接。</p>
@@ -647,5 +647,11 @@ fetchRows()
   .pagination-wrap {
     justify-content: center;
   }
+}
+@media (max-width: 767px) {
+  .referrals-container { overflow-wrap: anywhere; }
+  .toolbar { align-items: stretch; flex-direction: column; }
+  .table-wrap { width: 100%; overflow-x: auto; }
+  :deep(.el-drawer) { width: min(100vw, 560px) !important; }
 }
 </style>

@@ -1,5 +1,5 @@
 <template>
-  <div class="servers-container">
+  <div class="servers-container tw-min-w-0">
     <div class="page-header">
       <h1 class="page-title">服务器管理</h1>
       <p class="page-subtitle">管理 3X-UI 服务器节点</p>
@@ -855,5 +855,14 @@ onBeforeUnmount(() => {
   .server-footer {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+@media (max-width: 767px) {
+  .content-card { padding: 12px; }
+  .toolbar { align-items: stretch; flex-direction: column; }
+  .url-text, .backup-status { overflow-wrap: anywhere; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
 }
 </style>

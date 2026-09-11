@@ -1,5 +1,5 @@
 <template>
-  <div class="home-proxies-container">
+  <div class="home-proxies-container tw-min-w-0">
     <div class="page-header">
       <h1 class="page-title">家宽 IP 管理</h1>
       <p class="page-subtitle">管理家宽 SOCKS 出站，并手动同步到在线 3X-UI 服务器</p>
@@ -577,5 +577,15 @@ onMounted(() => {
   .proxy-footer {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+@media (max-width: 767px) {
+  .content-card { padding: 12px; }
+  .toolbar { align-items: stretch; flex-direction: column; }
+  .proxy-card, .proxy-card * { min-width: 0; }
+  .proxy-card { overflow-wrap: anywhere; }
+  :deep(.el-dialog) { width: calc(100vw - 24px) !important; }
+  :deep(.el-form-item) { display: block; }
+  :deep(.el-form-item__label) { width: auto !important; }
+  :deep(.el-form-item__content) { margin-left: 0 !important; }
 }
 </style>
