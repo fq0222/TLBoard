@@ -22,15 +22,26 @@
       <div class="toolbar">
         <el-input
           v-model="email"
+          class="toolbar-email"
           placeholder="搜索邮箱"
-          style="width: 200px; margin-right: 10px;"
           @keyup.enter="fetchOrders"
-        />
+        >
+          <template #append>
+            <el-button
+              class="email-search-button"
+              aria-label="搜索邮箱"
+              title="搜索"
+              @click="fetchOrders"
+            >
+              <el-icon><Search /></el-icon>
+            </el-button>
+          </template>
+        </el-input>
         <el-select
           v-model="status"
+          class="toolbar-status"
           placeholder="状态筛选"
           clearable
-          style="width: 150px; margin-right: 10px;"
           @change="fetchOrders"
         >
           <el-option label="待支付" value="pending" />
@@ -39,11 +50,11 @@
         </el-select>
         <el-date-picker
           v-model="dateRange"
+          class="toolbar-date"
           type="daterange"
           range-separator="至"
           start-placeholder="开始日期"
           end-placeholder="结束日期"
-          style="margin-right: 10px;"
           @change="fetchOrders"
         />
       </div>
@@ -95,6 +106,7 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import { Search } from '@element-plus/icons-vue'
 import api from '@/api'
 
 const orders = ref([])
@@ -198,9 +210,17 @@ onMounted(() => {
 }
 
 .toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 3fr);
   align-items: center;
+  gap: 10px;
   margin-bottom: 20px;
+}
+
+.toolbar :deep(.el-input),
+.toolbar :deep(.el-select),
+.toolbar :deep(.el-date-editor) {
+  width: 100%;
 }
 
 .pagination {
@@ -215,8 +235,7 @@ onMounted(() => {
 
 @media (max-width: 767px) {
   .content-card { padding: 12px; }
-  .toolbar { display: grid; gap: 10px; }
-  .toolbar :deep(.el-input), .toolbar :deep(.el-select), .toolbar :deep(.el-date-editor) { width: 100% !important; margin-right: 0 !important; }
+  .toolbar { grid-template-columns: minmax(0, 1fr); }
   .pagination { overflow-x: auto; justify-content: flex-start; }
 }
 .mobile-order-card { padding: 14px; border: 1px solid #ebeef5; border-radius: 10px; }
