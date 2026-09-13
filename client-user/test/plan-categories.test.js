@@ -8,7 +8,10 @@ import {
   buildDisplayPlans,
   filterHomeIpPlans,
   filterTrafficPlans,
-  resolveRecommendedTrafficPlanId
+  paginatePlans,
+  resolvePlanPage,
+  resolveRecommendedTrafficPlanId,
+  sortPlansWithCurrentFirst
 } from '../src/utils/plan-categories.js'
 
 const mixedPlans = [
@@ -36,4 +39,31 @@ test('buildDisplayPlans 不依赖分类 computed 循环也能标记推荐套餐'
   assert.equal(displayPlans.find((plan) => plan.id === 6).isRecommended, true)
   assert.equal(displayPlans.find((plan) => plan.id === 10).isRecommended, false)
   assert.equal(displayPlans.find((plan) => plan.id === 10).durationText, '30 天周期')
+})
+
+test('sortPlansWithCurrentFirst 将当前套餐置顶并按权重和 ID 排序其余套餐', () => {
+  const plans = [
+    { id: 3, sort_order: 10 },
+    { id: 2, sort_order: 10 },
+    { id: 4, sort_order: 20 },
+    { id: 1, sort_order: 30 }
+  ]
+
+  assert.deepEqual(sortPlansWithCurrentFirst(plans, 4).map((plan) => plan.id), [4, 2, 3, 1])
+  assert.deepEqual(plans.map((plan) => plan.id), [3, 2, 4, 1])
+})
+
+test('paginatePlans 按设备每页数量返回对应套餐', () => {
+  const plans = Array.from({ length: 6 }, (_, index) => ({ id: index + 1 }))
+
+  assert.deepEqual(paginatePlans(plans, 1, 4).map((plan) => plan.id), [1, 2, 3, 4])
+  assert.deepEqual(paginatePlans(plans, 2, 4).map((plan) => plan.id), [5, 6])
+  assert.deepEqual(paginatePlans(plans, 2, 2).map((plan) => plan.id), [3, 4])
+})
+
+test('resolvePlanPage 返回指定套餐所在页且找不到时回到第一页', () => {
+  const plans = Array.from({ length: 6 }, (_, index) => ({ id: index + 1 }))
+
+  assert.equal(resolvePlanPage(plans, 6, 4), 2)
+  assert.equal(resolvePlanPage(plans, 99, 4), 1)
 })

@@ -51,7 +51,7 @@ test('个人首页续费套餐按钮跳转到套餐页面并移除弹窗入口',
 test('套餐页根据首页续费跳转参数自动选中对应套餐', () => {
   const plansSource = readFileSync(plansPageUrl, 'utf8')
 
-  assert.match(plansSource, /import \{ computed, nextTick, onMounted, ref \} from 'vue'/)
+  assert.match(plansSource, /import \{ computed, nextTick, onBeforeUnmount, onMounted, ref, watch \} from 'vue'/)
   assert.match(plansSource, /import \{ useRoute, useRouter \} from 'vue-router'/)
   assert.match(plansSource, /const route = useRoute\(\)/)
   assert.match(plansSource, /applyRenewRouteSelection\(\)/)
@@ -66,7 +66,7 @@ test('套餐页根据首页续费跳转参数自动选中对应套餐', () => {
 test('移动端从首页点击家宽续费后定位到家宽套餐区块顶部', () => {
   const plansSource = readFileSync(plansPageUrl, 'utf8')
 
-  assert.match(plansSource, /import \{ computed, nextTick, onMounted, ref \} from 'vue'/)
+  assert.match(plansSource, /import \{ computed, nextTick, onBeforeUnmount, onMounted, ref, watch \} from 'vue'/)
   assert.match(plansSource, /ref="broadbandSectionRef"/)
   assert.match(plansSource, /const broadbandSectionRef = ref\(null\)/)
   assert.match(plansSource, /scrollBroadbandSectionToTopOnMobile\(\)/)
@@ -158,4 +158,13 @@ test('移动端支付面板按选中的套餐类型插入到对应套餐大区�
   assert.match(plansSource, /class="desktop-payment-panel payment-panel"/)
   assert.match(plansSource, /@media \(max-width: 768px\)[\s\S]*?\.desktop-payment-panel\s*\{[\s\S]*?display:\s*none;/)
   assert.match(plansSource, /@media \(max-width: 768px\)[\s\S]*?\.mobile-payment-panel\s*\{[\s\S]*?display:\s*flex;/)
+})
+
+test('套餐分页按钮使用完整边框热区并同步交互状态', () => {
+  const plansSource = readFileSync(plansPageUrl, 'utf8')
+
+  assert.match(plansSource, /:deep\(\.plans-pagination \.btn-prev\),[\s\S]*:deep\(\.plans-pagination \.el-pager li\)\s*\{[\s\S]*min-width:\s*32px;[\s\S]*height:\s*32px;[\s\S]*border:\s*1px solid/)
+  assert.match(plansSource, /:deep\(\.plans-pagination \.el-pager li\.is-active\)\s*\{[\s\S]*border-color:\s*var\(--accent\);/)
+  assert.match(plansSource, /:deep\(\.plans-pagination \.btn-prev:not\(:disabled\):hover\)/)
+  assert.match(plansSource, /:deep\(\.plans-pagination \.btn-prev:disabled\)/)
 })

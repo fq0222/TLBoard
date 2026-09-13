@@ -9,7 +9,18 @@
                 <h2>流量套餐</h2>
                 <p>{{ renewTipText }}</p>
               </div>
-              <span class="section-count">{{ trafficPlans.length }} 个可续费套餐</span>
+              <div class="section-actions">
+                <span class="section-count">{{ trafficPlans.length }} 个可续费套餐</span>
+                <el-pagination
+                  v-if="trafficPlans.length > pageSize"
+                  v-model:current-page="trafficPage"
+                  class="plans-pagination desktop-pagination"
+                  :page-size="pageSize"
+                  :total="trafficPlans.length"
+                  layout="prev, pager, next"
+                  small
+                />
+              </div>
             </div>
 
             <div v-if="plansLoading" class="state-container">
@@ -23,7 +34,7 @@
 
             <div v-else class="plans-grid">
               <article
-                v-for="plan in trafficPlans"
+                v-for="plan in paginatedTrafficPlans"
                 :key="plan.id"
                 class="plan-card"
                 :class="{
@@ -65,6 +76,15 @@
                 </div>
               </article>
             </div>
+            <el-pagination
+              v-if="trafficPlans.length > pageSize"
+              v-model:current-page="trafficPage"
+              class="plans-pagination mobile-pagination"
+              :page-size="pageSize"
+              :total="trafficPlans.length"
+              layout="prev, pager, next"
+              small
+            />
           </section>
 
           <aside
@@ -183,7 +203,18 @@
                 <h2>家宽IP套餐</h2>
                 <p>家宽 IP 套餐只限制使用时间，不限制流量。</p>
               </div>
-              <span class="section-count">{{ homeIpPlans.length }} 个可购买套餐</span>
+              <div class="section-actions">
+                <span class="section-count">{{ homeIpPlans.length }} 个可购买套餐</span>
+                <el-pagination
+                  v-if="homeIpPlans.length > pageSize"
+                  v-model:current-page="homeIpPage"
+                  class="plans-pagination desktop-pagination"
+                  :page-size="pageSize"
+                  :total="homeIpPlans.length"
+                  layout="prev, pager, next"
+                  small
+                />
+              </div>
             </div>
             <div v-if="plansLoading" class="state-container">
               <el-icon class="is-loading"><Loading /></el-icon>
@@ -194,7 +225,7 @@
             </div>
             <div v-else class="plans-grid">
               <article
-                v-for="plan in homeIpPlans"
+                v-for="plan in paginatedHomeIpPlans"
                 :key="plan.id"
                 class="plan-card"
                 :class="{
@@ -235,6 +266,15 @@
                 </div>
               </article>
             </div>
+            <el-pagination
+              v-if="homeIpPlans.length > pageSize"
+              v-model:current-page="homeIpPage"
+              class="plans-pagination mobile-pagination"
+              :page-size="pageSize"
+              :total="homeIpPlans.length"
+              layout="prev, pager, next"
+              small
+            />
           </section>
 
           <aside
@@ -460,7 +500,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { CircleCheck, Loading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -470,7 +510,10 @@ import {
   buildDisplayPlans,
   filterHomeIpPlans,
   filterTrafficPlans,
-  resolveRecommendedTrafficPlanId
+  paginatePlans,
+  resolvePlanPage,
+  resolveRecommendedTrafficPlanId,
+  sortPlansWithCurrentFirst
 } from '@/utils/plan-categories'
 
 const route = useRoute()
@@ -486,6 +529,10 @@ const pageLoading = ref(false)
 const plansLoading = ref(false)
 const renewSubmitting = ref(false)
 const broadbandSectionRef = ref(null)
+const trafficPage = ref(1)
+const homeIpPage = ref(1)
+const isMobile = ref(false)
+let mobileMediaQuery = null
 
 const currentPlanId = computed(() => userInfo.value.plan_id || null)
 const selectedPlan = computed(() => displayPlans.value.find((plan) => plan.id === selectedPlanId.value) || null)
@@ -505,8 +552,19 @@ const renewTipText = computed(() => {
 
 const recommendedPlanId = computed(() => resolveRecommendedTrafficPlanId(plans.value))
 const displayPlans = computed(() => buildDisplayPlans(plans.value, recommendedPlanId.value))
-const trafficPlans = computed(() => filterTrafficPlans(displayPlans.value))
-const homeIpPlans = computed(() => filterHomeIpPlans(displayPlans.value))
+const pageSize = computed(() => isMobile.value ? 2 : 4)
+const trafficPlans = computed(() => sortPlansWithCurrentFirst(filterTrafficPlans(displayPlans.value), currentPlanId.value))
+const homeIpPlans = computed(() => sortPlansWithCurrentFirst(filterHomeIpPlans(displayPlans.value), userInfo.value.home_plan_id || null))
+const paginatedTrafficPlans = computed(() => paginatePlans(trafficPlans.value, trafficPage.value, pageSize.value))
+const paginatedHomeIpPlans = computed(() => paginatePlans(homeIpPlans.value, homeIpPage.value, pageSize.value))
+
+watch([trafficPlans, pageSize], () => {
+  trafficPage.value = Math.min(trafficPage.value, Math.max(1, Math.ceil(trafficPlans.value.length / pageSize.value)))
+})
+
+watch([homeIpPlans, pageSize], () => {
+  homeIpPage.value = Math.min(homeIpPage.value, Math.max(1, Math.ceil(homeIpPlans.value.length / pageSize.value)))
+})
 
 /**
  * 初始化套餐页所需数据。
@@ -553,6 +611,11 @@ function applyRenewRouteSelection() {
   }
 
   selectedPlanId.value = routePlan.id
+  if (selectedPlanCategory.value === 'broadband') {
+    homeIpPage.value = resolvePlanPage(homeIpPlans.value, routePlan.id, pageSize.value)
+  } else {
+    trafficPage.value = resolvePlanPage(trafficPlans.value, routePlan.id, pageSize.value)
+  }
   return true
 }
 
@@ -947,8 +1010,23 @@ function getRenewErrorMessage(error) {
   return error?.userMessage || error?.response?.data?.message || '续费失败，请重试'
 }
 
+/**
+ * 同步移动端断点状态，使每页数量与页面响应式布局保持一致。
+ * @param {MediaQueryListEvent|MediaQueryList} event - 当前媒体查询状态。
+ */
+function syncMobileState(event) {
+  isMobile.value = event.matches
+}
+
 onMounted(() => {
+  mobileMediaQuery = window.matchMedia('(max-width: 768px)')
+  syncMobileState(mobileMediaQuery)
+  mobileMediaQuery.addEventListener('change', syncMobileState)
   loadPageData()
+})
+
+onBeforeUnmount(() => {
+  mobileMediaQuery?.removeEventListener('change', syncMobileState)
 })
 </script>
 
@@ -1032,6 +1110,57 @@ onMounted(() => {
 .section-count.pending {
   background: #f1f5f9;
   color: #64748b;
+}
+
+.section-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.plans-pagination {
+  justify-content: flex-end;
+}
+
+:deep(.plans-pagination .btn-prev),
+:deep(.plans-pagination .btn-next),
+:deep(.plans-pagination .el-pager li) {
+  min-width: 32px;
+  height: 32px;
+  margin: 0 3px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text-main);
+  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+:deep(.plans-pagination .el-pager li.is-active) {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+:deep(.plans-pagination .btn-prev:not(:disabled):hover),
+:deep(.plans-pagination .btn-next:not(:disabled):hover),
+:deep(.plans-pagination .el-pager li:not(.is-active):hover) {
+  border-color: var(--accent);
+  background: #eef6ff;
+  color: var(--accent);
+}
+
+:deep(.plans-pagination .btn-prev:disabled),
+:deep(.plans-pagination .btn-next:disabled) {
+  border-color: #e5e7eb;
+  background: #f8fafc;
+  color: #c0c4cc;
+}
+
+.mobile-pagination {
+  display: none;
 }
 
 .state-container,
@@ -1451,6 +1580,10 @@ onMounted(() => {
     gap: 10px;
   }
 
+  .section-actions {
+    align-items: flex-start;
+  }
+
   .section-head h2 {
     font-size: 19px;
   }
@@ -1458,6 +1591,15 @@ onMounted(() => {
   .plans-grid {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+
+  .desktop-pagination {
+    display: none;
+  }
+
+  .mobile-pagination {
+    display: flex;
+    margin-top: 14px;
   }
 
   .plan-card {
