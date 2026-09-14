@@ -859,6 +859,11 @@ onBeforeUnmount(() => {
 @media (max-width: 767px) {
   .content-card { padding: 12px; }
   .toolbar { align-items: stretch; flex-direction: column; }
+  .toolbar .el-button {
+    width: 100%;
+    margin-left: 0;
+    box-sizing: border-box;
+  }
   .url-text, .backup-status { overflow-wrap: anywhere; }
   :deep(.el-dialog) { width: calc(100vw - 24px) !important; }
   :deep(.el-form-item) { display: block; }
