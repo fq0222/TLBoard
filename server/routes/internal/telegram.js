@@ -1,11 +1,13 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const { authenticateInternalTelegram } = require('../../middleware/auth-internal-telegram');
+const { telegramAuthenticatedClientLimiter } = require('../../middleware/telegram-internal-rate-limit');
 const telegramInternalController = require('../../controllers/admin/telegram-internal-controller');
 
 const router = express.Router();
 
 router.use('/api/internal/telegram', authenticateInternalTelegram);
+router.use('/api/internal/telegram', telegramAuthenticatedClientLimiter);
 
 router.get('/api/internal/telegram/health', telegramInternalController.getHealth);
 

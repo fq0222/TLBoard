@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const config = require('../config');
 const { createLogger } = require('../utils/logger');
+const { telegramAuthFailureLimiter } = require('./telegram-internal-rate-limit');
 
 const logger = createLogger('AUTH-TELEGRAM-INTERNAL');
 const DEFAULT_ALLOWED_SKEW_SECONDS = 300;
@@ -76,6 +77,22 @@ function createTelegramInternalAuthMiddleware(options = {}) {
     allowedSkewSeconds = config.telegram?.internalApiAllowedSkewSeconds || DEFAULT_ALLOWED_SKEW_SECONDS
   } = options;
 
+  const failureLimiter = options.failureLimiter || telegramAuthFailureLimiter;
+
+  /**
+   * 返回内部接口鉴权失败，并且只在该失败分支累计来源 IP 次数。
+   * @param {Object} req - Express 请求对象
+   * @param {Object} res - Express 响应对象
+   * @returns {Object|undefined} Express 响应结果
+   */
+  function rejectAuthentication(req, res) {
+    return failureLimiter(req, res, () => res.status(401).json({
+      code: 1002,
+      message: '内部接口鉴权失败',
+      data: null
+    }));
+  }
+
   return async function authenticateInternalTelegram(req, res, next) {
     if (!enabled) {
       logger.warn('Telegram 内部接口未启用');
@@ -92,31 +109,19 @@ function createTelegramInternalAuthMiddleware(options = {}) {
 
     if (!client || !timestamp || !signature) {
       logger.warn('Telegram 内部鉴权缺少必要请求头');
-      return res.status(401).json({
-        code: 1002,
-        message: '内部接口鉴权失败',
-        data: null
-      });
+      return rejectAuthentication(req, res);
     }
 
     if (client !== 'telegram-bot') {
       logger.warn(`Telegram 内部鉴权客户端非法: ${client}`);
-      return res.status(401).json({
-        code: 1002,
-        message: '内部接口鉴权失败',
-        data: null
-      });
+      return rejectAuthentication(req, res);
     }
 
     const timestampNumber = Number(timestamp);
     const now = Math.floor(Date.now() / 1000);
     if (!Number.isFinite(timestampNumber) || Math.abs(now - timestampNumber) > allowedSkewSeconds) {
       logger.warn(`Telegram 内部鉴权时间戳超出允许范围: ${timestamp}`);
-      return res.status(401).json({
-        code: 1002,
-        message: '内部接口鉴权失败',
-        data: null
-      });
+      return rejectAuthentication(req, res);
     }
 
     const rawBody = getRequestRawBody(req);
@@ -134,11 +139,7 @@ function createTelegramInternalAuthMiddleware(options = {}) {
 
     if (!isTelegramSignatureValid(signature, expectedSignature)) {
       logger.warn(`Telegram 内部鉴权签名不匹配: path=${path}`);
-      return res.status(401).json({
-        code: 1002,
-        message: '内部接口鉴权失败',
-        data: null
-      });
+      return rejectAuthentication(req, res);
     }
 
     req.telegramInternalClient = {
@@ -156,4 +157,3 @@ module.exports = {
   buildTelegramSignaturePayload,
   createTelegramInternalAuthMiddleware
 };
-
