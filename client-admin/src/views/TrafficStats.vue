@@ -69,6 +69,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { ElMessage } from 'element-plus/es/components/message/index.mjs'
 import { Refresh } from '@element-plus/icons-vue'
 import api from '@/api'
+import { getTrafficChartLayout } from '@/utils/traffic-chart-layout'
 
 echarts.use([
   BarChart,
@@ -226,14 +227,14 @@ function renderChart() {
     chartInstance.on('datazoom', updateLabelButtons)
   }
 
-  const visibleServerCount = getVisibleServerCount()
+  const chartLayout = getTrafficChartLayout(chartRef.value.clientWidth, window.innerWidth)
+  const visibleServerCount = chartLayout.visibleServerCount
 
   chartInstance.setOption({
     grid: {
       top: 48,
-      right: 36,
       bottom: 112,
-      left: 72,
+      ...chartLayout.grid,
       containLabel: true
     },
     tooltip: {
@@ -403,17 +404,6 @@ function formatServerAxisLabel(value) {
   }
 
   return lines.join('\n')
-}
-
-/**
- * 按当前图表宽度估算一次能舒服展示的服务器数量。
- *
- * @returns {number} 可见服务器数量
- */
-function getVisibleServerCount() {
-  const chartWidth = chartRef.value?.clientWidth || 0
-  const plotWidth = Math.max(0, chartWidth - 160)
-  return Math.max(1, Math.floor(plotWidth / 70))
 }
 
 /**
@@ -601,6 +591,7 @@ watch(servers, async () => {
 }
 @media (max-width: 767px) {
   :deep(.el-dialog) { width: calc(100vw - 24px) !important; }
-  .chart-shell { min-width: 0; overflow-x: auto; }
+  .chart-shell { min-width: 0; padding: 10px; overflow-x: auto; }
+  .label-layer { inset: 10px; }
 }
 </style>

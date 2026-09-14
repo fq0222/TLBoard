@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { getTrafficChartLayout } from '../src/utils/traffic-chart-layout.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
@@ -10,6 +11,25 @@ const root = path.resolve(__dirname, '..')
 function read(relativePath) {
   return fs.readFileSync(path.resolve(root, relativePath), 'utf8')
 }
+
+test('移动端流量图表利用横向空间展示更多服务器', () => {
+  const layout = getTrafficChartLayout(360, 360)
+
+  assert.deepEqual(layout.grid, {
+    left: 8,
+    right: 8
+  })
+  assert.equal(layout.visibleServerCount, 4)
+})
+
+test('桌面端图表容器较窄时仍保留桌面边距', () => {
+  const layout = getTrafficChartLayout(600, 1024)
+
+  assert.deepEqual(layout.grid, {
+    left: 72,
+    right: 36
+  })
+})
 
 test('管理端提供最近一轮服务器流量统计页面入口', () => {
   const api = read('src/api/index.js')
@@ -39,7 +59,7 @@ test('管理端提供最近一轮服务器流量统计页面入口', () => {
   assert.match(page, /labelButtons/)
   assert.match(page, /updateLabelButtons/)
   assert.match(page, /user-count-button/)
-  assert.match(page, /getVisibleServerCount/)
+  assert.match(page, /getTrafficChartLayout/)
   assert.doesNotMatch(page, /nameLocation: 'end'/)
   assert.match(page, /background: #ecf5ff/)
   assert.match(page, /border-radius: 4px/)
