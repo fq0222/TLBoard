@@ -1,6 +1,6 @@
 /**
  * 3X-UI 数据库备份工具。
- * 负责读取 `xui_servers` 表中的服务器配置，下载每台服务器的 `x-ui.db`
+ * 负责读取 `xui_servers` 表中的服务器配置，通过原生数据库接口下载备份
  * 并保存到 `server/backupDB` 目录，同时支持通过回调上报逐服务器进度。
  */
 
@@ -27,13 +27,53 @@ function sanitizeFileName(value) {
 }
 
 /**
- * 校验下载内容是否为 SQLite 数据库文件。
+ * 识别 3X-UI 原生数据库备份格式，并拒绝常见的错误页面响应。
  *
  * @param {Buffer} buffer - 下载得到的二进制内容
- * @returns {boolean} 是否包含 SQLite 文件头
+ * @returns {{valid: boolean, format: string, extension: string|null}} 格式识别结果
  */
-function isSqliteDatabase(buffer) {
-  return Buffer.isBuffer(buffer) && buffer.subarray(0, 16).toString('utf8') === 'SQLite format 3\0';
+function detectBackupFormat(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    return { valid: false, format: 'empty', extension: null };
+  }
+
+  if (buffer.subarray(0, 16).toString('utf8') === 'SQLite format 3\0') {
+    return { valid: true, format: 'sqlite', extension: '.db' };
+  }
+
+  if (buffer.subarray(0, 5).toString('ascii') === 'PGDMP') {
+    return { valid: true, format: 'postgres-custom', extension: '.dump' };
+  }
+
+  const prefix = buffer.subarray(0, 512).toString('utf8').trimStart();
+  if (prefix.startsWith('{') || prefix.startsWith('[')) {
+    return { valid: false, format: 'json-response', extension: null };
+  }
+
+  if (/^<!doctype html|^<html/i.test(prefix)) {
+    return { valid: false, format: 'html-response', extension: null };
+  }
+
+  return { valid: false, format: 'unknown', extension: null };
+}
+
+/**
+ * 先写入同目录临时文件，再重命名替换最终备份，避免残缺响应直接污染备份文件。
+ *
+ * @param {string} filePath - 最终备份路径
+ * @param {Buffer} buffer - 已校验的备份内容
+ */
+function writeBackupFile(filePath, buffer) {
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+
+  try {
+    fs.writeFileSync(tempPath, buffer);
+    fs.renameSync(tempPath, filePath);
+  } finally {
+    if (fs.existsSync(tempPath)) {
+      fs.unlinkSync(tempPath);
+    }
+  }
 }
 
 /**
@@ -92,26 +132,46 @@ async function backupServer(server, options = {}) {
   fs.mkdirSync(backupDir, { recursive: true });
 
   const client = buildClient(server, options);
-  const data = typeof client.getMigration === 'function'
-    ? await client.getMigration()
-    : await client.getDb();
-  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
-  const filePath = path.join(backupDir, `${sanitizeFileName(server.name)}-x-ui.db`);
-  const validSqlite = isSqliteDatabase(buffer);
+  const data = await client.getDb();
+  const buffer = data === null || data === undefined
+    ? Buffer.alloc(0)
+    : (Buffer.isBuffer(data) ? data : Buffer.from(data));
+  const detected = detectBackupFormat(buffer);
+  const validSqlite = detected.format === 'sqlite';
 
-  if (!validSqlite) {
-    logger.warn(`服务器 ${server.name} 备份文件 SQLite 头校验未通过: ${filePath}`);
-  } else {
-    fs.writeFileSync(filePath, buffer);
+  if (!detected.valid) {
+    const prefixHex = buffer.subarray(0, 16).toString('hex');
+    logger.warn(
+      `服务器 ${server.name} 数据库备份格式校验失败: `
+      + `format=${detected.format}, size=${buffer.length}, prefix_hex=${prefixHex}`
+    );
+    return {
+      success: false,
+      skipped: false,
+      server,
+      size: buffer.length,
+      format: detected.format,
+      validSqlite
+    };
   }
 
-  logger.info(`服务器 ${server.name} 数据库备份完成: ${filePath}, ${buffer.length} bytes`);
+  const filePath = path.join(
+    backupDir,
+    `${sanitizeFileName(server.name)}-x-ui${detected.extension}`
+  );
+  writeBackupFile(filePath, buffer);
+
+  logger.info(
+    `服务器 ${server.name} 数据库备份完成: `
+    + `${filePath}, format=${detected.format}, ${buffer.length} bytes`
+  );
   return {
-    success: validSqlite,
+    success: detected.valid,
     skipped: false,
     server,
     filePath,
     size: buffer.length,
+    format: detected.format,
     validSqlite
   };
 }
@@ -214,5 +274,6 @@ module.exports = {
   backupXuiDatabases,
   backupServer,
   buildClient,
+  detectBackupFormat,
   sanitizeFileName
 };
