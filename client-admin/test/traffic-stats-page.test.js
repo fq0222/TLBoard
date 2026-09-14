@@ -31,6 +31,17 @@ test('桌面端图表容器较窄时仍保留桌面边距', () => {
   })
 })
 
+test('移动端用户明细完整显示流量列并省略过长邮箱', () => {
+  const page = read('src/views/TrafficStats.vue')
+
+  assert.match(
+    page,
+    /prop="email" label="用户 email" min-width="160" show-overflow-tooltip/
+  )
+  assert.match(page, /label="使用流量" width="100" align="right"/)
+  assert.match(page, /\.traffic-user-dialog \.el-dialog__body[\s\S]*padding-right: 12px/)
+})
+
 test('管理端提供最近一轮服务器流量统计页面入口', () => {
   const api = read('src/api/index.js')
   const router = read('src/router/index.js')

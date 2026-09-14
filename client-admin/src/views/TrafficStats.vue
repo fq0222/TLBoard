@@ -36,12 +36,13 @@
 
     <el-dialog
       v-model="userDialogVisible"
+      class="traffic-user-dialog"
       :title="selectedServer ? `${selectedServer.serverName} 使用用户` : '使用用户'"
       width="560px"
     >
       <el-table :data="selectedServer?.users || []" border>
-        <el-table-column prop="email" label="用户 email" min-width="260" />
-        <el-table-column label="使用流量" width="140" align="right">
+        <el-table-column prop="email" label="用户 email" min-width="160" show-overflow-tooltip />
+        <el-table-column label="使用流量" width="100" align="right">
           <template #default="{ row }">
             {{ formatUserTraffic(row.traffic) }}
           </template>
@@ -591,6 +592,10 @@ watch(servers, async () => {
 }
 @media (max-width: 767px) {
   :deep(.el-dialog) { width: calc(100vw - 24px) !important; }
+  :global(.traffic-user-dialog .el-dialog__body) {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
   .chart-shell { min-width: 0; padding: 10px; overflow-x: auto; }
   .label-layer { inset: 10px; }
 }
