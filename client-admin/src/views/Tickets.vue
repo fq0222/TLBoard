@@ -106,7 +106,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus/es/components/message/index.mjs'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
@@ -174,6 +174,15 @@ async function fetchTickets() {
   }
 }
 
+/**
+ * 响应页头铃铛的工单刷新请求。
+ * 核心分支语义：保留当前筛选条件和页码，同时更新统计卡片与工单列表。
+ */
+function handleTicketListRefresh() {
+  fetchStats()
+  fetchTickets()
+}
+
 async function handleDelete(row) {
   try {
     await ElMessageBox.confirm(
@@ -206,8 +215,13 @@ watch(statusFilter, () => {
 })
 
 onMounted(() => {
+  window.addEventListener('ticket-list-refresh-requested', handleTicketListRefresh)
   fetchStats()
   fetchTickets()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('ticket-list-refresh-requested', handleTicketListRefresh)
 })
 </script>
 

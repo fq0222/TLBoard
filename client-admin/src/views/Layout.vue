@@ -107,6 +107,17 @@
         </div>
 
         <div class="header-right">
+          <button
+            type="button"
+            class="ticket-reminder-button"
+            :class="{ shaking: actionRequiredTicketCount > 0 }"
+            aria-label="查看待处理工单"
+            @click="goToTickets"
+          >
+            <el-icon :size="22"><Bell /></el-icon>
+            <span v-if="actionRequiredTicketCount > 0" class="ticket-reminder-dot"></span>
+          </button>
+
           <el-dropdown @command="handleCommand">
             <span class="user-info">
               <el-icon><User /></el-icon>
@@ -135,17 +146,6 @@
       aria-label="关闭导航菜单"
       @click="closeMobileSidebar"
     ></button>
-
-    <button
-      type="button"
-      class="ticket-reminder-button"
-      :class="{ shaking: actionRequiredTicketCount > 0 }"
-      aria-label="查看待处理工单"
-      @click="goToTickets"
-    >
-      <el-icon :size="24"><Bell /></el-icon>
-      <span v-if="actionRequiredTicketCount > 0" class="ticket-reminder-dot"></span>
-    </button>
   </div>
 </template>
 
@@ -269,10 +269,11 @@ function handleTicketReadStateChanged() {
 
 /**
  * 跳转到工单管理页面。
- * 核心分支语义：当前已在工单页时只刷新提醒数量，不重复触发路由跳转。
+ * 核心分支语义：当前已在工单列表时刷新列表和提醒，其他页面统一跳转到工单列表。
  */
 async function goToTickets() {
-  if (currentRoute.path.startsWith('/admin/tickets')) {
+  if (currentRoute.path === '/admin/tickets') {
+    window.dispatchEvent(new CustomEvent('ticket-list-refresh-requested'))
     await refreshTicketReminder({ force: true })
     return
   }
@@ -473,6 +474,7 @@ onBeforeUnmount(() => {
 .header-right {
   display: flex;
   align-items: center;
+  gap: 16px;
 }
 
 .user-info {
@@ -488,28 +490,26 @@ onBeforeUnmount(() => {
 }
 
 .ticket-reminder-button {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 230;
+  position: relative;
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  height: 52px;
+  width: 38px;
+  height: 38px;
+  padding: 0;
   border: 0;
   border-radius: 50%;
   background: #409eff;
   color: #fff;
-  box-shadow: 0 12px 28px rgba(64, 158, 255, 0.32);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.28);
   cursor: pointer;
-  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .ticket-reminder-button:hover {
   background: #337ecc;
-  transform: translateY(-2px);
-  box-shadow: 0 16px 34px rgba(64, 158, 255, 0.38);
+  box-shadow: 0 6px 16px rgba(64, 158, 255, 0.36);
 }
 
 .ticket-reminder-button.shaking {
@@ -518,10 +518,10 @@ onBeforeUnmount(() => {
 
 .ticket-reminder-dot {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 10px;
-  height: 10px;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
   border: 2px solid #fff;
   border-radius: 50%;
   background: #f56c6c;
@@ -598,9 +598,5 @@ onBeforeUnmount(() => {
     padding: 12px;
   }
 
-  .ticket-reminder-button {
-    right: 16px;
-    bottom: 16px;
-  }
 }
 </style>
