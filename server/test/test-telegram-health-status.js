@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
 const XuiService = require('../integrations/xui/xui-service');
 const telegramRepository = require('../repositories/telegram-repository');
 const serversRepository = require('../repositories/servers-repository');
+const trafficRepository = require('../repositories/traffic-repository');
 const telegramMonitorService = require('../services/shared/telegram-monitor-service');
 
 const originals = {
@@ -21,7 +22,8 @@ const originals = {
   createAlert: telegramRepository.createAlert,
   updateOpenAlert: telegramRepository.updateOpenAlert,
   resolveAlert: telegramRepository.resolveAlert,
-  updateServerStatus: serversRepository.updateServerStatus
+  updateServerStatus: serversRepository.updateServerStatus,
+  listAllServersForHealthCheck: trafficRepository.listAllServersForHealthCheck
 };
 
 function restoreMocks() {
@@ -33,6 +35,7 @@ function restoreMocks() {
   telegramRepository.updateOpenAlert = originals.updateOpenAlert;
   telegramRepository.resolveAlert = originals.resolveAlert;
   serversRepository.updateServerStatus = originals.updateServerStatus;
+  trafficRepository.listAllServersForHealthCheck = originals.listAllServersForHealthCheck;
 }
 
 test.afterEach(restoreMocks);
@@ -153,4 +156,27 @@ test('健康巡检成功时清零失败次数并标记服务器在线', async ()
   assert.equal(statusWrites.length, 1);
   assert.equal(statusWrites[0].serverId, 9);
   assert.equal(statusWrites[0].status, 1);
+});
+
+test('巡检汇总按服务器健康结果统计而不是按 Promise 完成状态统计', async () => {
+  trafficRepository.listAllServersForHealthCheck = async () => ([
+    { id: 1, name: '正常服务器', api_url: 'https://healthy.example.com', api_token: 'token' },
+    { id: 2, name: '超时服务器', api_url: 'https://timeout.example.com', api_token: 'token' }
+  ]);
+  XuiService.getInstance = async (apiUrl) => ({
+    getServerStatus: async () => apiUrl.includes('healthy')
+      ? { success: true, data: { xrayState: 'running' } }
+      : { success: false, message: 'Request timeout' },
+    getInbounds: async () => ({ success: false, message: 'Request timeout' })
+  });
+  telegramRepository.findServerHealthDetail = async () => ({ consecutive_failures: 0 });
+  telegramRepository.upsertServerHealthCheck = async () => {};
+  telegramRepository.findOpenAlertByServerAndType = async () => null;
+  telegramRepository.createAlert = async () => {};
+  telegramRepository.resolveAlert = async () => {};
+  serversRepository.updateServerStatus = async () => {};
+
+  const summary = await telegramMonitorService.checkAllServersHealth({});
+
+  assert.deepEqual(summary, { total: 2, success: 1, failure: 1 });
 });

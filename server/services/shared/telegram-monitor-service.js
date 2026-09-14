@@ -236,7 +236,7 @@ async function resolveAlert(db, serverId, alertType) {
  *
  * @param {Object} db - 数据库实例
  * @param {Object} server - 服务器配置
- * @returns {Promise<void>}
+ * @returns {Promise<{healthy: boolean}>} 面板 API 与鉴权均健康时返回 true，否则返回 false
  */
 async function checkSingleServerHealth(db, server) {
   const checkedAt = getNowTimestamp();
@@ -266,7 +266,7 @@ async function checkSingleServerHealth(db, server) {
       await updateServerOnlineStatus(db, server, 1, checkedAt);
       await resolveAlert(db, server.id, 'panel_unreachable');
       logger.info(`服务器 ${server.name} 巡检结果: panel_api_status=healthy, panel_auth_status=healthy, xray_runtime_status=${xrayRuntimeStatus}`);
-      return;
+      return { healthy: true };
     }
 
     const serverStatusFailureDetail = String(serverStatusResult.message || '').trim();
@@ -300,7 +300,7 @@ async function checkSingleServerHealth(db, server) {
         last_triggered_at: checkedAt
       });
       logger.warn(`服务器 ${server.name} 巡检结果: panel_api_status=${failure.panelApiStatus}, panel_auth_status=${failure.panelAuthStatus}, xray_runtime_status=unknown`);
-      return;
+      return { healthy: false };
     }
 
     logger.info(`服务器 ${server.name} 面板连通成功`);
@@ -320,6 +320,7 @@ async function checkSingleServerHealth(db, server) {
     await resolveAlert(db, server.id, 'panel_unreachable');
     logger.warn(`服务器 ${server.name} server/status 读取失败，已降级记录 xray_runtime_status=unknown`);
     logger.info(`服务器 ${server.name} 巡检结果: panel_api_status=healthy, panel_auth_status=healthy, xray_runtime_status=unknown`);
+    return { healthy: true };
   } catch (error) {
     const detail = String(error.message || '').trim();
     const consecutiveFailures = await getNextConsecutiveFailures(db, server.id);
@@ -345,6 +346,7 @@ async function checkSingleServerHealth(db, server) {
       message: detail || '服务器健康巡检异常',
       last_triggered_at: checkedAt
     });
+    return { healthy: false };
   }
 }
 
@@ -352,7 +354,7 @@ async function checkSingleServerHealth(db, server) {
  * 巡检所有已配置服务器健康状态。
  *
  * @param {Object} db - 数据库实例
- * @returns {Promise<void>}
+ * @returns {Promise<{total: number, success: number, failure: number}>} 本轮健康与失败数量
  */
 async function checkAllServersHealth(db) {
   const servers = await trafficRepository.listAllServersForHealthCheck(db);
@@ -360,7 +362,7 @@ async function checkAllServersHealth(db) {
 
   if (servers.length === 0) {
     logger.warn('Telegram 服务器健康巡检结束：没有已配置服务器');
-    return;
+    return { total: 0, success: 0, failure: 0 };
   }
 
   const results = await runWithConcurrency(
@@ -368,7 +370,9 @@ async function checkAllServersHealth(db) {
     TELEGRAM_HEALTH_CHECK_CONCURRENCY,
     (server) => checkSingleServerHealth(db, server)
   );
-  const successCount = results.filter((result) => result.status === 'fulfilled').length;
+  const successCount = results.filter((result) => (
+    result.status === 'fulfilled' && result.value?.healthy === true
+  )).length;
   const failureCount = results.length - successCount;
 
   results.forEach((result, index) => {
@@ -378,6 +382,7 @@ async function checkAllServersHealth(db) {
   });
 
   logger.info(`Telegram 服务器健康巡检完成：共 ${servers.length} 台，成功 ${successCount} 台，失败 ${failureCount} 台`);
+  return { total: servers.length, success: successCount, failure: failureCount };
 }
 
 /**
