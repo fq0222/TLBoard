@@ -57,6 +57,11 @@
           </template>
         </el-table-column>
         <el-table-column prop="traffic_limit_text" label="流量上限" />
+        <el-table-column label="用户余额">
+          <template #default="scope">
+            {{ formatBalance(scope.row.balance) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="status_text" label="状态" width="100">
           <template #default="scope">
             <el-tag :type="getStatusType(scope.row.status)">{{ scope.row.status_text }}</el-tag>
@@ -89,6 +94,7 @@
           <dl class="mobile-record-fields">
             <div><dt>流量套餐</dt><dd>{{ user.plan_name || '-' }}</dd></div>
             <div><dt>已用 / 上限</dt><dd>{{ user.traffic_used_text }} / {{ user.traffic_limit_text }}</dd></div>
+            <div><dt>用户余额</dt><dd>{{ formatBalance(user.balance) }}</dd></div>
             <div><dt>流量到期</dt><dd>{{ user.expire_text || '-' }}</dd></div>
             <div><dt>家宽套餐</dt><dd>{{ user.home_plan_name || '-' }}</dd></div>
           </dl>
@@ -528,6 +534,19 @@ const unitMultipliers = {
   'MB': 1024 * 1024,
   'GB': 1024 * 1024 * 1024,
   'TB': 1024 * 1024 * 1024 * 1024
+}
+
+/**
+ * 将后端返回的分单位余额格式化为元。
+ * 关键分支：空值或非数字按 0 分展示，始终保留两位小数。
+ *
+ * @param {*} balance - 原始余额，单位为分
+ * @returns {string} 带元单位的余额文本
+ */
+function formatBalance(balance) {
+  const cents = Number(balance)
+  const normalizedCents = Number.isFinite(cents) ? cents : 0
+  return `${(normalizedCents / 100).toFixed(2)} 元`
 }
 
 // 将字节转换为指定单位的值

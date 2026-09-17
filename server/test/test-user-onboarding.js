@@ -250,6 +250,31 @@ test('admin user list returns home ip plan and expire fields', async () => {
   assert.equal(result.list[0].home_expire_text, '2030/3/18 01:46:40');
 });
 
+test('admin user list returns raw balance in cents', async () => {
+  const { db, getListSql } = createListUsersDb([
+    {
+      id: 6,
+      email: 'balance@example.com',
+      plan_id: 1,
+      plan_name: '基础套餐',
+      traffic_used: 0,
+      traffic_limit: 1024,
+      balance: 1234,
+      expire_at: 0,
+      enabled: 1,
+      disable_reason: null,
+      ip_location: '{}',
+      created_at: 6
+    }
+  ]);
+
+  const result = await usersService.listUsers(db, { page: 1, limit: 15 });
+
+  assert.match(getListSql(), /u\.balance/);
+  assert.equal(result.list[0].balance, 1234);
+  assert.equal(Object.hasOwn(result.list[0], 'balance_text'), false);
+});
+
 test('admin user update preserves disable reason when enabled value is unchanged and updates traffic used', async () => {
   const originalUser = {
     id: 10,

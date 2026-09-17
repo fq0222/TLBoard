@@ -373,6 +373,7 @@ async function listUsers(db, query) {
       home_expire_text: formatTime(user.home_expire_at),
       traffic_used: user.traffic_used,
       traffic_limit: user.traffic_limit,
+      balance: user.balance,
       traffic_used_text: formatTraffic(user.traffic_used),
       traffic_limit_text: formatTraffic(user.traffic_limit),
       expire_at: user.expire_at,

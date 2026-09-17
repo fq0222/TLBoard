@@ -420,7 +420,7 @@ async function listUsers(db, whereClause, params, limit, offset, sort) {
   return db.prepare(`
     SELECT
       u.id, u.email, u.plan_id, u.home_plan_id, u.home_expire_at,
-      u.traffic_used, u.traffic_limit, u.expire_at, u.enabled,
+      u.traffic_used, u.traffic_limit, u.balance, u.expire_at, u.enabled,
       u.disable_reason, u.ip_location, u.created_at,
       p.name as plan_name,
       hp.name as home_plan_name
