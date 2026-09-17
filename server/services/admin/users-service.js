@@ -325,15 +325,15 @@ function buildUserListWhere(query) {
 
 /**
  * 构造管理端用户列表排序选项。
- * 关键分支：目前只开放已用流量倒序，其它输入回落到默认创建时间倒序。
+ * 关键分支：仅开放已用流量和用户余额倒序，其它输入回落到默认创建时间倒序。
  *
  * @param {Object} query - 路由查询参数
  * @returns {{sortBy:string,sortOrder:string}} 仓储层使用的排序配置
  */
 function buildUserListSort(query) {
-  if (query.sort_by === 'traffic_used' && query.sort_order === 'desc') {
+  if (['traffic_used', 'balance'].includes(query.sort_by) && query.sort_order === 'desc') {
     return {
-      sortBy: 'traffic_used',
+      sortBy: query.sort_by,
       sortOrder: 'desc'
     };
   }

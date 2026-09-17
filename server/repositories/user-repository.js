@@ -399,6 +399,9 @@ function buildUserListOrderBy(sort = {}) {
   if (sort.sortBy === 'traffic_used' && sort.sortOrder === 'desc') {
     return 'ORDER BY COALESCE(u.traffic_used, 0) DESC, u.created_at DESC';
   }
+  if (sort.sortBy === 'balance' && sort.sortOrder === 'desc') {
+    return 'ORDER BY COALESCE(u.balance, 0) DESC, u.created_at DESC';
+  }
 
   return 'ORDER BY u.created_at DESC';
 }

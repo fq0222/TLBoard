@@ -57,7 +57,12 @@
           </template>
         </el-table-column>
         <el-table-column prop="traffic_limit_text" label="流量上限" />
-        <el-table-column label="用户余额">
+        <el-table-column
+          prop="balance"
+          label="用户余额"
+          sortable="custom"
+          :sort-orders="['descending', null]"
+        >
           <template #default="scope">
             {{ formatBalance(scope.row.balance) }}
           </template>
@@ -1240,11 +1245,11 @@ async function deleteUser(user) {
 
 /**
  * 处理管理端用户列表的服务端排序。
- * 关键分支：仅响应“已用流量”列，排序变化后回到第一页，让后端按全量结果排序再分页。
+ * 关键分支：仅响应“已用流量”和“用户余额”列，排序变化后回到第一页，让后端按全量结果排序再分页。
  */
 function handleSortChange({ prop, order }) {
-  if (prop === 'traffic_used' && order === 'descending') {
-    sortBy.value = 'traffic_used'
+  if (['traffic_used', 'balance'].includes(prop) && order === 'descending') {
+    sortBy.value = prop
     sortOrder.value = 'desc'
   } else {
     sortBy.value = ''

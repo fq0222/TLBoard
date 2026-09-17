@@ -7,9 +7,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { validationResult } = require('express-validator');
 
 const authService = require('../services/user/auth-service');
 const usersService = require('../services/admin/users-service');
+const usersRouter = require('../routes/admin/users');
 const userRepository = require('../repositories/user-repository');
 const planRepository = require('../repositories/plan-repository');
 const plansRepository = require('../repositories/plans-repository');
@@ -45,6 +47,20 @@ function replaceMethods(target, replacements) {
       }
     });
   };
+}
+
+/**
+ * 执行 Express 中间件并等待其调用 next。
+ * 关键分支：中间件传递错误时拒绝 Promise，否则在 next 后完成。
+ *
+ * @param {Function} middleware - Express 中间件
+ * @param {Object} req - 测试请求对象
+ * @returns {Promise<void>}
+ */
+function runMiddleware(middleware, req) {
+  return new Promise((resolve, reject) => {
+    middleware(req, {}, (error) => (error ? reject(error) : resolve()));
+  });
 }
 
 /**
@@ -174,6 +190,56 @@ test('admin user list sorts traffic used before pagination when requested', asyn
   });
 
   assert.match(getListSql(), /ORDER BY COALESCE\(u\.traffic_used, 0\) DESC, u\.created_at DESC\s+LIMIT \? OFFSET \?/);
+});
+
+test('admin user list sorts balance before pagination when requested', async () => {
+  const { db, getListSql } = createListUsersDb([
+    {
+      id: 2,
+      email: 'rich@example.com',
+      plan_id: 1,
+      plan_name: '基础套餐',
+      traffic_used: 0,
+      traffic_limit: 4096,
+      balance: 5000,
+      expire_at: 0,
+      enabled: 1,
+      disable_reason: null,
+      created_at: 2
+    }
+  ]);
+
+  await usersService.listUsers(db, {
+    page: 1,
+    limit: 15,
+    sort_by: 'balance',
+    sort_order: 'desc'
+  });
+
+  assert.match(getListSql(), /ORDER BY COALESCE\(u\.balance, 0\) DESC, u\.created_at DESC\s+LIMIT \? OFFSET \?/);
+});
+
+test('admin user list route accepts balance descending sort parameters', async () => {
+  const listRouteLayer = usersRouter.stack.find((layer) => layer.route && layer.route.path === '/');
+  assert.ok(listRouteLayer, 'admin user list route should exist');
+
+  const validatorMiddlewares = listRouteLayer.route.stack.slice(1, -1).map((layer) => layer.handle);
+  const req = {
+    query: {
+      sort_by: 'balance',
+      sort_order: 'desc'
+    },
+    body: {},
+    params: {},
+    headers: {},
+    cookies: {}
+  };
+
+  for (const middleware of validatorMiddlewares) {
+    await runMiddleware(middleware, req);
+  }
+
+  assert.deepEqual(validationResult(req).array(), []);
 });
 
 test('admin user list returns formatted ip location text', async () => {

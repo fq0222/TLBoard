@@ -33,7 +33,7 @@ router.get('/', authenticateAdmin, [
     .withMessage('套餐ID必须是大于0的整数'),
   query('sort_by')
     .optional()
-    .isIn(['traffic_used'])
+    .isIn(['traffic_used', 'balance'])
     .withMessage('排序字段无效'),
   query('sort_order')
     .optional()
