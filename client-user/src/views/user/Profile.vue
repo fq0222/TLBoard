@@ -19,6 +19,9 @@
             <dd>{{ rewardAmountText }}</dd>
           </div>
         </dl>
+        <p v-if="rewardPercent > 0" class="referral-reward-hint">
+          好友首购，你得到该订单实付金额的<span>{{ rewardPercent }}%</span>作为奖励。
+        </p>
         <div class="referral-action-row">
           <button
             type="button"
@@ -32,7 +35,7 @@
             class="text-link-button share-friend-button"
             @click="referralPosterRef?.open()"
           >
-            分享给好友
+            {{ rewardPercent > 0 ? `分享得${rewardPercent}%` : '分享给好友' }}
           </button>
           <a
             v-if="telegramChannelUrl"
@@ -492,6 +495,7 @@ import {
 import { createCfLatencySample } from '@/utils/cf-ip-browser-test.js'
 import { selectFallbackCfIp, selectRecommendedCfIps } from '@/utils/cf-ip-optimizer'
 import { getSubscriptionGenerationErrorMessage } from '@/utils/subscription-error'
+import { normalizeReferralRewardPercent } from '@/utils/referral-reward-display'
 
 const userStore = useUserStore()
 const userInfo = ref({})
@@ -644,6 +648,7 @@ const rewardAmountText = computed(() => {
 
   return `${((Number(referralSummary.value.reward_amount) || 0) / 100).toFixed(2)} 元`
 })
+const rewardPercent = computed(() => normalizeReferralRewardPercent(referralSummary.value))
 
 const homeExpireText = computed(() => {
   if (!userInfo.value.home_plan_name) return '暂无可订阅'
@@ -1729,6 +1734,18 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 8px 14px;
   margin-top: auto;
+}
+
+.referral-reward-hint {
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.referral-reward-hint span {
+  color: #2563eb;
+  font-weight: 800;
 }
 
 .referral-action-row .text-link-button {

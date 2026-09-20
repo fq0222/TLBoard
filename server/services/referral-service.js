@@ -198,7 +198,12 @@ async function getUserReferralSummary(db, req, userId, codeFactory = generateRef
   const referralCode = await getOrCreateReferralCode(db, userId, codeFactory);
   const clickRow = await referralRepository.countReferralClicks(db, userId);
   const rewardRow = await referralRepository.sumReferralRewards(db, userId);
+  const rewardSetting = await referralRepository.findReferralRewardSetting(db);
   const rewardAmount = Number(rewardRow && rewardRow.total !== undefined ? rewardRow.total : 0);
+  const configuredCoefficient = Number(rewardSetting && rewardSetting.value);
+  const rewardCoefficient = Number.isFinite(configuredCoefficient) && configuredCoefficient >= 0
+    ? configuredCoefficient
+    : 0;
 
   return {
     code: referralCode.code,
@@ -207,8 +212,60 @@ async function getUserReferralSummary(db, req, userId, codeFactory = generateRef
     click_count: Number((clickRow && clickRow.count) || 0),
     reward_count: Number((rewardRow && rewardRow.count) || 0),
     reward_amount: Number.isFinite(rewardAmount) ? rewardAmount : 0,
-    reward_amount_text: formatAmount(rewardAmount)
+    reward_amount_text: formatAmount(rewardAmount),
+    reward_coefficient: rewardCoefficient,
+    reward_percent: Number((rewardCoefficient * 100).toFixed(2))
   };
+}
+
+/**
+ * 脱敏推广奖励中的被推荐人邮箱。
+ * 职责：保留足以辨认奖励来源的局部字符，同时避免接口返回完整个人邮箱。
+ * 关键参数：email 为仓储返回的原始邮箱。
+ * 核心分支：长前缀保留前三后三，普通前缀保留首尾，极短前缀仅保留首字符。
+ *
+ * @param {string} email - 原始邮箱
+ * @returns {string} 脱敏邮箱
+ */
+function maskReferralEmail(email) {
+  const normalized = String(email || '').trim();
+  const atIndex = normalized.lastIndexOf('@');
+  if (atIndex <= 0) {
+    return normalized ? `${normalized.slice(0, 1)}***` : '';
+  }
+
+  const localPart = normalized.slice(0, atIndex);
+  const domain = normalized.slice(atIndex);
+  if (localPart.length > 6) {
+    return `${localPart.slice(0, 3)}***${localPart.slice(-3)}${domain}`;
+  }
+  if (localPart.length > 2) {
+    return `${localPart.slice(0, 1)}***${localPart.slice(-1)}${domain}`;
+  }
+  return `${localPart.slice(0, 1)}***${domain}`;
+}
+
+/**
+ * 脱敏推广奖励关联的订单号。
+ * 职责：让用户可凭前后片段核对记录，同时减少完整业务标识泄露。
+ * 关键参数：tradeNo 为原始订单号。
+ * 核心分支：短订单号保持原样，长订单号仅保留前七位和后四位。
+ *
+ * @param {string} tradeNo - 原始订单号
+ * @returns {string} 脱敏订单号
+ */
+function maskReferralTradeNo(tradeNo) {
+  const normalized = String(tradeNo || '').trim();
+  if (!normalized) {
+    return '';
+  }
+  if (normalized.length <= 4) {
+    return `${normalized.slice(0, 1)}***`;
+  }
+  if (normalized.length <= 11) {
+    return `${normalized.slice(0, 3)}***${normalized.slice(-2)}`;
+  }
+  return `${normalized.slice(0, 7)}***${normalized.slice(-4)}`;
 }
 
 /**
@@ -385,7 +442,11 @@ async function listUserRewards(db, userId, query = {}) {
     total: Number((rewardRow && rewardRow.count) || 0),
     page,
     limit,
-    list
+    list: list.map(reward => ({
+      ...reward,
+      referred_email: maskReferralEmail(reward.referred_email),
+      out_trade_no: maskReferralTradeNo(reward.out_trade_no)
+    }))
   };
 }
 

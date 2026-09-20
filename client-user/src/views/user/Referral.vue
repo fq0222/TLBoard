@@ -3,8 +3,13 @@
     <section class="hero-card">
       <div class="hero-copy">
         <div class="hero-badge">推广中心</div>
-        <h1 class="hero-title">分享链接，赚取奖励余额</h1>
-        <p class="hero-desc">查看谁通过你的推广链接完成付款、累计获得多少余额奖励，以及每一笔奖励的到账时间。</p>
+        <h1 class="hero-title">
+          {{ rewardPercent > 0 ? `邀请好友，首单奖励${rewardPercent}%` : '分享链接，赚取奖励余额' }}
+        </h1>
+        <p v-if="rewardPercent > 0" class="hero-desc">
+          好友首次付款后，你将获得该订单实付金额{{ rewardPercent }}%的奖励余额。奖励自动到账，可直接用于购买或续费套餐。
+        </p>
+        <p v-else class="hero-desc">查看推广点击、累计奖励余额和每一笔奖励的到账时间。</p>
       </div>
 
     </section>
@@ -14,7 +19,16 @@
         <div class="panel-head link-card-head">
           <div>
             <h2 class="panel-title">专属推广链接</h2>
-            <p class="panel-subtitle">复制后分享给新用户，对方完成首单支付后会给你发放奖励余额。</p>
+            <p class="panel-subtitle">复制链接分享给好友，好友通过链接注册并完成首单后，奖励将自动发放。</p>
+          </div>
+        </div>
+
+        <div v-if="rewardPercent > 0" class="reward-calculation">
+          <span class="reward-calculation-label">奖励怎么算？</span>
+          <div class="reward-calculation-grid">
+            <span>好友实付 ¥10 <strong>你获得 ¥{{ rewardExamples.ten }} 余额</strong></span>
+            <span>好友实付 ¥50 <strong>你获得 ¥{{ rewardExamples.fifty }} 余额</strong></span>
+            <span>好友实付 ¥100 <strong>你获得 ¥{{ rewardExamples.hundred }} 余额</strong></span>
           </div>
         </div>
 
@@ -32,6 +46,17 @@
             复制推广链接
           </el-button>
         </div>
+
+        <details v-if="rewardPercent > 0" class="reward-rules">
+          <summary>奖励规则</summary>
+          <ol>
+            <li>好友必须通过你的专属推广链接注册。</li>
+            <li>奖励仅针对好友完成的首笔付款订单。</li>
+            <li>奖励金额为该订单实际支付金额的{{ rewardPercent }}%。</li>
+            <li>奖励在订单付款成功后自动发放至账户余额。</li>
+            <li>奖励余额可用于购买或续费套餐，暂不支持提现。</li>
+          </ol>
+        </details>
 
       </article>
 
@@ -102,6 +127,38 @@
         </el-table-column>
       </el-table>
 
+      <div class="mobile-reward-list">
+        <el-empty v-if="rewards.length === 0" description="暂无推广奖励记录" />
+        <article
+          v-for="reward in rewards"
+          :key="reward.id || reward.out_trade_no"
+          class="mobile-reward-card"
+        >
+          <div class="mobile-reward-row mobile-reward-user-row">
+            <span class="mobile-reward-label">付款用户</span>
+            <strong class="mobile-reward-user">{{ reward.referred_email || '-' }}</strong>
+          </div>
+          <div class="mobile-reward-row mobile-reward-order-row">
+            <span class="mobile-reward-label">订单号</span>
+            <strong class="mobile-reward-value mobile-reward-order">{{ reward.out_trade_no || '-' }}</strong>
+          </div>
+          <div class="mobile-reward-grid">
+            <div class="mobile-reward-field mobile-reward-highlight">
+              <span class="mobile-reward-label">奖励金额</span>
+              <strong class="mobile-reward-value">{{ formatAmount(reward.reward_amount) }}</strong>
+            </div>
+            <div class="mobile-reward-field">
+              <span class="mobile-reward-label">付款金额</span>
+              <strong class="mobile-reward-value">{{ formatAmount(reward.amount) }}</strong>
+            </div>
+            <div class="mobile-reward-field mobile-reward-time">
+              <span class="mobile-reward-label">奖励时间</span>
+              <strong class="mobile-reward-value">{{ formatDateTime(reward.created_at) }}</strong>
+            </div>
+          </div>
+        </article>
+      </div>
+
       <div class="pagination-wrap">
         <el-pagination
           v-model:current-page="pagination.page"
@@ -119,6 +176,10 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import {
+  calculateReferralRewardAmount,
+  normalizeReferralRewardPercent
+} from '@/utils/referral-reward-display'
 
 const loading = ref(false)
 const summary = ref({})
@@ -136,6 +197,12 @@ const rewardAmountText = computed(() => {
 
   return formatAmount(summary.value.reward_amount)
 })
+const rewardPercent = computed(() => normalizeReferralRewardPercent(summary.value))
+const rewardExamples = computed(() => ({
+  ten: calculateReferralRewardAmount(10, summary.value),
+  fifty: calculateReferralRewardAmount(50, summary.value),
+  hundred: calculateReferralRewardAmount(100, summary.value)
+}))
 
 /**
  * 格式化流量显示，兼容后端返回的字符串数字。
@@ -297,7 +364,9 @@ async function copyReferralLink() {
 
   try {
     await copyToClipboard(summary.value.referral_url)
-    ElMessage.success('推广链接已复制')
+    ElMessage.success(rewardPercent.value > 0
+      ? `推广链接已复制，好友完成首购后你可获得${rewardPercent.value}%奖励`
+      : '推广链接已复制')
   } catch (error) {
     console.error('复制推广链接失败:', error)
     ElMessage.error('复制失败，请手动复制')
@@ -330,7 +399,7 @@ onMounted(() => {
 .hero-card,
 .panel-card {
   background: #fff;
-  border-radius: 20px;
+  border-radius: 8px;
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
 }
 
@@ -405,12 +474,49 @@ onMounted(() => {
   align-items: start;
 }
 
+.reward-calculation {
+  grid-column: 1 / -1;
+  padding: 16px;
+  border: 1px solid rgba(37, 99, 235, 0.1);
+  border-radius: 16px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+}
+
+.reward-calculation-label {
+  display: block;
+  margin-bottom: 12px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.reward-calculation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.reward-calculation-grid span {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #64748b;
+  font-size: 13px;
+}
+
+.reward-calculation-grid strong {
+  color: #2563eb;
+  font-size: 15px;
+}
+
 .link-card-head {
   margin-bottom: 0;
 }
 
 .link-box {
-  grid-column: 1 / -1;
+  grid-column: 1;
   padding: 16px;
   border-radius: 16px;
   background: #f8fafc;
@@ -418,8 +524,28 @@ onMounted(() => {
 
 .link-card-action {
   display: flex;
-  justify-content: flex-end;
-  align-items: flex-start;
+  grid-column: 2;
+  align-items: center;
+  justify-content: center;
+}
+
+.reward-rules {
+  grid-column: 1 / -1;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+  color: #475569;
+}
+
+.reward-rules summary {
+  color: #2563eb;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.reward-rules ol {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  line-height: 1.9;
 }
 
 .link-text {
@@ -497,6 +623,10 @@ onMounted(() => {
   margin-top: 20px;
 }
 
+.mobile-reward-list {
+  display: none;
+}
+
 @media (max-width: 1024px) {
   .hero-card,
   .summary-grid {
@@ -513,7 +643,7 @@ onMounted(() => {
   .hero-card,
   .panel-card {
     padding: 18px;
-    border-radius: 18px;
+    border-radius: 8px;
   }
 
   .hero-title {
@@ -535,7 +665,24 @@ onMounted(() => {
 
   .link-card-action {
     width: 100%;
+    align-items: stretch;
     justify-content: stretch;
+  }
+
+  .reward-calculation-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reward-calculation {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .reward-rules {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
   }
 
   .copy-link-btn {
@@ -546,6 +693,84 @@ onMounted(() => {
 
   .pagination-wrap {
     justify-content: center;
+  }
+
+  .reward-table {
+    display: none;
+  }
+
+  .mobile-reward-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 120px;
+  }
+
+  .mobile-reward-card {
+    padding: 8px 10px;
+    border: 1px solid #ebeef5;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .mobile-reward-row,
+  .mobile-reward-field {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .mobile-reward-user-row {
+    justify-content: space-between;
+  }
+
+  .mobile-reward-order-row {
+    margin-top: 4px;
+  }
+
+  .mobile-reward-label {
+    flex: 0 0 auto;
+    color: #909399;
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .mobile-reward-user {
+    min-width: 0;
+    color: #303133;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  .mobile-reward-value {
+    min-width: 0;
+    color: #606266;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.3;
+  }
+
+  .mobile-reward-order {
+    overflow-wrap: anywhere;
+  }
+
+  .mobile-reward-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 10px;
+    margin-top: 6px;
+  }
+
+  .mobile-reward-highlight .mobile-reward-value {
+    color: #2563eb;
+    font-weight: 700;
+  }
+
+  .mobile-reward-time {
+    grid-column: 1 / -1;
   }
 }
 </style>

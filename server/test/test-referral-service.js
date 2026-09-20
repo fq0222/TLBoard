@@ -513,7 +513,8 @@ async function testGetUserReferralSummaryCreatesCodeAndFormatsTraffic() {
     sumReferralRewards: async () => ({
       count: 2,
       total: 123
-    })
+    }),
+    findReferralRewardSetting: async () => ({ value: '0.5' })
   }, async () => {
     const result = await referralService.getUserReferralSummary(
       {},
@@ -531,6 +532,48 @@ async function testGetUserReferralSummaryCreatesCodeAndFormatsTraffic() {
     assert.strictEqual(result.reward_count, 2);
     assert.strictEqual(result.reward_amount, 123);
     assert.strictEqual(result.reward_amount_text, '1.23 元');
+    assert.strictEqual(result.reward_coefficient, 0.5);
+    assert.strictEqual(result.reward_percent, 50);
+  });
+}
+
+/**
+ * 验证用户奖励明细不会泄露被推荐人的完整邮箱和订单号。
+ *
+ * 职责：保护推广奖励接口的隐私边界，避免仅在前端视觉遮挡敏感字段。
+ * 关键参数：仓储返回完整邮箱和订单号，服务层负责生成可辨认的脱敏结果。
+ * 核心分支：长邮箱保留前三后三，短邮箱只保留必要字符；订单号保留前后片段。
+ *
+ * @returns {Promise<void>}
+ */
+async function testListUserRewardsMasksPrivateIdentifiers() {
+  await withRepositoryMocks({
+    sumReferralRewards: async () => ({ count: 2, total: 750 }),
+    listReferralRewards: async () => ([
+      {
+        referred_email: 'fuqiang_2015@163.com',
+        out_trade_no: 'ORD1789272302539cxfpr87j8',
+        reward_amount: 500
+      },
+      {
+        referred_email: 'ab@gmail.com',
+        out_trade_no: 'ORD1234',
+        reward_amount: 250
+      },
+      {
+        referred_email: 'a@example.com',
+        out_trade_no: 'A1',
+        reward_amount: 100
+      }
+    ])
+  }, async () => {
+    const result = await referralService.listUserRewards({}, 12, { page: 1, limit: 10 });
+
+    assert.strictEqual(result.list[0].referred_email, 'fuq***015@163.com');
+    assert.strictEqual(result.list[0].out_trade_no, 'ORD1789***87j8');
+    assert.strictEqual(result.list[1].referred_email, 'a***@gmail.com');
+    assert.strictEqual(result.list[1].out_trade_no, 'ORD***34');
+    assert.strictEqual(result.list[2].out_trade_no, 'A***');
   });
 }
 
@@ -1929,6 +1972,7 @@ async function main() {
   await testIssueFirstPaymentRewardHandlesDuplicateConflict();
   await testIssueFirstPaymentRewardRethrowsUnrelatedUniqueConflict();
   await testGetUserReferralSummaryCreatesCodeAndFormatsTraffic();
+  await testListUserRewardsMasksPrivateIdentifiers();
   await testGetOrCreateReferralCodeRetriesCodeUniqueConflict();
   await testGetOrCreateReferralCodeRethrowsUnrelatedUniqueConflict();
   await testGetOrCreateReferralCodeRethrowsReferralUserConflict();

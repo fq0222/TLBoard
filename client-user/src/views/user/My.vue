@@ -33,7 +33,6 @@
       <div class="section-head">
         <div>
           <h2 class="section-title">推广</h2>
-          <p class="section-subtitle">分享专属链接，查看点击和奖励余额</p>
         </div>
         <router-link to="/user/referral" class="section-link">
           <span>查看详情</span>
@@ -42,6 +41,12 @@
       </div>
 
       <div class="referral-overview">
+        <div v-if="rewardPercent > 0" class="reward-callout">
+          <div>
+            <strong>邀请好友，首单奖励{{ rewardPercent }}%</strong>
+            <p>邀请好友完成首购，你可获得订单实付金额{{ rewardPercent }}%的奖励余额</p>
+          </div>
+        </div>
         <div class="referral-stat">
           <span class="referral-stat-label">推广链接</span>
           <div class="referral-link-row">
@@ -53,7 +58,7 @@
                 :disabled="!referralSummary.referral_url"
                 @click="showReferralPoster"
               >
-                海报
+                生成海报
               </el-button>
               <el-button
                 class="copy-button"
@@ -61,7 +66,7 @@
                 :disabled="!referralSummary.referral_url"
                 @click="copyReferralLink"
               >
-                复制
+                复制链接
               </el-button>
             </div>
           </div>
@@ -164,6 +169,7 @@ import { ArrowRight } from '@element-plus/icons-vue'
 import api from '@/api'
 import ReferralPosterDialog from '@/components/ReferralPosterDialog.vue'
 import { useUserStore } from '@/stores/user'
+import { normalizeReferralRewardPercent } from '@/utils/referral-reward-display'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -181,6 +187,7 @@ const rewardAmountText = computed(() => {
 
   return formatAmount(referralSummary.value.reward_amount)
 })
+const rewardPercent = computed(() => normalizeReferralRewardPercent(referralSummary.value))
 
 function formatAmount(amount) {
   const cents = Number(amount)
@@ -288,7 +295,9 @@ async function copyReferralLink() {
 
   try {
     await copyToClipboard(referralSummary.value.referral_url)
-    ElMessage.success('推广链接已复制')
+    ElMessage.success(rewardPercent.value > 0
+      ? `推广链接已复制，好友完成首购后你可获得${rewardPercent.value}%奖励`
+      : '推广链接已复制')
   } catch (error) {
     console.error('复制推广链接失败:', error)
     ElMessage.error('复制失败，请手动复制')
@@ -434,16 +443,32 @@ onMounted(async () => {
   color: #303133;
 }
 
-.section-subtitle {
-  margin: 8px 0 0;
-  color: #909399;
-  line-height: 1.5;
-}
-
 .referral-overview {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.reward-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px;
+  border: 1px solid rgba(37, 99, 235, 0.1);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+}
+
+.reward-callout strong {
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.reward-callout p {
+  margin: 6px 0 0;
+  color: #64748b;
+  line-height: 1.5;
 }
 
 .referral-stat {
@@ -635,7 +660,8 @@ onMounted(async () => {
 
   .profile-top,
   .section-head,
-  .referral-link-row {
+  .referral-link-row,
+  .reward-callout {
     flex-direction: column;
     align-items: flex-start;
     gap: 10px;
@@ -690,8 +716,7 @@ onMounted(async () => {
   .metric-label,
   .referral-stat-label,
   .action-desc,
-  .manage-desc,
-  .section-subtitle {
+  .manage-desc {
     font-size: 13px;
   }
 
@@ -705,11 +730,6 @@ onMounted(async () => {
 
   .section-title {
     font-size: 17px;
-  }
-
-  .section-subtitle {
-    margin-top: 6px;
-    line-height: 1.4;
   }
 
   .section-link {

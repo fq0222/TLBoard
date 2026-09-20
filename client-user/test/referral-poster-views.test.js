@@ -77,12 +77,13 @@ test('我的页面复用共享海报弹窗且不再自行生成二维码', () =>
   assert.doesNotMatch(mySource, /QRCode\.toDataURL/)
 })
 
-test('个人中心账户信息卡提供分享好友入口', () => {
+test('个人中心账户信息卡提供动态奖励比例分享入口', () => {
   assert.match(
     profileSource,
     /class\s*=\s*["']panel-card dashboard-card referral-card["']/
   )
-  assert.match(profileSource, />\s*分享给好友\s*</)
+  assert.match(profileSource, /分享得\$\{rewardPercent\}%/)
+  assert.match(profileSource, /normalizeReferralRewardPercent\(referralSummary\.value\)/)
   assert.match(profileSource, /<ReferralPosterDialog/)
   assert.match(
     profilePosterTag,
