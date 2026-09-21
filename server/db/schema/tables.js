@@ -50,6 +50,70 @@ const tableDefinitions = [
     `
   },
   {
+    logMessage: '余额流水表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS balance_transactions (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        type VARCHAR(30) NOT NULL,
+        amount INTEGER NOT NULL CHECK (amount <> 0),
+        balance_after INTEGER NOT NULL CHECK (balance_after >= 0),
+        reference_type VARCHAR(50) NOT NULL,
+        reference_id INTEGER NOT NULL,
+        description VARCHAR(255) NOT NULL DEFAULT '',
+        created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()),
+        CONSTRAINT balance_transactions_type_check CHECK (
+          type IN ('opening_balance', 'referral_reward', 'plan_payment', 'withdrawal', 'withdrawal_refund')
+        ),
+        UNIQUE (reference_type, reference_id, type)
+      )
+    `
+  },
+  {
+    logMessage: '用户收款码表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_payment_qr_codes (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        payment_type VARCHAR(20) NOT NULL,
+        qr_payload_encrypted TEXT NOT NULL,
+        qr_payload_digest VARCHAR(128) NOT NULL,
+        created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()),
+        updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()),
+        CONSTRAINT user_payment_qr_codes_payment_type_check CHECK (
+          payment_type IN ('wechat', 'alipay')
+        )
+      )
+    `
+  },
+  {
+    logMessage: '提现申请表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS withdrawal_requests (
+        id BIGSERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        amount INTEGER NOT NULL CHECK (amount > 0),
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        payment_type VARCHAR(20) NOT NULL,
+        qr_payload_encrypted TEXT NOT NULL,
+        qr_payload_digest VARCHAR(128) NOT NULL,
+        reject_reason TEXT,
+        processed_by INTEGER REFERENCES admins(id) ON DELETE SET NULL,
+        processed_at BIGINT,
+        created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()),
+        CONSTRAINT withdrawal_requests_status_check CHECK (
+          status IN ('pending', 'completed', 'rejected')
+        ),
+        CONSTRAINT withdrawal_requests_payment_type_check CHECK (
+          payment_type IN ('wechat', 'alipay')
+        ),
+        CONSTRAINT withdrawal_requests_reject_reason_check CHECK (
+          status <> 'rejected' OR NULLIF(BTRIM(reject_reason), '') IS NOT NULL
+        )
+      )
+    `
+  },
+  {
     logMessage: '套餐表初始化完成',
     sql: `
       CREATE TABLE IF NOT EXISTS plans (
