@@ -36,6 +36,9 @@ module.exports = {
         TELEGRAM_INTERNAL_API_SECRET: 'dasfdafdsaf45sadfasw234erwerwe8765rwerrw',
         TELEGRAM_INTERNAL_API_ALLOWED_SKEW_SECONDS: 300,
         
+        // 提现收款码密钥由部署环境注入，禁止在仓库中填写真实值。
+        WITHDRAWAL_QR_ENCRYPTION_KEY: process.env.WITHDRAWAL_QR_ENCRYPTION_KEY,
+
         // 安全配置
         RATE_LIMIT_WINDOW: 900000, // 15分钟 = 15 * 60 * 1000 = 900000毫秒
         RATE_LIMIT_MAX: 3, // 最大尝试次数
@@ -63,6 +66,9 @@ module.exports = {
         TELEGRAM_INTERNAL_API_SECRET: 'dasfdafdsaf45sadfasw234erwerwe8765rwerrw',
         TELEGRAM_INTERNAL_API_ALLOWED_SKEW_SECONDS: 300,
         
+        // 提现收款码密钥由部署环境注入，无不安全默认值。
+        WITHDRAWAL_QR_ENCRYPTION_KEY: process.env.WITHDRAWAL_QR_ENCRYPTION_KEY,
+
         // 安全配置
         RATE_LIMIT_WINDOW: 900000,
         RATE_LIMIT_MAX: 3,
