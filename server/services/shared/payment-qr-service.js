@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const sharp = require('sharp');
 const QRCode = require('qrcode');
-const { prepareZXingModule, readBarcodes } = require('zxing-wasm/reader');
+const { prepareZXingModule, defaultReaderOptions, barcodeFormats, binarizers, eanAddOnSymbols, textModes, characterSets } = require('zxing-wasm/reader');
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 12 * 1024 * 1024;
@@ -69,11 +69,42 @@ class PaymentQrService {
     return { data, width: info.width, height: info.height, format: metadata.format, pages: metadata.pages || 1 };
   }
 
-  /** 枚举图片内所有 QR；不按内容去重，因此相同收款码出现两次也必须拒绝。 */
+  /**
+   * 枚举图片内所有 QR，不按内容去重；相同内容出现两次也必须拒绝。
+   * 固定 zxing-wasm 2.1.2 的底层 RGBA API，绕过其未释放结果向量的包装方法。
+   * 仅复制需要的标量字段，finally 无论成功、识别失败或复制异常均释放向量及输入。
+   */
   async decodeQr({ data, width, height }) {
-    return readBarcodes({ data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength), width, height }, {
-      formats: ['QRCode'], tryHarder: true, maxNumberOfSymbols: 255, returnErrors: true
-    });
+    const wasm = await prepareZXingModule({ fireImmediately: true });
+    const pointer = wasm._malloc(data.byteLength);
+    if (!pointer) throw new Error('二维码解码内存分配失败');
+    let results;
+    try {
+      wasm.HEAPU8.set(data, pointer);
+      results = wasm.readBarcodesFromPixmap(pointer, width, height, {
+        ...defaultReaderOptions,
+        formats: 1 << barcodeFormats.indexOf('QRCode'),
+        binarizer: binarizers.indexOf('LocalAverage'),
+        eanAddOnSymbol: eanAddOnSymbols.indexOf('Ignore'),
+        textMode: textModes.indexOf('Plain'),
+        characterSet: characterSets.indexOf('Unknown'),
+        tryHarder: true,
+        maxNumberOfSymbols: 255,
+        returnErrors: true
+      });
+      const decoded = [];
+      for (let index = 0; index < results.size(); index++) {
+        const result = results.get(index);
+        decoded.push({ text: result.text, error: result.error, isValid: result.isValid });
+      }
+      return decoded;
+    } finally {
+      try {
+        if (results) results.delete();
+      } finally {
+        wasm._free(pointer);
+      }
+    }
   }
 
   /**

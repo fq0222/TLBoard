@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 const PaymentQrService = require('../services/shared/payment-qr-service');
 const sharp = require('sharp');
 const QRCode = require('qrcode');
+const { prepareZXingModule } = require('zxing-wasm/reader');
 
 const TEST_KEY = Buffer.alloc(32, 7).toString('base64');
 const PAYLOAD = 'wxp://f2f/example';
@@ -144,4 +145,59 @@ test('重建 PNG 可再次解析且不泄露注入编码器错误', async () => 
   assert.equal(service.decryptPayload((await service.parseAndEncrypt(result, 'wechat')).encryptedPayload), PAYLOAD);
   const broken = createService({ qrEncoder: async () => { throw new Error(PAYLOAD); } });
   await assert.rejects(broken.renderQrPng(service.encryptPayload(PAYLOAD)), error => !error.message.includes(PAYLOAD));
+});
+
+test('连续 50 次真实解码及读取异常均释放 WASM 结果向量和输入内存', async context => {
+  const wasm = await prepareZXingModule({ fireImmediately: true });
+  const originalRead = wasm.readBarcodesFromPixmap;
+  const originalMalloc = wasm._malloc;
+  const originalFree = wasm._free;
+  const vectors = [];
+  let allocated = 0;
+  let deleted = 0;
+  let failureMode;
+  const outstanding = new Set();
+  // 包装真实 WASM 边界，仅计数；不替代解码结果，以观察实际资源生命周期。
+  wasm.readBarcodesFromPixmap = function (...args) {
+    if (failureMode === 'read') throw new Error('模拟底层解码异常');
+    const vector = originalRead.apply(this, args);
+    const originalDelete = vector.delete.bind(vector);
+    allocated++;
+    vectors.push(vector);
+    vector.delete = () => { deleted++; return originalDelete(); };
+    if (failureMode === 'get') vector.get = () => { throw new Error('模拟结果复制异常'); };
+    return vector;
+  };
+  wasm._malloc = function (size) {
+    const pointer = originalMalloc.call(this, size);
+    if (pointer) outstanding.add(pointer);
+    return pointer;
+  };
+  wasm._free = function (pointer) {
+    outstanding.delete(pointer);
+    return originalFree.call(this, pointer);
+  };
+  try {
+    const service = createService();
+    const png = await QRCode.toBuffer(PAYLOAD);
+    for (let index = 0; index < 50; index++) await service.parseAndEncrypt(png, 'wechat');
+    assert.equal(allocated, 50);
+    assert.equal(deleted, allocated, `WASM vectors allocated=${allocated}, deleted=${deleted}`);
+    assert.equal(outstanding.size, 0, 'WASM 输入缓冲区必须全部释放');
+    context.diagnostic(`真实解码: allocated=${allocated}, deleted=${deleted}, outstandingInputs=${outstanding.size}`);
+    for (const mode of ['get', 'read']) {
+      failureMode = mode;
+      await assert.rejects(service.parseAndEncrypt(png, 'wechat'), isSafeError);
+      assert.equal(deleted, allocated, `${mode} 异常必须释放所有结果向量`);
+      assert.equal(outstanding.size, 0, `${mode} 异常必须释放输入内存`);
+    }
+    context.diagnostic(`异常回收: allocated=${allocated}, deleted=${deleted}, outstandingInputs=${outstanding.size}`);
+  } finally {
+    wasm.readBarcodesFromPixmap = originalRead;
+    wasm._malloc = originalMalloc;
+    wasm._free = originalFree;
+    // RED 阶段也回收探针发现的泄漏，避免测试自身留下 WASM 资源。
+    for (const vector of vectors) if (!vector.isDeleted()) vector.delete();
+    for (const pointer of outstanding) originalFree(pointer);
+  }
 });
