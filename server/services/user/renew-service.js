@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const vmqService = require('../../integrations/vmq/vmq-service');
 const orderRepository = require('../../repositories/order-repository');
+const balanceRepository = require('../../repositories/balance-repository');
 const planRepository = require('../../repositories/plan-repository');
 const orderService = require('../shared/order-service');
 const { BalanceService } = require('../shared/balance-service');
@@ -289,6 +290,9 @@ async function createRenewOrder(db, userId, payload) {
           referenceId: orderId,
           description: buildPlanPaymentDescription(plan, outTradeNo)
         });
+      } else {
+        // 零价没有扣款服务代为加锁，仍须在读取旧权益前锁定用户，避免并发续费丢失累加。
+        await balanceRepository.lockUser(transactionDb, userId);
       }
 
       const completed = await orderService.completePaidOrder(transactionDb, outTradeNo, `BALANCE-${outTradeNo}`, {

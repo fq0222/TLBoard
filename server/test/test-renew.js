@@ -332,8 +332,8 @@ class BalanceRenewDatabase {
     return Promise.resolve(name === 'enqueue' ? 99 : undefined);
   }
 
-  /** 隔离 VMQ/3X-UI/邮件网络入口，内部业务及全部 SQL 仍运行真实代码。 */
-  async renew() {
+  /** 隔离外部入口；count>1 时在同一组替身下并发执行续费，避免并发恢复替身互相覆盖。 */
+  async renew(count = 1) {
     const originals = [xuiSyncTaskService.enqueueTask, xuiSyncTaskService.processTask, orderActivationEmailService.sendOrderActivationEmail, vmqService.createOrder, vmqService.isMonitorOnline];
     xuiSyncTaskService.enqueueTask = db => this.recordEffect('enqueue', db);
     xuiSyncTaskService.processTask = db => this.recordEffect('process', db);
@@ -341,10 +341,74 @@ class BalanceRenewDatabase {
     vmqService.createOrder = () => { throw new Error('余额支付不应调用 VMQ'); };
     vmqService.isMonitorOnline = () => { throw new Error('余额支付不应查询 VMQ'); };
     try {
-      return await renewService.createRenewOrder(this.db, 8, { plan_id: 1, pay_type: 9 });
+      const results = await Promise.all(Array.from({ length: count }, () =>
+        renewService.createRenewOrder(this.db, 8, { plan_id: 1, pay_type: 9 })
+      ));
+      return count === 1 ? results[0] : results;
     } finally {
       [xuiSyncTaskService.enqueueTask, xuiSyncTaskService.processTask, orderActivationEmailService.sendOrderActivationEmail, vmqService.createOrder, vmqService.isMonitorOnline] = originals;
     }
+  }
+}
+
+/**
+ * 零价并发续费的 PostgreSQL 行锁边界，其他 SQL 继续使用真实仓储与原测试边界。
+ * 职责：每笔事务获得独立 client，显式用户行锁等待前一事务提交；读取权益后让出执行权以复现旧快照竞争。
+ * 核心分支：仅用于成功并发场景，不模拟回滚快照；回滚原子性由 BalanceRenewDatabase 单独覆盖。
+ */
+class ConcurrentZeroPriceDatabase extends BalanceRenewDatabase {
+  /** 初始化共享权益和行锁等待队列，客户端编号用于断言每条事务 SQL 的归属。 */
+  constructor() {
+    super({ balance: 0, price: 0 });
+    this.clientCount = 0;
+    this.lockTail = Promise.resolve();
+    this.unlocks = new Map();
+    this.db = createDbProxy({
+      pool: { connect: async () => this.createClient() },
+      queryWithRetry: (sql, params) => this.query(sql, params, 'pool'),
+      convertPlaceholders,
+      logger: { error() {}, info() {} }
+    });
+  }
+
+  /** 为每笔事务创建不同连接；query 和 release 都记录同一个客户端标识。 */
+  createClient() {
+    const source = `client-${++this.clientCount}`;
+    return {
+      query: (sql, params) => this.query(sql, params, source),
+      release: () => this.calls.push({ sql: 'RELEASE', source })
+    };
+  }
+
+  /** 按 client 串行化用户锁；订单快照读取后的事件循环让步保证缺锁时可确定复现丢失累加。 */
+  async query(sql, params = [], source) {
+    sql = sql.replace(/\s+/g, ' ').trim();
+    if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+      this.calls.push({ sql, params, source });
+      if (sql !== 'BEGIN') {
+        this.unlocks.get(source)?.();
+        this.unlocks.delete(source);
+      }
+      return { rows: [], rowCount: 0 };
+    }
+    if (sql.includes('FOR NO KEY UPDATE')) {
+      const previous = this.lockTail;
+      this.lockTail = new Promise(resolve => this.unlocks.set(source, resolve));
+      await previous;
+    }
+    if (sql.includes('FROM orders o')) {
+      this.calls.push({ sql, params, source });
+      const order = this.state.orders.find(row => row.out_trade_no === params[0]);
+      const user = this.state.user;
+      const rows = [{ ...order, current_plan_id: user.plan_id, current_plan_type: 'lifetime', current_traffic_limit: user.traffic_limit, current_traffic_used: user.traffic_used, current_payment_count: user.payment_count }];
+      await new Promise(resolve => setImmediate(resolve));
+      return { rows, rowCount: 1 };
+    }
+    const result = await super.query(sql, params, source);
+    if (sql.startsWith('INSERT INTO orders')) {
+      result.rows[0].id = this.state.orders.indexOf(result.rows[0]) + 66;
+    }
+    return result;
   }
 }
 
@@ -372,6 +436,9 @@ async function testBalancePaymentCommitsTogether() {
     assert.ok(transactionCalls.every(call => call.source === 'client'));
     assert.strictEqual(transactionCalls.filter(call => call.sql === 'BEGIN').length, 1);
     assert.strictEqual(transactionCalls.filter(call => call.sql.includes('FOR NO KEY UPDATE')).length, 1);
+    const lockIndex = transactionCalls.findIndex(call => call.sql.includes('FOR NO KEY UPDATE'));
+    assert.ok(transactionCalls.findIndex(call => call.sql.startsWith('INSERT INTO orders')) < lockIndex);
+    assert.ok(lockIndex < transactionCalls.findIndex(call => call.sql.includes('FROM orders o')));
     assert.deepStrictEqual(transactionCalls.slice(-2).map(call => call.sql), ['COMMIT', 'RELEASE']);
     assert.ok(transactionCalls.findIndex(call => call.sql.startsWith('INSERT INTO orders')) < transactionCalls.findIndex(call => call.sql.startsWith('INSERT INTO balance_transactions')));
     assert.ok(transactionCalls.findIndex(call => call.sql.startsWith('INSERT INTO balance_transactions')) < transactionCalls.findIndex(call => call.sql.startsWith('UPDATE orders')));
@@ -402,7 +469,11 @@ async function testZeroPricePlanCompletesWithoutBalanceTransaction() {
     const transactionCalls = database.calls.slice(begin);
     assert.ok(transactionCalls.every(call => call.source === 'client'));
     assert.strictEqual(transactionCalls.filter(call => call.sql === 'BEGIN').length, 1);
-    assert.ok(!transactionCalls.some(call => call.sql.includes('FOR NO KEY UPDATE') || /UPDATE users.*balance/.test(call.sql)));
+    assert.ok(!transactionCalls.some(call => /UPDATE users.*balance/.test(call.sql)));
+    assert.strictEqual(transactionCalls.filter(call => call.sql.includes('FOR NO KEY UPDATE')).length, 1, '零价续费也必须锁定用户一次');
+    const lockIndex = transactionCalls.findIndex(call => call.sql.includes('FOR NO KEY UPDATE'));
+    assert.ok(transactionCalls.findIndex(call => call.sql.startsWith('INSERT INTO orders')) < lockIndex);
+    assert.ok(lockIndex < transactionCalls.findIndex(call => call.sql.includes('FROM orders o')), '读取订单权益前必须先锁定用户');
     assert.deepStrictEqual(transactionCalls.slice(-2).map(call => call.sql), ['COMMIT', 'RELEASE']);
     assert.deepStrictEqual(database.effects.map(effect => effect.name).sort(), ['email', 'enqueue', 'process']);
     assert.ok(database.effects.every(effect => !effect.inTransaction && effect.db === database.db));
@@ -424,6 +495,28 @@ async function testZeroPricePlanCompletesWithoutBalanceTransaction() {
   assert.deepStrictEqual(invalid.state.transactions, []);
   assert.deepStrictEqual(invalid.effects, []);
   console.log('PASS 零价套餐：数字/字符串零金额无扣款和流水，订单权益同事务提交或回滚');
+}
+
+/** 验证两笔零价续费等待同一用户行锁，第二笔读取最新权益，保留两次累加且不写资金流水。 */
+async function testConcurrentZeroPriceRenewKeepsBothEntitlements() {
+  const database = new ConcurrentZeroPriceDatabase();
+  const results = await database.renew(2);
+  assert.ok(results.every(result => result.paid));
+  assert.strictEqual(new Set(results.map(result => result.order_id)).size, 2);
+  assert.strictEqual(database.state.user.traffic_limit, 5120, '并发零价续费应累计 1024 + 2048 + 2048，不能丢失一次权益');
+  assert.strictEqual(database.state.user.payment_count, 3);
+  assert.strictEqual(database.state.balance, 0);
+  assert.deepStrictEqual(database.state.transactions, []);
+  assert.ok(database.state.orders.every(order => order.status === 'paid'));
+  for (const source of ['client-1', 'client-2']) {
+    const calls = database.calls.filter(call => call.source === source);
+    const lockIndex = calls.findIndex(call => call.sql.includes('FOR NO KEY UPDATE'));
+    assert.strictEqual(calls.filter(call => call.sql.includes('FOR NO KEY UPDATE')).length, 1);
+    assert.ok(calls.findIndex(call => call.sql.startsWith('INSERT INTO orders')) < lockIndex);
+    assert.ok(lockIndex < calls.findIndex(call => call.sql.includes('FROM orders o')));
+    assert.deepStrictEqual(calls.slice(-2).map(call => call.sql), ['COMMIT', 'RELEASE']);
+  }
+  console.log('PASS 并发零价续费：两个独立事务各锁用户一次，权益累计 1024 → 5120，无余额流水');
 }
 
 /** 验证流水描述最长 255 个 JS 字符，保留完整订单号且不截断中文或 UTF-16 代理对。 */
@@ -499,9 +592,10 @@ async function testLiveModeFailureExitCodes() {
 
 /** 执行离线专项并保证失败返回非零退出码；真实 HTTP 流程仅在显式参数下启动。 */
 async function runOfflineTests() {
+  await testZeroPricePlanCompletesWithoutBalanceTransaction();
+  await testConcurrentZeroPriceRenewKeepsBothEntitlements();
   await testLiveModeFailureExitCodes();
   await testPlanPaymentDescriptionLengthBoundary();
-  await testZeroPricePlanCompletesWithoutBalanceTransaction();
   await testBalancePaymentCommitsTogether();
   await testBalancePaymentRollback();
   console.log('renew balance transaction tests passed');
