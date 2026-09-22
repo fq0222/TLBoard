@@ -21,6 +21,7 @@ const {
 const { formatTraffic } = require('../../shared/utils/format-traffic');
 
 const BALANCE_PAY_TYPE = 9;
+const BALANCE_DESCRIPTION_MAX_LENGTH = 255;
 const balanceService = new BalanceService();
 
 /**
@@ -62,6 +63,25 @@ function getNowTimestamp() {
  */
 function isBalancePayType(payType) {
   return Number(payType) === BALANCE_PAY_TYPE;
+}
+
+/**
+ * 构造长度受限的套餐支付流水描述。
+ * @param {Object} plan - 套餐快照，名称缺失时使用套餐 ID 作为说明。
+ * @param {string} outTradeNo - 服务生成的完整商户订单号，必须保留便于核对。
+ * @returns {string} 不超过 255 个 UTF-16 代码单元的描述。
+ * 核心分支：只按完整 Unicode 字符截短套餐名，不拆开代理对，固定语义和订单号不截断。
+ */
+function buildPlanPaymentDescription(plan, outTradeNo) {
+  const prefix = '套餐支付：';
+  const suffix = `，订单号：${outTradeNo}`;
+  const nameLimit = BALANCE_DESCRIPTION_MAX_LENGTH - prefix.length - suffix.length;
+  let safeName = '';
+  for (const character of String(plan.name || `套餐${plan.id}`)) {
+    if (safeName.length + character.length > nameLimit) break;
+    safeName += character;
+  }
+  return `${prefix}${safeName}${suffix}`;
 }
 
 /**
@@ -238,7 +258,7 @@ async function createRenewOrder(db, userId, payload) {
   const createdAt = getNowTimestamp();
 
   if (isBalancePayType(payType)) {
-    const planPrice = Number(plan.price) || 0;
+    const planPrice = Number(plan.price);
     const userBalance = Number(user.balance) || 0;
     if (userBalance < planPrice) {
       throw createLegacyBusinessError('余额不足，请更换支付方式', {
@@ -259,14 +279,17 @@ async function createRenewOrder(db, userId, payload) {
       });
 
       orderId = Number(orderResult.lastInsertRowid);
-      await balanceService.debit(transactionDb, {
-        userId,
-        amount: planPrice,
-        type: 'plan_payment',
-        referenceType: 'order',
-        referenceId: orderId,
-        description: `套餐支付：${plan.name || `套餐${plan.id}`}，订单号：${outTradeNo}`
-      });
+      // 零价套餐没有余额变化，无需扣款或生成零金额流水；订单权益仍在当前事务完成。
+      if (planPrice !== 0) {
+        await balanceService.debit(transactionDb, {
+          userId,
+          amount: planPrice,
+          type: 'plan_payment',
+          referenceType: 'order',
+          referenceId: orderId,
+          description: buildPlanPaymentDescription(plan, outTradeNo)
+        });
+      }
 
       const completed = await orderService.completePaidOrder(transactionDb, outTradeNo, `BALANCE-${outTradeNo}`, {
         deferEffects: effect => postCommitEffects.push(effect)
