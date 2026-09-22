@@ -1,4 +1,7 @@
 const assert = require('assert');
+const { createDbProxy } = require('../db/proxy');
+const { convertPlaceholders } = require('../db/sql-utils');
+const { BalanceService } = require('../services/shared/balance-service');
 const { validationResult } = require('express-validator');
 const referralRepository = require('../repositories/referral-repository');
 const referralService = require('../services/referral-service');
@@ -15,6 +18,76 @@ const emailRepository = require('../repositories/email-repository');
 const systemSettingsService = require('../services/admin/system-settings-service');
 const orderActivationEmailService = require('../services/shared/order-activation-email-service');
 const config = require('../config');
+
+/**
+ * 推广账务的内存 PostgreSQL 边界，保留真实 service/repository/db proxy。
+ * 职责：按实际 SQL 模拟余额、奖励和流水状态，事务回滚还原快照。
+ * 关键参数：failure 可在指定写入注入数据库错误；所有事务 SQL 记录连接来源。
+ */
+class ReferralLedgerDatabase {
+  /** 初始化 100 分余额以及只由 pool.connect 取得的专用连接。 */
+  constructor(failure = null) {
+    this.failure = failure;
+    this.state = { balance: 100, rewards: [], transactions: [] };
+    this.calls = [];
+    this.snapshot = null;
+    this.client = {
+      query: (sql, params) => this.query(sql, params, 'client'),
+      release: () => this.calls.push({ sql: 'RELEASE', source: 'client' })
+    };
+    this.db = createDbProxy({
+      pool: { connect: async () => this.client },
+      queryWithRetry: (sql, params) => this.query(sql, params, 'pool'),
+      convertPlaceholders,
+      logger: { error() {}, info() {} }
+    });
+  }
+
+  /** 按 SQL 执行账务分支；重复奖励返回空结果，错误写入交由真实事务代理回滚。 */
+  async query(sql, params = [], source) {
+    sql = sql.replace(/\s+/g, ' ').trim();
+    this.calls.push({ sql, params, source });
+    let rows = [];
+    if (sql === 'BEGIN') {
+      this.snapshot = structuredClone(this.state);
+    } else if (sql === 'ROLLBACK') {
+      this.state = this.snapshot;
+      this.snapshot = null;
+    } else if (sql === 'COMMIT') {
+      this.snapshot = null;
+    } else if (sql.includes('FROM system_settings')) {
+      rows = [{ value: '0.1' }];
+    } else if (sql.startsWith('INSERT INTO referral_rewards')) {
+      if (this.failure?.target === 'reward') throw this.failure.error;
+      const [referrerUserId, referredUserId, orderId, rewardAmount] = params;
+      const duplicate = this.state.rewards.some(row => row.order_id === orderId || row.referred_user_id === referredUserId);
+      if (duplicate && !sql.includes('ON CONFLICT')) {
+        throw Object.assign(new Error('duplicate referral_rewards_order_id_key'), { code: '23505' });
+      }
+      if (!duplicate) {
+        rows = [{ id: 7, referrer_user_id: referrerUserId, referred_user_id: referredUserId, order_id: orderId, reward_amount: rewardAmount }];
+        this.state.rewards.push(rows[0]);
+      }
+    } else if (sql.includes('FROM users') && sql.includes('FOR NO KEY UPDATE')) {
+      assert.strictEqual(params[0], 12);
+      rows = [{ id: 12, balance: this.state.balance }];
+    } else if (sql.startsWith('UPDATE users') && sql.includes('balance')) {
+      assert.strictEqual(params[1], 12);
+      this.state.balance += params[0];
+      rows = [{ id: 12, balance: this.state.balance }];
+    } else if (sql.startsWith('INSERT INTO balance_transactions')) {
+      if (this.failure?.target === 'ledger') throw this.failure.error;
+      const [userId, type, amount, balanceAfter, referenceType, referenceId, description] = params;
+      rows = [{ id: 8, user_id: userId, type, amount, balance_after: balanceAfter, reference_type: referenceType, reference_id: referenceId, description }];
+      this.state.transactions.push(rows[0]);
+    } else {
+      throw new Error(`未覆盖的推广账务 SQL: ${sql}`);
+    }
+    return { rows, rowCount: rows.length };
+  }
+}
+
+const REWARD_ORDER = { id: 55, user_id: 20, referrer_user_id: 12, amount: 699 };
 
 /**
  * Builds a PostgreSQL-style referral_codes.code duplicate error for retry tests.
@@ -325,34 +398,25 @@ async function testRecordClickSkipsInvalidCode() {
  * @returns {Promise<void>}
  */
 async function testIssueFirstPaymentRewardGrantsBalance() {
-  const calls = [];
-
-  await withRepositoryMocks({
-    findReferralRewardSetting: async () => ({ value: '0.1' }),
-    insertReferralReward: async (db, payload) => {
-      calls.push(['insert', payload]);
-      return { lastInsertRowid: 7 };
-    },
-    incrementUserBalance: async (db, userId, rewardAmount) => {
-      calls.push(['increment', { userId, rewardAmount }]);
-      return { changes: 1 };
-    }
-  }, async () => {
-    const result = await referralService.issueFirstPaymentReward({}, {
-      id: 55,
-      user_id: 20,
-      referrer_user_id: 12,
-      amount: 699
-    });
-
-    assert.strictEqual(result, true);
-    assert.strictEqual(calls.length, 2);
-    assert.strictEqual(calls[0][1].referrerUserId, 12);
-    assert.strictEqual(calls[0][1].referredUserId, 20);
-    assert.strictEqual(calls[0][1].orderId, 55);
-    assert.strictEqual(calls[0][1].rewardAmount, 69);
-    assert.strictEqual(calls[1][1].rewardAmount, 69);
+  const database = new ReferralLedgerDatabase();
+  assert.strictEqual(await referralService.issueFirstPaymentReward(database.db, REWARD_ORDER), true);
+  assert.strictEqual(database.state.transactions.length, 1, '推广奖励缺少统一余额流水');
+  assert.strictEqual(database.state.balance, 169);
+  assert.deepStrictEqual(database.state.rewards, [{ id: 7, referrer_user_id: 12, referred_user_id: 20, order_id: 55, reward_amount: 69 }]);
+  const ledger = database.state.transactions[0];
+  assert.deepStrictEqual({ ...ledger, description: '' }, {
+    id: 8, user_id: 12, type: 'referral_reward', amount: 69, balance_after: 169,
+    reference_type: 'referral_reward', reference_id: 7, description: ''
   });
+  assert.ok(ledger.description.includes('推广奖励'));
+  const transactionCalls = database.calls.filter(call => !call.sql.includes('FROM system_settings'));
+  assert.ok(transactionCalls.every(call => call.source === 'client'), '账务操作必须全部使用专用连接');
+  assert.strictEqual(transactionCalls[0].sql, 'BEGIN');
+  assert.ok(transactionCalls[1].sql.startsWith('INSERT INTO referral_rewards'));
+  assert.ok(transactionCalls[2].sql.includes('FOR NO KEY UPDATE'));
+  assert.ok(transactionCalls[3].sql.startsWith('UPDATE users'));
+  assert.ok(transactionCalls[4].sql.startsWith('INSERT INTO balance_transactions'));
+  assert.deepStrictEqual(transactionCalls.slice(-2).map(call => call.sql), ['COMMIT', 'RELEASE']);
 }
 
 /**
@@ -368,8 +432,7 @@ async function testIssueFirstPaymentRewardGrantsBalance() {
 async function testIssueFirstPaymentRewardSkipsMissingReferrer() {
   const calls = {
     findSetting: 0,
-    insertReward: 0,
-    incrementTraffic: 0
+    insertReward: 0
   };
 
   await withRepositoryMocks({
@@ -380,10 +443,6 @@ async function testIssueFirstPaymentRewardSkipsMissingReferrer() {
     insertReferralReward: async () => {
       calls.insertReward += 1;
       return { lastInsertRowid: 1 };
-    },
-    incrementUserBalance: async () => {
-      calls.incrementTraffic += 1;
-      return { changes: 1 };
     }
   }, async () => {
     const missingOrder = await referralService.issueFirstPaymentReward({}, null);
@@ -396,7 +455,6 @@ async function testIssueFirstPaymentRewardSkipsMissingReferrer() {
     assert.strictEqual(missingReferrer, false);
     assert.strictEqual(calls.findSetting, 0);
     assert.strictEqual(calls.insertReward, 0);
-    assert.strictEqual(calls.incrementTraffic, 0);
   });
 }
 
@@ -426,30 +484,19 @@ async function testIssueFirstPaymentRewardSkipsZeroReward() {
  * @returns {Promise<void>}
  */
 async function testIssueFirstPaymentRewardHandlesDuplicateConflict() {
-  let incremented = false;
-  const duplicateError = new Error('duplicate key value violates unique constraint "referral_rewards_order_id_key"');
-  duplicateError.code = '23505';
-  duplicateError.constraint = 'referral_rewards_order_id_key';
-
-  await withRepositoryMocks({
-    findReferralRewardSetting: async () => ({ value: '0.1' }),
-    insertReferralReward: async () => {
-      throw duplicateError;
-    },
-    incrementUserBalance: async () => {
-      incremented = true;
-    }
-  }, async () => {
-    const result = await referralService.issueFirstPaymentReward({}, {
-      id: 55,
-      user_id: 20,
-      referrer_user_id: 12,
-      amount: 1000
-    });
-
-    assert.strictEqual(result, false);
-    assert.strictEqual(incremented, false);
-  });
+  const database = new ReferralLedgerDatabase();
+  await database.db.transaction(async transactionDb => {
+    assert.strictEqual(await referralService.issueFirstPaymentReward(transactionDb, REWARD_ORDER), true);
+    assert.strictEqual(await referralService.issueFirstPaymentReward(transactionDb, REWARD_ORDER), false);
+    assert.strictEqual(await referralService.issueFirstPaymentReward(transactionDb, { ...REWARD_ORDER, id: 56 }), false);
+  })();
+  assert.strictEqual(database.state.balance, 169);
+  assert.strictEqual(database.state.rewards.length, 1);
+  assert.strictEqual(database.state.transactions.length, 1);
+  assert.strictEqual(database.calls.filter(call => call.sql === 'BEGIN').length, 1);
+  assert.strictEqual(database.calls.filter(call => call.sql === 'COMMIT').length, 1);
+  assert.strictEqual(database.calls.filter(call => call.sql === 'RELEASE').length, 1);
+  assert.ok(database.calls.every(call => call.source === 'client'));
 }
 
 /**
@@ -462,32 +509,27 @@ async function testIssueFirstPaymentRewardHandlesDuplicateConflict() {
  * @returns {Promise<void>}
  */
 async function testIssueFirstPaymentRewardRethrowsUnrelatedUniqueConflict() {
-  let incremented = false;
   const duplicateError = new Error('duplicate key value violates unique constraint "users_email_key"');
   duplicateError.code = '23505';
   duplicateError.constraint = 'users_email_key';
+  const database = new ReferralLedgerDatabase({ target: 'reward', error: duplicateError });
+  await assertRejectsSameError(() => referralService.issueFirstPaymentReward(database.db, REWARD_ORDER), duplicateError);
+  assert.deepStrictEqual(database.state, { balance: 100, rewards: [], transactions: [] });
+  assert.deepStrictEqual(database.calls.slice(-2).map(call => call.sql), ['ROLLBACK', 'RELEASE']);
+}
 
-  await withRepositoryMocks({
-    findReferralRewardSetting: async () => ({ value: '0.1' }),
-    insertReferralReward: async () => {
-      throw duplicateError;
-    },
-    incrementUserBalance: async () => {
-      incremented = true;
-    }
-  }, async () => {
-    await assert.rejects(
-      () => referralService.issueFirstPaymentReward({}, {
-        id: 55,
-        user_id: 20,
-        referrer_user_id: 12,
-        amount: 1000
-      }),
-      duplicateError
-    );
-
-    assert.strictEqual(incremented, false);
-  });
+/** 验证流水写入失败会回滚奖励记录和余额，且错误传播到已有的订单事务。 */
+async function testIssueFirstPaymentRewardRollsBackLedgerFailure() {
+  for (const nested of [false, true]) {
+    const ledgerError = new Error('账务写入故障');
+    const database = new ReferralLedgerDatabase({ target: 'ledger', error: ledgerError });
+    const action = nested
+      ? database.db.transaction(transactionDb => referralService.issueFirstPaymentReward(transactionDb, REWARD_ORDER))
+      : () => referralService.issueFirstPaymentReward(database.db, REWARD_ORDER);
+    await assertRejectsSameError(action, ledgerError);
+    assert.deepStrictEqual(database.state, { balance: 100, rewards: [], transactions: [] });
+    assert.deepStrictEqual(database.calls.slice(-2).map(call => call.sql), ['ROLLBACK', 'RELEASE']);
+  }
 }
 
 /**
@@ -1688,7 +1730,12 @@ async function testHomeIpRenewOrderUsesHipPrefix() {
   const transactionDb = { name: 'home-ip-renew-prefix-transaction-db' };
   const calls = [];
 
-  await withObjectMocks(orderRepository, {
+  await withObjectMocks(BalanceService.prototype, {
+    debit: async (db, payload) => {
+      calls.push(['decrementBalance', db, payload]);
+      return { id: 1 };
+    }
+  }, () => withObjectMocks(orderRepository, {
     findUserById: async () => ({
       id: 8,
       email: 'user@example.com',
@@ -1717,10 +1764,6 @@ async function testHomeIpRenewOrderUsesHipPrefix() {
     createPendingRenewOrder: async (db, payload) => {
       calls.push(['createOrder', db, payload]);
       return { lastInsertRowid: 67 };
-    },
-    decrementUserBalance: async (db, payload) => {
-      calls.push(['decrementBalance', db, payload]);
-      return { changes: 1 };
     }
   }, async () => {
     await withObjectMocks(orderService, {
@@ -1740,8 +1783,9 @@ async function testHomeIpRenewOrderUsesHipPrefix() {
       assert.strictEqual(calls[0][2].outTradeNo, result.out_trade_no);
       assert.strictEqual(calls[2][2].outTradeNo, result.out_trade_no);
       assert.strictEqual(calls[2][2].tradeNo, `BALANCE-${result.out_trade_no}`);
+      assert.strictEqual(calls[2][1], transactionDb);
     });
-  });
+  }));
 }
 
 /**
@@ -1840,7 +1884,7 @@ async function testCompletePaidOrderKeepsEntitlementAndSyncWhenEmailFails() {
  *
  * 职责：覆盖 renewService 的余额支付分支，避免余额续费误走外部支付。
  * 关键参数：pay_type=9 表示余额支付，用户余额大于套餐价格。
- * 核心分支：事务内创建订单和扣余额，事务后调用统一订单完结逻辑。
+ * 核心分支：事务内创建订单、调用统一余额服务和订单完结逻辑。
  *
  * @returns {Promise<void>}
  */
@@ -1848,7 +1892,12 @@ async function testBalanceRenewCompletesWithoutVmq() {
   const transactionDb = { name: 'balance-renew-transaction-db' };
   const calls = [];
 
-  await withObjectMocks(orderRepository, {
+  await withObjectMocks(BalanceService.prototype, {
+    debit: async (db, payload) => {
+      calls.push(['decrementBalance', db, payload]);
+      return { id: 1 };
+    }
+  }, () => withObjectMocks(orderRepository, {
     findUserById: async () => ({
       id: 8,
       email: 'user@example.com',
@@ -1874,10 +1923,6 @@ async function testBalanceRenewCompletesWithoutVmq() {
     createPendingRenewOrder: async (db, payload) => {
       calls.push(['createOrder', db, payload]);
       return { lastInsertRowid: 66 };
-    },
-    decrementUserBalance: async (db, payload) => {
-      calls.push(['decrementBalance', db, payload]);
-      return { changes: 1 };
     }
   }, async () => {
     await withObjectMocks(orderService, {
@@ -1905,12 +1950,16 @@ async function testBalanceRenewCompletesWithoutVmq() {
         assert.strictEqual(calls[0][2].amount, 1500);
         assert.strictEqual(calls[1][0], 'decrementBalance');
         assert.strictEqual(calls[1][1], transactionDb);
-        assert.deepStrictEqual(calls[1][2], { userId: 8, amount: 1500 });
+        assert.deepStrictEqual({ ...calls[1][2], description: '' }, {
+          userId: 8, amount: 1500, type: 'plan_payment',
+          referenceType: 'order', referenceId: 66, description: ''
+        });
         assert.strictEqual(calls[2][0], 'completeOrder');
+        assert.strictEqual(calls[2][1], transactionDb);
         assert.ok(calls[2][2].tradeNo.startsWith('BALANCE-'));
       });
     });
-  });
+  }));
 }
 
 /**
@@ -1971,6 +2020,7 @@ async function main() {
   await testIssueFirstPaymentRewardSkipsZeroReward();
   await testIssueFirstPaymentRewardHandlesDuplicateConflict();
   await testIssueFirstPaymentRewardRethrowsUnrelatedUniqueConflict();
+  await testIssueFirstPaymentRewardRollsBackLedgerFailure();
   await testGetUserReferralSummaryCreatesCodeAndFormatsTraffic();
   await testListUserRewardsMasksPrivateIdentifiers();
   await testGetOrCreateReferralCodeRetriesCodeUniqueConflict();

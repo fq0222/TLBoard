@@ -2,9 +2,11 @@ const crypto = require('crypto');
 const { parsePagination } = require('../shared/utils/pagination');
 const { getUserAppBaseUrl } = require('../shared/utils/site-url');
 const referralRepository = require('../repositories/referral-repository');
+const { BalanceService } = require('./shared/balance-service');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('REFERRAL');
+const balanceService = new BalanceService();
 
 /**
  * 推广系统服务。
@@ -333,38 +335,11 @@ async function resolveReferrerByCode(db, code, registeringEmail) {
 }
 
 /**
- * 判断错误是否为唯一约束冲突。
- *
- * 职责：识别重复支付回调导致的推广奖励重复插入。
- * 关键参数：error 为 repository 插入奖励时抛出的异常。
- * 核心分支：PostgreSQL 23505 或错误文本包含常见唯一冲突关键词时返回 true。
- *
- * @param {Error} error - 数据库错误
- * @returns {boolean} 是否为唯一约束冲突
- */
-function isReferralRewardUniqueConstraintError(error) {
-  if (!error) {
-    return false;
-  }
-
-  const constraint = String(error.constraint || '').toLowerCase();
-  const message = String(error.message || '').toLowerCase();
-  const isDuplicate = error.code === '23505' ||
-    message.includes('duplicate') ||
-    message.includes('unique');
-
-  return isDuplicate && (
-    constraint.includes('referral_rewards') ||
-    message.includes('referral_rewards')
-  );
-}
-
-/**
  * 发放首单推广奖励。
  *
- * 职责：支付成功后按配置给推广人增加奖励余额。
+ * 职责：支付成功后在同一事务记录奖励、增加余额并追加统一流水。
  * 关键参数：order.id 为订单 ID，order.user_id 为被推荐人，order.referrer_user_id 为推广人。
- * 核心分支：无推广人或奖励配置小于等于 0 返回 false；唯一约束冲突视为重复回调返回 false。
+ * 核心分支：无推广人或奖励配置小于等于 0 返回 false；重复奖励不再入账；嵌套调用复用订单事务。
  *
  * @param {Object} db - 数据库实例
  * @param {Object} order - 已支付订单
@@ -393,24 +368,29 @@ async function issueFirstPaymentReward(db, order) {
     return false;
   }
 
-  try {
-    await referralRepository.insertReferralReward(db, {
+  // 根代理负责 pool.connect/BEGIN/COMMIT/ROLLBACK/release，事务态代理则复用当前 client。
+  return db.transaction(async transactionDb => {
+    const reward = await referralRepository.insertReferralReward(transactionDb, {
       referrerUserId: order.referrer_user_id,
       referredUserId: order.user_id,
       orderId: order.id,
       rewardAmount
     });
-  } catch (error) {
-    if (isReferralRewardUniqueConstraintError(error)) {
+    if (!reward || Number(reward.changes) === 0) {
       logger.warn(`跳过重复推广奖励: order=${order.id}, referrer=${order.referrer_user_id}`);
       return false;
     }
 
-    throw error;
-  }
-
-  await referralRepository.incrementUserBalance(db, order.referrer_user_id, rewardAmount);
-  return true;
+    await balanceService.credit(transactionDb, {
+      userId: order.referrer_user_id,
+      amount: rewardAmount,
+      type: 'referral_reward',
+      referenceType: 'referral_reward',
+      referenceId: Number(reward.lastInsertRowid),
+      description: '首单推广奖励'
+    });
+    return true;
+  })();
 }
 
 /**

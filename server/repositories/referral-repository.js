@@ -180,9 +180,9 @@ async function listReferralRewards(db, payload) {
 /**
  * 插入推广奖励。
  *
- * 职责：记录首单奖励，唯一约束冲突由 service 识别为重复回调。
+ * 职责：记录首单奖励，重复回调返回 changes=0，避免唯一冲突中断外层事务。
  * 关键参数：payload.referrerUserId/referredUserId/orderId/rewardAmount 描述奖励归属与金额。
- * 核心分支：不做去重判断，依赖数据库 UNIQUE(referred_user_id/order_id)。
+ * 核心分支：数据库 UNIQUE(referred_user_id/order_id) 冲突不写入，其他数据库错误仍向上传播。
  *
  * @param {Object} db - 数据库实例
  * @param {Object} payload - 奖励写入参数
@@ -199,38 +199,8 @@ async function insertReferralReward(db, payload) {
   return db.prepare(`
     INSERT INTO referral_rewards (referrer_user_id, referred_user_id, order_id, reward_amount)
     VALUES (?, ?, ?, ?)
+    ON CONFLICT DO NOTHING
   `).run(referrerUserId, referredUserId, orderId, rewardAmount);
-}
-
-/**
- * 增加用户推广奖励余额。
- *
- * 职责：将奖励金额累加到 users.balance。
- * 关键参数：userId 为推广人，rewardAmount 为本次奖励金额，单位分。
- * 核心分支：COALESCE 兼容历史空值。
- *
- * @param {Object} db - 数据库实例
- * @param {number} userId - 推广人用户 ID
- * @param {number} rewardAmount - 奖励金额，单位分
- * @returns {Promise<Object>} 更新结果
- */
-/**
- * 增加用户推广奖励余额。
- * 职责：把首单奖励金额累加到 users.balance，金额单位为分。
- * 关键参数：userId 为推广人用户 ID，rewardAmount 为本次奖励金额。
- * 核心分支：使用 COALESCE 兼容历史余额空值。
- *
- * @param {Object} db - 数据库代理对象
- * @param {number} userId - 推广人用户 ID
- * @param {number} rewardAmount - 奖励金额，单位分
- * @returns {Promise<Object>} 更新结果
- */
-async function incrementUserBalance(db, userId, rewardAmount) {
-  return db.prepare(`
-    UPDATE users
-    SET balance = COALESCE(balance, 0) + ?
-    WHERE id = ?
-  `).run(rewardAmount, userId);
 }
 
 /**
@@ -418,7 +388,6 @@ module.exports = {
   sumReferralRewards,
   listReferralRewards,
   insertReferralReward,
-  incrementUserBalance,
   findReferralRewardSetting,
   listAdminReferralSummaries,
   countAdminReferralSummaries,

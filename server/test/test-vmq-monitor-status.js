@@ -7,6 +7,7 @@ const orderRepository = require('../repositories/order-repository');
 const authService = require('../services/user/auth-service');
 const orderService = require('../services/shared/order-service');
 const renewService = require('../services/user/renew-service');
+const { BalanceService } = require('../services/shared/balance-service');
 
 /**
  * 验证注册购买在 VMQ 监控端离线时提前中止，不开启数据库事务。
@@ -116,7 +117,7 @@ async function testBalanceRenewBypassesMonitor() {
     findEnabledPlanById: orderRepository.findEnabledPlanById,
     findPlanById: orderRepository.findPlanById,
     createPendingRenewOrder: orderRepository.createPendingRenewOrder,
-    decrementUserBalance: orderRepository.decrementUserBalance,
+    debit: BalanceService.prototype.debit,
     completePaidOrder: orderService.completePaidOrder,
     isMonitorOnline: vmqService.isMonitorOnline
   };
@@ -145,7 +146,14 @@ async function testBalanceRenewBypassesMonitor() {
     });
     orderRepository.findPlanById = async () => ({ id: 1, plan_type: 'lifetime' });
     orderRepository.createPendingRenewOrder = async () => ({ lastInsertRowid: 66 });
-    orderRepository.decrementUserBalance = async () => ({ changes: 1 });
+    // 本用例只隔离账务依赖，保留余额支付绕过 VMQ 监控的业务断言。
+    BalanceService.prototype.debit = async (_db, payload) => {
+      assert.strictEqual(payload.type, 'plan_payment');
+      assert.strictEqual(payload.referenceType, 'order');
+      assert.strictEqual(payload.referenceId, 66);
+      assert.strictEqual(payload.amount, 1500);
+      return { id: 1 };
+    };
     orderService.completePaidOrder = async () => {
       completed = true;
       return { handled: true };
@@ -167,7 +175,7 @@ async function testBalanceRenewBypassesMonitor() {
     orderRepository.findEnabledPlanById = originals.findEnabledPlanById;
     orderRepository.findPlanById = originals.findPlanById;
     orderRepository.createPendingRenewOrder = originals.createPendingRenewOrder;
-    orderRepository.decrementUserBalance = originals.decrementUserBalance;
+    BalanceService.prototype.debit = originals.debit;
     orderService.completePaidOrder = originals.completePaidOrder;
     vmqService.isMonitorOnline = originals.isMonitorOnline;
   }

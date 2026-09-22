@@ -149,30 +149,6 @@ async function findPaidOrderContextByOutTradeNo(db, outTradeNo) {
 }
 
 /**
- * 扣减用户余额。
- *
- * 职责：在余额支付续费时按分扣减 users.balance。
- * 关键参数：payload.userId 为付款用户，payload.amount 为扣减金额，单位分。
- * 核心分支：SQL 条件要求余额充足，调用方通过 changes 判断是否扣款成功。
- *
- * @param {Object} db - 数据库代理对象
- * @param {{userId:number,amount:number}} payload - 扣款参数
- * @returns {Promise<Object>} 更新结果
- */
-async function decrementUserBalance(db, payload) {
-  const {
-    userId,
-    amount
-  } = payload;
-
-  return db.prepare(`
-    UPDATE users
-    SET balance = COALESCE(balance, 0) - ?
-    WHERE id = ? AND COALESCE(balance, 0) >= ?
-  `).run(amount, userId, amount);
-}
-
-/**
  * 将订单标记为已支付。
  *
  * @param {Object} db - 数据库代理对象
@@ -519,7 +495,6 @@ module.exports = {
   markOrderExpiredByOutTradeNo,
   clearUserSubscriptionSourceCache,
   updateOrderPaymentInfo,
-  decrementUserBalance,
   updateUserSyncStatus,
   findPaidOrderContextByOutTradeNo,
   markOrderPaid,

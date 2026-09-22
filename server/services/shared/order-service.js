@@ -844,9 +844,11 @@ function calculatePaidOrderEntitlement(order, plan, now = Math.floor(Date.now() 
  * @param {Object} db - 数据库实例
  * @param {string} outTradeNo - 商户订单号
  * @param {string|null} [tradeNo=null] - 第三方订单号
+ * @param {Object} [options] - deferEffects 可登记一个接收根 db 的提交后回调；省略时保持原流程。
+ * 核心分支：余额支付外层事务登记副作用，只有外层提交成功后才执行同步与邮件。
  * @returns {Promise<Object>} 处理结果
  */
-async function completePaidOrder(db, outTradeNo, tradeNo = null) {
+async function completePaidOrder(db, outTradeNo, tradeNo = null, options = {}) {
   const order = await orderRepository.findPaidOrderContextByOutTradeNo(db, outTradeNo);
 
   if (!order) {
@@ -891,13 +893,18 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
     });
 
     await transaction();
-    logger.info(`家宽 IP 套餐支付完成: ${outTradeNo}, user=${order.email}, home_expire_at=${entitlement.homeExpireAt}`);
-    await orderActivationEmailService.sendOrderActivationEmail(db, {
-      order,
-      plan,
-      expireAt: entitlement.homeExpireAt,
-      isRenewOrder: isRenewOrHomeIpOrder
-    });
+    // 回调接收外层提交后可继续使用的根代理，避免保留已释放的事务连接。
+    const afterCommit = async effectDb => {
+      logger.info(`家宽 IP 套餐支付完成: ${outTradeNo}, user=${order.email}, home_expire_at=${entitlement.homeExpireAt}`);
+      await orderActivationEmailService.sendOrderActivationEmail(effectDb, {
+        order,
+        plan,
+        expireAt: entitlement.homeExpireAt,
+        isRenewOrder: isRenewOrHomeIpOrder
+      });
+    };
+    if (options.deferEffects) options.deferEffects(afterCommit);
+    else await afterCommit(db);
     return { handled: true, alreadyPaid: false, order, plan, expireAt: entitlement.homeExpireAt };
   }
 
@@ -933,46 +940,51 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null) {
 
   await transaction();
 
-  logger.info(`Order paid: ${outTradeNo}, user=${order.email}, expire_at=${expireAt}, traffic_limit=${newTrafficLimit}`);
+  // 所有第三方副作用使用执行时提供的根代理，不捕获事务态 db。
+  const afterCommit = async effectDb => {
+    logger.info(`Order paid: ${outTradeNo}, user=${order.email}, expire_at=${expireAt}, traffic_limit=${newTrafficLimit}`);
 
-  const userInfo = {
-    id: order.user_id,
-    email: order.email,
-    subscription_token: order.subscription_token,
-    enabled: 1,
-    expire_at: expireAt,
-    traffic_used: resetTrafficUsed ? 0 : Number(order.current_traffic_used || 0),
-    traffic_limit: newTrafficLimit,
-    total_traffic_limit: newTrafficLimit
-  };
-  const syncPlan = {
-    ...plan,
-    traffic_limit: newTrafficLimit,
-    total_traffic_limit: newTrafficLimit,
-    reset_client_traffic: entitlement.resetClientTraffic === true
-  };
+    const userInfo = {
+      id: order.user_id,
+      email: order.email,
+      subscription_token: order.subscription_token,
+      enabled: 1,
+      expire_at: expireAt,
+      traffic_used: resetTrafficUsed ? 0 : Number(order.current_traffic_used || 0),
+      traffic_limit: newTrafficLimit,
+      total_traffic_limit: newTrafficLimit
+    };
+    const syncPlan = {
+      ...plan,
+      traffic_limit: newTrafficLimit,
+      total_traffic_limit: newTrafficLimit,
+      reset_client_traffic: entitlement.resetClientTraffic === true
+    };
 
-  const syncTaskType = isRenewOrHomeIpOrder
-    ? xuiSyncTaskService.TASK_TYPES.RENEW_SYNC
-    : xuiSyncTaskService.TASK_TYPES.INITIAL_USER_SYNC;
+    const syncTaskType = isRenewOrHomeIpOrder
+      ? xuiSyncTaskService.TASK_TYPES.RENEW_SYNC
+      : xuiSyncTaskService.TASK_TYPES.INITIAL_USER_SYNC;
 
-  // 支付流程不等待 3X-UI 完全成功，失败由持久化队列继续重试
-  enqueueAndTryUserSync(db, syncTaskType, userInfo, syncPlan).catch(error => {
-    logger.error(`创建 3X-UI 同步任务失败，降级为直接同步: ${error.message}`);
-    syncUserToXuiServers(db, userInfo, syncPlan).catch(syncError => {
-      logger.error(`后台同步用户到 3X-UI 失败: ${syncError.message}`);
+    // 支付流程不等待 3X-UI 完全成功，失败由持久化队列继续重试
+    enqueueAndTryUserSync(effectDb, syncTaskType, userInfo, syncPlan).catch(error => {
+      logger.error(`创建 3X-UI 同步任务失败，降级为直接同步: ${error.message}`);
+      syncUserToXuiServers(effectDb, userInfo, syncPlan).catch(syncError => {
+        logger.error(`后台同步用户到 3X-UI 失败: ${syncError.message}`);
+      });
     });
-  });
 
-  const shouldSendActivationEmail = isRenewOrHomeIpOrder || Number(order.current_payment_count || 0) === 0;
-  if (shouldSendActivationEmail) {
-    await orderActivationEmailService.sendOrderActivationEmail(db, {
-      order,
-      plan,
-      expireAt,
-      isRenewOrder: isRenewOrHomeIpOrder
-    });
-  }
+    const shouldSendActivationEmail = isRenewOrHomeIpOrder || Number(order.current_payment_count || 0) === 0;
+    if (shouldSendActivationEmail) {
+      await orderActivationEmailService.sendOrderActivationEmail(effectDb, {
+        order,
+        plan,
+        expireAt,
+        isRenewOrder: isRenewOrHomeIpOrder
+      });
+    }
+  };
+  if (options.deferEffects) options.deferEffects(afterCommit);
+  else await afterCommit(db);
 
   return { handled: true, alreadyPaid: false, order, plan, expireAt };
 }

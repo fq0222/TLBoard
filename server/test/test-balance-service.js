@@ -274,7 +274,8 @@ async function testRepositoryBalanceSql() {
   await balanceRepository.decrementBalance(db, 7, 2000);
   await balanceRepository.incrementBalance(db, 7, 4000);
 
-  assert.match(calls[0].sql, /SELECT[\s\S]+COALESCE\(balance, 0\)[\s\S]+FROM users[\s\S]+FOR UPDATE/i);
+  // 余额锁必须兼容订单/奖励 INSERT 外键持有的 KEY SHARE，避免并发锁升级死锁。
+  assert.match(calls[0].sql, /SELECT[\s\S]+COALESCE\(balance, 0\)[\s\S]+FROM users[\s\S]+FOR NO KEY UPDATE/i);
   assert.deepStrictEqual(calls[0].params, [7]);
   assert.match(calls[1].sql, /UPDATE users[\s\S]+COALESCE\(balance, 0\) - \?[\s\S]+COALESCE\(balance, 0\) >= \?[\s\S]+RETURNING balance/i);
   assert.deepStrictEqual(calls[1].params, [2000, 7, 2000]);

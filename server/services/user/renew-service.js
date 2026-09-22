@@ -3,6 +3,7 @@ const vmqService = require('../../integrations/vmq/vmq-service');
 const orderRepository = require('../../repositories/order-repository');
 const planRepository = require('../../repositories/plan-repository');
 const orderService = require('../shared/order-service');
+const { BalanceService } = require('../shared/balance-service');
 const planSalesService = require('../shared/plan-sales-service');
 const {
   evaluateRenewEligibility,
@@ -20,6 +21,7 @@ const {
 const { formatTraffic } = require('../../shared/utils/format-traffic');
 
 const BALANCE_PAY_TYPE = 9;
+const balanceService = new BalanceService();
 
 /**
  * 用户端续费服务。
@@ -244,6 +246,8 @@ async function createRenewOrder(db, userId, payload) {
       });
     }
 
+    // 数据库订单与账务共用事务；完成回调只登记副作用，提交后才使用根代理执行。
+    const postCommitEffects = [];
     const transaction = db.transaction(async (transactionDb) => {
       const orderResult = await orderRepository.createPendingRenewOrder(transactionDb, {
         userId,
@@ -255,22 +259,36 @@ async function createRenewOrder(db, userId, payload) {
       });
 
       orderId = Number(orderResult.lastInsertRowid);
-      const balanceResult = await orderRepository.decrementUserBalance(transactionDb, {
+      await balanceService.debit(transactionDb, {
         userId,
-        amount: planPrice
+        amount: planPrice,
+        type: 'plan_payment',
+        referenceType: 'order',
+        referenceId: orderId,
+        description: `套餐支付：${plan.name || `套餐${plan.id}`}，订单号：${outTradeNo}`
       });
 
-      if (!balanceResult || Number(balanceResult.changes) !== 1) {
-        throw createLegacyBusinessError('余额不足，请更换支付方式', {
-          code: 4001
-        });
+      const completed = await orderService.completePaidOrder(transactionDb, outTradeNo, `BALANCE-${outTradeNo}`, {
+        deferEffects: effect => postCommitEffects.push(effect)
+      });
+      if (!completed || !completed.handled || completed.alreadyPaid) {
+        throw createLegacyBusinessError('余额支付订单完成失败，请重试', { code: 5002 });
       }
     });
 
-    await transaction();
+    try {
+      await transaction();
+    } catch (error) {
+      // 沿用续费接口余额不足的旧错误结构；其他账务错误保留原有机器码。
+      if (error.code === 'INSUFFICIENT_BALANCE') {
+        throw createLegacyBusinessError('余额不足，请更换支付方式', { code: 4001 });
+      }
+      throw error;
+    }
 
-    const tradeNo = `BALANCE-${outTradeNo}`;
-    await orderService.completePaidOrder(db, outTradeNo, tradeNo);
+    for (const effect of postCommitEffects) {
+      await effect(db);
+    }
 
     return {
       order_id: orderId,

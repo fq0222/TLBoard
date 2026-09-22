@@ -47,14 +47,14 @@ function buildTransactionFilters({ userId, type, keyword } = {}) {
  * @param {Object} db - 绑定专用 pg.Client 的事务数据库适配器
  * @param {number} userId - 用户 ID
  * @returns {Promise<Object|undefined>} 用户及当前余额
- * 核心分支：FOR UPDATE 串行化同一用户的全部余额变更。
+ * 核心分支：FOR NO KEY UPDATE 串行化余额变更，同时兼容业务记录外键的 KEY SHARE，避免锁升级死锁。
  */
 async function lockUser(db, userId) {
   return db.prepare(`
     SELECT id, COALESCE(balance, 0) AS balance
     FROM users
     WHERE id = ?
-    FOR UPDATE
+    FOR NO KEY UPDATE
   `).get(userId);
 }
 
