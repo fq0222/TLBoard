@@ -10,6 +10,16 @@
         </el-tag>
       </header>
 
+      <section class="reward-summary" aria-label="累计奖励">
+        <span>累计奖励</span>
+        <strong v-if="rewardLoading">加载中</strong>
+        <strong v-else-if="rewardLoadError" class="metric-error">
+          加载失败
+          <button type="button" @click="fetchRewardSummary">重试</button>
+        </strong>
+        <strong v-else>¥{{ formatCents(rewardTotal) }}</strong>
+      </section>
+
       <div v-if="overviewLoadError" class="panel-state is-error">
         <el-icon><WarningFilled /></el-icon>
         <div>
@@ -24,15 +34,6 @@
         <strong class="balance-value"><small>¥</small>{{ formatCents(overview.balance) }}</strong>
 
         <dl class="balance-metrics">
-          <div>
-            <dt>累计奖励</dt>
-            <dd v-if="rewardLoading">加载中</dd>
-            <dd v-else-if="rewardLoadError" class="metric-error">
-              加载失败
-              <button type="button" @click="fetchRewardSummary">重试</button>
-            </dd>
-            <dd v-else>¥{{ formatCents(rewardTotal) }}</dd>
-          </div>
           <div>
             <dt>最低提现</dt>
             <dd>¥{{ formatCents(overview.minimum_withdrawal_amount) }}</dd>
@@ -84,7 +85,7 @@
       </div>
     </aside>
 
-    <main class="withdraw-panel transactions-panel">
+    <section class="withdraw-panel transactions-panel">
       <header class="transactions-heading">
         <div>
           <p class="eyebrow">WALLET</p>
@@ -95,6 +96,7 @@
           <el-input
             v-model="searchDraft"
             class="search-input"
+            aria-label="搜索余额明细"
             clearable
             :maxlength="200"
             placeholder="搜索说明"
@@ -105,6 +107,7 @@
           <el-select
             v-model="selectedType"
             class="type-select"
+            aria-label="筛选余额明细类型"
             placeholder="所有类型"
             @change="handleTypeChange"
           >
@@ -196,12 +199,12 @@
           @current-change="fetchTransactions"
         />
       </footer>
-    </main>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { InfoFilled, Search, WalletFilled, WarningFilled } from '@element-plus/icons-vue'
 import api from '@/api'
@@ -240,6 +243,7 @@ const pageSize = 20
 const total = ref(0)
 let overviewRequestSequence = 0
 let requestSequence = 0
+let alive = true
 
 const pendingWithdrawal = computed(() => overview.pending_withdrawal)
 const paymentTypeText = computed(() => {
@@ -426,7 +430,9 @@ function amountToCents(amount) {
  */
 async function handleSubmit() {
   if (submitDisabled.value) return
-  const cents = amountToCents(amountInput.value)
+  const amountSnapshot = amountInput.value
+  const paymentTypeSnapshot = paymentTypeText.value
+  const cents = amountToCents(amountSnapshot)
   if (cents === null) {
     ElMessage.warning('请输入正数金额，最多保留两位小数')
     return
@@ -443,7 +449,7 @@ async function handleSubmit() {
   confirming.value = true
   try {
     await ElMessageBox.confirm(
-      `确认提现 ¥${formatCents(cents)} 至${paymentTypeText.value}收款码？`,
+      `确认提现 ¥${formatCents(cents)} 至${paymentTypeSnapshot}收款码？`,
       '确认提现',
       {
         confirmButtonText: '确认提现',
@@ -451,6 +457,7 @@ async function handleSubmit() {
         type: 'warning'
       }
     )
+    if (!alive) return
   } catch {
     return
   } finally {
@@ -460,13 +467,19 @@ async function handleSubmit() {
   if (submitting.value || pendingWithdrawal.value) return
   submitting.value = true
   try {
-    const response = await api.user.createWithdrawal({ amount: amountInput.value })
+    const response = await api.user.createWithdrawal({ amount: amountSnapshot })
+    if (!alive) return
     if (response.code !== 0) throw new Error(response.message || '提现申请提交失败')
     ElMessage.success('提现申请已提交')
     amountInput.value = ''
     currentPage.value = 1
     await Promise.all([fetchOverview(), fetchTransactions(1)])
   } catch (error) {
+    if (!alive) return
+    if (Number(error.response?.status) === 409) {
+      await fetchOverview()
+      return
+    }
     ElMessage.error(error.userMessage || error.message || '提现申请提交失败，请重试')
   } finally {
     submitting.value = false
@@ -477,6 +490,14 @@ onMounted(() => {
   fetchOverview()
   fetchRewardSummary()
   fetchTransactions(1)
+})
+
+/** 卸载时使异步提现流程失效，并关闭仍在等待用户选择的确认框。 */
+onBeforeUnmount(() => {
+  alive = false
+  overviewRequestSequence += 1
+  requestSequence += 1
+  ElMessageBox.close()
 })
 </script>
 
@@ -512,7 +533,7 @@ onMounted(() => {
 
 .balance-heading {
   justify-content: space-between;
-  margin-bottom: 30px;
+  margin-bottom: 20px;
 }
 
 .heading-icon {
@@ -529,6 +550,31 @@ onMounted(() => {
 
 .balance-content {
   min-height: 390px;
+}
+
+.reward-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 22px;
+  padding: 13px 15px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  color: #475569;
+  background: #f8fbff;
+  font-size: 13px;
+}
+
+.reward-summary strong {
+  color: #0f172a;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.reward-summary .metric-error {
+  color: #c2410c;
+  font-size: 12px;
 }
 
 .balance-label,
@@ -563,7 +609,7 @@ onMounted(() => {
 
 .balance-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin: 0 0 22px;
   padding: 18px 0;
