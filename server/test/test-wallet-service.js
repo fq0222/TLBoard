@@ -113,6 +113,27 @@ function createService() {
   return new UserWalletService({ paymentQrService: new PaymentQrService({ encryptionKey: Buffer.alloc(32, 7).toString('base64') }) });
 }
 
+/** 捕获钱包服务在构造时提前读取加密密钥，导致纯查询接口随密钥缺失一起不可用。 */
+async function testQueriesDoNotRequireQrEncryptionKey() {
+  const hadEncryptionKey = Object.prototype.hasOwnProperty.call(process.env, 'WITHDRAWAL_QR_ENCRYPTION_KEY');
+  const originalEncryptionKey = process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;
+  delete process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;
+  try {
+    const database = new WalletDatabase();
+    const service = new UserWalletService();
+    assert.equal((await service.getSummary(database.db, 7)).balance, 5000);
+    assert.equal((await service.getWithdrawalOverview(database.db, 7)).minimum_withdrawal_amount, 2000);
+    assert.deepEqual(await service.listUserTransactions(database.db, 7, { page: 1, limit: 20 }), { list: [], total: 0, page: 1, limit: 20 });
+    await assert.rejects(
+      () => service.savePaymentQr(database.db, 7, { paymentType: 'wechat', fileBuffer: Buffer.from('image-fixture') }),
+      /收款码加密密钥未配置/
+    );
+  } finally {
+    if (hadEncryptionKey) process.env.WITHDRAWAL_QR_ENCRYPTION_KEY = originalEncryptionKey;
+    else delete process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;
+  }
+}
+
 /** 捕获摘要或 pending 直接返回整行导致的密文、摘要、明文泄漏。 */
 async function testSummaryAndOverviewArePrivate() {
   const database = new WalletDatabase({ balance: '5000', pending: true });
@@ -221,24 +242,30 @@ async function testUniqueConflictMapping() {
   await assert.rejects(() => service.createWithdrawal(other.db, 7, { amount: 2000 }), error => error.code === '23505');
 }
 
-/** 查询强制使用登录用户 ID，分页最大 100，关键字仍交给已有安全查询处理。 */
+/** 查询强制使用登录用户 ID，并将筛选与分页精确转交真实余额仓储。 */
 async function testTransactionsAreScopedAndPaginated() {
   const database = new WalletDatabase();
   const service = createService();
   await service.createWithdrawal(database.db, 7, { amount: 2000 });
-  const result = await service.listUserTransactions(database.db, 7, { userId: 8, page: 2, limit: 999, keyword: '50%_' });
+  const callsBeforeQuery = database.calls.length;
+  const result = await service.listUserTransactions(database.db, 7, { userId: 8, page: 2, limit: 25, type: 'withdrawal', keyword: 'abc' });
   assert.equal(result.total, 1);
   assert.equal(result.page, 2);
-  assert.equal(result.limit, 100);
-  const call = database.calls.at(-1);
-  assert.equal(call.params[0], 7);
-  assert.deepEqual(call.params.slice(-2), [100, 100]);
+  assert.equal(result.limit, 25);
+  const repositoryCalls = database.calls.slice(callsBeforeQuery).filter(call => call.sql.includes('FROM balance_transactions'));
+  assert.equal(repositoryCalls.length, 2);
+  assert.deepEqual(repositoryCalls[0].params, [7, 'withdrawal', '%abc%', '%abc%']);
+  assert.deepEqual(repositoryCalls[1].params, [7, 'withdrawal', '%abc%', '%abc%', 25, 25]);
+
+  const capped = await service.listUserTransactions(database.db, 7, { page: 2, limit: 999, keyword: '50%_' });
+  assert.equal(capped.limit, 100);
+  assert.deepEqual(database.calls.at(-1).params, [7, '%50\\%\\_%', '%50\\%\\_%', 100, 100]);
   assert.equal((await service.listUserTransactions(database.db, 8, {})).total, 0);
 }
 
 /** 按行为顺序运行测试；失败输出名称和堆栈，成功输出可追溯统计。 */
 async function run() {
-  const tests = [testSummaryAndOverviewArePrivate, testSaveQrEncryptsAndPreservesSnapshot, testMinimumAndValidation, testRejectionsDoNotMutate, testCreateIsAtomic, testFailureRollsEverythingBack, testConcurrentRequestsOnlyDebitOnce, testUniqueConflictMapping, testTransactionsAreScopedAndPaginated];
+  const tests = [testQueriesDoNotRequireQrEncryptionKey, testSummaryAndOverviewArePrivate, testSaveQrEncryptsAndPreservesSnapshot, testMinimumAndValidation, testRejectionsDoNotMutate, testCreateIsAtomic, testFailureRollsEverythingBack, testConcurrentRequestsOnlyDebitOnce, testUniqueConflictMapping, testTransactionsAreScopedAndPaginated];
   for (const test of tests) { await test(); console.log(`✓ ${test.name}`); }
   console.log(`钱包服务测试通过：${tests.length}/${tests.length}`);
 }

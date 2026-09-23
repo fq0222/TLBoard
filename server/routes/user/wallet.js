@@ -8,9 +8,11 @@ const { TRANSACTION_TYPES } = require('../../services/shared/balance-service');
 const controller = require('../../controllers/user/wallet-controller');
 
 const router = express.Router();
+const MAX_PAYMENT_QR_BYTES = 5 * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 1, fieldSize: 32, parts: 3 }
+  // Busboy 在字节数恰好等于阈值时也触发超限；多放行 1 字节后仍由中间件拒绝所有大于 5 MiB 的文件。
+  limits: { fileSize: MAX_PAYMENT_QR_BYTES + 1, files: 1, fields: 1, fieldSize: 32, parts: 3 }
 }).single('qr_code');
 
 /** 仅接收 multipart；错误详情可能含文件名或输入，统一转换为固定中文提示，不写日志。 */

@@ -68,7 +68,12 @@ async function testAuthentication(port) {
 
 /** 请求中的 userId/user_id 永远不能替换 JWT 用户，成功响应沿用旧结构。 */
 async function testReadEndpointsAndOwnership(port) {
-  for (const [path, method] of [['/summary?user_id=8', 'getSummary'], ['/withdrawal?userId=8', 'getWithdrawalOverview'], ['/transactions?page=2&limit=100&type=withdrawal&keyword=abc&userId=8', 'listUserTransactions']]) {
+  const cases = [
+    ['/summary?user_id=8', 'getSummary'],
+    ['/withdrawal?userId=8', 'getWithdrawalOverview'],
+    ['/transactions?page=2&limit=100&type=withdrawal&keyword=abc&userId=8', 'listUserTransactions', { page: '2', limit: '100', type: 'withdrawal', keyword: 'abc' }]
+  ];
+  for (const [path, method, expectedFilters] of cases) {
     const response = await request(port, path);
     assertEnvelope(response, 200);
     assert.equal(response.body.code, 0);
@@ -76,6 +81,7 @@ async function testReadEndpointsAndOwnership(port) {
     assert.equal(call.name, method);
     assert.strictEqual(call.args[0], db);
     assert.equal(call.args[1], 7);
+    if (expectedFilters) assert.deepEqual(call.args[2], expectedFilters);
   }
 }
 
@@ -115,6 +121,10 @@ async function testUploadBoundary(port) {
   assert.ok(Buffer.isBuffer(call.args[2].fileBuffer));
   assert.equal(call.args[2].fileBuffer.toString(), 'image-fixture');
   assert.deepEqual(Object.keys(call.args[2]).sort(), ['fileBuffer', 'paymentType']);
+
+  const exactLimit = multipart({ buffer: Buffer.alloc(5 * 1024 * 1024) });
+  assertEnvelope(await request(port, '/payment-qr', { method: 'PUT', ...exactLimit }), 200);
+  assert.equal(calls.at(-1).args[2].fileBuffer.length, 5 * 1024 * 1024);
   const before = calls.length;
   for (const upload of [multipart({ field: 'image' }), multipart({ paymentType: 'bank' }), multipart({ extraFile: true }), multipart({ buffer: Buffer.alloc(5 * 1024 * 1024 + 1) })]) {
     assertEnvelope(await request(port, '/payment-qr', { method: 'PUT', ...upload }), 400);
