@@ -38,6 +38,10 @@
           <el-icon><Document /></el-icon>
           <span v-if="!isCollapsed || mobileSidebarOpen">订单管理</span>
         </router-link>
+        <router-link to="/admin/wallets" class="nav-item" active-class="active">
+          <el-icon><Wallet /></el-icon>
+          <span v-if="!isCollapsed || mobileSidebarOpen">余额管理</span>
+        </router-link>
         <router-link to="/admin/announcements" class="nav-item" active-class="active">
           <el-icon><Bell /></el-icon>
           <span v-if="!isCollapsed || mobileSidebarOpen">公告管理</span>
@@ -180,7 +184,8 @@ import {
   Setting,
   Share,
   SwitchButton,
-  User
+  User,
+  Wallet
 } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
 

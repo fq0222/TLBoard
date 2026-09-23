@@ -74,6 +74,12 @@ const routes = [
         meta: { title: '订单管理' }
       },
       {
+        path: 'wallets',
+        name: 'Wallets',
+        component: () => import('@/views/Wallets.vue'),
+        meta: { title: '余额管理' }
+      },
+      {
         path: 'cf-ips',
         name: 'CfIps',
         component: () => import('@/views/CfIps.vue'),

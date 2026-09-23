@@ -163,6 +163,34 @@
         </div>
       </el-tab-pane>
 
+      <el-tab-pane label="提现设置" name="withdrawal">
+        <div class="content-card">
+          <h2 class="card-title">最低提现金额</h2>
+          <el-form label-width="160px" style="max-width: 640px;">
+            <el-form-item label="最低提现金额">
+              <el-input-number
+                v-model="minimumWithdrawalYuan"
+                class="minimum-withdrawal-input"
+                :min="0.01"
+                :step="0.01"
+                :precision="2"
+              />
+              <span class="form-hint">元，用户单次提现不得低于此金额</span>
+            </el-form-item>
+            <el-form-item>
+              <el-button
+                class="save-withdrawal-settings"
+                type="primary"
+                :loading="withdrawalSaving"
+                @click="saveWithdrawalSettings"
+              >
+                保存设置
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+      </el-tab-pane>
+
       <el-tab-pane label="订阅配置" name="subscription">
         <div class="content-card">
           <h2 class="card-title">订阅响应配置</h2>
@@ -373,6 +401,9 @@ const trafficForm = reactive({
   referral_reward_coefficient: 0.1
 })
 const trafficSaving = ref(false)
+
+const minimumWithdrawalYuan = ref(20)
+const withdrawalSaving = ref(false)
 
 const subscriptionForm = ref({
   clash_config_name: '天涯大陆',
@@ -611,6 +642,65 @@ async function saveTrafficConfig() {
   }
 }
 
+/**
+ * 将页面中的元金额精确规范成后端要求的正安全整数分。
+ * @param {number} amountYuan - 输入框中的元金额
+ * @returns {number|null} 合法时返回整数分，否则返回 null
+ */
+function normalizeYuanToCents(amountYuan) {
+  if (typeof amountYuan !== 'number' || !Number.isFinite(amountYuan) || amountYuan <= 0) {
+    return null
+  }
+
+  const normalized = amountYuan.toFixed(2)
+  const [yuan, fraction] = normalized.split('.')
+  const cents = Number(yuan) * 100 + Number(fraction)
+  return Number.isSafeInteger(cents) && cents > 0 ? cents : null
+}
+
+/** 加载最低提现金额；接口缺失或非法时保留页面默认值 20 元。 */
+async function loadWithdrawalSettings() {
+  try {
+    const response = await api.admin.getWithdrawalSettings()
+    const cents = Number(response.data?.minimum_withdrawal_amount)
+    if (response.code === 0 && Number.isSafeInteger(cents) && cents > 0) {
+      minimumWithdrawalYuan.value = cents / 100
+    }
+  } catch (error) {
+    console.error('加载提现设置失败:', error)
+  }
+}
+
+/** 保存时只发送整数分；失败分支不回写表单，保留管理员当前输入。 */
+async function saveWithdrawalSettings() {
+  const cents = normalizeYuanToCents(minimumWithdrawalYuan.value)
+  if (cents === null) {
+    ElMessage.warning('请输入大于 0 的提现金额，最多保留两位小数')
+    return
+  }
+
+  withdrawalSaving.value = true
+  try {
+    const response = await api.admin.saveWithdrawalSettings({
+      minimum_withdrawal_amount: cents
+    })
+    if (response.code !== 0) {
+      ElMessage.error(response.message || '提现设置保存失败')
+      return
+    }
+
+    const savedCents = Number(response.data?.minimum_withdrawal_amount)
+    if (Number.isSafeInteger(savedCents) && savedCents > 0) {
+      minimumWithdrawalYuan.value = savedCents / 100
+    }
+    ElMessage.success('提现设置已保存')
+  } catch (error) {
+    ElMessage.error('提现设置保存失败')
+  } finally {
+    withdrawalSaving.value = false
+  }
+}
+
 async function loadSubscriptionConfig() {
   try {
     const res = await api.admin.getSubscriptionConfig()
@@ -743,6 +833,7 @@ onMounted(() => {
   loadEmailConfig()
   loadResourceConfig()
   loadTrafficConfig()
+  loadWithdrawalSettings()
   loadSubscriptionConfig()
   loadTelegramConfig()
   loadTelegramBindings()

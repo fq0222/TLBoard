@@ -332,6 +332,49 @@ const adminApi = {
   },
 
   /**
+   * 获取钱包用户分页列表。
+   * @param {Object} params - 邮箱与分页筛选
+   * @returns {Promise<Object>} 钱包用户分页结果
+   */
+  getWalletUsers(params) {
+    return apiClient.get('/wallets/users', { params })
+  },
+
+  /**
+   * 获取指定用户的钱包概览和待处理提现。
+   * @param {number} userId - 用户 ID
+   * @returns {Promise<Object>} 钱包详情
+   */
+  getWalletUserDetail(userId) {
+    return apiClient.get(`/wallets/users/${userId}`)
+  },
+
+  /**
+   * 获取指定用户的余额流水。
+   * @param {number} userId - 用户 ID
+   * @param {Object} params - 类型与分页筛选
+   * @returns {Promise<Object>} 流水分页结果
+   */
+  getWalletTransactions(userId, params) {
+    return apiClient.get(`/wallets/users/${userId}/transactions`, { params })
+  },
+
+  /** 获取待处理提现的收款二维码 PNG。 */
+  getWithdrawalQr(id) {
+    return apiClient.get(`/wallets/withdrawals/${id}/qr`, { responseType: 'blob' })
+  },
+
+  /** 将待处理提现标记为已完成。 */
+  completeWithdrawal(id) {
+    return apiClient.post(`/wallets/withdrawals/${id}/complete`)
+  },
+
+  /** 驳回待处理提现，原因由管理员输入。 */
+  rejectWithdrawal(id, reason) {
+    return apiClient.post(`/wallets/withdrawals/${id}/reject`, { reason })
+  },
+
+  /**
    * 修改用户信息
    * @param {number} id - 用户ID
    * @param {Object} data - 用户数据
@@ -856,6 +899,24 @@ const adminApi = {
 
   saveTrafficConfig(data) {
     return apiClient.put('/system-settings/traffic', data)
+  },
+
+  /**
+   * 获取最低提现金额设置。
+   * @returns {Promise<Object>} 以整数分表示的提现设置
+   */
+  getWithdrawalSettings() {
+    return apiClient.get('/system-settings/withdrawal')
+  },
+
+  /**
+   * 保存最低提现金额设置。
+   * @param {Object} data - 设置数据
+   * @param {number} data.minimum_withdrawal_amount - 正安全整数分
+   * @returns {Promise<Object>} 保存后的提现设置
+   */
+  saveWithdrawalSettings(data) {
+    return apiClient.put('/system-settings/withdrawal', data)
   },
 
   /**
