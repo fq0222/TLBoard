@@ -154,7 +154,8 @@ function preloadNavPages() {
     () => import('@/views/user/Subscription.vue'),
     () => import('@/views/user/Plans.vue'),
     () => import('@/views/user/HelpCenter.vue'),
-    () => import('@/views/user/My.vue')
+    () => import('@/views/user/My.vue'),
+    () => import('@/views/user/Withdraw.vue')
   ]
 
   const runPreload = () => {

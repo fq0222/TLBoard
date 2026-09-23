@@ -379,6 +379,33 @@ const userApi = {
   },
 
   /**
+   * 获取当前用户提现页概览。
+   * @returns {Promise<Object>} 余额、收款方式、最低提现金额与处理中申请
+   */
+  getWithdrawalOverview() {
+    return apiClient.get('/wallet/withdrawal')
+  },
+
+  /**
+   * 创建提现申请，金额保持用户输入的元字符串，由后端精确转换为分。
+   * @param {Object} payload - 提现参数
+   * @param {string} payload.amount - 正数元字符串，最多两位小数
+   * @returns {Promise<Object>} 新建的提现申请
+   */
+  createWithdrawal({ amount }) {
+    return apiClient.post('/wallet/withdrawals', { amount })
+  },
+
+  /**
+   * 获取当前用户余额流水。
+   * @param {Object} params - page、limit、type 与 keyword 查询参数
+   * @returns {Promise<Object>} 流水分页结果
+   */
+  getBalanceTransactions(params) {
+    return apiClient.get('/wallet/transactions', { params })
+  },
+
+  /**
    * 上传并保存当前用户的收款码。
    * FormData 不手工设置 Content-Type，让浏览器生成正确的 multipart boundary。
    * @param {FormData} formData - 包含 payment_type 和 qr_code 的表单数据

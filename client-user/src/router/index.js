@@ -57,6 +57,12 @@ const routes = [
         meta: { title: '推广' }
       },
       {
+        path: 'withdraw',
+        name: 'UserWithdraw',
+        component: () => import('@/views/user/Withdraw.vue'),
+        meta: { title: '提现与余额明细' }
+      },
+      {
         path: 'orders',
         name: 'UserOrders',
         component: () => import('@/views/user/UserOrders.vue'),
