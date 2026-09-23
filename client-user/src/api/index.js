@@ -371,6 +371,24 @@ const userApi = {
   },
 
   /**
+   * 获取当前用户的钱包与收款码摘要。
+   * @returns {Promise<Object>} 余额、收款方式与收款码状态
+   */
+  getWalletSummary() {
+    return apiClient.get('/wallet/summary')
+  },
+
+  /**
+   * 上传并保存当前用户的收款码。
+   * FormData 不手工设置 Content-Type，让浏览器生成正确的 multipart boundary。
+   * @param {FormData} formData - 包含 payment_type 和 qr_code 的表单数据
+   * @returns {Promise<Object>} 保存后的收款方式与收款码状态
+   */
+  savePaymentQr(formData) {
+    return apiClient.put('/wallet/payment-qr', formData, { timeout: 20000 })
+  },
+
+  /**
    * 获取当前用户推广概览
    * @returns {Promise<Object>} 响应数据
    */

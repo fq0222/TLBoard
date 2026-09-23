@@ -1,30 +1,107 @@
 <template>
   <div class="my-container">
-    <section class="content-card profile-card">
-      <div class="profile-top">
-        <div class="profile-main">
-          <p class="profile-label">账户信息</p>
-          <div class="profile-email">{{ userInfo.email || '-' }}</div>
-          <div class="profile-plan">{{ currentPlanText }}</div>
+    <section class="content-card wallet-card">
+      <div class="wallet-heading">
+        <div class="wallet-title-wrap">
+          <span class="wallet-title-icon">
+            <el-icon><Wallet /></el-icon>
+          </span>
+          <div>
+            <h2 class="section-title">收款信息</h2>
+            <p class="wallet-description">设置微信或支付宝收款码，用于接收余额提现。</p>
+          </div>
         </div>
-        <router-link to="/user" class="profile-shortcut">
-          <span>前往服务台</span>
-          <el-icon><ArrowRight /></el-icon>
-        </router-link>
+        <span class="wallet-status" :class="{ 'is-ready': walletSummary.has_payment_qr }">
+          <el-icon>
+            <CircleCheck v-if="walletSummary.has_payment_qr" />
+            <Warning v-else />
+          </el-icon>
+          {{ walletSummary.has_payment_qr ? '已设置收款码' : '暂未设置' }}
+        </span>
       </div>
 
-      <div class="profile-meta">
-        <div class="meta-item">
-          <span class="meta-label">到期时间</span>
-          <span class="meta-value">{{ userInfo.expire_text || '未订阅' }}</span>
+      <div class="wallet-metrics">
+        <div class="wallet-metric">
+          <span class="metric-label">当前余额</span>
+          <strong class="wallet-amount">{{ walletBalanceText }}</strong>
+          <span class="metric-hint">可用于购买套餐或申请提现</span>
         </div>
-        <div class="meta-item">
-          <span class="meta-label">流量使用</span>
-          <span class="meta-value">{{ userInfo.traffic_used_text || '0 B' }}</span>
+        <div class="wallet-metric">
+          <span class="metric-label">累计推广奖励</span>
+          <strong class="wallet-amount">{{ rewardAmountText }}</strong>
+          <span class="metric-hint">邀请好友首购后自动计入余额</span>
         </div>
-        <div class="meta-item">
-          <span class="meta-label">订阅状态</span>
-          <span class="meta-value">{{ subscriptionReady ? '已生成' : '未生成' }}</span>
+      </div>
+
+      <div class="payment-form">
+        <div class="payment-type-row">
+          <div>
+            <span class="field-label">收款方式</span>
+            <p class="field-help">
+              当前保存：{{ savedPaymentTypeText }}，更换时请选择与图片一致的平台。
+            </p>
+          </div>
+          <el-radio-group v-model="paymentType" class="payment-type-group">
+            <el-radio-button label="wechat">微信</el-radio-button>
+            <el-radio-button label="alipay">支付宝</el-radio-button>
+          </el-radio-group>
+        </div>
+
+        <div class="payment-upload-row">
+          <el-upload
+            ref="qrUploadRef"
+            class="qr-uploader"
+            drag
+            accept="image/png,image/jpeg,image/webp"
+            :auto-upload="false"
+            :limit="1"
+            :show-file-list="false"
+            :on-change="handleQrChange"
+          >
+            <div v-if="qrPreviewUrl" class="qr-preview">
+              <img :src="qrPreviewUrl" alt="待保存的收款码预览">
+              <span class="qr-preview-mask">
+                <el-icon><UploadFilled /></el-icon>
+                点击更换图片
+              </span>
+            </div>
+            <div v-else class="qr-upload-empty">
+              <el-icon class="qr-upload-icon"><UploadFilled /></el-icon>
+              <strong>{{ walletSummary.has_payment_qr ? '上传新的收款码' : '上传收款码' }}</strong>
+              <span>PNG、JPEG 或 WebP，不超过 5 MB</span>
+            </div>
+          </el-upload>
+
+          <div class="payment-actions-panel">
+            <div>
+              <span class="field-label">保存状态</span>
+              <p class="field-help payment-state-copy">{{ paymentStateText }}</p>
+            </div>
+            <div class="wallet-actions">
+              <el-button
+                class="primary-action"
+                type="primary"
+                :loading="savingQr"
+                :disabled="!qrFile"
+                @click="savePaymentQr"
+              >
+                <el-icon v-if="!savingQr"><Upload /></el-icon>
+                {{ walletSummary.has_payment_qr ? '保存更换' : '保存收款码' }}
+              </el-button>
+              <el-button
+                class="withdraw-action"
+                :disabled="!walletSummary.has_payment_qr"
+                @click="goWithdraw"
+              >
+                提现
+                <el-icon><ArrowRight /></el-icon>
+              </el-button>
+            </div>
+            <p v-if="!walletSummary.has_payment_qr" class="withdraw-tip">
+              <el-icon><Warning /></el-icon>
+              请先保存有效收款码，再申请提现。
+            </p>
+          </div>
         </div>
       </div>
     </section>
@@ -162,10 +239,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowRight } from '@element-plus/icons-vue'
+import { ArrowRight, CircleCheck, Upload, UploadFilled, Wallet, Warning } from '@element-plus/icons-vue'
 import api from '@/api'
 import ReferralPosterDialog from '@/components/ReferralPosterDialog.vue'
 import { useUserStore } from '@/stores/user'
@@ -175,11 +252,14 @@ const router = useRouter()
 const userStore = useUserStore()
 const unreadTicketCount = ref(0)
 const referralSummary = ref({})
+const walletSummary = ref({})
+const paymentType = ref('wechat')
+const qrFile = ref(null)
+const qrPreviewUrl = ref('')
+const savingQr = ref(false)
+const qrUploadRef = ref(null)
 const posterDialogRef = ref(null)
 
-const userInfo = computed(() => userStore.userInfo || {})
-const subscriptionReady = computed(() => !!userStore.userInfo?.subscription_ready)
-const currentPlanText = computed(() => `当前套餐：${userInfo.value.plan_name || '未订阅'}`)
 const rewardAmountText = computed(() => {
   if (referralSummary.value.reward_amount_text) {
     return referralSummary.value.reward_amount_text
@@ -188,6 +268,22 @@ const rewardAmountText = computed(() => {
   return formatAmount(referralSummary.value.reward_amount)
 })
 const rewardPercent = computed(() => normalizeReferralRewardPercent(referralSummary.value))
+const walletBalanceText = computed(() => {
+  if (walletSummary.value.balance_text) {
+    return walletSummary.value.balance_text.replace(/元$/, ' 元')
+  }
+
+  return formatAmount(walletSummary.value.balance)
+})
+const savedPaymentTypeText = computed(() => {
+  if (!walletSummary.value.has_payment_qr) return '未设置'
+  return walletSummary.value.payment_type === 'alipay' ? '支付宝' : '微信'
+})
+const paymentStateText = computed(() => {
+  if (qrFile.value) return `已选择 ${qrFile.value.name}，保存后生效。`
+  if (walletSummary.value.has_payment_qr) return `${savedPaymentTypeText.value}收款码已生效，可上传新图片更换。`
+  return '请选择收款方式并上传对应的收款码图片。'
+})
 
 function formatAmount(amount) {
   const cents = Number(amount)
@@ -199,25 +295,95 @@ function formatAmount(amount) {
 }
 
 /**
- * 格式化流量显示，兼容空值和字符串数字。
+ * 获取余额与收款码公开摘要，并以服务端已保存的平台作为默认选择。
  *
- * @param {*} bytes - 原始字节数
- * @returns {string} 格式化后的流量文本
+ * @returns {Promise<void>}
  */
-function formatTraffic(bytes) {
-  if (bytes === null || bytes === undefined || bytes === '') return '0 B'
+async function fetchWalletSummary() {
+  try {
+    const response = await api.user.getWalletSummary()
+    if (response.code === 0) {
+      walletSummary.value = response.data || {}
+      if (['wechat', 'alipay'].includes(walletSummary.value.payment_type)) {
+        paymentType.value = walletSummary.value.payment_type
+      }
+    }
+  } catch (error) {
+    console.error('获取钱包摘要失败:', error)
+  }
+}
 
-  const numericValue = Number(bytes)
-  if (Number.isNaN(numericValue) || numericValue === 0) return '0 B'
+/** 释放本地图片预览地址，避免用户反复换图造成内存泄漏。 */
+function revokeQrPreview() {
+  if (!qrPreviewUrl.value) return
+  URL.revokeObjectURL(qrPreviewUrl.value)
+  qrPreviewUrl.value = ''
+}
 
-  const unitBase = 1024
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const unitIndex = Math.min(
-    Math.floor(Math.log(numericValue) / Math.log(unitBase)),
-    units.length - 1
-  )
+/**
+ * 校验并预览用户选择的收款码；非法文件不会替换当前有效选择。
+ *
+ * @param {Object} uploadFile - Element Plus 上传文件对象
+ */
+function handleQrChange(uploadFile) {
+  const rawFile = uploadFile?.raw
+  const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp'])
+  const maxFileSize = 5 * 1024 * 1024
 
-  return `${parseFloat((numericValue / (unitBase ** unitIndex)).toFixed(2))} ${units[unitIndex]}`
+  if (!rawFile || !allowedTypes.has(rawFile.type)) {
+    ElMessage.error('仅支持 PNG、JPEG 或 WebP 格式的图片')
+    qrUploadRef.value?.clearFiles()
+    return
+  }
+
+  if (rawFile.size > maxFileSize) {
+    ElMessage.error('收款码图片不能超过 5 MB')
+    qrUploadRef.value?.clearFiles()
+    return
+  }
+
+  revokeQrPreview()
+  qrFile.value = rawFile
+  qrPreviewUrl.value = URL.createObjectURL(rawFile)
+  qrUploadRef.value?.clearFiles()
+}
+
+/**
+ * 上传当前选择并刷新摘要；失败时保留文件和预览，便于直接重试。
+ *
+ * @returns {Promise<void>}
+ */
+async function savePaymentQr() {
+  if (!qrFile.value || savingQr.value) return
+
+  const formData = new FormData()
+  formData.append('payment_type', paymentType.value)
+  formData.append('qr_code', qrFile.value)
+  savingQr.value = true
+
+  try {
+    const response = await api.user.savePaymentQr(formData)
+    if (response.code !== 0) {
+      throw new Error('payment qr save failed')
+    }
+
+    walletSummary.value = { ...walletSummary.value, ...(response.data || {}) }
+    await fetchWalletSummary()
+    qrFile.value = null
+    qrUploadRef.value?.clearFiles()
+    revokeQrPreview()
+    ElMessage.success('收款码已保存')
+  } catch {
+    ElMessage.error('保存失败，请检查收款码类型和图片后重试')
+  } finally {
+    savingQr.value = false
+  }
+}
+
+/** 进入提现页面；未保存收款码时由按钮禁用状态阻止操作。 */
+function goWithdraw() {
+  if (!walletSummary.value.has_payment_qr) return
+  router.push('/user/withdraw')
 }
 
 /**
@@ -336,9 +502,14 @@ onMounted(async () => {
 
   await Promise.allSettled([
     userStore.fetchUserProfile(),
+    fetchWalletSummary(),
     fetchUnreadCount(),
     fetchReferralSummary()
   ])
+})
+
+onBeforeUnmount(() => {
+  revokeQrPreview()
 })
 </script>
 
@@ -356,42 +527,272 @@ onMounted(async () => {
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
 }
 
-.profile-card {
+.wallet-card {
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
-.profile-top {
+.wallet-heading,
+.wallet-title-wrap,
+.payment-type-row,
+.payment-upload-row,
+.wallet-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
 }
 
-.profile-main {
+.wallet-heading,
+.payment-type-row {
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.wallet-title-wrap {
+  min-width: 0;
+  gap: 12px;
+}
+
+.wallet-title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  color: #2563eb;
+  font-size: 20px;
+  background: #eff6ff;
+}
+
+.wallet-description {
+  margin: 6px 0 0;
+  color: #909399;
+  line-height: 1.5;
+}
+
+.wallet-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 7px 11px;
+  border-radius: 999px;
+  color: #d97706;
+  font-size: 13px;
+  background: #fffbeb;
+  white-space: nowrap;
+}
+
+.wallet-status.is-ready {
+  color: #0f9f72;
+  background: #ecfdf5;
+}
+
+.wallet-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.wallet-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.wallet-amount {
+  color: #0f172a;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.metric-hint {
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.payment-form {
+  padding: 18px;
+  border: 1px solid #ebeef5;
+  border-radius: 14px;
+}
+
+.field-label {
+  display: block;
+  color: #303133;
+  font-weight: 600;
+}
+
+.field-help {
+  margin: 6px 0 0;
+  color: #909399;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.payment-type-group {
+  flex-shrink: 0;
+}
+
+.payment-form :deep(.el-radio-button__inner) {
+  min-width: 84px;
+  padding: 10px 18px;
+}
+
+.payment-upload-row {
+  align-items: stretch;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.qr-uploader {
+  flex: 1 1 360px;
   min-width: 0;
 }
 
-.profile-label {
-  margin: 0 0 10px;
-  font-size: 13px;
-  color: #909399;
+.qr-uploader :deep(.el-upload),
+.qr-uploader :deep(.el-upload-dragger) {
+  width: 100%;
+  height: 100%;
 }
 
-.profile-email {
-  font-size: 20px;
-  font-weight: 600;
-  color: #303133;
-  word-break: break-all;
+.qr-uploader :deep(.el-upload-dragger) {
+  min-height: 220px;
+  padding: 0;
+  overflow: hidden;
+  border-color: #dbe2ea;
+  border-radius: 12px;
+  background: #fbfcfe;
 }
 
-.profile-plan {
-  margin-top: 10px;
+.qr-uploader :deep(.el-upload-dragger:hover) {
+  border-color: #409eff;
+}
+
+.qr-upload-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  gap: 10px;
   color: #606266;
 }
 
-.profile-shortcut,
+.qr-upload-empty span {
+  color: #909399;
+  font-size: 13px;
+}
+
+.qr-upload-icon {
+  color: #409eff;
+  font-size: 34px;
+}
+
+.qr-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  padding: 14px;
+  background: #f8fafc;
+}
+
+.qr-preview img {
+  display: block;
+  width: 190px;
+  height: 190px;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.qr-preview-mask {
+  position: absolute;
+  inset: auto 12px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  background: rgba(15, 23, 42, 0.78);
+}
+
+.payment-actions-panel {
+  display: flex;
+  flex: 0 1 340px;
+  min-width: 260px;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.payment-state-copy {
+  min-height: 42px;
+  word-break: break-all;
+}
+
+.wallet-actions {
+  align-items: stretch;
+  gap: 10px;
+}
+
+.wallet-actions .el-button {
+  min-height: 42px;
+  margin-left: 0;
+  border-radius: 10px;
+}
+
+.primary-action {
+  flex: 1;
+  border: none;
+  font-weight: 700;
+  background: linear-gradient(135deg, #2563eb 0%, #14b8a6 100%);
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.2);
+}
+
+.primary-action:hover,
+.primary-action:focus-visible {
+  background: linear-gradient(135deg, #1d4ed8 0%, #0f9f94 100%);
+}
+
+.primary-action.is-disabled,
+.primary-action.is-disabled:hover {
+  background: #cbd5e1;
+  box-shadow: none;
+}
+
+.withdraw-action {
+  flex: 0 0 104px;
+}
+
+.withdraw-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -8px 0 0;
+  color: #d97706;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.withdraw-tip .el-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
 .section-link {
   display: inline-flex;
   align-items: center;
@@ -402,31 +803,6 @@ onMounted(async () => {
   text-decoration: none;
   background: #ecf5ff;
   white-space: nowrap;
-}
-
-.profile-meta {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.meta-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px;
-  border-radius: 12px;
-  background: #f8fafc;
-}
-
-.meta-label {
-  font-size: 13px;
-  color: #909399;
-}
-
-.meta-value {
-  color: #303133;
-  font-weight: 500;
 }
 
 .section-head {
@@ -658,7 +1034,9 @@ onMounted(async () => {
     gap: 14px;
   }
 
-  .profile-top,
+  .wallet-heading,
+  .payment-type-row,
+  .payment-upload-row,
   .section-head,
   .referral-link-row,
   .reward-callout {
@@ -672,47 +1050,31 @@ onMounted(async () => {
     padding: 15px;
   }
 
-  .profile-card,
+  .wallet-card,
   .referral-overview {
     gap: 14px;
   }
 
-  .profile-label {
-    margin-bottom: 7px;
-    font-size: 12px;
-  }
-
-  .profile-email {
-    font-size: 19px;
-    line-height: 1.25;
-  }
-
-  .profile-plan {
-    margin-top: 7px;
-  }
-
-  .profile-shortcut,
   .section-link {
     min-height: 38px;
     padding: 8px 12px;
     border-radius: 14px;
   }
 
-  .profile-meta,
+  .wallet-metrics,
   .management-grid,
   .referral-metrics {
     grid-template-columns: 1fr;
     gap: 10px;
   }
 
-  .meta-item,
+  .wallet-metric,
   .metric-card {
     gap: 6px;
     padding: 13px 14px;
     border-radius: 11px;
   }
 
-  .meta-label,
   .metric-label,
   .referral-stat-label,
   .action-desc,
@@ -737,9 +1099,76 @@ onMounted(async () => {
     justify-content: center;
   }
 
-  .profile-shortcut {
+  .wallet-title-wrap {
+    align-items: flex-start;
+  }
+
+  .wallet-status {
+    margin-left: 50px;
+  }
+
+  .wallet-amount {
+    font-size: 21px;
+  }
+
+  .payment-form {
+    padding: 13px;
+    border-radius: 12px;
+  }
+
+  .payment-type-row,
+  .payment-upload-row {
+    align-items: stretch;
+  }
+
+  .payment-type-group {
+    display: flex;
     width: 100%;
-    justify-content: center;
+  }
+
+  .payment-type-group :deep(.el-radio-button) {
+    flex: 1;
+  }
+
+  .payment-form :deep(.el-radio-button__inner) {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .payment-upload-row {
+    margin-top: 14px;
+  }
+
+  .qr-uploader,
+  .payment-actions-panel {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .qr-uploader :deep(.el-upload-dragger),
+  .qr-upload-empty,
+  .qr-preview {
+    min-height: 190px;
+  }
+
+  .qr-preview img {
+    width: 160px;
+    height: 160px;
+  }
+
+  .payment-actions-panel {
+    padding: 14px;
+  }
+
+  .wallet-actions {
+    flex-direction: column;
+  }
+
+  .wallet-actions .el-button,
+  .withdraw-action {
+    flex: 1 1 auto;
+    width: 100%;
   }
 
   .referral-link-row {
