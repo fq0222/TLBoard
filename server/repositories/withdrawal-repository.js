@@ -4,6 +4,23 @@ const WALLET_USER_COLUMNS = `
   COALESCE((SELECT SUM(reward_amount) FROM referral_rewards WHERE referrer_user_id = u.id), 0) AS reward_total
 `;
 
+/** 每名用户最多关联一条待处理申请，历史记录不会扩大用户列表行数。 */
+const WALLET_PENDING_COLUMNS = `,
+  pending_withdrawal.id AS pending_withdrawal_id,
+  pending_withdrawal.amount AS pending_withdrawal_amount,
+  pending_withdrawal.status AS pending_withdrawal_status
+`;
+
+const WALLET_PENDING_JOIN = `
+  LEFT JOIN LATERAL (
+    SELECT wr.id, wr.amount, wr.status
+    FROM withdrawal_requests wr
+    WHERE wr.user_id = u.id AND wr.status = 'pending'
+    ORDER BY wr.created_at DESC, wr.id DESC
+    LIMIT 1
+  ) pending_withdrawal ON TRUE
+`;
+
 class WithdrawalRepository {
   /** email 作为字面关键字绑定 ILIKE，转义通配符；列表和计数共用同一筛选。 */
   buildUserFilter(email) {
@@ -19,10 +36,14 @@ class WithdrawalRepository {
     return db.prepare(`SELECT COUNT(*) AS total FROM users u ${where}`).get(...params);
   }
 
-  /** 分页查询用户余额与历史累计奖励；SUM 独立关联，余额消费不会减少奖励总额。 */
+  /** 分页查询余额、累计奖励及唯一 pending；历史申请不会重复用户或污染分页。 */
   async listWalletUsers(db, { email, limit, offset }) {
     const { where, params } = this.buildUserFilter(email);
-    return db.prepare(`SELECT ${WALLET_USER_COLUMNS} FROM users u ${where} ORDER BY u.id DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    return db.prepare(`
+      SELECT ${WALLET_USER_COLUMNS} ${WALLET_PENDING_COLUMNS}
+      FROM users u ${WALLET_PENDING_JOIN}
+      ${where} ORDER BY u.id DESC LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
   }
 
   /** userId 为管理员选中的用户，返回与列表完全相同的只读钱包概览。 */

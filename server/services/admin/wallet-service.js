@@ -17,7 +17,17 @@ function validateId(id) {
 
 /** 白名单投影用户概览；余额与累计推广奖励各自转换数值，不返回用户其他资料。 */
 function publicUser(row) {
-  return { id: row.id, email: row.email, balance: Number(row.balance) || 0, reward_total: Number(row.reward_total) || 0 };
+  return {
+    id: row.id,
+    email: row.email,
+    balance: Number(row.balance) || 0,
+    reward_total: Number(row.reward_total) || 0,
+    pending_withdrawal_id: row.pending_withdrawal_id ?? null,
+    pending_withdrawal_amount: row.pending_withdrawal_amount === null || row.pending_withdrawal_amount === undefined
+      ? null
+      : Number(row.pending_withdrawal_amount),
+    pending_withdrawal_status: row.pending_withdrawal_status ?? null
+  };
 }
 
 /** 白名单投影申请元数据；即使仓储返回密文/摘要，JSON 也不能包含这些内部字段。 */

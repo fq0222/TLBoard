@@ -12,7 +12,11 @@ class AdminWalletDatabase {
     this.state = {
       users: [{ id: 7, email: 'wallet@example.invalid', balance: 3000 }, { id: 8, email: 'empty@example.invalid', balance: 0 }],
       rewards: [{ referrer_user_id: 7, reward_amount: 6000 }, { referrer_user_id: 7, reward_amount: 1500 }],
-      withdrawals: [{ id: 12, user_id: 7, amount: 2000, payment_type: 'wechat', status: 'pending', qr_payload_encrypted: 'private-cipher', qr_payload_digest: 'private-digest', reject_reason: null, processed_by: null, processed_at: null, created_at: 123 }],
+      withdrawals: [
+        { id: 12, user_id: 7, amount: 2000, payment_type: 'wechat', status: 'pending', qr_payload_encrypted: 'private-cipher', qr_payload_digest: 'private-digest', reject_reason: null, processed_by: null, processed_at: null, created_at: 123 },
+        { id: 10, user_id: 7, amount: 1000, payment_type: 'alipay', status: 'completed', qr_payload_encrypted: 'old-cipher', qr_payload_digest: 'old-digest', reject_reason: null, processed_by: 2, processed_at: 100, created_at: 90 },
+        { id: 11, user_id: 8, amount: 1500, payment_type: 'wechat', status: 'rejected', qr_payload_encrypted: 'old-cipher', qr_payload_digest: 'old-digest', reject_reason: '历史驳回', processed_by: 2, processed_at: 110, created_at: 100 }
+      ],
       transactions: []
     };
     this.calls = [];
@@ -75,12 +79,37 @@ class AdminWalletDatabase {
         users = users.filter(user => user.email.toLowerCase().includes(keyword.toLowerCase()));
       }
       if (sql.includes('u.id = $1')) users = users.filter(user => user.id === params[0]);
-      if (sql.startsWith('SELECT COUNT(*)')) rows = [{ total: String(users.length) }];
+      if (sql.startsWith('SELECT COUNT(*)')) {
+        assert.doesNotMatch(sql, /withdrawal_requests/, '用户计数不得被提现历史关联污染');
+        rows = [{ total: String(users.length) }];
+      }
       else {
         assert.match(sql, /SUM\(reward_amount\)/);
         assert.match(sql, /referrer_user_id = u.id/);
         assert.match(sql, /AS reward_total/);
-        rows = users.map(user => ({ ...user, reward_total: String(state.rewards.filter(reward => reward.referrer_user_id === user.id).reduce((sum, reward) => sum + reward.reward_amount, 0)) }));
+        const isWalletList = sql.includes('ORDER BY u.id DESC');
+        if (isWalletList) {
+          assert.match(sql, /LEFT JOIN LATERAL/);
+          assert.match(sql, /status = 'pending'/);
+          assert.match(sql, /LIMIT 1/);
+          assert.match(sql, /AS pending_withdrawal_id/);
+          assert.match(sql, /AS pending_withdrawal_amount/);
+          assert.match(sql, /AS pending_withdrawal_status/);
+        }
+        rows = users.map(user => {
+          const pending = state.withdrawals
+            .filter(withdrawal => withdrawal.user_id === user.id && withdrawal.status === 'pending')
+            .sort((left, right) => right.created_at - left.created_at || right.id - left.id)[0];
+          return {
+            ...user,
+            reward_total: String(state.rewards.filter(reward => reward.referrer_user_id === user.id).reduce((sum, reward) => sum + reward.reward_amount, 0)),
+            ...(isWalletList ? {
+              pending_withdrawal_id: pending ? pending.id : null,
+              pending_withdrawal_amount: pending ? String(pending.amount) : null,
+              pending_withdrawal_status: pending ? pending.status : null
+            } : {})
+          };
+        });
         if (sql.includes('LIMIT')) rows = rows.slice(params.at(-1), params.at(-1) + params.at(-2));
       }
     } else if (sql.includes('FROM users')) {
@@ -116,14 +145,33 @@ class AdminWalletDatabase {
   }
 }
 
-/** 防止累计奖励误用当前余额，同时覆盖无奖励用户、分页及邮箱搜索。 */
+/** 防止累计奖励误用当前余额，并验证 pending 汇总不受历史申请、搜索和分页影响。 */
 async function testUsersAndRewardTotals() {
   const database = new AdminWalletDatabase();
   const service = new AdminWalletService();
   const result = await service.listUsers(database.db, { email: 'wallet', page: 1, limit: 25 });
-  assert.deepEqual(result, { list: [{ id: 7, email: 'wallet@example.invalid', balance: 3000, reward_total: 7500 }], total: 1, page: 1, limit: 25 });
+  assert.deepEqual(result, {
+    list: [{
+      id: 7, email: 'wallet@example.invalid', balance: 3000, reward_total: 7500,
+      pending_withdrawal_id: 12, pending_withdrawal_amount: 2000, pending_withdrawal_status: 'pending'
+    }],
+    total: 1,
+    page: 1,
+    limit: 25
+  });
   const empty = await service.listUsers(database.db, { email: 'empty' });
   assert.equal(empty.list[0].reward_total, 0);
+  assert.deepEqual(
+    {
+      id: empty.list[0].pending_withdrawal_id,
+      amount: empty.list[0].pending_withdrawal_amount,
+      status: empty.list[0].pending_withdrawal_status
+    },
+    { id: null, amount: null, status: null }
+  );
+  const allUsers = await service.listUsers(database.db, { page: 1, limit: 25 });
+  assert.equal(allUsers.total, 2);
+  assert.equal(allUsers.list.length, 2, '历史提现不得让同一用户在列表中重复');
   assert.equal((await service.listUsers(database.db, { page: 2, limit: 1 })).list[0].id, 7);
   assert.equal((await service.listUsers(database.db, { email: '50%_' })).total, 0);
   assert.equal(database.calls.at(-1).params[0], '%50\\%\\_%');
