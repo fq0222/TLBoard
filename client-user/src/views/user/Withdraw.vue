@@ -243,6 +243,7 @@ const pageSize = 20
 const total = ref(0)
 let overviewRequestSequence = 0
 let requestSequence = 0
+let confirmRequestSequence = 0
 let alive = true
 
 const pendingWithdrawal = computed(() => overview.pending_withdrawal)
@@ -446,6 +447,7 @@ async function handleSubmit() {
     return
   }
 
+  const confirmSequence = ++confirmRequestSequence
   confirming.value = true
   try {
     await ElMessageBox.confirm(
@@ -457,11 +459,13 @@ async function handleSubmit() {
         type: 'warning'
       }
     )
-    if (!alive) return
+    if (!alive || confirmSequence !== confirmRequestSequence) return
   } catch {
     return
   } finally {
-    confirming.value = false
+    if (alive && confirmSequence === confirmRequestSequence) {
+      confirming.value = false
+    }
   }
 
   if (submitting.value || pendingWithdrawal.value) return
@@ -492,12 +496,12 @@ onMounted(() => {
   fetchTransactions(1)
 })
 
-/** 卸载时使异步提现流程失效，并关闭仍在等待用户选择的确认框。 */
+/** 卸载时仅使本组件的异步请求与确认流程失效，不触碰全局消息框实例。 */
 onBeforeUnmount(() => {
   alive = false
   overviewRequestSequence += 1
   requestSequence += 1
-  ElMessageBox.close()
+  confirmRequestSequence += 1
 })
 </script>
 

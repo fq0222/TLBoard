@@ -265,7 +265,7 @@ describe('Withdraw', () => {
     expect(wrapper.get('[aria-label="筛选余额明细类型"]')).toBeTruthy()
   })
 
-  it('卸载时关闭确认框且确认完成后不再提交', async () => {
+  it.each(['resolve', 'reject'])('卸载时不关闭全局确认框且延迟 %s 后不再提交', async result => {
     const confirmation = deferred()
     messageMocks.confirm.mockReturnValue(confirmation.promise)
     const wrapper = mountWithdraw()
@@ -276,10 +276,14 @@ describe('Withdraw', () => {
     expect(messageMocks.confirm).toHaveBeenCalledOnce()
 
     wrapper.unmount()
-    confirmation.resolve('confirm')
+    if (result === 'resolve') {
+      confirmation.resolve('confirm')
+    } else {
+      confirmation.reject(new Error('cancel'))
+    }
     await settle()
 
-    expect(messageMocks.close).toHaveBeenCalled()
+    expect(messageMocks.close).not.toHaveBeenCalled()
     expect(apiMocks.createWithdrawal).not.toHaveBeenCalled()
   })
 
