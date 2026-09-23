@@ -1,5 +1,75 @@
-/** 提现仓储：封装本人余额摘要、最低额、收款码和申请 SQL；写入只接收调用方的事务 db。 */
+/** 提现仓储：封装用户及管理端查询、申请行锁和条件状态更新，事务写入使用调用方的 db。 */
+const WALLET_USER_COLUMNS = `
+  u.id, u.email, COALESCE(u.balance, 0) AS balance,
+  COALESCE((SELECT SUM(reward_amount) FROM referral_rewards WHERE referrer_user_id = u.id), 0) AS reward_total
+`;
+
 class WithdrawalRepository {
+  /** email 作为字面关键字绑定 ILIKE，转义通配符；列表和计数共用同一筛选。 */
+  buildUserFilter(email) {
+    const keyword = typeof email === 'string' ? email.trim() : '';
+    return keyword
+      ? { where: "WHERE u.email ILIKE ? ESCAPE '\\'", params: [`%${keyword.replace(/[\\%_]/g, character => `\\${character}`)}%`] }
+      : { where: '', params: [] };
+  }
+
+  /** 统计匹配邮箱的用户数，不用奖励关联表计数，避免奖励多条造成重复用户。 */
+  async countWalletUsers(db, { email }) {
+    const { where, params } = this.buildUserFilter(email);
+    return db.prepare(`SELECT COUNT(*) AS total FROM users u ${where}`).get(...params);
+  }
+
+  /** 分页查询用户余额与历史累计奖励；SUM 独立关联，余额消费不会减少奖励总额。 */
+  async listWalletUsers(db, { email, limit, offset }) {
+    const { where, params } = this.buildUserFilter(email);
+    return db.prepare(`SELECT ${WALLET_USER_COLUMNS} FROM users u ${where} ORDER BY u.id DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+  }
+
+  /** userId 为管理员选中的用户，返回与列表完全相同的只读钱包概览。 */
+  async getWalletUser(db, userId) {
+    return db.prepare(`SELECT ${WALLET_USER_COLUMNS} FROM users u WHERE u.id = ?`).get(userId);
+  }
+
+  /** 待处理申请只读取公开元数据；管理详情不需要二维码密文或历史申请集合。 */
+  async getAdminPendingWithdrawal(db, userId) {
+    return db.prepare(`
+      SELECT id, user_id, amount, payment_type, status, reject_reason, processed_by, processed_at, created_at
+      FROM withdrawal_requests WHERE user_id = ? AND status = 'pending'
+      ORDER BY created_at DESC, id DESC LIMIT 1
+    `).get(userId);
+  }
+
+  /** id 为提现申请；密文仅用于管理员二维码渲染，调用方不得直接返回整行。 */
+  async getWithdrawal(db, id) {
+    return db.prepare(`
+      SELECT id, user_id, amount, payment_type, status, qr_payload_encrypted
+      FROM withdrawal_requests WHERE id = ?
+    `).get(id);
+  }
+
+  /** 驳回事务首先锁申请，随后由余额服务锁用户；等待后读到其他管理员最新状态。 */
+  async lockWithdrawal(db, id) {
+    return db.prepare('SELECT id, user_id, amount, status FROM withdrawal_requests WHERE id = ? FOR UPDATE').get(id);
+  }
+
+  /** 单条条件更新保证只处理 pending；成功才记录处理人，不修改任何余额或流水。 */
+  async completeWithdrawal(db, id, adminId) {
+    return db.prepare(`
+      UPDATE withdrawal_requests SET status = 'completed', processed_by = ?, processed_at = EXTRACT(EPOCH FROM NOW())
+      WHERE id = ? AND status = 'pending'
+      RETURNING id, user_id, amount, payment_type, status, reject_reason, processed_by, processed_at, created_at
+    `).get(adminId, id);
+  }
+
+  /** 调用方须持有申请锁；原因与处理人连同状态一起写入，与退款共用事务。 */
+  async rejectWithdrawal(db, id, { adminId, reason }) {
+    return db.prepare(`
+      UPDATE withdrawal_requests SET status = 'rejected', processed_by = ?, reject_reason = ?, processed_at = EXTRACT(EPOCH FROM NOW())
+      WHERE id = ? AND status = 'pending'
+      RETURNING id, user_id, amount, payment_type, status, reject_reason, processed_by, processed_at, created_at
+    `).get(adminId, reason, id);
+  }
+
   /** userId 为登录用户；只读取余额，不暴露用户其他资料。 */
   async getUserBalance(db, userId) {
     return db.prepare('SELECT id, COALESCE(balance, 0) AS balance FROM users WHERE id = ?').get(userId);

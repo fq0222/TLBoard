@@ -132,7 +132,8 @@ async function testResourceConfigDefaults() {
 
   assert.deepStrictEqual(config, {
     max_file_size: 100,
-    download_speed_limit: 0
+    download_speed_limit: 0,
+    blog_video_speed_limit: 300
   });
 }
 
@@ -147,15 +148,42 @@ async function testSaveResourceConfig() {
 
   assert.deepStrictEqual(config, {
     max_file_size: 512,
-    download_speed_limit: 2048
+    download_speed_limit: 2048,
+    blog_video_speed_limit: 300
   });
   assert.strictEqual(
     db.settings.resource_config,
-    JSON.stringify({ max_file_size: 512, download_speed_limit: 2048 })
+    JSON.stringify({ max_file_size: 512, download_speed_limit: 2048, blog_video_speed_limit: 300 })
   );
 }
 
+/** 最低提现配置缺失或旧值不合法时默认 2000 分，不影响其他设置键。 */
+async function testWithdrawalDefaults() {
+  for (const value of [undefined, '', '0', '-1', '1.5', '2000x', '9007199254740992']) {
+    const db = createSettingsDb(value === undefined ? {} : { minimum_withdrawal_amount: value });
+    assert.deepStrictEqual(await systemSettingsService.getWithdrawalConfig(db), { minimum_withdrawal_amount: 2000 });
+  }
+}
+
+/** 写入严格接收正安全整数分；无效输入不能被四舍五入、截断或覆盖为默认额。 */
+async function testSaveWithdrawalConfig() {
+  const db = createSettingsDb({ clash_config_name: '原名称', traffic_usage_multiplier: '2', resource_config: '{"max_file_size":128}' });
+  const original = { ...db.settings };
+  assert.deepStrictEqual(await systemSettingsService.saveWithdrawalConfig(db, { minimum_withdrawal_amount: 2000 }), { minimum_withdrawal_amount: 2000 });
+  assert.strictEqual(db.settings.minimum_withdrawal_amount, '2000');
+  for (const amount of [0, -1, 20.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, '2000', null, undefined, true, {}]) {
+    await assert.rejects(() => systemSettingsService.saveWithdrawalConfig(db, { minimum_withdrawal_amount: amount }), error => error.statusCode === 400);
+    assert.strictEqual(db.settings.minimum_withdrawal_amount, '2000');
+  }
+  await systemSettingsService.saveWithdrawalConfig(db, { minimum_withdrawal_amount: Number.MAX_SAFE_INTEGER });
+  assert.deepStrictEqual(await systemSettingsService.getWithdrawalConfig(db), { minimum_withdrawal_amount: Number.MAX_SAFE_INTEGER });
+  const { minimum_withdrawal_amount, ...rest } = db.settings;
+  assert.deepStrictEqual(rest, original);
+}
+
 async function run() {
+  await testWithdrawalDefaults();
+  await testSaveWithdrawalConfig();
   await testMissingTelegramChannelUrlStaysEmpty();
   await testMissingOnlineCustomerServiceUrlStaysEmpty();
   await testSaveTelegramChannelUrl();
@@ -164,7 +192,7 @@ async function run() {
   await testSaveEmailConfig();
   await testResourceConfigDefaults();
   await testSaveResourceConfig();
-  console.log('✓ 系统订阅配置链接测试通过');
+  console.log('✓ 系统设置测试通过：10/10（含最低提现整数分、原有订阅/邮件/资源配置）');
 }
 
 run().catch((error) => {

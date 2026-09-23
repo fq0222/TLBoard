@@ -152,6 +152,31 @@ async function saveSubscriptionConfig(req, res) {
   }
 }
 
+/** 查询最低提现配置；无设置时由服务给出默认的 2000 分。 */
+async function getWithdrawalConfig(req, res) {
+  try {
+    return legacySuccess(res, await systemSettingsService.getWithdrawalConfig(req.app.locals.db));
+  } catch (error) {
+    return handleControllerError(res, '获取提现配置', error);
+  }
+}
+
+/** 原样转交整数分，路由与服务双重校验，避免隐式转换掩盖非法金额。 */
+async function saveWithdrawalConfig(req, res) {
+  if (handleValidationFailure(req, res)) return;
+  try {
+    const data = await systemSettingsService.saveWithdrawalConfig(req.app.locals.db, {
+      minimum_withdrawal_amount: req.body.minimum_withdrawal_amount
+    });
+    return legacySuccess(res, data);
+  } catch (error) {
+    if (error.expose && error.statusCode === 400) {
+      return legacyValidationError(res, { message: error.message });
+    }
+    return handleControllerError(res, '保存提现配置', error);
+  }
+}
+
 module.exports = {
   getTrafficConfig,
   saveTrafficConfig,
@@ -160,5 +185,7 @@ module.exports = {
   getResourceConfig,
   saveResourceConfig,
   getSubscriptionConfig,
-  saveSubscriptionConfig
+  saveSubscriptionConfig,
+  getWithdrawalConfig,
+  saveWithdrawalConfig
 };

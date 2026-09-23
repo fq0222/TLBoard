@@ -8,6 +8,14 @@ const router = express.Router();
 
 router.get('/traffic', authenticateAdmin, systemSettingsController.getTrafficConfig);
 
+// 提现金额接口单位固定为分，必须是 JSON 数字中的正安全整数。
+router.get('/withdrawal', authenticateAdmin, systemSettingsController.getWithdrawalConfig);
+router.put('/withdrawal', authenticateAdmin, [
+  body('minimum_withdrawal_amount')
+    .custom(value => Number.isSafeInteger(value) && value > 0)
+    .withMessage('最低提现金额必须为正的安全整数分')
+], systemSettingsController.saveWithdrawalConfig);
+
 router.put('/traffic', authenticateAdmin, [
   body('traffic_usage_multiplier')
     .isFloat({ min: 0, max: 100 })
@@ -74,5 +82,7 @@ router.getResourceConfig = systemSettingsService.getResourceConfig;
 router.saveResourceConfig = systemSettingsService.saveResourceConfig;
 router.getSubscriptionConfig = systemSettingsService.getSubscriptionConfig;
 router.saveSubscriptionConfig = systemSettingsService.saveSubscriptionConfig;
+router.getWithdrawalConfig = systemSettingsService.getWithdrawalConfig;
+router.saveWithdrawalConfig = systemSettingsService.saveWithdrawalConfig;
 
 module.exports = router;

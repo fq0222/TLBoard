@@ -1,5 +1,6 @@
 const { getUnixTimestamp } = require('../../shared/utils/time');
 const systemSettingsRepository = require('../../repositories/system-settings-repository');
+const AppError = require('../../shared/errors/app-error');
 
 const TRAFFIC_USAGE_MULTIPLIER_KEY = 'traffic_usage_multiplier';
 const REFERRAL_REWARD_COEFFICIENT_KEY = 'referral_reward_coefficient';
@@ -13,6 +14,7 @@ const BREVO_SENDER_NAME_KEY = 'brevo_sender_name';
 const BREVO_DAILY_LIMIT_KEY = 'brevo_daily_limit';
 const BREVO_CAMPAIGN_DAILY_LIMIT_KEY = 'brevo_campaign_daily_limit';
 const RESOURCE_CONFIG_KEY = 'resource_config';
+const MINIMUM_WITHDRAWAL_AMOUNT_KEY = 'minimum_withdrawal_amount';
 
 const DEFAULT_TRAFFIC_USAGE_MULTIPLIER = 1.0;
 const DEFAULT_REFERRAL_REWARD_COEFFICIENT = 0.1;
@@ -327,6 +329,23 @@ async function getOnlineCustomerServiceUrl(db) {
   return normalizeOptionalUrl(value);
 }
 
+/** 读取最低提现整数分；历史缺失或非法值默认 2000，与用户钱包默认规则一致。 */
+async function getWithdrawalConfig(db) {
+  const value = await getSystemSettingValue(db, MINIMUM_WITHDRAWAL_AMOUNT_KEY);
+  const amount = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
+  return { minimum_withdrawal_amount: Number.isSafeInteger(amount) && amount > 0 ? amount : 2000 };
+}
+
+/** payload 仅接受正安全整数分；不做字符串转换或金额舍入，也不更改其他设置。 */
+async function saveWithdrawalConfig(db, payload = {}) {
+  const amount = payload.minimum_withdrawal_amount;
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    throw new AppError('最低提现金额必须为正的安全整数分', { statusCode: 400, code: 400 });
+  }
+  await saveSystemSettingValue(db, MINIMUM_WITHDRAWAL_AMOUNT_KEY, amount);
+  return { minimum_withdrawal_amount: amount };
+}
+
 module.exports = {
   keys: {
     TRAFFIC_USAGE_MULTIPLIER_KEY,
@@ -352,5 +371,7 @@ module.exports = {
   saveResourceConfig,
   getSubscriptionConfig,
   saveSubscriptionConfig,
+  getWithdrawalConfig,
+  saveWithdrawalConfig,
   getOnlineCustomerServiceUrl
 };
