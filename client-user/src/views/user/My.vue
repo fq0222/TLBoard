@@ -11,19 +11,26 @@
             <p class="wallet-description">设置微信或支付宝收款码，用于接收余额提现。</p>
           </div>
         </div>
-        <span class="wallet-status" :class="{ 'is-ready': walletSummary.has_payment_qr }">
+        <span
+          class="wallet-status"
+          :class="{
+            'is-ready': !walletLoading && !walletLoadError && walletSummary.has_payment_qr,
+            'is-error': walletLoadError
+          }"
+        >
           <el-icon>
-            <CircleCheck v-if="walletSummary.has_payment_qr" />
+            <Loading v-if="walletLoading" class="is-loading" />
+            <CircleCheck v-else-if="!walletLoadError && walletSummary.has_payment_qr" />
             <Warning v-else />
           </el-icon>
-          {{ walletSummary.has_payment_qr ? '已设置收款码' : '暂未设置' }}
+          {{ walletStatusText }}
         </span>
       </div>
 
       <div class="wallet-metrics">
         <div class="wallet-metric">
           <span class="metric-label">当前余额</span>
-          <strong class="wallet-amount">{{ walletBalanceText }}</strong>
+          <strong class="wallet-amount">{{ walletBalanceDisplayText }}</strong>
           <span class="metric-hint">可用于购买套餐或申请提现</span>
         </div>
         <div class="wallet-metric">
@@ -33,7 +40,27 @@
         </div>
       </div>
 
-      <div class="payment-form">
+      <div v-if="walletLoading" class="wallet-load-state">
+        <el-icon class="wallet-load-icon is-loading"><Loading /></el-icon>
+        <div>
+          <strong>正在加载钱包信息</strong>
+          <p>余额和收款码状态确认后即可继续操作。</p>
+        </div>
+      </div>
+
+      <div v-else-if="walletLoadError" class="wallet-load-state is-error">
+        <el-icon class="wallet-load-icon"><Warning /></el-icon>
+        <div class="wallet-load-content">
+          <strong>{{ walletLoadError }}</strong>
+          <p>钱包信息加载失败，暂时无法申请提现。请重新加载后再操作。</p>
+          <div class="wallet-load-actions">
+            <el-button type="primary" plain @click="fetchWalletSummary">重新加载</el-button>
+            <el-button disabled>提现</el-button>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="payment-form">
         <div class="payment-type-row">
           <div>
             <span class="field-label">收款方式</span>
@@ -41,7 +68,11 @@
               当前保存：{{ savedPaymentTypeText }}，更换时请选择与图片一致的平台。
             </p>
           </div>
-          <el-radio-group v-model="paymentType" class="payment-type-group">
+          <el-radio-group
+            v-model="paymentType"
+            class="payment-type-group"
+            :disabled="savingQr"
+          >
             <el-radio-button label="wechat">微信</el-radio-button>
             <el-radio-button label="alipay">支付宝</el-radio-button>
           </el-radio-group>
@@ -57,6 +88,7 @@
             :limit="1"
             :show-file-list="false"
             :on-change="handleQrChange"
+            :disabled="savingQr"
           >
             <div v-if="qrPreviewUrl" class="qr-preview">
               <img :src="qrPreviewUrl" alt="待保存的收款码预览">
@@ -82,7 +114,7 @@
                 class="primary-action"
                 type="primary"
                 :loading="savingQr"
-                :disabled="!qrFile"
+                :disabled="!qrFile || savingQr"
                 @click="savePaymentQr"
               >
                 <el-icon v-if="!savingQr"><Upload /></el-icon>
@@ -242,7 +274,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowRight, CircleCheck, Upload, UploadFilled, Wallet, Warning } from '@element-plus/icons-vue'
+import { ArrowRight, CircleCheck, Loading, Upload, UploadFilled, Wallet, Warning } from '@element-plus/icons-vue'
 import api from '@/api'
 import ReferralPosterDialog from '@/components/ReferralPosterDialog.vue'
 import { useUserStore } from '@/stores/user'
@@ -257,6 +289,8 @@ const paymentType = ref('wechat')
 const qrFile = ref(null)
 const qrPreviewUrl = ref('')
 const savingQr = ref(false)
+const walletLoading = ref(true)
+const walletLoadError = ref('')
 const qrUploadRef = ref(null)
 const posterDialogRef = ref(null)
 
@@ -268,6 +302,11 @@ const rewardAmountText = computed(() => {
   return formatAmount(referralSummary.value.reward_amount)
 })
 const rewardPercent = computed(() => normalizeReferralRewardPercent(referralSummary.value))
+const walletStatusText = computed(() => {
+  if (walletLoading.value) return '正在加载'
+  if (walletLoadError.value) return '加载失败'
+  return walletSummary.value.has_payment_qr ? '已设置收款码' : '暂未设置'
+})
 const walletBalanceText = computed(() => {
   if (walletSummary.value.balance_text) {
     return walletSummary.value.balance_text.replace(/元$/, ' 元')
@@ -275,6 +314,9 @@ const walletBalanceText = computed(() => {
 
   return formatAmount(walletSummary.value.balance)
 })
+const walletBalanceDisplayText = computed(() => (
+  walletLoading.value || walletLoadError.value ? '--' : walletBalanceText.value
+))
 const savedPaymentTypeText = computed(() => {
   if (!walletSummary.value.has_payment_qr) return '未设置'
   return walletSummary.value.payment_type === 'alipay' ? '支付宝' : '微信'
@@ -300,16 +342,24 @@ function formatAmount(amount) {
  * @returns {Promise<void>}
  */
 async function fetchWalletSummary() {
+  walletLoading.value = true
+  walletLoadError.value = ''
+
   try {
     const response = await api.user.getWalletSummary()
-    if (response.code === 0) {
-      walletSummary.value = response.data || {}
-      if (['wechat', 'alipay'].includes(walletSummary.value.payment_type)) {
-        paymentType.value = walletSummary.value.payment_type
-      }
+    if (response.code !== 0) {
+      throw new Error('wallet summary request failed')
+    }
+
+    walletSummary.value = response.data || {}
+    if (['wechat', 'alipay'].includes(walletSummary.value.payment_type)) {
+      paymentType.value = walletSummary.value.payment_type
     }
   } catch (error) {
     console.error('获取钱包摘要失败:', error)
+    walletLoadError.value = '钱包信息加载失败，请重试'
+  } finally {
+    walletLoading.value = false
   }
 }
 
@@ -326,6 +376,8 @@ function revokeQrPreview() {
  * @param {Object} uploadFile - Element Plus 上传文件对象
  */
 function handleQrChange(uploadFile) {
+  if (savingQr.value) return
+
   const rawFile = uploadFile?.raw
   const allowedTypes = new Set(['image/png', 'image/jpeg', 'image/webp'])
   const maxFileSize = 5 * 1024 * 1024
@@ -356,9 +408,10 @@ function handleQrChange(uploadFile) {
 async function savePaymentQr() {
   if (!qrFile.value || savingQr.value) return
 
+  const submittedFile = qrFile.value
   const formData = new FormData()
   formData.append('payment_type', paymentType.value)
-  formData.append('qr_code', qrFile.value)
+  formData.append('qr_code', submittedFile)
   savingQr.value = true
 
   try {
@@ -369,9 +422,11 @@ async function savePaymentQr() {
 
     walletSummary.value = { ...walletSummary.value, ...(response.data || {}) }
     await fetchWalletSummary()
-    qrFile.value = null
-    qrUploadRef.value?.clearFiles()
-    revokeQrPreview()
+    if (qrFile.value === submittedFile) {
+      qrFile.value = null
+      qrUploadRef.value?.clearFiles()
+      revokeQrPreview()
+    }
     ElMessage.success('收款码已保存')
   } catch {
     ElMessage.error('保存失败，请检查收款码类型和图片后重试')
@@ -590,6 +645,11 @@ onBeforeUnmount(() => {
   background: #ecfdf5;
 }
 
+.wallet-status.is-error {
+  color: #c2410c;
+  background: #fff7ed;
+}
+
 .wallet-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -621,6 +681,46 @@ onBeforeUnmount(() => {
   padding: 18px;
   border: 1px solid #ebeef5;
   border-radius: 14px;
+}
+
+.wallet-load-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  color: #1e40af;
+  background: #eff6ff;
+}
+
+.wallet-load-state.is-error {
+  border-color: #fed7aa;
+  color: #c2410c;
+  background: #fff7ed;
+}
+
+.wallet-load-state p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.wallet-load-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-size: 20px;
+}
+
+.wallet-load-content {
+  min-width: 0;
+}
+
+.wallet-load-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .field-label {
@@ -708,6 +808,7 @@ onBeforeUnmount(() => {
 .qr-preview img {
   display: block;
   width: 190px;
+  max-width: 100%;
   height: 190px;
   object-fit: contain;
   border-radius: 8px;
@@ -1029,6 +1130,20 @@ onBeforeUnmount(() => {
   }
 }
 
+@media (max-width: 860px) {
+  .payment-upload-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .qr-uploader,
+  .payment-actions-panel {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+  }
+}
+
 @media (max-width: 768px) {
   .my-container {
     gap: 14px;
@@ -1114,6 +1229,20 @@ onBeforeUnmount(() => {
   .payment-form {
     padding: 13px;
     border-radius: 12px;
+  }
+
+  .wallet-load-state {
+    padding: 14px;
+    border-radius: 12px;
+  }
+
+  .wallet-load-actions {
+    flex-direction: column;
+  }
+
+  .wallet-load-actions .el-button {
+    width: 100%;
+    margin-left: 0;
   }
 
   .payment-type-row,
