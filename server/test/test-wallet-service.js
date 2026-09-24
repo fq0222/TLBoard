@@ -134,6 +134,9 @@ async function testQueriesDoNotRequireQrEncryptionKey() {
       /收款码加密密钥未配置/
     );
     assert.deepEqual(database.state, beforeWithdrawal);
+    assert.equal(database.nextClientId, 0, '密钥缺失时不得获取事务连接');
+    assert.equal(database.calls.some(call => call.sql === 'BEGIN'), false, '密钥缺失时不得开启事务');
+    assert.equal(database.calls.some(call => call.sql === 'RELEASE'), false, '未获取连接时不得执行释放');
   } finally {
     if (hadEncryptionKey) process.env.WITHDRAWAL_QR_ENCRYPTION_KEY = originalEncryptionKey;
     else delete process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;

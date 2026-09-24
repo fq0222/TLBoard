@@ -127,18 +127,20 @@ async function testPaginationValidation(port) {
   assert.equal(calls.length, before);
 }
 
-/** 成功上传传递内存 Buffer；错误字段名、额外文件、非 multipart、超大文件和非法平台均拒绝。 */
+/** PNG/JPEG/WebP 成功传递内存 Buffer；错误 MIME、字段、数量、格式、大小和平台均拒绝。 */
 async function testUploadBoundary(port) {
-  const payload = multipart();
-  const uploaded = await request(port, '/payment-qr', { method: 'PUT', ...payload });
-  assertEnvelope(uploaded, 200);
-  const call = calls.at(-1);
-  assert.equal(call.name, 'savePaymentQr');
-  assert.equal(call.args[1], 7);
-  assert.equal(call.args[2].paymentType, 'wechat');
-  assert.ok(Buffer.isBuffer(call.args[2].fileBuffer));
-  assert.equal(call.args[2].fileBuffer.toString(), 'image-fixture');
-  assert.deepEqual(Object.keys(call.args[2]).sort(), ['fileBuffer', 'paymentType']);
+  for (const [mimeType, fixture] of [['image/png', 'png-fixture'], ['image/jpeg', 'jpeg-fixture'], ['image/webp', 'webp-fixture']]) {
+    const payload = multipart({ mimeType, buffer: Buffer.from(fixture) });
+    const uploaded = await request(port, '/payment-qr', { method: 'PUT', ...payload });
+    assertEnvelope(uploaded, 200);
+    const call = calls.at(-1);
+    assert.equal(call.name, 'savePaymentQr');
+    assert.equal(call.args[1], 7);
+    assert.equal(call.args[2].paymentType, 'wechat');
+    assert.ok(Buffer.isBuffer(call.args[2].fileBuffer));
+    assert.equal(call.args[2].fileBuffer.toString(), fixture);
+    assert.deepEqual(Object.keys(call.args[2]).sort(), ['fileBuffer', 'paymentType']);
+  }
 
   const exactLimit = multipart({ buffer: Buffer.alloc(5 * 1024 * 1024) });
   assertEnvelope(await request(port, '/payment-qr', { method: 'PUT', ...exactLimit }), 200);
