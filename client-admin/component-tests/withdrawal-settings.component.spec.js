@@ -33,6 +33,17 @@ vi.mock('element-plus/es/components/message-box/index.mjs', () => ({
 
 import Settings from '../src/views/Settings.vue'
 
+/** 创建可手动完成的 Promise，用于观察设置加载中的交互状态。 */
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 const PassthroughStub = defineComponent({
   inheritAttrs: false,
   setup(_, { attrs, slots }) {
@@ -132,6 +143,49 @@ beforeEach(() => {
 })
 
 describe('Settings 提现设置', () => {
+  it('真实设置返回前不展示默认金额，也不能编辑或保存', async () => {
+    const loading = deferred()
+    apiMocks.getWithdrawalSettings.mockReturnValue(loading.promise)
+    const wrapper = mountSettings()
+    await nextTick()
+
+    expect(wrapper.get('.minimum-withdrawal-input').element.value).toBe('')
+    expect(wrapper.get('.minimum-withdrawal-input').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.save-withdrawal-settings').attributes('disabled')).toBeDefined()
+    await wrapper.get('.save-withdrawal-settings').trigger('click')
+    expect(apiMocks.saveWithdrawalSettings).not.toHaveBeenCalled()
+
+    loading.resolve({ code: 0, data: { minimum_withdrawal_amount: 2034 } })
+    await settle()
+    expect(wrapper.get('.minimum-withdrawal-input').element.value).toBe('20.34')
+    expect(wrapper.get('.minimum-withdrawal-input').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('.save-withdrawal-settings').attributes('disabled')).toBeUndefined()
+  })
+
+  it('加载失败后保持禁用并提供可恢复的重试入口', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    apiMocks.getWithdrawalSettings
+      .mockRejectedValueOnce(new Error('加载失败'))
+      .mockResolvedValueOnce({ code: 0, data: { minimum_withdrawal_amount: 3456 } })
+    try {
+      const wrapper = mountSettings()
+      await settle()
+
+      expect(wrapper.get('.withdrawal-settings-error').attributes('title')).toBe('提现设置加载失败，请重试')
+      expect(wrapper.get('.minimum-withdrawal-input').attributes('disabled')).toBeDefined()
+      expect(wrapper.get('.save-withdrawal-settings').attributes('disabled')).toBeDefined()
+
+      await wrapper.get('.retry-withdrawal-settings').trigger('click')
+      await settle()
+      expect(apiMocks.getWithdrawalSettings).toHaveBeenCalledTimes(2)
+      expect(wrapper.find('.withdrawal-settings-error').exists()).toBe(false)
+      expect(wrapper.get('.minimum-withdrawal-input').element.value).toBe('34.56')
+      expect(wrapper.get('.save-withdrawal-settings').attributes('disabled')).toBeUndefined()
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   it('将后端整数分显示为元，并按精确整数分保存', async () => {
     const wrapper = mountSettings()
     await settle()
@@ -160,5 +214,24 @@ describe('Settings 提现设置', () => {
 
     expect(input.element.value).toBe('88.88')
     expect(messageMocks.error).toHaveBeenCalledWith('提现设置保存失败')
+  })
+
+  it('只允许保存安全整数分边界内的金额', async () => {
+    const wrapper = mountSettings()
+    await settle()
+    const input = wrapper.get('.minimum-withdrawal-input')
+
+    await input.setValue(String(Number.MAX_SAFE_INTEGER / 100))
+    await wrapper.get('.save-withdrawal-settings').trigger('click')
+    await settle()
+    expect(apiMocks.saveWithdrawalSettings).toHaveBeenLastCalledWith({
+      minimum_withdrawal_amount: Number.MAX_SAFE_INTEGER
+    })
+
+    await input.setValue('90071992547410')
+    await wrapper.get('.save-withdrawal-settings').trigger('click')
+    await settle()
+    expect(apiMocks.saveWithdrawalSettings).toHaveBeenCalledTimes(1)
+    expect(messageMocks.warning).toHaveBeenCalledWith('请输入大于 0 的提现金额，最多保留两位小数')
   })
 })

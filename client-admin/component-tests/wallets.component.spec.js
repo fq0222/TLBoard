@@ -350,6 +350,28 @@ describe('Wallets', () => {
     expect(apiMocks.getWithdrawalQr).not.toHaveBeenCalled()
   })
 
+  it('流水翻到第二页时仍使用当前选中的用户编号', async () => {
+    apiMocks.getWalletUsers.mockResolvedValue(listResponse([walletUser(7)]))
+    apiMocks.getWalletUserDetail.mockResolvedValue(detailResponse(7, false))
+    apiMocks.getWalletTransactions.mockImplementation(id => {
+      const response = transactionResponse(id)
+      response.data.total = 40
+      return Promise.resolve(response)
+    })
+    const wrapper = mountWallets()
+    await settle()
+
+    await wrapper.get('.view-wallet-detail').trigger('click')
+    await settle()
+    await wrapper.get('.transaction-pagination').trigger('click')
+    await settle()
+
+    expect(apiMocks.getWalletTransactions).toHaveBeenLastCalledWith(7, {
+      page: 2,
+      limit: 20
+    })
+  })
+
   it('确认期间禁用两个处理按钮，成功后刷新列表、详情和流水', async () => {
     const confirmation = deferred()
     messageMocks.confirm.mockReturnValue(confirmation.promise)
@@ -373,6 +395,38 @@ describe('Wallets', () => {
     expect(apiMocks.getWalletUserDetail).toHaveBeenCalledTimes(2)
     expect(apiMocks.getWalletTransactions).toHaveBeenCalledTimes(2)
     expect(messageMocks.success).toHaveBeenCalledWith('提现已确认完成')
+  })
+
+  it.each([
+    ['确认', '.complete-withdrawal', apiMocks.completeWithdrawal],
+    ['驳回', '.reject-withdrawal', apiMocks.rejectWithdrawal]
+  ])('%s成功后立即清除待处理状态，详情刷新失败也不会恢复旧二维码', async (_, selector, actionMock) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const wrapper = mountWallets()
+      await settle()
+      await wrapper.findAll('.view-wallet-detail')[0].trigger('click')
+      await settle()
+      const qrUrl = wrapper.get('.withdrawal-qr').attributes('src')
+      const failedRefresh = deferred()
+      apiMocks.getWalletUserDetail.mockReturnValueOnce(failedRefresh.promise)
+
+      await wrapper.get(selector).trigger('click')
+      await settle()
+
+      expect(actionMock).toHaveBeenCalledOnce()
+      expect(wrapper.find('.pending-card').exists()).toBe(false)
+      expect(wrapper.find('.withdrawal-qr').exists()).toBe(false)
+      expect(wrapper.find('[title="当前没有待处理提现"]').exists()).toBe(true)
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith(qrUrl)
+
+      failedRefresh.reject(new Error('详情刷新失败'))
+      await settle()
+      expect(wrapper.find('.pending-card').exists()).toBe(false)
+      expect(wrapper.find('.withdrawal-qr').exists()).toBe(false)
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   it('驳回输入框使用非空校验并提交修剪后的原因', async () => {

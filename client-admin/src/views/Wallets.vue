@@ -217,7 +217,7 @@
               :page-size="transactionPageSize"
               :total="transactionTotal"
               layout="prev, pager, next"
-              @current-change="loadWalletTransactions"
+              @current-change="handleTransactionPageChange"
             />
           </section>
         </template>
@@ -379,6 +379,27 @@ function resetWithdrawalQr() {
   revokeWithdrawalQrUrl()
 }
 
+/**
+ * 提现处理接口成功后先提交本地状态，再发起刷新。
+ * 这样刷新失败时不会继续暴露已失效申请的按钮或二维码。
+ */
+function clearProcessedWithdrawal(userId, withdrawalId) {
+  if (selectedUserId.value !== userId || pendingWithdrawal.value?.id !== withdrawalId) return
+  resetWithdrawalQr()
+  walletDetail.value = {
+    ...walletDetail.value,
+    pending_withdrawal: null
+  }
+  walletUsers.value = walletUsers.value.map(user => walletUserId(user) === userId
+    ? {
+        ...user,
+        pending_withdrawal_id: null,
+        pending_withdrawal_amount: null,
+        pending_withdrawal_status: null
+      }
+    : user)
+}
+
 /** 仅为当前打开用户的 pending 申请加载二维码，响应返回后再次核对上下文。 */
 async function loadWithdrawalQr(withdrawalId, userId) {
   const requestId = ++qrRequestSequence
@@ -494,6 +515,12 @@ function handleTransactionTypeChange() {
   loadWalletTransactions()
 }
 
+/** 流水页码事件只更新分页状态，用户编号始终从当前抽屉上下文读取。 */
+function handleTransactionPageChange(page) {
+  transactionPage.value = page
+  loadWalletTransactions()
+}
+
 /** 提现处理成功后同时刷新列表、当前详情和当前筛选下的流水。 */
 async function refreshAfterWithdrawal(userId) {
   await Promise.all([loadWalletUsers(), loadWalletDetail(userId), loadWalletTransactions(userId)])
@@ -516,6 +543,7 @@ async function completePendingWithdrawal() {
       ElMessage.error(response.message || '确认提现失败')
       return
     }
+    clearProcessedWithdrawal(userId, withdrawal.id)
     ElMessage.success('提现已确认完成')
     await refreshAfterWithdrawal(userId)
   } catch (error) {
@@ -548,6 +576,7 @@ async function rejectPendingWithdrawal() {
       ElMessage.error(response.message || '驳回提现失败')
       return
     }
+    clearProcessedWithdrawal(userId, withdrawal.id)
     ElMessage.success('提现已驳回并退回余额')
     await refreshAfterWithdrawal(userId)
   } catch (error) {

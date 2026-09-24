@@ -166,6 +166,26 @@
       <el-tab-pane label="提现设置" name="withdrawal">
         <div class="content-card">
           <h2 class="card-title">最低提现金额</h2>
+          <el-alert
+            v-if="withdrawalSettingsLoading"
+            class="withdrawal-settings-loading"
+            title="提现设置加载中…"
+            type="info"
+            :closable="false"
+            show-icon
+          />
+          <div v-else-if="withdrawalSettingsError" class="withdrawal-settings-load-error">
+            <el-alert
+              class="withdrawal-settings-error"
+              :title="withdrawalSettingsError"
+              type="error"
+              :closable="false"
+              show-icon
+            />
+            <el-button class="retry-withdrawal-settings" type="primary" plain @click="loadWithdrawalSettings">
+              重新加载
+            </el-button>
+          </div>
           <el-form label-width="160px" style="max-width: 640px;">
             <el-form-item label="最低提现金额">
               <el-input-number
@@ -174,6 +194,7 @@
                 :min="0.01"
                 :step="0.01"
                 :precision="2"
+                :disabled="withdrawalSettingsLoading || !withdrawalSettingsLoaded"
               />
               <span class="form-hint">元，用户单次提现不得低于此金额</span>
             </el-form-item>
@@ -182,6 +203,7 @@
                 class="save-withdrawal-settings"
                 type="primary"
                 :loading="withdrawalSaving"
+                :disabled="withdrawalSettingsLoading || !withdrawalSettingsLoaded || withdrawalSaving"
                 @click="saveWithdrawalSettings"
               >
                 保存设置
@@ -402,8 +424,11 @@ const trafficForm = reactive({
 })
 const trafficSaving = ref(false)
 
-const minimumWithdrawalYuan = ref(20)
+const minimumWithdrawalYuan = ref(null)
 const withdrawalSaving = ref(false)
+const withdrawalSettingsLoading = ref(true)
+const withdrawalSettingsLoaded = ref(false)
+const withdrawalSettingsError = ref('')
 
 const subscriptionForm = ref({
   clash_config_name: '天涯大陆',
@@ -658,21 +683,33 @@ function normalizeYuanToCents(amountYuan) {
   return Number.isSafeInteger(cents) && cents > 0 ? cents : null
 }
 
-/** 加载最低提现金额；接口缺失或非法时保留页面默认值 20 元。 */
+/** 加载最低提现金额；只有合法成功响应才解锁输入与保存。 */
 async function loadWithdrawalSettings() {
+  if (withdrawalSettingsLoading.value && withdrawalSettingsLoaded.value) return
+  withdrawalSettingsLoading.value = true
+  withdrawalSettingsLoaded.value = false
+  withdrawalSettingsError.value = ''
+  minimumWithdrawalYuan.value = null
   try {
     const response = await api.admin.getWithdrawalSettings()
     const cents = Number(response.data?.minimum_withdrawal_amount)
-    if (response.code === 0 && Number.isSafeInteger(cents) && cents > 0) {
-      minimumWithdrawalYuan.value = cents / 100
+    if (response.code !== 0 || !Number.isSafeInteger(cents) || cents <= 0) {
+      withdrawalSettingsError.value = response.message || '提现设置加载失败，请重试'
+      return
     }
+    minimumWithdrawalYuan.value = cents / 100
+    withdrawalSettingsLoaded.value = true
   } catch (error) {
     console.error('加载提现设置失败:', error)
+    withdrawalSettingsError.value = '提现设置加载失败，请重试'
+  } finally {
+    withdrawalSettingsLoading.value = false
   }
 }
 
 /** 保存时只发送整数分；失败分支不回写表单，保留管理员当前输入。 */
 async function saveWithdrawalSettings() {
+  if (withdrawalSettingsLoading.value || !withdrawalSettingsLoaded.value || withdrawalSaving.value) return
   const cents = normalizeYuanToCents(minimumWithdrawalYuan.value)
   if (cents === null) {
     ElMessage.warning('请输入大于 0 的提现金额，最多保留两位小数')
