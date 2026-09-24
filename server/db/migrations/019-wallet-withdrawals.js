@@ -25,7 +25,7 @@ async function up(pool) {
     await client.query(`
       CREATE TABLE IF NOT EXISTS balance_transactions (
         id BIGSERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
         type VARCHAR(30) NOT NULL,
         amount INTEGER NOT NULL CHECK (amount <> 0),
         balance_after INTEGER NOT NULL CHECK (balance_after >= 0),
@@ -58,7 +58,7 @@ async function up(pool) {
     await client.query(`
       CREATE TABLE IF NOT EXISTS withdrawal_requests (
         id BIGSERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
         amount INTEGER NOT NULL CHECK (amount > 0),
         status VARCHAR(20) NOT NULL DEFAULT 'pending',
         payment_type VARCHAR(20) NOT NULL,
@@ -79,6 +79,15 @@ async function up(pool) {
         )
       )
     `);
+
+    // 已部署旧版 019 的库也必须升级外键；事务内重建默认具名约束，不留下级联删除窗口。
+    for (const table of ['balance_transactions', 'withdrawal_requests']) {
+      await client.query(`
+        ALTER TABLE ${table}
+        DROP CONSTRAINT IF EXISTS ${table}_user_id_fkey,
+        ADD CONSTRAINT ${table}_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+      `);
+    }
 
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_balance_transactions_user_created_id
@@ -113,6 +122,9 @@ async function up(pool) {
       SELECT id, 'opening_balance', balance, balance, 'opening_balance', id, '期初余额'
       FROM users
       WHERE COALESCE(balance, 0) > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM balance_transactions existing WHERE existing.user_id = users.id
+        )
       ON CONFLICT (reference_type, reference_id, type) DO NOTHING
     `);
 

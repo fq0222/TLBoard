@@ -523,7 +523,12 @@ function handleTransactionPageChange(page) {
 
 /** 提现处理成功后同时刷新列表、当前详情和当前筛选下的流水。 */
 async function refreshAfterWithdrawal(userId) {
-  await Promise.all([loadWalletUsers(), loadWalletDetail(userId), loadWalletTransactions(userId)])
+  const refreshes = [loadWalletUsers()]
+  // 处理 A 期间若抽屉已切到 B，只刷新全局列表，不能再发起 A 的详情或流水请求。
+  if (!disposed && detailDrawerVisible.value && selectedUserId.value === userId) {
+    refreshes.push(loadWalletDetail(userId), loadWalletTransactions(userId))
+  }
+  await Promise.all(refreshes)
 }
 
 /** 从确认框开始锁定两个操作按钮，并在确认后复核抽屉仍是原申请。 */

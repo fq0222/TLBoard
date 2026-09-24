@@ -407,12 +407,12 @@ const userApi = {
 
   /**
    * 上传并保存当前用户的收款码。
-   * FormData 不手工设置 Content-Type，让浏览器生成正确的 multipart boundary。
+   * 清除实例的 JSON 默认头，保留 FormData 并让浏览器生成 multipart boundary。
    * @param {FormData} formData - 包含 payment_type 和 qr_code 的表单数据
    * @returns {Promise<Object>} 保存后的收款方式与收款码状态
    */
   savePaymentQr(formData) {
-    return apiClient.put('/wallet/payment-qr', formData, { timeout: 20000 })
+    return apiClient.put('/wallet/payment-qr', formData, { timeout: 20000, headers: { 'Content-Type': undefined } })
   },
 
   /**

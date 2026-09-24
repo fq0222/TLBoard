@@ -21,18 +21,18 @@ function escapeLikePattern(keyword) {
  * 核心分支：type 和非空 keyword 可选；keyword 只通过参数化 ILIKE 使用。
  */
 function buildTransactionFilters({ userId, type, keyword } = {}) {
-  const conditions = ['user_id = ?'];
+  const conditions = ['bt.user_id = ?'];
   const params = [userId];
 
   if (type) {
-    conditions.push('type = ?');
+    conditions.push('bt.type = ?');
     params.push(type);
   }
 
   const normalizedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
   if (normalizedKeyword) {
     const pattern = `%${escapeLikePattern(normalizedKeyword)}%`;
-    conditions.push("(description ILIKE ? ESCAPE '\\' OR reference_type ILIKE ? ESCAPE '\\')");
+    conditions.push("(bt.description ILIKE ? ESCAPE '\\' OR bt.reference_type ILIKE ? ESCAPE '\\')");
     params.push(pattern, pattern);
   }
 
@@ -129,7 +129,7 @@ async function countTransactions(db, filters) {
   const { whereClause, params } = buildTransactionFilters(filters);
   return db.prepare(`
     SELECT COUNT(*) AS total
-    FROM balance_transactions
+    FROM balance_transactions bt
     ${whereClause}
   `).get(...params);
 }
@@ -145,11 +145,18 @@ async function listTransactions(db, options) {
   const { limit, offset } = options;
   const { whereClause, params } = buildTransactionFilters(options);
   return db.prepare(`
-    SELECT id, user_id, type, amount, balance_after,
-      reference_type, reference_id, description, created_at
-    FROM balance_transactions
+    SELECT bt.id, bt.user_id, bt.type, bt.amount, bt.balance_after,
+      bt.reference_type, bt.reference_id, bt.description, bt.created_at,
+      wr.status AS withdrawal_status,
+      wr.processed_at AS withdrawal_processed_at,
+      wr.reject_reason AS withdrawal_reject_reason
+    FROM balance_transactions bt
+    LEFT JOIN withdrawal_requests wr
+      ON bt.reference_type = 'withdrawal_request'
+      AND bt.reference_id = wr.id
+      AND bt.user_id = wr.user_id
     ${whereClause}
-    ORDER BY created_at DESC, id DESC
+    ORDER BY bt.created_at DESC, bt.id DESC
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset);
 }

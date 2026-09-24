@@ -599,7 +599,7 @@ async function updateUser(db, userId, payload) {
 
 /**
  * 删除用户在系统本地数据库中的全部关联数据。
- * 核心分支语义：用户不存在时返回旧接口业务错误；存在时只执行本地事务清理，不触发 3X-UI 同步。
+ * 核心分支语义：用户不存在或包含财务审计记录时返回业务错误；其余用户只执行本地事务清理。
  *
  * @param {Object} db - 数据库代理对象
  * @param {number} userId - 用户 ID
@@ -614,9 +614,24 @@ async function deleteUserLocalData(db, userId) {
   }
 
   const transaction = db.transaction(async (transactionDb) => {
+    if (!await userRepository.lockUserForDeletion(transactionDb, userId)) {
+      throw createLegacyBusinessError('用户不存在', { code: 2004 });
+    }
+    if (await userRepository.hasUserFinancialRecords(transactionDb, userId)) {
+      throw createLegacyBusinessError('用户存在财务记录，不能删除', { statusCode: 409, code: 409 });
+    }
     return userRepository.deleteUserLocalRelatedData(transactionDb, user);
   });
-  const deletedRows = await transaction();
+  let deletedRows;
+  try {
+    deletedRows = await transaction();
+  } catch (error) {
+    // 外键为最终审计保护；只转换两张财务表的用户关联冲突，其他数据库错误保持原处理。
+    if (error.code === '23503' && ['balance_transactions_user_id_fkey', 'withdrawal_requests_user_id_fkey'].includes(error.constraint)) {
+      throw createLegacyBusinessError('用户存在财务记录，不能删除', { statusCode: 409, code: 409 });
+    }
+    throw error;
+  }
 
   return {
     id: user.id,

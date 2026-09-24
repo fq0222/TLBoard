@@ -54,7 +54,7 @@ const tableDefinitions = [
     sql: `
       CREATE TABLE IF NOT EXISTS balance_transactions (
         id BIGSERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
         type VARCHAR(30) NOT NULL,
         amount INTEGER NOT NULL CHECK (amount <> 0),
         balance_after INTEGER NOT NULL CHECK (balance_after >= 0),
@@ -91,7 +91,7 @@ const tableDefinitions = [
     sql: `
       CREATE TABLE IF NOT EXISTS withdrawal_requests (
         id BIGSERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
         amount INTEGER NOT NULL CHECK (amount > 0),
         status VARCHAR(20) NOT NULL DEFAULT 'pending',
         payment_type VARCHAR(20) NOT NULL,

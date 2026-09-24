@@ -6,13 +6,21 @@ const { convertPlaceholders } = require('../db/sql-utils');
 const PaymentQrService = require('../services/shared/payment-qr-service');
 const { UserWalletService } = require('../services/user/wallet-service');
 
+const CURRENT_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
+const OLD_ENCRYPTION_KEY = Buffer.alloc(32, 8).toString('base64');
+
+/** 使用真实 AES-256-GCM 生成数据库夹具，避免伪密文掩盖认证解密缺陷。 */
+function encryptQrPayload(payload = 'wxp://wallet-saved-fixture', encryptionKey = CURRENT_ENCRYPTION_KEY) {
+  return new PaymentQrService({ encryptionKey }).encryptPayload(payload);
+}
+
 /** 可控连接池：模拟同一用户行锁、事务私有写集与提交/回滚，以验证业务交错而不访问业务库。 */
 class WalletDatabase {
   /** options 为余额、二维码、最低额及 SQL 故障；默认用户 7，另一个用户的查询必须为空。 */
-  constructor({ balance = 5000, qr = true, minimum, pending = false, failOn, conflict } = {}) {
+  constructor({ balance = 5000, qr = true, qrPayloadEncrypted = encryptQrPayload(), minimum, pending = false, failOn, conflict } = {}) {
     this.state = {
       user: { id: 7, balance }, minimum,
-      qr: qr ? { user_id: 7, payment_type: 'wechat', qr_payload_encrypted: 'v1.saved-encrypted', qr_payload_digest: 'saved-digest' } : undefined,
+      qr: qr ? { user_id: 7, payment_type: 'wechat', qr_payload_encrypted: qrPayloadEncrypted, qr_payload_digest: 'saved-digest' } : undefined,
       withdrawals: pending ? [{ id: 1, user_id: 7, amount: 2000, status: 'pending', created_at: 123 }] : [],
       transactions: []
     };
@@ -110,7 +118,7 @@ class WalletDatabase {
 
 /** 测试专用随机性无关密钥，不使用本地配置或环境中的真实密钥。 */
 function createService() {
-  return new UserWalletService({ paymentQrService: new PaymentQrService({ encryptionKey: Buffer.alloc(32, 7).toString('base64') }) });
+  return new UserWalletService({ paymentQrService: new PaymentQrService({ encryptionKey: CURRENT_ENCRYPTION_KEY }) });
 }
 
 /** 捕获钱包服务在构造时提前读取加密密钥，导致纯查询接口随密钥缺失一起不可用。 */
@@ -200,6 +208,33 @@ async function testRejectionsDoNotMutate() {
   }
 }
 
+/** 旧密钥或认证标签损坏都必须在用户锁内失败，且不能留下申请、扣款或流水。 */
+async function testCreateAuthenticatesStoredQrAfterLock() {
+  const validCiphertext = encryptQrPayload();
+  const parts = validCiphertext.split('.');
+  parts[2] = Buffer.alloc(16, 9).toString('base64');
+  const fixtures = [
+    ['旧密钥', encryptQrPayload('wxp://wallet-old-key-fixture', OLD_ENCRYPTION_KEY)],
+    ['损坏密文', parts.join('.')]
+  ];
+
+  for (const [name, qrPayloadEncrypted] of fixtures) {
+    const database = new WalletDatabase({ qrPayloadEncrypted });
+    const before = structuredClone(database.state);
+    await assert.rejects(
+      () => createService().createWithdrawal(database.db, 7, { amount: 2000 }),
+      error => error.expose === true && error.statusCode === 400 && /收款码已失效/.test(error.message),
+      `${name}必须转换为可公开的固定业务错误`
+    );
+    assert.deepStrictEqual(database.state, before, `${name}失败后数据库状态必须回滚`);
+    assert.ok(database.calls.some(call => call.sql.includes('FOR NO KEY UPDATE')), `${name}必须在锁定用户后认证`);
+    assert.equal(database.calls.some(call => call.sql.startsWith('INSERT INTO withdrawal_requests')), false);
+    assert.equal(database.calls.some(call => call.sql.startsWith('UPDATE users')), false);
+    assert.equal(database.calls.some(call => call.sql.startsWith('INSERT INTO balance_transactions')), false);
+    assert.equal(database.calls.filter(call => call.sql === 'ROLLBACK').length, 1);
+  }
+}
+
 /** 验证申请、二维码快照、一次扣款、一次负数流水均落在同一个专用事务并一起提交。 */
 async function testCreateIsAtomic() {
   const database = new WalletDatabase({ balance: 2000 });
@@ -274,7 +309,7 @@ async function testTransactionsAreScopedAndPaginated() {
 
 /** 按行为顺序运行测试；失败输出名称和堆栈，成功输出可追溯统计。 */
 async function run() {
-  const tests = [testQueriesDoNotRequireQrEncryptionKey, testSummaryAndOverviewArePrivate, testSaveQrEncryptsAndPreservesSnapshot, testMinimumAndValidation, testRejectionsDoNotMutate, testCreateIsAtomic, testFailureRollsEverythingBack, testConcurrentRequestsOnlyDebitOnce, testUniqueConflictMapping, testTransactionsAreScopedAndPaginated];
+  const tests = [testQueriesDoNotRequireQrEncryptionKey, testSummaryAndOverviewArePrivate, testSaveQrEncryptsAndPreservesSnapshot, testMinimumAndValidation, testRejectionsDoNotMutate, testCreateAuthenticatesStoredQrAfterLock, testCreateIsAtomic, testFailureRollsEverythingBack, testConcurrentRequestsOnlyDebitOnce, testUniqueConflictMapping, testTransactionsAreScopedAndPaginated];
   for (const test of tests) { await test(); console.log(`✓ ${test.name}`); }
   console.log(`钱包服务测试通过：${tests.length}/${tests.length}`);
 }

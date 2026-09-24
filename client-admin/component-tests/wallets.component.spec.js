@@ -400,6 +400,34 @@ describe('Wallets', () => {
   it.each([
     ['确认', '.complete-withdrawal', apiMocks.completeWithdrawal],
     ['驳回', '.reject-withdrawal', apiMocks.rejectWithdrawal]
+  ])('处理用户 A 的提现时切换到 B，%s成功后只刷新列表而不回刷 A 详情', async (_, selector, actionMock) => {
+    const action = deferred()
+    actionMock.mockReturnValue(action.promise)
+    const wrapper = mountWallets()
+    await settle()
+
+    await wrapper.findAll('.view-wallet-detail')[0].trigger('click')
+    await settle()
+    await wrapper.get(selector).trigger('click')
+    await nextTick()
+    expect(actionMock).toHaveBeenCalledOnce()
+
+    await wrapper.findAll('.view-wallet-detail')[1].trigger('click')
+    await settle()
+    expect(wrapper.get('.drawer-stub').text()).toContain('user2@example.com')
+
+    action.resolve({ code: 0, data: { status: selector.includes('complete') ? 'completed' : 'rejected' } })
+    await settle()
+
+    expect(apiMocks.getWalletUsers).toHaveBeenCalledTimes(2)
+    expect(apiMocks.getWalletUserDetail.mock.calls.map(([id]) => id)).toEqual([1, 2])
+    expect(apiMocks.getWalletTransactions.mock.calls.map(([id]) => id)).toEqual([1, 2])
+    expect(wrapper.get('.drawer-stub').text()).toContain('user2@example.com')
+  })
+
+  it.each([
+    ['确认', '.complete-withdrawal', apiMocks.completeWithdrawal],
+    ['驳回', '.reject-withdrawal', apiMocks.rejectWithdrawal]
   ])('%s成功后立即清除待处理状态，详情刷新失败也不会恢复旧二维码', async (_, selector, actionMock) => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {

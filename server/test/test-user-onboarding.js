@@ -408,6 +408,11 @@ test('admin user delete clears local related records in one transaction', async 
         return fn({
           prepare(sql) {
             return {
+              async get() {
+                if (sql.includes('FOR UPDATE')) return { id: originalUser.id };
+                if (sql.includes('AS has_records')) return { has_records: false };
+                throw new Error('删除测试出现未支持的读取 SQL');
+              },
               async run(...params) {
                 calls.push({ sql: sql.replace(/\s+/g, ' ').trim(), params });
                 return { changes: 1 };
@@ -454,6 +459,79 @@ test('admin user delete returns legacy error when user is missing', async () => 
   } finally {
     restoreRepository();
   }
+});
+
+test('admin user delete rejects existing financial audit records before cleanup', async () => {
+  const transactionDb = { marker: 'delete-transaction' };
+  const db = { transaction: fn => async () => fn(transactionDb) };
+  let cleanupCalled = false;
+  const restoreRepository = replaceMethods(userRepository, {
+    findUserDetailById: async () => ({ id: 12, email: 'financial@example.com' }),
+    lockUserForDeletion: async (receivedDb, userId) => {
+      assert.equal(receivedDb, transactionDb);
+      assert.equal(userId, 12);
+      return { id: 12 };
+    },
+    hasUserFinancialRecords: async (receivedDb, userId) => {
+      assert.equal(receivedDb, transactionDb);
+      assert.equal(userId, 12);
+      return true;
+    },
+    deleteUserLocalRelatedData: async () => {
+      cleanupCalled = true;
+    }
+  });
+
+  try {
+    await assert.rejects(
+      () => usersService.deleteUserLocalData(db, 12),
+      error => error.isLegacyBusinessError && error.code === 409 && error.statusCode === 409 && error.message === '用户存在财务记录，不能删除'
+    );
+    assert.equal(cleanupCalled, false);
+  } finally {
+    restoreRepository();
+  }
+});
+
+test('admin user delete maps audit foreign key race to the same Chinese business error', async () => {
+  const transactionDb = { marker: 'delete-transaction' };
+  const db = { transaction: fn => async () => fn(transactionDb) };
+  const foreignKeyError = Object.assign(new Error('foreign key violation'), {
+    code: '23503',
+    constraint: 'withdrawal_requests_user_id_fkey'
+  });
+  const restoreRepository = replaceMethods(userRepository, {
+    findUserDetailById: async () => ({ id: 12, email: 'race@example.com' }),
+    lockUserForDeletion: async () => ({ id: 12 }),
+    hasUserFinancialRecords: async () => false,
+    deleteUserLocalRelatedData: async () => { throw foreignKeyError; }
+  });
+
+  try {
+    await assert.rejects(
+      () => usersService.deleteUserLocalData(db, 12),
+      error => error.isLegacyBusinessError && error.code === 409 && error.statusCode === 409 && error.message === '用户存在财务记录，不能删除'
+    );
+  } finally {
+    restoreRepository();
+  }
+});
+
+test('admin user financial precheck covers both balance and withdrawal audit tables', async () => {
+  let recordedSql = '';
+  const result = await userRepository.hasUserFinancialRecords({
+    prepare(sql) {
+      recordedSql = sql.replace(/\s+/g, ' ').trim();
+      return { get: async (...params) => {
+        assert.deepEqual(params, [12, 12]);
+        return { has_records: true };
+      } };
+    }
+  }, 12);
+
+  assert.equal(result, true);
+  assert.match(recordedSql, /FROM balance_transactions WHERE user_id = \?/);
+  assert.match(recordedSql, /FROM withdrawal_requests WHERE user_id = \?/);
 });
 
 test('admin home routing actions update expire time and reuse shared service with cooldown skipped', async () => {

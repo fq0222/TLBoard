@@ -737,6 +737,28 @@ async function deleteUserLocalRelatedData(db, user) {
 }
 
 /**
+ * 删除前锁定用户，串行化余额变动并阻止新的外键引用插入。
+ * @param {Object} db - 专用事务代理
+ * @param {number} userId - 待删除用户 ID；已被其它事务删除时返回空
+ */
+async function lockUserForDeletion(db, userId) {
+  return db.prepare('SELECT id FROM users WHERE id = ? FOR UPDATE').get(userId);
+}
+
+/**
+ * 查询任意余额流水或提现申请是否存在，不因余额为零或申请已处理而放行删除。
+ * @param {Object} db - 已持有用户锁的事务代理
+ * @param {number} userId - 待检查用户 ID
+ */
+async function hasUserFinancialRecords(db, userId) {
+  const row = await db.prepare(`
+    SELECT EXISTS (SELECT 1 FROM balance_transactions WHERE user_id = ?)
+      OR EXISTS (SELECT 1 FROM withdrawal_requests WHERE user_id = ?) AS has_records
+  `).get(userId, userId);
+  return !!row.has_records;
+}
+
+/**
  * 查询指定 ID 列表里仍启用的 CF IP。
  *
  * @param {Object} db - 数据库代理对象
@@ -934,6 +956,8 @@ module.exports = {
   findUserIpLocationById,
   updateUserIpLocation,
   deleteUserLocalRelatedData,
+  lockUserForDeletion,
+  hasUserFinancialRecords,
   findEnabledCfIpsByIds,
   replaceUserCfIps,
   findActiveCfIpsForUser,

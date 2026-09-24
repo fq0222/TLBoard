@@ -153,7 +153,18 @@
           </template>
         </el-table-column>
         <el-table-column prop="description" label="说明" min-width="180">
-          <template #default="{ row }">{{ row.description || '-' }}</template>
+          <template #default="{ row }">
+            <div>{{ row.description || '-' }}</div>
+            <div v-if="withdrawalStatusText(row)" class="withdrawal-state">
+              <el-tag :type="withdrawalStatusTagType(row.withdrawal_status)" effect="plain" size="small">
+                {{ withdrawalStatusText(row) }}
+              </el-tag>
+              <span v-if="row.withdrawal_processed_at">处理于 {{ formatDateTime(row.withdrawal_processed_at) }}</span>
+              <span v-if="row.withdrawal_status === 'rejected' && row.withdrawal_reject_reason" class="withdrawal-reason">
+                原因：{{ row.withdrawal_reject_reason }}
+              </span>
+            </div>
+          </template>
         </el-table-column>
         <el-table-column label="变动金额" min-width="130" align="right">
           <template #default="{ row }">
@@ -183,6 +194,15 @@
             </strong>
           </div>
           <p class="transaction-description">{{ transaction.description || '-' }}</p>
+          <div v-if="withdrawalStatusText(transaction)" class="withdrawal-state">
+            <el-tag :type="withdrawalStatusTagType(transaction.withdrawal_status)" effect="plain" size="small">
+              {{ withdrawalStatusText(transaction) }}
+            </el-tag>
+            <span v-if="transaction.withdrawal_processed_at">处理于 {{ formatDateTime(transaction.withdrawal_processed_at) }}</span>
+            <span v-if="transaction.withdrawal_status === 'rejected' && transaction.withdrawal_reject_reason" class="withdrawal-reason">
+              原因：{{ transaction.withdrawal_reject_reason }}
+            </span>
+          </div>
           <div class="mobile-transaction-meta">
             <span>{{ formatDateTime(transaction.created_at) }}</span>
             <span>余额 ¥{{ formatCents(transaction.balance_after) }}</span>
@@ -326,6 +346,16 @@ function transactionTagType(type) {
     withdrawal: 'warning',
     withdrawal_refund: 'success'
   }[type] || 'info'
+}
+
+/** 只展示后端白名单中的提现状态，普通余额流水不追加状态文案。 */
+function withdrawalStatusText(transaction) {
+  return ({ pending: '处理中', completed: '已完成', rejected: '已驳回' })[transaction?.withdrawal_status] || ''
+}
+
+/** 将提现处理状态映射为稳定的标签颜色。 */
+function withdrawalStatusTagType(status) {
+  return ({ pending: 'warning', completed: 'success', rejected: 'danger' })[status] || 'info'
 }
 
 /**
@@ -806,6 +836,23 @@ onBeforeUnmount(() => {
 
 .amount-change {
   font-variant-numeric: tabular-nums;
+}
+
+.withdrawal-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.withdrawal-reason {
+  width: 100%;
+  color: #dc2626;
+  word-break: break-word;
 }
 
 .amount-change.is-positive {

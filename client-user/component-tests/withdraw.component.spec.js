@@ -357,6 +357,27 @@ describe('Withdraw', () => {
     expect(wrapper.text()).not.toContain('旧流水')
   })
 
+  it('提现流水展示处理中、已完成、已驳回及驳回原因', async () => {
+    apiMocks.getBalanceTransactions.mockResolvedValue(transactionResponse({
+      list: [
+        { id: 1, type: 'withdrawal', amount: -2000, balance_after: 8000, description: '提现申请', withdrawal_status: 'pending', withdrawal_processed_at: null, withdrawal_reject_reason: null, created_at: 1700000000 },
+        { id: 2, type: 'withdrawal', amount: -2000, balance_after: 6000, description: '提现申请', withdrawal_status: 'completed', withdrawal_processed_at: 1700000100, withdrawal_reject_reason: null, created_at: 1700000001 },
+        { id: 3, type: 'withdrawal', amount: -2000, balance_after: 4000, description: '提现申请', withdrawal_status: 'rejected', withdrawal_processed_at: 1700000200, withdrawal_reject_reason: '收款信息不符', created_at: 1700000002 }
+      ]
+    }))
+
+    const wrapper = mountWithdraw()
+    await settle()
+
+    const states = wrapper.findAll('.withdrawal-state')
+    expect(states).toHaveLength(3)
+    expect(states[0].text()).toContain('处理中')
+    expect(states[1].text()).toContain('已完成')
+    expect(states[1].text()).toContain('处理于')
+    expect(states[2].text()).toContain('已驳回')
+    expect(states[2].text()).toContain('原因：收款信息不符')
+  })
+
   it('提交成功后强制刷新概览和第一页流水', async () => {
     apiMocks.getBalanceTransactions.mockResolvedValue(transactionResponse({ total: 30 }))
     const wrapper = mountWithdraw()

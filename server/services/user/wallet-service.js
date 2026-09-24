@@ -84,7 +84,7 @@ class UserWalletService {
    */
   async createWithdrawal(db, userId, { amount } = {}) {
     if (!Number.isSafeInteger(amount) || amount <= 0) throw walletError('提现金额必须为正的安全整数分');
-    this.requirePaymentQrService();
+    const paymentQrService = this.requirePaymentQrService();
     try {
       return await db.transaction(async transactionDb => {
         const user = await this.balances.lockUser(transactionDb, userId);
@@ -93,6 +93,13 @@ class UserWalletService {
         if (pending) throw walletError('已有处理中提现申请', 409);
         const qr = await this.repository.getPaymentQr(transactionDb, userId);
         if (!qr) throw walletError('请先上传收款码');
+        try {
+          // 必须在用户锁内认证申请快照来源；旧密钥、篡改密文或失效协议都不能进入写入阶段。
+          const payload = paymentQrService.decryptPayload(qr.qr_payload_encrypted);
+          paymentQrService.validatePaymentPayload(payload, qr.payment_type);
+        } catch {
+          throw walletError('收款码已失效，请重新上传');
+        }
         const minimum = await this.getMinimumAmount(transactionDb);
         if (amount < minimum) throw walletError(`最低提现金额为${(minimum / 100).toFixed(2)}元`);
         if (Number(user.balance) < amount) throw walletError('余额不足', 409);

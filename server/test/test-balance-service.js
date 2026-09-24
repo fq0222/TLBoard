@@ -325,8 +325,35 @@ async function testRepositoryEscapesKeywordAndPaginates() {
     assert.doesNotMatch(call.sql, /50%/);
     assert.deepStrictEqual(call.params.slice(0, 4), [7, 'withdrawal', '%50\\%\\_\\\\VIP%', '%50\\%\\_\\\\VIP%']);
   }
-  assert.match(calls[1].sql, /ORDER BY created_at DESC, id DESC[\s\S]+LIMIT \? OFFSET \?/i);
+  assert.match(calls[1].sql, /ORDER BY bt\.created_at DESC, bt\.id DESC[\s\S]+LIMIT \? OFFSET \?/i);
   assert.deepStrictEqual(calls[1].params.slice(-2), [25, 50]);
+}
+
+/** 提现流水只关联同一用户的申请，并返回状态、处理时间与驳回原因供本人展示。 */
+async function testRepositoryJoinsOwnWithdrawalStatus() {
+  const expected = [{
+    id: 8,
+    withdrawal_status: 'rejected',
+    withdrawal_processed_at: 1700000000,
+    withdrawal_reject_reason: '收款信息不符'
+  }];
+  const { db, calls } = createRecordingDb([expected]);
+
+  const items = await balanceRepository.listTransactions(db, {
+    userId: 7,
+    limit: 20,
+    offset: 0
+  });
+
+  assert.deepStrictEqual(items, expected);
+  assert.match(calls[0].sql, /LEFT JOIN withdrawal_requests wr/i);
+  assert.match(calls[0].sql, /bt\.reference_type = 'withdrawal_request'/i);
+  assert.match(calls[0].sql, /bt\.reference_id = wr\.id/i);
+  assert.match(calls[0].sql, /bt\.user_id = wr\.user_id/i);
+  assert.match(calls[0].sql, /wr\.status AS withdrawal_status/i);
+  assert.match(calls[0].sql, /wr\.processed_at AS withdrawal_processed_at/i);
+  assert.match(calls[0].sql, /wr\.reject_reason AS withdrawal_reject_reason/i);
+  assert.deepStrictEqual(calls[0].params, [7, 20, 0]);
 }
 
 /** 按行为顺序运行全部用例，任一失败时保留完整堆栈。 */
@@ -344,7 +371,8 @@ async function run() {
     testListTransactionsPaginationBoundaries,
     testRepositoryBalanceSql,
     testRepositoryInsertsTransaction,
-    testRepositoryEscapesKeywordAndPaginates
+    testRepositoryEscapesKeywordAndPaginates,
+    testRepositoryJoinsOwnWithdrawalStatus
   ];
 
   for (const test of tests) {
