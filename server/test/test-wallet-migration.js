@@ -66,6 +66,8 @@ function assertWalletSql(queries) {
   assert.match(sql, /payment_type IN \('wechat', 'alipay'\)/);
   assert.match(sql, /status <> 'rejected' OR NULLIF\(BTRIM\(reject_reason\), ''\) IS NOT NULL/);
   assert.match(sql, /UNIQUE \(reference_type, reference_id, type\)/);
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS idx_balance_transactions_user_created_id[\s\S]*ON balance_transactions\(user_id, created_at DESC, id DESC\)/);
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_status_created_at[\s\S]*ON withdrawal_requests\(status, created_at DESC\)/);
   assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS idx_withdrawal_requests_one_pending_per_user[\s\S]*WHERE status = 'pending'/);
 }
 

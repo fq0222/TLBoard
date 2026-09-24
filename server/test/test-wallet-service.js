@@ -128,6 +128,12 @@ async function testQueriesDoNotRequireQrEncryptionKey() {
       () => service.savePaymentQr(database.db, 7, { paymentType: 'wechat', fileBuffer: Buffer.from('image-fixture') }),
       /收款码加密密钥未配置/
     );
+    const beforeWithdrawal = structuredClone(database.state);
+    await assert.rejects(
+      () => service.createWithdrawal(database.db, 7, { amount: 2000 }),
+      /收款码加密密钥未配置/
+    );
+    assert.deepEqual(database.state, beforeWithdrawal);
   } finally {
     if (hadEncryptionKey) process.env.WITHDRAWAL_QR_ENCRYPTION_KEY = originalEncryptionKey;
     else delete process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;

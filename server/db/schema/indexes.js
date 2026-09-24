@@ -7,8 +7,9 @@ const indexStatements = [
   'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)',
   'CREATE INDEX IF NOT EXISTS idx_users_plan_id ON users(plan_id)',
   'CREATE INDEX IF NOT EXISTS idx_users_subscription_token ON users(subscription_token)',
-  'CREATE INDEX IF NOT EXISTS idx_balance_transactions_user_created_at ON balance_transactions(user_id, created_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_balance_transactions_user_created_id ON balance_transactions(user_id, created_at DESC, id DESC)',
   'CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_user_created_at ON withdrawal_requests(user_id, created_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_status_created_at ON withdrawal_requests(status, created_at DESC)',
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_withdrawal_requests_one_pending_per_user
     ON withdrawal_requests(user_id)
     WHERE status = 'pending'`,

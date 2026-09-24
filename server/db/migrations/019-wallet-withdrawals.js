@@ -81,13 +81,18 @@ async function up(pool) {
     `);
 
     await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_balance_transactions_user_created_at
-      ON balance_transactions(user_id, created_at DESC)
+      CREATE INDEX IF NOT EXISTS idx_balance_transactions_user_created_id
+      ON balance_transactions(user_id, created_at DESC, id DESC)
     `);
 
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_user_created_at
       ON withdrawal_requests(user_id, created_at DESC)
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_status_created_at
+      ON withdrawal_requests(status, created_at DESC)
     `);
 
     await client.query(`

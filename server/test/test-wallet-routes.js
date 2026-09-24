@@ -39,9 +39,9 @@ function stubAdminService(name, result) {
 }
 
 /** 手工创建 multipart 字节流以覆盖字段名、大小限制及损坏边界，不依赖浏览器容错。 */
-function multipart({ field = 'qr_code', paymentType = 'wechat', buffer = Buffer.from('image-fixture'), extraFile = false } = {}) {
+function multipart({ field = 'qr_code', paymentType = 'wechat', buffer = Buffer.from('image-fixture'), mimeType = 'image/png', extraFile = false } = {}) {
   const boundary = 'wallet-test-boundary';
-  const parts = [Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="payment_type"\r\n\r\n${paymentType}\r\n`), Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${field}"; filename="wallet.png"\r\nContent-Type: image/png\r\n\r\n`), buffer, Buffer.from('\r\n')];
+  const parts = [Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="payment_type"\r\n\r\n${paymentType}\r\n`), Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${field}"; filename="wallet.png"\r\nContent-Type: ${mimeType}\r\n\r\n`), buffer, Buffer.from('\r\n')];
   if (extraFile) parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="qr_code"; filename="second.png"\r\nContent-Type: image/png\r\n\r\nsecond\r\n`));
   parts.push(Buffer.from(`--${boundary}--\r\n`));
   return { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` };
@@ -144,7 +144,7 @@ async function testUploadBoundary(port) {
   assertEnvelope(await request(port, '/payment-qr', { method: 'PUT', ...exactLimit }), 200);
   assert.equal(calls.at(-1).args[2].fileBuffer.length, 5 * 1024 * 1024);
   const before = calls.length;
-  for (const upload of [multipart({ field: 'image' }), multipart({ paymentType: 'bank' }), multipart({ extraFile: true }), multipart({ buffer: Buffer.alloc(5 * 1024 * 1024 + 1) })]) {
+  for (const upload of [multipart({ field: 'image' }), multipart({ paymentType: 'bank' }), multipart({ mimeType: 'text/plain' }), multipart({ extraFile: true }), multipart({ buffer: Buffer.alloc(5 * 1024 * 1024 + 1) })]) {
     assertEnvelope(await request(port, '/payment-qr', { method: 'PUT', ...upload }), 400);
   }
   assertEnvelope(await request(port, '/payment-qr', { method: 'PUT', body: { payment_type: 'wechat', qr_code: 'fake' } }), 400);

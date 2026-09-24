@@ -9,8 +9,13 @@ const controller = require('../../controllers/user/wallet-controller');
 
 const router = express.Router();
 const MAX_PAYMENT_QR_BYTES = 5 * 1024 * 1024;
+const PAYMENT_QR_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const upload = multer({
   storage: multer.memoryStorage(),
+  fileFilter: (_req, file, callback) => callback(
+    PAYMENT_QR_MIME_TYPES.has(file.mimetype) ? null : new multer.MulterError('LIMIT_UNEXPECTED_FILE', file.fieldname),
+    PAYMENT_QR_MIME_TYPES.has(file.mimetype)
+  ),
   // Busboy 在字节数恰好等于阈值时也触发超限；多放行 1 字节后仍由中间件拒绝所有大于 5 MiB 的文件。
   limits: { fileSize: MAX_PAYMENT_QR_BYTES + 1, files: 1, fields: 1, fieldSize: 32, parts: 3 }
 }).single('qr_code');

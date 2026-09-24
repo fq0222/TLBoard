@@ -24,6 +24,15 @@ class UserWalletService {
     this.paymentQrService = paymentQrService;
   }
 
+  /**
+   * 延迟创建并校验二维码加密服务；查询接口不依赖密钥，保存与提交提现必须先通过校验。
+   * @returns {PaymentQrService} 已配置有效 32 字节密钥的二维码服务
+   */
+  requirePaymentQrService() {
+    if (!this.paymentQrService) this.paymentQrService = new PaymentQrService();
+    return this.paymentQrService;
+  }
+
   /** db 为事务或普通代理；缺失、空白、非法或非正最低额均默认 2000 分。 */
   async getMinimumAmount(db) {
     const setting = await this.repository.getMinimumAmount(db);
@@ -44,10 +53,10 @@ class UserWalletService {
   /** fileBuffer 仅在内存解码；成功后在用户锁下原子保存密文，避免申请快照与平台错配。 */
   async savePaymentQr(db, userId, { paymentType, fileBuffer } = {}) {
     if (!['wechat', 'alipay'].includes(paymentType)) throw walletError('收款方式必须为微信或支付宝');
-    if (!this.paymentQrService) this.paymentQrService = new PaymentQrService();
+    const paymentQrService = this.requirePaymentQrService();
     let parsed;
     try {
-      parsed = await this.paymentQrService.parseAndEncrypt(fileBuffer, paymentType);
+      parsed = await paymentQrService.parseAndEncrypt(fileBuffer, paymentType);
     } catch (error) {
       // 二维码服务的 400 均为固定安全文案；包装成可公开业务错误，其他异常统一隐藏。
       if (error.status === 400) throw walletError(error.message);
@@ -75,6 +84,7 @@ class UserWalletService {
    */
   async createWithdrawal(db, userId, { amount } = {}) {
     if (!Number.isSafeInteger(amount) || amount <= 0) throw walletError('提现金额必须为正的安全整数分');
+    this.requirePaymentQrService();
     try {
       return await db.transaction(async transactionDb => {
         const user = await this.balances.lockUser(transactionDb, userId);
