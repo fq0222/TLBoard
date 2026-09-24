@@ -6,7 +6,9 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const sharp = require('sharp');
 const QRCode = require('qrcode');
+const jsQR = require('jsqr');
 const { prepareZXingModule, defaultReaderOptions, barcodeFormats, binarizers, eanAddOnSymbols, textModes, characterSets } = require('zxing-wasm/reader');
+const config = require('../../config');
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 12 * 1024 * 1024;
@@ -20,10 +22,10 @@ prepareZXingModule({
 
 class PaymentQrService {
   /**
-   * @param {Object} options - 测试或运行时依赖；密钥为严格 Base64 编码的 32 字节值。
-   * 缺失环境密钥立即失败，绝不回退到开发用密钥。
+   * @param {Object} options - 测试或运行时依赖；默认读取 config.js 中严格 Base64 编码的 32 字节密钥。
+   * 配置缺失或格式错误时立即失败，绝不回退到内置密钥。
    */
-  constructor({ encryptionKey = process.env.WITHDRAWAL_QR_ENCRYPTION_KEY, imageDecoder, qrDecoder, qrEncoder } = {}) {
+  constructor({ encryptionKey = config.withdrawal && config.withdrawal.qrEncryptionKey, imageDecoder, qrDecoder, jsQrDecoder, qrEncoder } = {}) {
     try {
       this.encryptionKey = this.decodeBase64(encryptionKey);
       if (this.encryptionKey.length !== 32) throw new Error();
@@ -32,6 +34,7 @@ class PaymentQrService {
     }
     this.imageDecoder = imageDecoder || this.decodeImage.bind(this);
     this.qrDecoder = qrDecoder || this.decodeQr.bind(this);
+    this.jsQrDecoder = jsQrDecoder || this.decodeQrWithJsQr.bind(this);
     this.qrEncoder = qrEncoder || (payload => QRCode.toBuffer(payload, { type: 'png', errorCorrectionLevel: 'M', margin: 4, width: 512 }));
   }
 
@@ -102,9 +105,21 @@ class PaymentQrService {
       try {
         if (results) results.delete();
       } finally {
+        wasm.HEAPU8.fill(0, pointer, pointer + data.byteLength);
         wasm._free(pointer);
       }
     }
+  }
+
+  /**
+   * ZXing 已定位单个二维码但纠错失败时，使用 jsQR 对同一份 RGBA 像素做一次无缓存兜底。
+   * @param {{data: Uint8Array, width: number, height: number}} image - 当前请求内的 RGBA 像素
+   * @returns {string|null} 解码文本；失败返回 null，绝不记录二维码内容
+   */
+  decodeQrWithJsQr({ data, width, height }) {
+    const pixels = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
+    const result = jsQR(pixels, width, height, { inversionAttempts: 'attemptBoth' });
+    return result && typeof result.data === 'string' && result.data.length ? result.data : null;
   }
 
   /**
@@ -131,29 +146,45 @@ class PaymentQrService {
 
   /** 对 buffer 完成全部安全校验后才加密，返回值始终仅包含密文与摘要。 */
   async parseAndEncrypt(buffer, paymentType) {
-    if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > MAX_IMAGE_BYTES) {
-      throw this.badRequest('请上传不超过 5 MB 的有效收款码图片');
-    }
-    let results;
+    let decoded;
     try {
-      const decoded = await this.imageDecoder(buffer);
-      this.validateImageInfo(decoded);
-      if (!(decoded.data instanceof Uint8Array) || decoded.data.length !== decoded.width * decoded.height * 4) {
-        throw new Error('无效像素数据');
+      if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > MAX_IMAGE_BYTES) {
+        throw this.badRequest('请上传不超过 5 MB 的有效收款码图片');
       }
-      results = await this.qrDecoder(decoded);
-    } catch {
-      throw this.badRequest('图片无法解析或格式尺寸不受支持');
+      let results;
+      try {
+        decoded = await this.imageDecoder(buffer);
+        this.validateImageInfo(decoded);
+        if (!(decoded.data instanceof Uint8Array) || decoded.data.length !== decoded.width * decoded.height * 4) {
+          throw new Error('无效像素数据');
+        }
+        results = await this.qrDecoder(decoded);
+      } catch {
+        throw this.badRequest('图片无法解析或格式尺寸不受支持');
+      }
+      if (!Array.isArray(results) || results.length !== 1) {
+        throw this.badRequest('图片中必须恰好包含一个二维码');
+      }
+      if (!results[0] || typeof results[0] !== 'object') {
+        throw this.badRequest('二维码无法识别');
+      }
+      if (results[0].error || results[0].isValid === false) {
+        let fallbackPayload;
+        try {
+          fallbackPayload = this.jsQrDecoder(decoded);
+        } catch {
+          fallbackPayload = null;
+        }
+        if (!fallbackPayload) throw this.badRequest('二维码无法识别');
+        results = [{ text: fallbackPayload, error: false, isValid: true }];
+      }
+      const payload = results[0].text;
+      this.validatePaymentPayload(payload, paymentType);
+      return { encryptedPayload: this.encryptPayload(payload), digest: crypto.createHash('sha256').update(payload, 'utf8').digest('hex') };
+    } finally {
+      if (decoded && decoded.data instanceof Uint8Array) decoded.data.fill(0);
+      if (Buffer.isBuffer(buffer)) buffer.fill(0);
     }
-    if (!Array.isArray(results) || results.length !== 1) {
-      throw this.badRequest('图片中必须恰好包含一个二维码');
-    }
-    if (!results[0] || typeof results[0] !== 'object' || results[0].error || results[0].isValid === false) {
-      throw this.badRequest('二维码无法识别');
-    }
-    const payload = results[0].text;
-    this.validatePaymentPayload(payload, paymentType);
-    return { encryptedPayload: this.encryptPayload(payload), digest: crypto.createHash('sha256').update(payload, 'utf8').digest('hex') };
   }
 
   /** AES-256-GCM 使用随机 12 字节 IV；输出 v1.iv.tag.ciphertext 便于后续格式迁移。 */

@@ -5,7 +5,9 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 const PaymentQrService = require('../services/shared/payment-qr-service');
+const config = require('../config');
 const sharp = require('sharp');
 const QRCode = require('qrcode');
 const { prepareZXingModule } = require('zxing-wasm/reader');
@@ -56,19 +58,39 @@ test('认证标签、IV、密文和版本篡改均拒绝且无明文错误', () 
   assert.throws(() => createService({ encryptionKey: Buffer.alloc(32, 8).toString('base64') }).decryptPayload(encrypted), isSafeError);
 });
 
-test('缺失、非规范 Base64 或非 32 字节密钥拒绝', () => {
+test('显式传入缺失、非规范 Base64 或非 32 字节密钥时拒绝', () => {
   for (const encryptionKey of ['', 'secret', Buffer.alloc(31).toString('base64'), Buffer.alloc(33).toString('base64'), TEST_KEY + '!']) {
     assert.throws(() => createService({ encryptionKey }), /密钥/);
   }
-  const previous = process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;
+});
+
+test('默认从 config.js 读取收款码加密密钥', () => {
+  const previousConfigKey = config.withdrawal.qrEncryptionKey;
+  const previousEnvKey = process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;
   try {
-    delete process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;
-    assert.throws(() => new PaymentQrService(), /密钥/);
-    process.env.WITHDRAWAL_QR_ENCRYPTION_KEY = TEST_KEY;
+    config.withdrawal.qrEncryptionKey = TEST_KEY;
+    process.env.WITHDRAWAL_QR_ENCRYPTION_KEY = '环境变量不应被服务直接读取';
     assert.equal(new PaymentQrService().decryptPayload(createService().encryptPayload(PAYLOAD)), PAYLOAD);
   } finally {
-    if (previous === undefined) delete process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;
-    else process.env.WITHDRAWAL_QR_ENCRYPTION_KEY = previous;
+    config.withdrawal.qrEncryptionKey = previousConfigKey;
+    if (previousEnvKey === undefined) delete process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;
+    else process.env.WITHDRAWAL_QR_ENCRYPTION_KEY = previousEnvKey;
+  }
+});
+
+test('生产环境由 ecosystem 注入的环境变量覆盖开发密钥', () => {
+  const output = execFileSync(process.execPath, ['-e', "process.stdout.write(require('./config').withdrawal.qrEncryptionKey)"], {
+    cwd: require('node:path').resolve(__dirname, '..'),
+    env: { ...process.env, NODE_ENV: 'production', WITHDRAWAL_QR_ENCRYPTION_KEY: TEST_KEY },
+    encoding: 'utf8'
+  });
+  assert.equal(output, TEST_KEY);
+});
+
+test('仓库中的 ecosystem 占位密钥不能初始化收款码服务', () => {
+  const ecosystem = require('../ecosystem.config');
+  for (const environment of [ecosystem.apps[0].env, ecosystem.apps[0].env_production]) {
+    assert.throws(() => new PaymentQrService({ encryptionKey: environment.WITHDRAWAL_QR_ENCRYPTION_KEY }), /密钥/);
   }
 });
 
@@ -121,11 +143,44 @@ test('注入解码边界的空结果、多结果、损坏元数据和依赖异�
   }
 });
 
+test('ZXing 找到单个无效二维码时使用 jsQR 兜底', async () => {
+  const source = Buffer.from('sensitive-image-fixture');
+  const pixels = { data: Buffer.alloc(16, 23), width: 2, height: 2, format: 'png', pages: 1 };
+  const service = createService({
+    imageDecoder: async () => pixels,
+    qrDecoder: async () => [{ text: 'decode error', error: 'checksum', isValid: false }],
+    jsQrDecoder: () => PAYLOAD
+  });
+
+  const parsed = await service.parseAndEncrypt(source, 'wechat');
+
+  assert.equal(service.decryptPayload(parsed.encryptedPayload), PAYLOAD);
+});
+
+test('二维码解析成功或异常时均归零上传图片和解码像素', async () => {
+  for (const shouldFail of [false, true]) {
+    const source = Buffer.from('sensitive-image-fixture');
+    const pixels = { data: Buffer.alloc(16, 23), width: 2, height: 2, format: 'png', pages: 1 };
+    const service = createService({
+      imageDecoder: async () => pixels,
+      qrDecoder: async () => {
+        if (shouldFail) throw new Error('decode failed');
+        return [{ text: PAYLOAD, error: false, isValid: true }];
+      }
+    });
+
+    if (shouldFail) await assert.rejects(service.parseAndEncrypt(source, 'wechat'), isSafeError);
+    else await service.parseAndEncrypt(source, 'wechat');
+    assert.ok(source.every(byte => byte === 0), '上传图片 Buffer 必须归零');
+    assert.ok(pixels.data.every(byte => byte === 0), 'RGBA 像素 Buffer 必须归零');
+  }
+});
+
 test('真实 PNG 无码拒绝，双码（不同与相同内容）均拒绝', async () => {
   const service = createService();
   const first = await QRCode.toBuffer(PAYLOAD, { width: 240, margin: 4 });
   const blank = await sharp({ create: { width: 560, height: 280, channels: 4, background: '#fff' } }).png().toBuffer();
-  await assert.rejects(service.parseAndEncrypt(blank, 'wechat'), isSafeError);
+  await assert.rejects(service.parseAndEncrypt(Buffer.from(blank), 'wechat'), isSafeError);
   for (const secondPayload of ['https://qr.alipay.com/second', PAYLOAD]) {
     const second = await QRCode.toBuffer(secondPayload, { width: 240, margin: 4 });
     const combined = await sharp(blank).composite([{ input: first, left: 20, top: 20 }, { input: second, left: 300, top: 20 }]).png().toBuffer();
@@ -180,14 +235,14 @@ test('连续 50 次真实解码及读取异常均释放 WASM 结果向量和输�
   try {
     const service = createService();
     const png = await QRCode.toBuffer(PAYLOAD);
-    for (let index = 0; index < 50; index++) await service.parseAndEncrypt(png, 'wechat');
+    for (let index = 0; index < 50; index++) await service.parseAndEncrypt(Buffer.from(png), 'wechat');
     assert.equal(allocated, 50);
     assert.equal(deleted, allocated, `WASM vectors allocated=${allocated}, deleted=${deleted}`);
     assert.equal(outstanding.size, 0, 'WASM 输入缓冲区必须全部释放');
     context.diagnostic(`真实解码: allocated=${allocated}, deleted=${deleted}, outstandingInputs=${outstanding.size}`);
     for (const mode of ['get', 'read']) {
       failureMode = mode;
-      await assert.rejects(service.parseAndEncrypt(png, 'wechat'), isSafeError);
+      await assert.rejects(service.parseAndEncrypt(Buffer.from(png), 'wechat'), isSafeError);
       assert.equal(deleted, allocated, `${mode} 异常必须释放所有结果向量`);
       assert.equal(outstanding.size, 0, `${mode} 异常必须释放输入内存`);
     }

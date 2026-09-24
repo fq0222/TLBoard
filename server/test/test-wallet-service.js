@@ -5,6 +5,7 @@ const { createDbProxy } = require('../db/proxy');
 const { convertPlaceholders } = require('../db/sql-utils');
 const PaymentQrService = require('../services/shared/payment-qr-service');
 const { UserWalletService } = require('../services/user/wallet-service');
+const config = require('../config');
 
 const CURRENT_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
 const OLD_ENCRYPTION_KEY = Buffer.alloc(32, 8).toString('base64');
@@ -123,9 +124,8 @@ function createService() {
 
 /** 捕获钱包服务在构造时提前读取加密密钥，导致纯查询接口随密钥缺失一起不可用。 */
 async function testQueriesDoNotRequireQrEncryptionKey() {
-  const hadEncryptionKey = Object.prototype.hasOwnProperty.call(process.env, 'WITHDRAWAL_QR_ENCRYPTION_KEY');
-  const originalEncryptionKey = process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;
-  delete process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;
+  const originalEncryptionKey = config.withdrawal.qrEncryptionKey;
+  delete config.withdrawal.qrEncryptionKey;
   try {
     const database = new WalletDatabase();
     const service = new UserWalletService();
@@ -146,8 +146,7 @@ async function testQueriesDoNotRequireQrEncryptionKey() {
     assert.equal(database.calls.some(call => call.sql === 'BEGIN'), false, '密钥缺失时不得开启事务');
     assert.equal(database.calls.some(call => call.sql === 'RELEASE'), false, '未获取连接时不得执行释放');
   } finally {
-    if (hadEncryptionKey) process.env.WITHDRAWAL_QR_ENCRYPTION_KEY = originalEncryptionKey;
-    else delete process.env.WITHDRAWAL_QR_ENCRYPTION_KEY;
+    config.withdrawal.qrEncryptionKey = originalEncryptionKey;
   }
 }
 
