@@ -149,11 +149,11 @@ function installMockXuiService({ updates, failHy2 = false }) {
               remark: 'direct',
               protocol: 'vless',
               clientStats: [
-                { email: 'disabled@example.com-direct', up: 700, down: 600 }
+                { email: 'disabled@example.com', up: 700, down: 600 }
               ],
               settings: JSON.stringify({
                 clients: [
-                  { email: 'disabled@example.com-direct', enable: true }
+                  { email: 'disabled@example.com', enable: true }
                 ]
               })
             }
@@ -169,11 +169,11 @@ function installMockXuiService({ updates, failHy2 = false }) {
             remark: 'hy2',
             protocol: 'hysteria2',
             clientStats: [
-              { email: 'disabled@example.com-hy2', up: 300, down: 200 }
+              { email: 'disabled@example.com', up: 300, down: 200 }
             ],
             settings: JSON.stringify({
               clients: [
-                { email: 'disabled@example.com-hy2', enable: true, auth: 'hy2-secret' }
+                { email: 'disabled@example.com', enable: true, auth: 'hy2-secret' }
               ]
             })
           }
@@ -186,7 +186,7 @@ function installMockXuiService({ updates, failHy2 = false }) {
     },
     async updateClientByContext(inboundId, email, options) {
       updates.push({ method: 'updateClientByContext', apiUrl, inboundId, email, options });
-      if (failHy2 && email.endsWith('-hy2')) {
+      if (failHy2 && options.strategy === 'hy2') {
         return { success: false, message: 'hy2 update failed' };
       }
       return { success: true };
@@ -299,7 +299,7 @@ async function testPartialXuiFailureStillDisablesLocalUser() {
     assert.match(db.executedUpdates[0].sql, /UPDATE users u[\s\S]*SET[\s\S]*enabled = 0/);
     assert.strictEqual(updates.length, 2);
     assert(updates.every(item => item.method === 'updateClientByContext'), '所有节点都应走 updateClientByContext');
-    assert(updates.some(item => item.email.endsWith('-hy2')));
+    assert(updates.some(item => item.options.strategy === 'hy2'));
     assert.deepStrictEqual(sentEmails, [{ userId: 1, reason: 'traffic_limit' }]);
   } finally {
     renewalRequiredEmailService.sendRenewalRequiredEmail = originalSend;

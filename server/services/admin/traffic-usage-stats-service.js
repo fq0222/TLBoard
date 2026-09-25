@@ -16,17 +16,11 @@ const GB = 1024 * 1024 * 1024;
  * @returns {{found: boolean, total: number}} 是否找到用户及累计流量
  */
 function getUserServerTraffic(serverData, email) {
-  let total = 0;
-  let found = false;
-
-  for (const [nodeEmail, data] of Object.entries(serverData || {})) {
-    if (nodeEmail === email || nodeEmail.startsWith(`${email}-`)) {
-      total += Number(data.total) || 0;
-      found = true;
-    }
-  }
-
-  return { found, total };
+  const data = serverData?.[email];
+  return {
+    found: Boolean(data),
+    total: Number(data?.total) || 0
+  };
 }
 
 /**

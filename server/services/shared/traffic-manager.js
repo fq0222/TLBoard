@@ -132,14 +132,12 @@ function getTotalTrafficLimit(user) {
  * @returns {Array<Object>} 匹配到的 3X-UI 客户端状态列表
  */
 function getUserClientSnapshotEntries(email, clientStatusSnapshot = {}) {
-  const nodeEmailPrefix = `${email}-`;
   const entries = [];
 
   for (const serverSnapshot of Object.values(clientStatusSnapshot || {})) {
-    for (const [nodeEmail, snapshotClient] of Object.entries(serverSnapshot || {})) {
-      if (nodeEmail === email || nodeEmail.startsWith(nodeEmailPrefix)) {
-        entries.push(snapshotClient);
-      }
+    const snapshotClient = serverSnapshot?.[email];
+    if (snapshotClient) {
+      entries.push(snapshotClient);
     }
   }
 
@@ -274,6 +272,9 @@ async function fetchAllServerTraffic(db) {
         }
 
         const serverData = {};
+        let statsRowCount = 0;
+        let duplicateEmailCount = 0;
+        let inconsistentEmailCount = 0;
 
         for (const inbound of inboundsResult.data) {
           const clientStats = inbound.clientStats || [];
@@ -283,30 +284,63 @@ async function fetchAllServerTraffic(db) {
           for (const client of clientStats) {
             const email = client.email;
             if (!email) continue;
-
-            if (!serverData[email]) {
-              serverData[email] = {
-                up: 0,
-                down: 0,
-                total: 0
-              };
-            }
+            statsRowCount++;
 
             const settingsClient = clientsByEmail.get(email);
             const enabledValue = client.enable !== undefined ? client.enable : settingsClient?.enable;
-            serverData[email].up += client.up || 0;
-            serverData[email].down += client.down || 0;
-            serverData[email].total += (client.up || 0) + (client.down || 0);
-            serverData[email].enabled = normalizeClientEnabled(enabledValue);
-            serverData[email].enabledKnown = enabledValue !== undefined;
-            serverData[email].inboundId = inbound.id;
-            serverData[email].protocol = inbound.protocol || '';
-            serverData[email].strategy = getInboundUpdateStrategy(inbound);
+            const up = Number(client.up) || 0;
+            const down = Number(client.down) || 0;
+            const total = up + down;
+            const existing = serverData[email];
+
+            if (!existing) {
+              serverData[email] = {
+                up,
+                down,
+                total,
+                enabled: normalizeClientEnabled(enabledValue),
+                enabledKnown: enabledValue !== undefined,
+                inboundIds: [inbound.id],
+                inboundId: inbound.id,
+                selectedInboundId: inbound.id,
+                protocol: inbound.protocol || '',
+                strategy: getInboundUpdateStrategy(inbound)
+              };
+              continue;
+            }
+
+            duplicateEmailCount++;
+            existing.inboundIds.push(inbound.id);
+
+            if (existing.up !== up || existing.down !== down) {
+              inconsistentEmailCount++;
+              logger.warn(
+                `服务器 ${server.id} 客户端流量快照不一致: email=${email}, ` +
+                `已选 inbound=${existing.selectedInboundId}, total=${existing.total}, ` +
+                `候选 inbound=${inbound.id}, total=${total}`
+              );
+            }
+
+            if (total > existing.total) {
+              existing.up = up;
+              existing.down = down;
+              existing.total = total;
+              existing.enabled = normalizeClientEnabled(enabledValue);
+              existing.enabledKnown = enabledValue !== undefined;
+              existing.inboundId = inbound.id;
+              existing.selectedInboundId = inbound.id;
+              existing.protocol = inbound.protocol || '';
+              existing.strategy = getInboundUpdateStrategy(inbound);
+            }
           }
         }
 
         serverTrafficData[server.id] = serverData;
-        logger.info(`获取服务器 ${server.name} 流量数据成功，${Object.keys(serverData).length} 个用户`);
+        logger.info(
+          `获取服务器 ${server.name} 流量数据成功: inbounds=${inboundsResult.data.length}, ` +
+          `statsRows=${statsRowCount}, uniqueEmails=${Object.keys(serverData).length}, ` +
+          `duplicateRows=${duplicateEmailCount}, inconsistentRows=${inconsistentEmailCount}`
+        );
       } catch (error) {
         logger.error(`获取服务器 ${server.name} 流量数据错误: ${error.message}`);
       }
@@ -366,21 +400,13 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
         for (const serverId of serverIds) {
           const serverData = serverTrafficData[serverId];
 
-          let userTotalTraffic = 0;
-          let found = false;
-          for (const [email, data] of Object.entries(serverData)) {
-            if (email === user.email || email.startsWith(user.email + '-')) {
-              userTotalTraffic += data.total || 0;
-              found = true;
-            }
-          }
-
-          if (!found) {
+          const userServerTraffic = serverData[user.email];
+          if (!userServerTraffic) {
             continue;
           }
 
           const lastSyncTraffic = syncLogMap.get(`${user.id}-${serverId}`) || 0;
-          const currentTraffic = userTotalTraffic;
+          const currentTraffic = Number(userServerTraffic.total) || 0;
 
           let increment = 0;
           let rawIncrement = 0;
