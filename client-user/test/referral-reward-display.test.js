@@ -66,6 +66,11 @@ test('推广详情页双端删除异常订单不发放奖励规则', () => {
   assert.doesNotMatch(referralPageSource, /退款、取消、异常或违规订单不发放奖励/)
 })
 
+test('推广详情页奖励规则明确奖励余额同样支持提现', () => {
+  assert.match(referralPageSource, /奖励余额可用于购买或续费套餐，同样支持提现。/)
+  assert.doesNotMatch(referralPageSource, /暂不支持提现/)
+})
+
 test('推广详情页移动端奖励规则分割线在折叠时保持全宽', () => {
   assert.match(
     referralPageSource,
