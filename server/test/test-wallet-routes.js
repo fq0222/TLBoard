@@ -184,7 +184,7 @@ async function testWalletRouteIsMounted() {
 /** 每个管理钱包路由都需管理员 JWT，普通用户身份和缺失身份均不可访问。 */
 async function testAdminAuthentication(port) {
   const before = calls.length;
-  for (const [method, path] of [['GET', '/users'], ['GET', '/users/7'], ['GET', '/users/7/transactions'], ['GET', '/withdrawals/12/qr'], ['POST', '/withdrawals/12/complete'], ['POST', '/withdrawals/12/reject']]) {
+  for (const [method, path] of [['GET', '/users'], ['GET', '/withdrawals/pending-count'], ['GET', '/users/7'], ['GET', '/users/7/transactions'], ['GET', '/withdrawals/12/qr'], ['POST', '/withdrawals/12/complete'], ['POST', '/withdrawals/12/reject']]) {
     assertEnvelope(await request(port, `/api/admin/wallets${path}`, { method, authenticated: false }), 401);
     assertEnvelope(await request(port, `/api/admin/wallets${path}`, { method }), 401);
   }
@@ -195,6 +195,9 @@ async function testAdminAuthentication(port) {
 async function testAdminReadAndProcessing(port) {
   assertEnvelope(await request(port, '/api/admin/wallets/users?email=test&page=2&limit=25', { admin: true }), 200);
   assert.deepEqual(calls.at(-1).args, [db, { email: 'test', page: '2', limit: '25' }]);
+  const pendingCount = await request(port, '/api/admin/wallets/withdrawals/pending-count', { admin: true });
+  assertEnvelope(pendingCount, 200);
+  assert.deepEqual(pendingCount.body.data, { count: 2 });
   assertEnvelope(await request(port, '/api/admin/wallets/users/7', { admin: true }), 200);
   assert.deepEqual(calls.at(-1).args, [db, 7]);
   assertEnvelope(await request(port, '/api/admin/wallets/users/7/transactions?page=2&limit=25&type=withdrawal_refund&keyword=refund&userId=8', { admin: true }), 200);
@@ -265,6 +268,7 @@ async function run() {
   stubService('createWithdrawal', { id: 1, amount: 2000, status: 'pending', created_at: 123 });
   stubService('savePaymentQr', { payment_type: 'wechat', has_payment_qr: true });
   stubAdminService('listUsers', { list: [], total: 0, page: 2, limit: 25 });
+  stubAdminService('getPendingWithdrawalCount', { count: 2 });
   stubAdminService('getUserDetail', { user: { id: 7, balance: 3000, reward_total: 7500 }, pending_withdrawal: null });
   stubAdminService('listUserTransactions', { list: [], total: 0, page: 2, limit: 25 });
   stubAdminService('completeWithdrawal', { id: 12, status: 'completed' });

@@ -340,6 +340,11 @@ const adminApi = {
     return apiClient.get('/wallets/users', { params })
   },
 
+  /** 获取全局待处理提现数量，供管理端导航提醒使用。 */
+  getPendingWithdrawalCount() {
+    return apiClient.get('/wallets/withdrawals/pending-count')
+  },
+
   /**
    * 获取指定用户的钱包概览和待处理提现。
    * @param {number} userId - 用户 ID

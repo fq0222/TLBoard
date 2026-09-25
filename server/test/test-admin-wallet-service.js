@@ -87,7 +87,7 @@ class AdminWalletDatabase {
         assert.match(sql, /SUM\(reward_amount\)/);
         assert.match(sql, /referrer_user_id = u.id/);
         assert.match(sql, /AS reward_total/);
-        const isWalletList = sql.includes('ORDER BY u.id DESC');
+        const isWalletList = sql.includes('LEFT JOIN LATERAL');
         if (isWalletList) {
           assert.match(sql, /LEFT JOIN LATERAL/);
           assert.match(sql, /status = 'pending'/);
@@ -95,6 +95,7 @@ class AdminWalletDatabase {
           assert.match(sql, /AS pending_withdrawal_id/);
           assert.match(sql, /AS pending_withdrawal_amount/);
           assert.match(sql, /AS pending_withdrawal_status/);
+          assert.match(sql, /pending_withdrawal\.created_at ASC/);
         }
         rows = users.map(user => {
           const pending = state.withdrawals
@@ -110,8 +111,23 @@ class AdminWalletDatabase {
             } : {})
           };
         });
+        if (isWalletList) {
+          rows.sort((left, right) => {
+            const leftPending = left.pending_withdrawal_id !== null;
+            const rightPending = right.pending_withdrawal_id !== null;
+            if (leftPending !== rightPending) return leftPending ? -1 : 1;
+            if (leftPending) {
+              const leftCreatedAt = state.withdrawals.find(item => item.id === left.pending_withdrawal_id).created_at;
+              const rightCreatedAt = state.withdrawals.find(item => item.id === right.pending_withdrawal_id).created_at;
+              if (leftCreatedAt !== rightCreatedAt) return leftCreatedAt - rightCreatedAt;
+            }
+            return right.id - left.id;
+          });
+        }
         if (sql.includes('LIMIT')) rows = rows.slice(params.at(-1), params.at(-1) + params.at(-2));
       }
+    } else if (sql.startsWith('SELECT COUNT(*) AS total FROM withdrawal_requests')) {
+      rows = [{ total: String(state.withdrawals.filter(row => row.status === 'pending').length) }];
     } else if (sql.includes('FROM users')) {
       rows = state.users.filter(user => user.id === params[0]);
     } else if (sql.startsWith('SELECT') && sql.includes('FROM withdrawal_requests')) {
@@ -156,6 +172,7 @@ async function testUsersAndRewardTotals() {
       pending_withdrawal_id: 12, pending_withdrawal_amount: 2000, pending_withdrawal_status: 'pending'
     }],
     total: 1,
+    pending_count: 1,
     page: 1,
     limit: 25
   });
@@ -172,9 +189,11 @@ async function testUsersAndRewardTotals() {
   const allUsers = await service.listUsers(database.db, { page: 1, limit: 25 });
   assert.equal(allUsers.total, 2);
   assert.equal(allUsers.list.length, 2, '历史提现不得让同一用户在列表中重复');
-  assert.equal((await service.listUsers(database.db, { page: 2, limit: 1 })).list[0].id, 7);
+  assert.equal(allUsers.list[0].id, 7, '待处理提现用户必须在全量分页前置顶');
+  assert.equal((await service.listUsers(database.db, { page: 2, limit: 1 })).list[0].id, 8);
   assert.equal((await service.listUsers(database.db, { email: '50%_' })).total, 0);
-  assert.equal(database.calls.at(-1).params[0], '%50\\%\\_%');
+  assert.ok(database.calls.some(call => call.params[0] === '%50\\%\\_%'), '邮箱通配符必须作为字面量转义');
+  assert.deepEqual(await service.getPendingWithdrawalCount(database.db), { count: 1 });
 }
 
 /** 详情只允许用户概览和待处理申请元数据；没有用户为 404，密文/摘要不可进入 JSON。 */

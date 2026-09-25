@@ -64,7 +64,20 @@ class AdminWalletService {
     const options = { email: filters.email, limit, offset };
     const totalRow = await this.repository.countWalletUsers(db, options);
     const rows = await this.repository.listWalletUsers(db, options);
-    return { list: rows.map(publicUser), total: Number(totalRow && totalRow.total) || 0, page, limit };
+    const pendingRow = await this.repository.countPendingWithdrawals(db);
+    return {
+      list: rows.map(publicUser),
+      total: Number(totalRow && totalRow.total) || 0,
+      pending_count: Number(pendingRow && pendingRow.total) || 0,
+      page,
+      limit
+    };
+  }
+
+  /** 返回全局待处理提现数量，供布局轻量刷新菜单角标。 */
+  async getPendingWithdrawalCount(db) {
+    const row = await this.repository.countPendingWithdrawals(db);
+    return { count: Number(row && row.total) || 0 };
   }
 
   /** userId 来自校验后的路径；详情仅返回钱包概览与当前 pending，不泄漏收款码。 */

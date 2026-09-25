@@ -41,6 +41,9 @@
         <router-link to="/admin/wallets" class="nav-item" active-class="active">
           <el-icon><Wallet /></el-icon>
           <span v-if="!isCollapsed || mobileSidebarOpen">余额管理</span>
+          <span v-if="pendingWithdrawalCount > 0" class="wallet-pending-badge">
+            {{ pendingWithdrawalCount > 99 ? '99+' : pendingWithdrawalCount }}
+          </span>
         </router-link>
         <router-link to="/admin/announcements" class="nav-item" active-class="active">
           <el-icon><Bell /></el-icon>
@@ -195,7 +198,9 @@ const adminStore = useAdminStore()
 const isCollapsed = ref(false)
 const mobileSidebarOpen = ref(false)
 const actionRequiredTicketCount = ref(0)
+const pendingWithdrawalCount = ref(0)
 let ticketReminderRefresher = null
+let walletReminderRefresher = null
 let bodyOverflowBeforeSidebar = ''
 
 function toggleCollapse() {
@@ -246,6 +251,17 @@ function createTicketReminderRefresher() {
   })
 }
 
+/** 创建待处理提现数量刷新器；复用提醒冷却与并发合并逻辑。 */
+function createWalletReminderRefresher() {
+  return new AdminTicketReminderRefresher({
+    fetchActionRequiredCount: () => api.admin.getPendingWithdrawalCount(),
+    setActionRequiredCount: (count) => {
+      pendingWithdrawalCount.value = count
+    },
+    errorMessage: '获取管理端待处理提现数量失败'
+  })
+}
+
 async function refreshTicketReminder(options) {
   if (!ticketReminderRefresher) {
     ticketReminderRefresher = createTicketReminderRefresher()
@@ -262,10 +278,27 @@ async function refreshTicketReminderAfterRouteChange() {
   await ticketReminderRefresher.refreshAfterRouteChange()
 }
 
+async function refreshWalletReminder(options) {
+  if (!walletReminderRefresher) walletReminderRefresher = createWalletReminderRefresher()
+  await walletReminderRefresher.refresh(options)
+}
+
+async function refreshWalletReminderAfterRouteChange() {
+  if (!walletReminderRefresher) walletReminderRefresher = createWalletReminderRefresher()
+  await walletReminderRefresher.refreshAfterRouteChange()
+}
+
 function handleVisibilityChange() {
   if (!document.hidden) {
     refreshTicketReminder({ force: true })
+    refreshWalletReminder({ force: true })
   }
+}
+
+/** 余额页列表刷新后立即同步角标，不额外发起一次计数请求。 */
+function handleWalletPendingCountChanged(event) {
+  if (!walletReminderRefresher) walletReminderRefresher = createWalletReminderRefresher()
+  walletReminderRefresher.setAuthoritativeCount(Math.max(0, Number(event.detail?.count) || 0))
 }
 
 function handleTicketReadStateChanged() {
@@ -307,6 +340,7 @@ async function handleLogout() {
 watch(() => currentRoute.path, () => {
   closeMobileSidebar()
   refreshTicketReminderAfterRouteChange()
+  refreshWalletReminderAfterRouteChange()
 })
 
 watch(mobileSidebarOpen, (isOpen) => {
@@ -321,9 +355,11 @@ watch(mobileSidebarOpen, (isOpen) => {
 
 onMounted(() => {
   refreshTicketReminderAfterRouteChange()
+  refreshWalletReminderAfterRouteChange()
   document.addEventListener('visibilitychange', handleVisibilityChange)
   document.addEventListener('keydown', handleSidebarKeydown)
   window.addEventListener('ticket-read-state-changed', handleTicketReadStateChanged)
+  window.addEventListener('wallet-pending-count-changed', handleWalletPendingCountChanged)
 })
 
 onBeforeUnmount(() => {
@@ -332,6 +368,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   document.removeEventListener('keydown', handleSidebarKeydown)
   window.removeEventListener('ticket-read-state-changed', handleTicketReadStateChanged)
+  window.removeEventListener('wallet-pending-count-changed', handleWalletPendingCountChanged)
 })
 </script>
 
@@ -407,6 +444,18 @@ onBeforeUnmount(() => {
   color: #bfcbd9;
   text-decoration: none;
   transition: all 0.3s;
+}
+
+.wallet-pending-badge {
+  min-width: 20px;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #f56c6c;
+  color: #fff;
+  text-align: center;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .nav-item:hover,

@@ -15,6 +15,7 @@ const withdrawalId = param('id').isInt({ min: 1, max: Number.MAX_SAFE_INTEGER })
 
 router.use(authenticateAdmin);
 router.get('/users', [...pagination, query('email').optional().isString().isLength({ max: 200 })], controller.listUsers.bind(controller));
+router.get('/withdrawals/pending-count', controller.getPendingWithdrawalCount.bind(controller));
 router.get('/users/:userId', userId, controller.getUserDetail.bind(controller));
 router.get('/users/:userId/transactions', [
   userId, ...pagination,

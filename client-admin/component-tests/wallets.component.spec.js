@@ -63,7 +63,7 @@ function walletUser(id, overrides = {}) {
 }
 
 function listResponse(list = [walletUser(1), walletUser(2)]) {
-  return { code: 0, data: { list, total: list.length, page: 1, limit: 20 } }
+  return { code: 0, data: { list, total: list.length, pending_count: 1, page: 1, limit: 20 } }
 }
 
 function detailResponse(id, pending = id === 1) {
@@ -285,6 +285,7 @@ describe('Wallets', () => {
     expect(wrapper.text()).toContain('¥56.78')
     expect(wrapper.text()).toContain('¥20.00')
     expect(wrapper.text()).toContain('待处理')
+    expect(wrapper.get('.pending-withdrawal-notice').attributes('title')).toBe('当前有 1 笔待处理提现，已按申请时间优先展示')
 
     await wrapper.get('.wallet-email-search').setValue('  next@example.com  ')
     await vi.advanceTimersByTimeAsync(299)
@@ -395,6 +396,31 @@ describe('Wallets', () => {
     expect(apiMocks.getWalletUserDetail).toHaveBeenCalledTimes(2)
     expect(apiMocks.getWalletTransactions).toHaveBeenCalledTimes(2)
     expect(messageMocks.success).toHaveBeenCalledWith('提现已确认完成')
+  })
+
+  it('提现处理成功后即使列表刷新失败，也立即递减并广播待处理数量', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const countEvents = []
+    const listener = event => countEvents.push(event.detail.count)
+    window.addEventListener('wallet-pending-count-changed', listener)
+    try {
+      apiMocks.getWalletUsers
+        .mockResolvedValueOnce(listResponse())
+        .mockRejectedValueOnce(new Error('列表刷新失败'))
+      const wrapper = mountWallets()
+      await settle()
+      await wrapper.findAll('.view-wallet-detail')[0].trigger('click')
+      await settle()
+
+      await wrapper.get('.complete-withdrawal').trigger('click')
+      await settle()
+
+      expect(countEvents).toContain(0)
+      expect(wrapper.find('.pending-withdrawal-notice').exists()).toBe(false)
+    } finally {
+      window.removeEventListener('wallet-pending-count-changed', listener)
+      consoleError.mockRestore()
+    }
   })
 
   it.each([

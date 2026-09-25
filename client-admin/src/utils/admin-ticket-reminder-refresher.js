@@ -11,12 +11,14 @@ export const ADMIN_TICKET_ROUTE_REFRESH_COOLDOWN_MS = 3 * 60 * 1000
  * 核心分支：路由刷新有 3 分钟冷却；前台恢复和点击可强制刷新；并发刷新复用同一个请求。
  */
 export class AdminTicketReminderRefresher {
-  constructor({ fetchActionRequiredCount, setActionRequiredCount, now = () => Date.now() }) {
+  constructor({ fetchActionRequiredCount, setActionRequiredCount, now = () => Date.now(), errorMessage = '获取管理端工单待处理数量失败' }) {
     this.fetchActionRequiredCount = fetchActionRequiredCount
     this.setActionRequiredCount = setActionRequiredCount
     this.now = now
+    this.errorMessage = errorMessage
     this.lastRouteRefreshAt = Number.NEGATIVE_INFINITY
     this.refreshPromise = null
+    this.updateVersion = 0
   }
 
   /**
@@ -59,14 +61,21 @@ export class AdminTicketReminderRefresher {
     return this.now() - this.lastRouteRefreshAt >= ADMIN_TICKET_ROUTE_REFRESH_COOLDOWN_MS
   }
 
+  /** 写入组件已获得的权威计数，并使此前已发起但尚未返回的请求失效。 */
+  setAuthoritativeCount(count) {
+    this.updateVersion += 1
+    this.setActionRequiredCount(count)
+  }
+
   async fetchAndUpdate() {
+    const requestVersion = this.updateVersion
     try {
       const response = await this.fetchActionRequiredCount()
-      if (response.code === 0) {
+      if (response.code === 0 && requestVersion === this.updateVersion) {
         this.setActionRequiredCount(response.data.count || 0)
       }
     } catch (error) {
-      console.error('获取管理端工单待处理数量失败:', error)
+      console.error(`${this.errorMessage}:`, error)
     }
   }
 }

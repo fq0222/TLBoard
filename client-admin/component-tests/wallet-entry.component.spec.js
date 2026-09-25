@@ -47,6 +47,7 @@ describe('管理端钱包入口契约', () => {
 
   it('钱包 API 使用后端实际路径且二维码声明 blob 响应', () => {
     api.admin.getWalletUsers({ page: 2, email: 'user@example.com' })
+    api.admin.getPendingWithdrawalCount()
     api.admin.getWalletUserDetail(7)
     api.admin.getWalletTransactions(7, { page: 3, type: 'withdrawal' })
     api.admin.getWithdrawalQr(12)
@@ -55,6 +56,7 @@ describe('管理端钱包入口契约', () => {
 
     expect(httpMocks.get.mock.calls).toEqual([
       ['/wallets/users', { params: { page: 2, email: 'user@example.com' } }],
+      ['/wallets/withdrawals/pending-count'],
       ['/wallets/users/7'],
       ['/wallets/users/7/transactions', { params: { page: 3, type: 'withdrawal' } }],
       ['/wallets/withdrawals/12/qr', { responseType: 'blob' }]

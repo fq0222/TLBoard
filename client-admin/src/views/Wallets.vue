@@ -8,6 +8,15 @@
     </div>
 
     <div class="content-card">
+      <el-alert
+        v-if="pendingWithdrawalCount > 0"
+        class="pending-withdrawal-notice"
+        :title="`当前有 ${pendingWithdrawalCount} 笔待处理提现，已按申请时间优先展示`"
+        type="warning"
+        :closable="false"
+        show-icon
+      />
+
       <div class="toolbar">
         <el-input
           v-model="emailKeyword"
@@ -245,6 +254,7 @@ const listTotal = ref(0)
 const listPage = ref(1)
 const emailKeyword = ref('')
 const listLoading = ref(false)
+const pendingWithdrawalCount = ref(0)
 const detailDrawerVisible = ref(false)
 const selectedUserId = ref(null)
 const walletDetail = ref(null)
@@ -344,6 +354,7 @@ async function loadWalletUsers() {
     }
     walletUsers.value = response.data?.list || []
     listTotal.value = Number(response.data?.total) || 0
+    publishPendingWithdrawalCount(response.data?.pending_count)
   } catch (error) {
     if (!disposed && requestId === listRequestSequence) {
       console.error('加载余额用户失败:', error)
@@ -352,6 +363,14 @@ async function loadWalletUsers() {
   } finally {
     if (!disposed && requestId === listRequestSequence) listLoading.value = false
   }
+}
+
+/** 更新页面计数并通知布局；非法值和负数统一归零。 */
+function publishPendingWithdrawalCount(count) {
+  pendingWithdrawalCount.value = Math.max(0, Number(count) || 0)
+  window.dispatchEvent(new CustomEvent('wallet-pending-count-changed', {
+    detail: { count: pendingWithdrawalCount.value }
+  }))
 }
 
 /** 邮箱输入停止 300ms 后才请求，避免每个字符都访问后端。 */
@@ -548,6 +567,7 @@ async function completePendingWithdrawal() {
       ElMessage.error(response.message || '确认提现失败')
       return
     }
+    publishPendingWithdrawalCount(pendingWithdrawalCount.value - 1)
     clearProcessedWithdrawal(userId, withdrawal.id)
     ElMessage.success('提现已确认完成')
     await refreshAfterWithdrawal(userId)
@@ -581,6 +601,7 @@ async function rejectPendingWithdrawal() {
       ElMessage.error(response.message || '驳回提现失败')
       return
     }
+    publishPendingWithdrawalCount(pendingWithdrawalCount.value - 1)
     clearProcessedWithdrawal(userId, withdrawal.id)
     ElMessage.success('提现已驳回并退回余额')
     await refreshAfterWithdrawal(userId)
@@ -615,6 +636,7 @@ onBeforeUnmount(() => {
 .page-title { margin-bottom: 10px; color: #303133; font-size: 28px; }
 .page-subtitle { color: #606266; font-size: 16px; }
 .content-card { padding: 20px; border-radius: 12px; background: #fff; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); }
+.pending-withdrawal-notice { margin-bottom: 16px; }
 .toolbar { display: flex; margin-bottom: 20px; }
 .wallet-email-search { width: 340px; }
 .pagination { display: flex; justify-content: flex-end; margin-top: 20px; }

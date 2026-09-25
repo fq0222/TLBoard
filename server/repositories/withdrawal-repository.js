@@ -8,12 +8,13 @@ const WALLET_USER_COLUMNS = `
 const WALLET_PENDING_COLUMNS = `,
   pending_withdrawal.id AS pending_withdrawal_id,
   pending_withdrawal.amount AS pending_withdrawal_amount,
-  pending_withdrawal.status AS pending_withdrawal_status
+  pending_withdrawal.status AS pending_withdrawal_status,
+  pending_withdrawal.created_at AS pending_withdrawal_created_at
 `;
 
 const WALLET_PENDING_JOIN = `
   LEFT JOIN LATERAL (
-    SELECT wr.id, wr.amount, wr.status
+    SELECT wr.id, wr.amount, wr.status, wr.created_at
     FROM withdrawal_requests wr
     WHERE wr.user_id = u.id AND wr.status = 'pending'
     ORDER BY wr.created_at DESC, wr.id DESC
@@ -42,8 +43,18 @@ class WithdrawalRepository {
     return db.prepare(`
       SELECT ${WALLET_USER_COLUMNS} ${WALLET_PENDING_COLUMNS}
       FROM users u ${WALLET_PENDING_JOIN}
-      ${where} ORDER BY u.id DESC LIMIT ? OFFSET ?
+      ${where}
+      ORDER BY
+        CASE WHEN pending_withdrawal.id IS NOT NULL THEN 0 ELSE 1 END,
+        pending_withdrawal.created_at ASC,
+        u.id DESC
+      LIMIT ? OFFSET ?
     `).all(...params, limit, offset);
+  }
+
+  /** 统计全局待处理提现数，供管理端导航提醒使用，不受用户列表搜索条件影响。 */
+  async countPendingWithdrawals(db) {
+    return db.prepare("SELECT COUNT(*) AS total FROM withdrawal_requests WHERE status = 'pending'").get();
   }
 
   /** userId 为管理员选中的用户，返回与列表完全相同的只读钱包概览。 */

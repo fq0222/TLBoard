@@ -30,6 +30,11 @@ class AdminWalletController {
     return this.execute(req, res, 'listUsers', [{ email, page, limit }]);
   }
 
+  /** 返回全局待处理提现数量，不加载用户列表或二维码数据。 */
+  getPendingWithdrawalCount(req, res) {
+    return this.execute(req, res, 'getPendingWithdrawalCount', []);
+  }
+
   /** 查看路径选定用户的只读概览及待处理申请。 */
   getUserDetail(req, res) {
     return this.execute(req, res, 'getUserDetail', [Number(req.params.userId)]);
