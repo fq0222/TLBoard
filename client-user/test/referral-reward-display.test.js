@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs'
 
 const myPageSource = readFileSync(new URL('../src/views/user/My.vue', import.meta.url), 'utf8')
 const referralPageSource = readFileSync(new URL('../src/views/user/Referral.vue', import.meta.url), 'utf8')
+const profilePageSource = readFileSync(new URL('../src/views/user/Profile.vue', import.meta.url), 'utf8')
 
 test('推广奖励展示会根据接口系数动态计算百分比', () => {
   assert.equal(normalizeReferralRewardPercent({ reward_coefficient: 0.5 }), 50)
@@ -20,6 +21,17 @@ test('推广奖励示例金额会按接口系数计算而不是写死50元', () 
   assert.equal(calculateReferralRewardAmount(100, { reward_coefficient: 0.5 }), 50)
   assert.equal(calculateReferralRewardAmount(100, { reward_coefficient: 0.3 }), 30)
   assert.equal(calculateReferralRewardAmount(100, {}), 0)
+})
+
+test('用户首页推广提示提供跳转到我的页面的蓝色提现入口', () => {
+  assert.match(
+    profilePageSource,
+    /作为奖励，可<router-link\s+to="\/user\/my"\s+class="withdraw-link">提现<\/router-link>。/
+  )
+  assert.match(
+    profilePageSource,
+    /\.referral-reward-hint \.withdraw-link\s*\{[\s\S]*?color:\s*#2563eb;/
+  )
 })
 
 test('我的页面推广提示不重复展示右侧百元奖励示例卡', () => {

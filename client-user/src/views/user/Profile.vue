@@ -20,7 +20,7 @@
           </div>
         </dl>
         <p v-if="rewardPercent > 0" class="referral-reward-hint">
-          好友首购，你得到该订单实付金额的<span>{{ rewardPercent }}%</span>作为奖励。
+          好友首购，你得到该订单实付金额的<span>{{ rewardPercent }}%</span>作为奖励，可<router-link to="/user/my" class="withdraw-link">提现</router-link>。
         </p>
         <div class="referral-action-row">
           <button
@@ -1746,6 +1746,17 @@ onBeforeUnmount(() => {
 .referral-reward-hint span {
   color: #2563eb;
   font-weight: 800;
+}
+
+.referral-reward-hint .withdraw-link {
+  color: #2563eb;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.referral-reward-hint .withdraw-link:hover,
+.referral-reward-hint .withdraw-link:focus-visible {
+  text-decoration: underline;
 }
 
 .referral-action-row .text-link-button {
