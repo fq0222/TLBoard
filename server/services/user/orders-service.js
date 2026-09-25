@@ -86,7 +86,8 @@ async function listOrders(db, userId, query) {
  * @param {Object} db - 数据库代理对象
  * @param {string} orderIdentifier - 订单 ID 或订单号
  * @param {Object|null} currentUser - 当前登录用户，未登录时为空
- * @returns {Promise<Object>} 兼容旧接口的订单状态结果
+ * 核心分支：匿名用户只返回 status，登录用户保留既有完整订单状态字段。
+ * @returns {Promise<Object>} 按登录状态裁剪后的订单状态结果
  */
 async function getPublicOrderStatus(db, orderIdentifier, currentUser) {
   const isNumericId = /^\d+$/.test(orderIdentifier);
@@ -109,6 +110,10 @@ async function getPublicOrderStatus(db, orderIdentifier, currentUser) {
   }
 
   const status = await syncOrderStatusIfNeeded(db, order);
+  if (!currentUser) {
+    return { status };
+  }
+
   return buildStatusResponse(order, status);
 }
 

@@ -160,6 +160,7 @@ server/test/*
 !server/test/test-admin-orders-summary.js
 !server/test/test-plans-updated-at-migration.js
 !server/test/test-user-announcements-auth.js
+!server/test/test-user-orders-privacy.js
 server/config.js
 server/uploads/
 server/backupDB/
