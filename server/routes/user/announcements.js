@@ -1,6 +1,6 @@
 /**
  * 用户端公告路由。
- * 普通公告列表保持公开访问；首页弹窗接口需要登录后按用户维度统计关闭次数。
+ * 公告列表和首页弹窗接口均仅允许登录用户访问。
  */
 
 const express = require('express');
@@ -14,7 +14,7 @@ const router = express.Router();
  * GET /api/user/announcements
  * 获取公告分页列表。
  */
-router.get('/', [
+router.get('/', authenticateUser, [
   query('page')
     .optional()
     .isInt({ min: 1 })

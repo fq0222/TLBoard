@@ -159,6 +159,7 @@ server/test/*
 !server/test/test-xui-server-cascade-cleanup.js
 !server/test/test-admin-orders-summary.js
 !server/test/test-plans-updated-at-migration.js
+!server/test/test-user-announcements-auth.js
 server/config.js
 server/uploads/
 server/backupDB/
