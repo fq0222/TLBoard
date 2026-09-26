@@ -620,6 +620,37 @@ async function testListUserRewardsMasksPrivateIdentifiers() {
 }
 
 /**
+ * 验证管理端推广详情返回完整的付款用户邮箱和订单号。
+ *
+ * 职责：保护管理端核对付款信息的可见性，同时与用户端奖励列表的隐私脱敏边界区分开。
+ * 关键参数：仓储返回完整邮箱和订单号，管理端详情必须原样返回。
+ * 核心分支：管理端奖励明细不得复用用户端的脱敏输出。
+ *
+ * @returns {Promise<void>}
+ */
+async function testGetAdminReferralDetailKeepsPrivateIdentifiersVisible() {
+  const reward = {
+    referred_email: 'payer@example.com',
+    out_trade_no: 'ORD1789272302539cxfpr87j8',
+    reward_amount: 500
+  };
+
+  await withRepositoryMocks({
+    sumReferralRewards: async () => ({ count: 1, total: 500 }),
+    listReferralRewards: async () => ([reward]),
+    listAdminReferralSummaries: async () => ([{
+      user_id: 12,
+      email: 'referrer@example.com'
+    }])
+  }, async () => {
+    const result = await referralService.getAdminReferralDetail({}, 12, { page: 1, limit: 10 });
+
+    assert.strictEqual(result.rewards.list[0].referred_email, 'payer@example.com');
+    assert.strictEqual(result.rewards.list[0].out_trade_no, 'ORD1789272302539cxfpr87j8');
+  });
+}
+
+/**
  * Verifies missing referral codes are regenerated when the generated code collides once.
  *
  * Responsibility: cover getOrCreateReferralCode retry behavior on referral_codes.code conflicts.
@@ -2023,6 +2054,7 @@ async function main() {
   await testIssueFirstPaymentRewardRollsBackLedgerFailure();
   await testGetUserReferralSummaryCreatesCodeAndFormatsTraffic();
   await testListUserRewardsMasksPrivateIdentifiers();
+  await testGetAdminReferralDetailKeepsPrivateIdentifiersVisible();
   await testGetOrCreateReferralCodeRetriesCodeUniqueConflict();
   await testGetOrCreateReferralCodeRethrowsUnrelatedUniqueConflict();
   await testGetOrCreateReferralCodeRethrowsReferralUserConflict();

@@ -394,18 +394,18 @@ async function issueFirstPaymentReward(db, order) {
 }
 
 /**
- * 查询用户推广奖励列表。
+ * 查询推广奖励原始列表。
  *
- * 职责：按用户维度分页返回奖励明细与总数。
+ * 职责：按用户维度分页返回未做展示层处理的奖励明细与总数，供用户端和管理端分别加工。
  * 关键参数：query.page/query.limit 控制分页。
- * 核心分支：分页参数非法时使用默认值。
+ * 核心分支：分页参数非法时使用默认值；本方法不脱敏任何字段。
  *
  * @param {Object} db - 数据库实例
  * @param {number} userId - 用户 ID
  * @param {Object} query - 查询参数
  * @returns {Promise<Object>} 分页奖励列表
  */
-async function listUserRewards(db, userId, query = {}) {
+async function queryReferralRewards(db, userId, query = {}) {
   const { page, limit, offset } = parsePagination(query, {
     defaultPage: 1,
     defaultLimit: 20,
@@ -422,7 +422,28 @@ async function listUserRewards(db, userId, query = {}) {
     total: Number((rewardRow && rewardRow.count) || 0),
     page,
     limit,
-    list: list.map(reward => ({
+    list
+  };
+}
+
+/**
+ * 查询用户端推广奖励列表并隐藏付款人标识。
+ *
+ * 职责：在用户端隐私边界内返回分页奖励明细。
+ * 关键参数：userId 为推广人用户 ID，query 控制分页。
+ * 核心分支：所有奖励记录的付款邮箱和订单号都必须脱敏。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} userId - 用户 ID
+ * @param {Object} query - 查询参数
+ * @returns {Promise<Object>} 已脱敏的分页奖励列表
+ */
+async function listUserRewards(db, userId, query = {}) {
+  const rewards = await queryReferralRewards(db, userId, query);
+
+  return {
+    ...rewards,
+    list: rewards.list.map(reward => ({
       ...reward,
       referred_email: maskReferralEmail(reward.referred_email),
       out_trade_no: maskReferralTradeNo(reward.out_trade_no)
@@ -480,7 +501,7 @@ async function listAdminReferrals(db, query = {}) {
  * @returns {Promise<Object>} 推广详情
  */
 async function getAdminReferralDetail(db, userId, query = {}) {
-  const rewards = await listUserRewards(db, userId, query);
+  const rewards = await queryReferralRewards(db, userId, query);
   const summaries = await referralRepository.listAdminReferralSummaries(db, {
     filters: { userId },
     limit: 1,
