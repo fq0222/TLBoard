@@ -78,10 +78,21 @@ function assertEnvelope(response, status) {
 /** 所有钱包接口都需鉴权，未经登录的上传不得进入 Multer 或业务层。 */
 async function testAuthentication(port) {
   calls.length = 0;
-  for (const [method, path] of [['GET', '/summary'], ['PUT', '/payment-qr'], ['GET', '/withdrawal'], ['POST', '/withdrawals'], ['GET', '/transactions']]) {
+  for (const [method, path] of [['GET', '/summary'], ['GET', '/payment-qr'], ['PUT', '/payment-qr'], ['GET', '/withdrawal'], ['POST', '/withdrawals'], ['GET', '/transactions']]) {
     assertEnvelope(await request(port, path, { method, authenticated: false }), 401);
   }
   assert.equal(calls.length, 0);
+}
+
+/** 当前用户收款码以禁止缓存的 PNG 返回，并且服务只能收到 JWT 中的用户编号。 */
+async function testCurrentUserQr(port) {
+  const qr = await request(port, '/payment-qr');
+  assert.equal(qr.status, 200);
+  assert.match(qr.headers['content-type'], /^image\/png/);
+  assert.equal(qr.headers['cache-control'], 'no-store, private');
+  assert.equal(qr.headers.pragma, 'no-cache');
+  assert.deepEqual([...qr.body.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.deepEqual(calls.at(-1), { name: 'getPaymentQr', args: [db, 7] });
 }
 
 /** 请求中的 userId/user_id 永远不能替换 JWT 用户，成功响应沿用旧结构。 */
@@ -263,6 +274,7 @@ async function testWithdrawalSettingsHttp(port) {
 /** 只启动与关闭临时 HTTP 测试夹具，不加载 app.js 或连接数据库。 */
 async function run() {
   stubService('getSummary', { balance: 5000, payment_type: 'wechat', has_payment_qr: true });
+  stubService('getPaymentQr', await require('qrcode').toBuffer('wxp://user-route-fixture'));
   stubService('getWithdrawalOverview', { balance: 5000, minimum_withdrawal_amount: 2000, pending_withdrawal: null });
   stubService('listUserTransactions', { list: [], total: 0, page: 2, limit: 100 });
   stubService('createWithdrawal', { id: 1, amount: 2000, status: 'pending', created_at: 123 });
@@ -287,7 +299,7 @@ async function run() {
   for (const name of Object.keys(consoleMethods)) console[name] = (...args) => capturedLogs.push(args.map(String).join(' '));
   try {
     const port = server.address().port;
-    const tests = [testAuthentication, testReadEndpointsAndOwnership, testStrictMoneyConversion, testPaginationValidation, testUploadBoundary, testErrorsNeverLeakPayload, testAdminAuthentication, testAdminReadAndProcessing, testAdminValidation, testAdminQrAndErrors, testWithdrawalSettingsHttp, testWalletRouteIsMounted];
+    const tests = [testAuthentication, testReadEndpointsAndOwnership, testCurrentUserQr, testStrictMoneyConversion, testPaginationValidation, testUploadBoundary, testErrorsNeverLeakPayload, testAdminAuthentication, testAdminReadAndProcessing, testAdminValidation, testAdminQrAndErrors, testWithdrawalSettingsHttp, testWalletRouteIsMounted];
     for (const test of tests) { await test(port); consoleMethods.log(`✓ ${test.name}`); }
     consoleMethods.log(`钱包路由测试通过：${tests.length}/${tests.length}`);
   } finally {

@@ -30,3 +30,19 @@ it('保存收款码不会继承 JSON 默认头并丢失 multipart 文件', async
   expect(requests[0].data.get('qr_code')).toBeInstanceOf(File)
   expect(requests[0].headers.get('Content-Type')).not.toContain('application/json')
 })
+
+it('读取当前收款码时请求本人 PNG 二进制数据', async () => {
+  const requests = []
+  const png = new Blob(['png fixture'], { type: 'image/png' })
+  axios.defaults.adapter = async config => {
+    requests.push(config)
+    return { data: png, status: 200, statusText: 'OK', headers: { 'content-type': 'image/png' }, config }
+  }
+  const { default: api } = await import('../src/api/index.js')
+
+  const result = await api.user.getPaymentQr()
+
+  expect(result).toBe(png)
+  expect(requests[0].url).toBe('/wallet/payment-qr')
+  expect(requests[0].responseType).toBe('blob')
+})

@@ -21,11 +21,14 @@ class UserWalletController {
   }
 
   /** 统一执行服务方法；仅已标记可公开的业务错误透出固定提示，未知错误不记录原始 message。 */
-  async execute(req, res, method, payload) {
+  async execute(req, res, method, payload, png = false) {
     if (!validationResult(req).isEmpty()) return legacyValidationError(res);
     try {
-      const data = await this.service[method](req.app.locals.db, req.user.id, payload);
-      return legacySuccess(res, data);
+      const args = payload === undefined
+        ? [req.app.locals.db, req.user.id]
+        : [req.app.locals.db, req.user.id, payload];
+      const data = await this.service[method](...args);
+      return png ? res.type('png').send(data) : legacySuccess(res, data);
     } catch (error) {
       if (error.expose && (error.statusCode || error.status) >= 400 && (error.statusCode || error.status) < 500) {
         const statusCode = error.statusCode || error.status;
@@ -38,6 +41,12 @@ class UserWalletController {
   /** 返回当前登录用户摘要；客户端提供的 userId 一律忽略。 */
   getSummary(req, res) {
     return this.execute(req, res, 'getSummary');
+  }
+
+  /** 当前生效收款码只以禁止缓存的 PNG 返回，用户编号固定取鉴权上下文。 */
+  getPaymentQr(req, res) {
+    res.set({ 'Cache-Control': 'no-store, private', Pragma: 'no-cache' });
+    return this.execute(req, res, 'getPaymentQr', undefined, true);
   }
 
   /** 上传中间件只保留内存 buffer，本层不转发文件名、路径或其他用户输入。 */

@@ -1,6 +1,7 @@
 /** 用户钱包服务测试：保留真实仓储、余额服务、二维码加密和事务代理，仅替换外部数据库。 */
 const assert = require('node:assert/strict');
 const QRCode = require('qrcode');
+const sharp = require('sharp');
 const { createDbProxy } = require('../db/proxy');
 const { convertPlaceholders } = require('../db/sql-utils');
 const PaymentQrService = require('../services/shared/payment-qr-service');
@@ -18,10 +19,10 @@ function encryptQrPayload(payload = 'wxp://wallet-saved-fixture', encryptionKey 
 /** 可控连接池：模拟同一用户行锁、事务私有写集与提交/回滚，以验证业务交错而不访问业务库。 */
 class WalletDatabase {
   /** options 为余额、二维码、最低额及 SQL 故障；默认用户 7，另一个用户的查询必须为空。 */
-  constructor({ balance = 5000, qr = true, qrPayloadEncrypted = encryptQrPayload(), minimum, pending = false, failOn, conflict } = {}) {
+  constructor({ balance = 5000, qr = true, paymentType = 'wechat', qrPayloadEncrypted = encryptQrPayload(), minimum, pending = false, failOn, conflict } = {}) {
     this.state = {
       user: { id: 7, balance }, minimum,
-      qr: qr ? { user_id: 7, payment_type: 'wechat', qr_payload_encrypted: qrPayloadEncrypted, qr_payload_digest: 'saved-digest' } : undefined,
+      qr: qr ? { user_id: 7, payment_type: paymentType, qr_payload_encrypted: qrPayloadEncrypted, qr_payload_digest: 'saved-digest' } : undefined,
       withdrawals: pending ? [{ id: 1, user_id: 7, amount: 2000, status: 'pending', created_at: 123 }] : [],
       transactions: []
     };
@@ -161,6 +162,23 @@ async function testSummaryAndOverviewArePrivate() {
   assert.deepEqual(overview.pending_withdrawal, { id: 1, amount: 2000, status: 'pending', created_at: 123 });
   assert.doesNotMatch(JSON.stringify(overview), /encrypted|digest|payload/);
   await assert.rejects(() => service.getSummary(database.db, 8), /用户不存在/);
+}
+
+/** 当前用户只能获取本人已保存二维码的 PNG；缺失记录返回受控 404，响应中不暴露原始内容。 */
+async function testCurrentQrRendersPrivatePng() {
+  const database = new WalletDatabase();
+  const png = await createService().getPaymentQr(database.db, 7);
+  assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.doesNotMatch(png.toString(), /wallet-saved-fixture/);
+  const wechatPixels = (await sharp(png).raw().toBuffer()).toString('hex');
+  assert.match(wechatPixels, /07c160ff/, '微信收款链接应重建为绿色二维码');
+  const alipayPng = await createService().getPaymentQr(new WalletDatabase({ paymentType: 'alipay' }).db, 7);
+  const alipayPixels = (await sharp(alipayPng).raw().toBuffer()).toString('hex');
+  assert.match(alipayPixels, /1677ffff/, '支付宝收款链接应重建为蓝色二维码');
+  await assert.rejects(
+    () => createService().getPaymentQr(database.db, 8),
+    error => error.expose === true && error.statusCode === 404 && /尚未上传收款码/.test(error.message)
+  );
 }
 
 /** 验证实际 PNG 解码后只保存密文与摘要，更新收款码不会覆盖历史申请快照。 */
@@ -325,7 +343,7 @@ async function testTransactionsAreScopedAndPaginated() {
 
 /** 按行为顺序运行测试；失败输出名称和堆栈，成功输出可追溯统计。 */
 async function run() {
-  const tests = [testQueriesDoNotRequireQrEncryptionKey, testSummaryAndOverviewArePrivate, testSaveQrEncryptsAndPreservesSnapshot, testMinimumAndValidation, testRejectionsDoNotMutate, testCreateAuthenticatesStoredQrAfterLock, testCreateIsAtomic, testFailureRollsEverythingBack, testConcurrentRequestsOnlyDebitOnce, testUniqueConflictMapping, testTransactionsAreScopedAndPaginated];
+  const tests = [testQueriesDoNotRequireQrEncryptionKey, testSummaryAndOverviewArePrivate, testCurrentQrRendersPrivatePng, testSaveQrEncryptsAndPreservesSnapshot, testMinimumAndValidation, testRejectionsDoNotMutate, testCreateAuthenticatesStoredQrAfterLock, testCreateIsAtomic, testFailureRollsEverythingBack, testConcurrentRequestsOnlyDebitOnce, testUniqueConflictMapping, testTransactionsAreScopedAndPaginated];
   for (const test of tests) { await test(); console.log(`✓ ${test.name}`); }
   console.log(`钱包服务测试通过：${tests.length}/${tests.length}`);
 }

@@ -50,6 +50,14 @@ class UserWalletService {
     return { balance, balance_text: `${(balance / 100).toFixed(2)}元`, payment_type: qr ? qr.payment_type : null, has_payment_qr: !!qr };
   }
 
+  /** 解密并重新渲染当前用户已保存的收款码，不向客户端暴露原始内容、密文或摘要。 */
+  async getPaymentQr(db, userId) {
+    const qr = await this.repository.getPaymentQr(db, userId);
+    if (!qr) throw walletError('尚未上传收款码', 404);
+    const color = qr.payment_type === 'alipay' ? '#1677FF' : '#07C160';
+    return this.requirePaymentQrService().renderQrPng(qr.qr_payload_encrypted, color);
+  }
+
   /** fileBuffer 仅在内存解码；成功后在用户锁下原子保存密文，避免申请快照与平台错配。 */
   async savePaymentQr(db, userId, { paymentType, fileBuffer } = {}) {
     if (!['wechat', 'alipay'].includes(paymentType)) throw walletError('收款方式必须为微信或支付宝');

@@ -35,7 +35,13 @@ class PaymentQrService {
     this.imageDecoder = imageDecoder || this.decodeImage.bind(this);
     this.qrDecoder = qrDecoder || this.decodeQr.bind(this);
     this.jsQrDecoder = jsQrDecoder || this.decodeQrWithJsQr.bind(this);
-    this.qrEncoder = qrEncoder || (payload => QRCode.toBuffer(payload, { type: 'png', errorCorrectionLevel: 'M', margin: 4, width: 512 }));
+    this.qrEncoder = qrEncoder || ((payload, color) => QRCode.toBuffer(payload, {
+      type: 'png',
+      errorCorrectionLevel: 'M',
+      margin: 4,
+      width: 512,
+      color: { dark: color || '#000000', light: '#FFFFFFFF' }
+    }));
   }
 
   /** 生成不包含输入内容的业务错误；message 必须为服务内部固定文案。 */
@@ -215,10 +221,10 @@ class PaymentQrService {
   }
 
   /** 只对已认证解密的内容生成内存 PNG Buffer，调用方负责权限验证及响应防缓存。 */
-  async renderQrPng(encryptedPayload) {
+  async renderQrPng(encryptedPayload, color) {
     const payload = this.decryptPayload(encryptedPayload);
     try {
-      const png = await this.qrEncoder(payload);
+      const png = await this.qrEncoder(payload, color);
       if (!Buffer.isBuffer(png) || !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error();
       return png;
     } catch {

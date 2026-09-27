@@ -379,6 +379,14 @@ const userApi = {
   },
 
   /**
+   * 获取当前登录用户已经保存并生效的收款码 PNG。
+   * @returns {Promise<Blob>} 不缓存的二维码图片二进制数据
+   */
+  getPaymentQr() {
+    return apiClient.get('/wallet/payment-qr', { responseType: 'blob' })
+  },
+
+  /**
    * 获取当前用户提现页概览。
    * @returns {Promise<Object>} 余额、收款方式、最低提现金额与处理中申请
    */

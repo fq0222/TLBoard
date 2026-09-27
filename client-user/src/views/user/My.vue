@@ -68,17 +68,24 @@
               当前保存：{{ savedPaymentTypeText }}，更换时请选择与图片一致的平台。
             </p>
           </div>
-          <el-radio-group
-            v-model="paymentType"
-            class="payment-type-group"
-            :disabled="savingQr"
-          >
-            <el-radio-button label="wechat">微信</el-radio-button>
-            <el-radio-button label="alipay">支付宝</el-radio-button>
-          </el-radio-group>
         </div>
 
         <div class="payment-upload-row">
+          <div class="current-qr-panel">
+            <span class="field-label">当前收款码</span>
+            <div class="current-qr-display">
+              <img v-if="savedQrUrl" :src="savedQrUrl" :alt="`${savedPaymentTypeText}收款码`">
+              <div v-else class="current-qr-empty">
+                <el-icon v-if="savedQrLoading" class="is-loading"><Loading /></el-icon>
+                <el-icon v-else><UploadFilled /></el-icon>
+                <strong>{{ savedQrPlaceholder }}</strong>
+              </div>
+            </div>
+            <span v-if="walletSummary.has_payment_qr" class="current-qr-platform" :class="`is-${walletSummary.payment_type}`">
+              {{ savedPaymentTypeText }}
+            </span>
+          </div>
+
           <el-upload
             ref="qrUploadRef"
             class="qr-uploader"
@@ -108,6 +115,17 @@
             <div>
               <span class="field-label">保存状态</span>
               <p class="field-help payment-state-copy">{{ paymentStateText }}</p>
+            </div>
+            <div class="payment-type-selector">
+              <p class="payment-type-help">请选择上传的二维码类型，选择的二维码类型要与实际上传的一致。</p>
+              <el-radio-group
+                v-model="paymentType"
+                class="payment-type-group"
+                :disabled="savingQr"
+              >
+                <el-radio-button label="wechat">微信</el-radio-button>
+                <el-radio-button label="alipay">支付宝</el-radio-button>
+              </el-radio-group>
             </div>
             <div class="wallet-actions">
               <el-button
@@ -288,6 +306,9 @@ const walletSummary = ref({})
 const paymentType = ref('wechat')
 const qrFile = ref(null)
 const qrPreviewUrl = ref('')
+const savedQrUrl = ref('')
+const savedQrLoading = ref(false)
+const savedQrLoadError = ref(false)
 const savingQr = ref(false)
 const walletLoading = ref(true)
 const walletLoadError = ref('')
@@ -326,6 +347,11 @@ const paymentStateText = computed(() => {
   if (walletSummary.value.has_payment_qr) return `${savedPaymentTypeText.value}收款码已生效，可上传新图片更换。`
   return '请选择收款方式并上传对应的收款码图片。'
 })
+const savedQrPlaceholder = computed(() => {
+  if (savedQrLoading.value) return '正在生成'
+  if (savedQrLoadError.value) return '暂时无法显示'
+  return '待上传'
+})
 
 function formatAmount(amount) {
   const cents = Number(amount)
@@ -355,11 +381,37 @@ async function fetchWalletSummary() {
     if (['wechat', 'alipay'].includes(walletSummary.value.payment_type)) {
       paymentType.value = walletSummary.value.payment_type
     }
+    await fetchSavedPaymentQr()
   } catch (error) {
     console.error('获取钱包摘要失败:', error)
     walletLoadError.value = '钱包信息加载失败，请重试'
   } finally {
     walletLoading.value = false
+  }
+}
+
+/** 释放当前生效二维码的对象地址；该图片只用于左侧只读展示。 */
+function revokeSavedQrUrl() {
+  if (!savedQrUrl.value) return
+  URL.revokeObjectURL(savedQrUrl.value)
+  savedQrUrl.value = ''
+}
+
+/** 从服务端读取数据库链接重新生成的彩色二维码，不复用用户上传的原图。 */
+async function fetchSavedPaymentQr() {
+  revokeSavedQrUrl()
+  savedQrLoadError.value = false
+  if (!walletSummary.value.has_payment_qr) return
+
+  savedQrLoading.value = true
+  try {
+    const qrBlob = await api.user.getPaymentQr()
+    savedQrUrl.value = URL.createObjectURL(qrBlob)
+  } catch (error) {
+    console.error('获取当前收款码失败:', error)
+    savedQrLoadError.value = true
+  } finally {
+    savedQrLoading.value = false
   }
 }
 
@@ -565,6 +617,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   revokeQrPreview()
+  revokeSavedQrUrl()
 })
 </script>
 
@@ -740,6 +793,20 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+.payment-type-selector {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.payment-type-help {
+  margin: 0;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .payment-form :deep(.el-radio-button__inner) {
   min-width: 84px;
   padding: 10px 18px;
@@ -749,6 +816,96 @@ onBeforeUnmount(() => {
   align-items: stretch;
   gap: 18px;
   margin-top: 18px;
+}
+
+.current-qr-panel {
+  display: none;
+}
+
+@media (min-width: 1025px) {
+  .payment-upload-row {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .current-qr-panel {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px;
+    border: 1px solid #ebeef5;
+    border-radius: 12px;
+    background: #fff;
+  }
+
+  .current-qr-display {
+    display: flex;
+    flex: 1;
+    min-height: 166px;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 10px;
+    background: #f8fafc;
+  }
+
+  .current-qr-display img {
+    display: block;
+    width: 166px;
+    height: 166px;
+    object-fit: contain;
+  }
+
+  .current-qr-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    color: #909399;
+    text-align: center;
+  }
+
+  .current-qr-empty .el-icon {
+    color: #c0c4cc;
+    font-size: 30px;
+  }
+
+  .current-qr-platform {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .current-qr-platform.is-wechat {
+    background: #07c160;
+  }
+
+  .current-qr-platform.is-alipay {
+    background: #1677ff;
+  }
+
+  .qr-uploader,
+  .payment-actions-panel {
+    width: auto;
+    min-width: 0;
+  }
+
+  .qr-uploader,
+  .payment-actions-panel {
+    flex: none;
+  }
+
+  .wallet-actions .el-button {
+    flex: 1 1 0;
+    min-width: 0;
+  }
 }
 
 .qr-uploader {
@@ -1146,7 +1303,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 768px) {
   .my-container {
-    gap: 14px;
+    gap: 10px;
   }
 
   .wallet-heading,
@@ -1157,17 +1314,21 @@ onBeforeUnmount(() => {
   .reward-callout {
     flex-direction: column;
     align-items: flex-start;
-    gap: 10px;
+    gap: 8px;
   }
 
   .content-card {
     border-radius: 8px;
-    padding: 15px;
+    padding: 12px;
   }
 
   .wallet-card,
   .referral-overview {
-    gap: 14px;
+    gap: 10px;
+  }
+
+  .wallet-card {
+    position: relative;
   }
 
   .section-link {
@@ -1180,13 +1341,13 @@ onBeforeUnmount(() => {
   .management-grid,
   .referral-metrics {
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: 8px;
   }
 
   .wallet-metric,
   .metric-card {
-    gap: 6px;
-    padding: 13px 14px;
+    gap: 4px;
+    padding: 10px 12px;
     border-radius: 11px;
   }
 
@@ -1216,19 +1377,51 @@ onBeforeUnmount(() => {
 
   .wallet-title-wrap {
     align-items: flex-start;
+    gap: 10px;
+    padding-right: 108px;
+  }
+
+  .wallet-title-icon {
+    flex-basis: 34px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    font-size: 18px;
+  }
+
+  .wallet-description {
+    margin-top: 3px;
+    font-size: 13px;
+    line-height: 1.35;
   }
 
   .wallet-status {
-    margin-left: 50px;
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    margin-left: 0;
+    padding: 5px 9px;
+    font-size: 12px;
   }
 
   .wallet-amount {
-    font-size: 21px;
+    font-size: 19px;
+  }
+
+  .metric-hint {
+    font-size: 11px;
+    line-height: 1.35;
   }
 
   .payment-form {
-    padding: 13px;
+    padding: 10px;
     border-radius: 12px;
+  }
+
+  .field-help {
+    margin-top: 3px;
+    font-size: 12px;
+    line-height: 1.35;
   }
 
   .wallet-load-state {
@@ -1262,10 +1455,78 @@ onBeforeUnmount(() => {
   .payment-form :deep(.el-radio-button__inner) {
     width: 100%;
     min-width: 0;
+    padding: 8px 12px;
   }
 
   .payment-upload-row {
-    margin-top: 14px;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .current-qr-panel {
+    position: relative;
+    display: flex;
+    width: 100%;
+    min-height: 132px;
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px;
+    border: 1px solid #ebeef5;
+    border-radius: 11px;
+    background: #fff;
+  }
+
+  .current-qr-display {
+    display: flex;
+    flex: 0 0 110px;
+    width: 110px;
+    height: 110px;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 9px;
+    background: #f8fafc;
+  }
+
+  .current-qr-display img {
+    display: block;
+    width: 110px;
+    height: 110px;
+    object-fit: contain;
+  }
+
+  .current-qr-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    color: #909399;
+    font-size: 12px;
+  }
+
+  .current-qr-empty .el-icon {
+    font-size: 24px;
+  }
+
+  .current-qr-platform {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .current-qr-platform.is-wechat {
+    background: #07c160;
+  }
+
+  .current-qr-platform.is-alipay {
+    background: #1677ff;
   }
 
   .qr-uploader,
@@ -1278,26 +1539,50 @@ onBeforeUnmount(() => {
   .qr-uploader :deep(.el-upload-dragger),
   .qr-upload-empty,
   .qr-preview {
-    min-height: 190px;
+    min-height: 150px;
+  }
+
+  .qr-upload-empty {
+    gap: 6px;
+  }
+
+  .qr-upload-icon {
+    font-size: 28px;
   }
 
   .qr-preview img {
-    width: 160px;
-    height: 160px;
+    width: 132px;
+    height: 132px;
   }
 
   .payment-actions-panel {
-    padding: 14px;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .payment-state-copy {
+    min-height: 0;
+  }
+
+  .payment-type-selector {
+    gap: 5px;
+  }
+
+  .payment-type-help {
+    font-size: 12px;
+    line-height: 1.35;
   }
 
   .wallet-actions {
     flex-direction: column;
+    gap: 8px;
   }
 
   .wallet-actions .el-button,
   .withdraw-action {
     flex: 1 1 auto;
     width: 100%;
+    min-height: 38px;
   }
 
   .referral-link-row {

@@ -31,6 +31,7 @@ function receivePaymentQr(req, res, next) {
 
 router.use(authenticateUser);
 router.get('/summary', controller.getSummary.bind(controller));
+router.get('/payment-qr', controller.getPaymentQr.bind(controller));
 router.put('/payment-qr', receivePaymentQr, controller.savePaymentQr.bind(controller));
 router.get('/withdrawal', controller.getWithdrawalOverview.bind(controller));
 router.post('/withdrawals', controller.createWithdrawal.bind(controller));

@@ -28,3 +28,25 @@ test('钱包上传区在平板窄宽度提前堆叠且预览不超过容器', ()
   assert.match(source, /\.qr-preview img \{[\s\S]*?max-width: 100%/)
   assert.match(source, /@media \(max-width: 860px\) \{[\s\S]*?\.payment-upload-row[\s\S]*?flex-direction: column/)
 })
+
+test('收款方式切换位于保存状态区域且电脑端操作按钮等宽', () => {
+  const actionsPanel = source.match(/<div class="payment-actions-panel">([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>\s*<\/section>/)?.[1] || ''
+  assert.match(actionsPanel, /请选择上传的二维码类型，选择的二维码类型要与实际上传的一致。[\s\S]*class="payment-type-group"/)
+  assert.match(actionsPanel, /class="payment-type-group"/)
+  assert.match(source, /@media \(min-width: 1025px\) \{[\s\S]*?\.wallet-actions \.el-button[\s\S]*?flex:\s*1/)
+})
+
+test('移动端显示当前收款码并压缩钱包卡片纵向空间', () => {
+  const mobileStyles = source.match(/@media \(max-width: 768px\) \{([\s\S]*)\n\}/)?.[1] || ''
+  assert.match(mobileStyles, /\.current-qr-panel[\s\S]*?display:\s*flex/)
+  assert.match(mobileStyles, /\.content-card[\s\S]*?padding:\s*12px/)
+  assert.match(mobileStyles, /\.wallet-card[\s\S]*?gap:\s*10px/)
+  assert.match(mobileStyles, /\.qr-uploader :deep\(\.el-upload-dragger\)[\s\S]*?min-height:\s*150px/)
+  assert.match(mobileStyles, /\.wallet-actions \.el-button[\s\S]*?min-height:\s*38px/)
+})
+
+test('移动端收款码状态固定在钱包卡片右上角且不占用文档流', () => {
+  const mobileStyles = source.match(/@media \(max-width: 768px\) \{([\s\S]*)\n\}/)?.[1] || ''
+  assert.match(mobileStyles, /\.wallet-card[\s\S]*?position:\s*relative/)
+  assert.match(mobileStyles, /\.wallet-status[\s\S]*?position:\s*absolute[\s\S]*?top:\s*12px[\s\S]*?right:\s*12px/)
+})
