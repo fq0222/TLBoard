@@ -79,7 +79,7 @@ class UserWalletService {
   }
 
   /**
-   * amount 必须为正安全整数分；先锁用户，再检查 pending/收款码/余额，随后创建快照并扣款写流水。
+   * amount 必须为正安全整数分且属于最低额的 1～5 倍；锁定用户后完成全部业务校验与写入。
    * BalanceService 在同一连接重入相同锁是安全的；任一步失败交由 transaction 整体回滚。
    */
   async createWithdrawal(db, userId, { amount } = {}) {
@@ -102,6 +102,8 @@ class UserWalletService {
         }
         const minimum = await this.getMinimumAmount(transactionDb);
         if (amount < minimum) throw walletError(`最低提现金额为${(minimum / 100).toFixed(2)}元`);
+        if (amount % minimum !== 0) throw walletError('提现金额必须是最低提现金额的整数倍');
+        if (amount / minimum > 5) throw walletError('提现金额最高为最低提现金额的5倍');
         if (Number(user.balance) < amount) throw walletError('余额不足', 409);
         const request = await this.repository.createWithdrawal(transactionDb, {
           userId, amount, paymentType: qr.payment_type,

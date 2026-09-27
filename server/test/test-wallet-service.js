@@ -97,7 +97,8 @@ class WalletDatabase {
       rows = [structuredClone(row)];
     } else if (sql.startsWith('UPDATE users')) {
       assert.ok(client && client.local, '扣款必须使用同一事务连接');
-      assert.deepEqual(params, [2000, 7, 2000]);
+      assert.equal(params[1], 7);
+      assert.equal(params[0], params[2], '扣款金额必须与余额充足条件使用同一数值');
       if (state.user.balance >= params[0]) {
         state.user.balance -= params[0];
         rows = [{ balance: state.user.balance }];
@@ -193,6 +194,22 @@ async function testMinimumAndValidation() {
   for (const amount of [0, -1, 20.5, '2000', NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
     await assert.rejects(() => service.createWithdrawal(new WalletDatabase().db, 7, { amount }), /金额/);
   }
+
+  const nonMultiple = new WalletDatabase({ balance: 20000 });
+  await assert.rejects(
+    () => service.createWithdrawal(nonMultiple.db, 7, { amount: 2500 }),
+    /最低提现金额的整数倍/
+  );
+  assert.equal(nonMultiple.state.withdrawals.length, 0);
+
+  const aboveFiveTimes = new WalletDatabase({ balance: 20000 });
+  await assert.rejects(
+    () => service.createWithdrawal(aboveFiveTimes.db, 7, { amount: 12000 }),
+    /最高.*5倍/
+  );
+  assert.equal(aboveFiveTimes.state.withdrawals.length, 0);
+
+  await service.createWithdrawal(new WalletDatabase({ balance: 20000 }).db, 7, { amount: 10000 });
 }
 
 /** 捕获无收款码、余额不足、已有 pending 时仍写入或扣款的错误。 */

@@ -265,6 +265,48 @@ describe('Withdraw', () => {
     expect(wrapper.get('[aria-label="筛选余额明细类型"]')).toBeTruthy()
   })
 
+  it('提现金额只能从最低金额的一至五倍中选择', async () => {
+    apiMocks.getWithdrawalOverview.mockResolvedValue(overviewResponse({
+      balance: 20000,
+      minimum_withdrawal_amount: 2000
+    }))
+    const wrapper = mountWithdraw()
+    await settle()
+
+    const amountSelect = wrapper.get('#withdraw-amount')
+    expect(amountSelect.element.tagName).toBe('SELECT')
+    expect(amountSelect.findAll('option').map(option => ({
+      value: option.element.value,
+      label: option.text()
+    }))).toEqual([
+      { value: '20.00', label: '¥20.00' },
+      { value: '40.00', label: '¥40.00' },
+      { value: '60.00', label: '¥60.00' },
+      { value: '80.00', label: '¥80.00' },
+      { value: '100.00', label: '¥100.00' }
+    ])
+  })
+
+  it('大额最低提现配置仍精确生成五倍金额而不发生分值舍入', async () => {
+    apiMocks.getWithdrawalOverview.mockResolvedValue(overviewResponse({
+      balance: Number.MAX_SAFE_INTEGER,
+      minimum_withdrawal_amount: 1801439850948198
+    }))
+    const wrapper = mountWithdraw()
+    await settle()
+
+    const options = wrapper.get('#withdraw-amount').findAll('option')
+    expect(options).toHaveLength(5)
+    expect(options[4].element.value).toBe('90071992547409.90')
+    expect(options[4].text()).toBe('¥90071992547409.90')
+
+    await wrapper.get('#withdraw-amount').setValue('90071992547409.90')
+    await wrapper.get('.submit-button').trigger('click')
+    await settle()
+    expect(messageMocks.confirm.mock.calls[0][0]).toContain('¥90071992547409.90 至微信收款码')
+    expect(apiMocks.createWithdrawal).toHaveBeenCalledWith({ amount: '90071992547409.90' })
+  })
+
   it.each(['resolve', 'reject'])('卸载时不关闭全局确认框且延迟 %s 后不再提交', async result => {
     const confirmation = deferred()
     messageMocks.confirm.mockReturnValue(confirmation.promise)
@@ -296,9 +338,9 @@ describe('Withdraw', () => {
     await amountInput.setValue('20.00')
     await wrapper.get('.submit-button').trigger('click')
     await nextTick()
-    wrapper.findAllComponents(ElInputStub)[0].vm.$emit('update:modelValue', '30.00')
+    wrapper.findComponent('#withdraw-amount').vm.$emit('update:modelValue', '40.00')
     await nextTick()
-    expect(wrapper.get('#withdraw-amount').element.value).toBe('30.00')
+    expect(wrapper.get('#withdraw-amount').element.value).toBe('40.00')
 
     confirmation.resolve('confirm')
     await settle()
@@ -307,16 +349,17 @@ describe('Withdraw', () => {
     expect(apiMocks.createWithdrawal).toHaveBeenCalledWith({ amount: '20.00' })
   })
 
-  it.each(['2e1', ' 20', '20 ', '+20', '20.001', '.5', '20.'])('严格拒绝非法金额字符串 %s', async amount => {
+  it.each(['2e1', ' 20', '20 ', '+20', '20.001', '.5', '20.', '30.00', '120.00'])('拒绝绕过下拉框提交非法金额 %s', async amount => {
     const wrapper = mountWithdraw()
     await settle()
-    await wrapper.get('#withdraw-amount').setValue(amount)
+    wrapper.findComponent('#withdraw-amount').vm.$emit('update:modelValue', amount)
+    await nextTick()
     await wrapper.get('.submit-button').trigger('click')
     await settle()
 
     expect(messageMocks.confirm).not.toHaveBeenCalled()
     expect(apiMocks.createWithdrawal).not.toHaveBeenCalled()
-    expect(messageMocks.warning).toHaveBeenCalledWith('请输入正数金额，最多保留两位小数')
+    expect(messageMocks.warning).toHaveBeenCalled()
   })
 
   it('pending 状态禁用提交并阻止进入确认流程', async () => {

@@ -56,18 +56,21 @@
 
         <section class="withdraw-form">
           <label class="form-label" for="withdraw-amount">提现金额</label>
-          <el-input
+          <el-select
             id="withdraw-amount"
             v-model="amountInput"
             class="amount-input"
-            inputmode="decimal"
-            placeholder="请输入提现金额"
+            placeholder="请选择提现金额"
             :disabled="submitDisabled"
-            @keyup.enter="handleSubmit"
           >
-            <template #prefix>¥</template>
-          </el-input>
-          <p class="form-help">金额最多保留两位小数，提交后将进入人工处理。</p>
+            <el-option
+              v-for="option in withdrawalAmountOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+          <p class="form-help">仅可选择最低提现金额的 1～5 倍，提交后将进入人工处理。</p>
           <el-button
             class="submit-button"
             type="primary"
@@ -271,6 +274,23 @@ const paymentTypeText = computed(() => {
   if (!overview.has_payment_qr) return '未设置'
   return overview.payment_type === 'alipay' ? '支付宝' : '微信'
 })
+
+/**
+ * 根据后端返回的安全整数分生成最低额 1～5 倍选项；BigInt 避免大额换算时丢失分值精度。
+ * 超出后端安全整数分契约的倍数不会成为可提交选项。
+ */
+const withdrawalAmountOptions = computed(() => {
+  const minimum = Number(overview.minimum_withdrawal_amount)
+  if (!Number.isSafeInteger(minimum) || minimum <= 0) return []
+  const minimumCents = BigInt(minimum)
+  const maximumSafeCents = BigInt(Number.MAX_SAFE_INTEGER)
+  return Array.from({ length: 5 }, (_, index) => {
+    const cents = minimumCents * BigInt(index + 1)
+    if (cents > maximumSafeCents) return null
+    const amount = `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`
+    return { value: amount, label: `¥${amount}` }
+  }).filter(Boolean)
+})
 const submitDisabled = computed(() => (
   overviewLoading.value || !!overviewLoadError.value || !!pendingWithdrawal.value ||
   !overview.has_payment_qr || confirming.value || submitting.value
@@ -456,7 +476,7 @@ function amountToCents(amount) {
 }
 
 /**
- * 校验并确认提现；确认与网络提交分别加锁，避免连续点击产生重复请求。
+ * 校验下拉选项并确认提现；确认与网络提交分别加锁，避免连续点击产生重复请求。
  * @returns {Promise<void>}
  */
 async function handleSubmit() {
@@ -472,6 +492,10 @@ async function handleSubmit() {
     ElMessage.warning(`最低提现金额为 ¥${formatCents(overview.minimum_withdrawal_amount)}`)
     return
   }
+  if (!withdrawalAmountOptions.value.some(option => option.value === amountSnapshot)) {
+    ElMessage.warning('提现金额必须是最低提现金额的 1～5 倍')
+    return
+  }
   if (cents > Number(overview.balance)) {
     ElMessage.warning('提现金额不能超过可用余额')
     return
@@ -481,7 +505,7 @@ async function handleSubmit() {
   confirming.value = true
   try {
     await ElMessageBox.confirm(
-      `确认提现 ¥${formatCents(cents)} 至${paymentTypeSnapshot}收款码？`,
+      `确认提现 ¥${amountSnapshot} 至${paymentTypeSnapshot}收款码？`,
       '确认提现',
       {
         confirmButtonText: '确认提现',
