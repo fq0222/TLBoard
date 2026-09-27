@@ -52,6 +52,7 @@
           v-model="dateRange"
           class="toolbar-date"
           type="daterange"
+          value-format="YYYY-MM-DD"
           range-separator="至"
           start-placeholder="开始日期"
           end-placeholder="结束日期"
@@ -131,8 +132,8 @@ async function fetchOrders() {
     if (email.value) params.email = email.value
     if (status.value) params.status = status.value
     if (dateRange.value && dateRange.value.length === 2) {
-      params.start_date = dateRange.value[0].toISOString().split('T')[0]
-      params.end_date = dateRange.value[1].toISOString().split('T')[0]
+      params.start_date = dateRange.value[0]
+      params.end_date = dateRange.value[1]
     }
 
     const response = await api.admin.getOrders(params)

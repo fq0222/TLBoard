@@ -430,19 +430,34 @@ async function updateUserHomePlanAfterPaidOrder(db, payload) {
 }
 
 /**
- * 统计管理端订单全局汇总。
+ * 统计管理端订单汇总。
+ * 日期范围与订单列表保持一致，统计不受分页参数影响。
  *
  * @param {Object} db - 数据库代理对象
+ * @param {{startDate?:string,endDate?:string}} filters - 起止日期筛选条件
  * @returns {Promise<Object>} 订单总金额与订单类型统计
  */
-async function summarizeAdminOrders(db) {
+async function summarizeAdminOrders(db, filters = {}) {
+  const { whereClause, params } = buildAdminOrderFilters(filters);
   return db.prepare(`
     SELECT
       COALESCE(SUM(amount), 0) as total_amount,
       SUM(CASE WHEN out_trade_no LIKE 'ORD%' THEN 1 ELSE 0 END) as ord_count,
       SUM(CASE WHEN out_trade_no LIKE 'REN%' THEN 1 ELSE 0 END) as ren_count
-    FROM orders
-  `).get();
+    FROM orders o
+    ${whereClause}
+  `).get(...params);
+}
+
+/**
+ * 将管理端选择的日期解析为北京时间当日零点。
+ * 关键语义：不依赖 Node.js 运行主机时区，避免 YYYY-MM-DD 被当作 UTC 零点。
+ *
+ * @param {string} date - YYYY-MM-DD 格式日期
+ * @returns {number} 秒级 Unix 时间戳
+ */
+function parseAdminDateToUnix(date) {
+  return Math.floor(Date.parse(`${date}T00:00:00+08:00`) / 1000);
 }
 
 /**
@@ -473,12 +488,12 @@ function buildAdminOrderFilters(filters = {}) {
 
   if (startDate) {
     whereClause += ' AND o.created_at >= ?';
-    params.push(Math.floor(new Date(startDate).getTime() / 1000));
+    params.push(parseAdminDateToUnix(startDate));
   }
 
   if (endDate) {
-    whereClause += ' AND o.created_at <= ?';
-    params.push(Math.floor(new Date(endDate).getTime() / 1000) + 86400);
+    whereClause += ' AND o.created_at < ?';
+    params.push(parseAdminDateToUnix(endDate) + 86400);
   }
 
   return {

@@ -1,7 +1,7 @@
 /**
  * 管理端订单汇总测试。
- * 职责：验证订单列表接口返回全局统计汇总，避免前端错误使用当前分页数据。
- * 关键场景：总金额为所有订单金额之和，ORD/REN 数量按订单号前缀统计。
+ * 职责：验证订单列表接口返回当前时间范围的统计汇总，避免前端错误使用当前分页数据。
+ * 关键场景：总金额和 ORD/REN 数量复用列表的起止日期，但不受分页影响。
  */
 
 const test = require('node:test');
@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const ordersService = require('../services/admin/orders-service');
 const orderRepository = require('../repositories/order-repository');
 
-test('admin orders service returns global summary with list data', async () => {
+test('admin orders service summarizes all orders inside the selected date range', async () => {
   const originalCountAdminOrders = orderRepository.countAdminOrders;
   const originalListAdminOrders = orderRepository.listAdminOrders;
   const originalSummarizeAdminOrders = orderRepository.summarizeAdminOrders;
@@ -40,17 +40,23 @@ test('admin orders service returns global summary with list data', async () => {
       created_at: 1719734200
     }
   ]);
-  orderRepository.summarizeAdminOrders = async () => ({
-    total_amount: 3500,
-    ord_count: 1,
-    ren_count: 1
-  });
+  let summaryFilters;
+  orderRepository.summarizeAdminOrders = async (db, filters) => {
+    summaryFilters = filters;
+    return {
+      total_amount: 3500,
+      ord_count: 1,
+      ren_count: 1
+    };
+  };
 
   try {
     const result = await ordersService.listOrders({}, {
       page: 1,
       limit: 15,
-      email: 'user@example.com'
+      email: 'user@example.com',
+      start_date: '2026-09-01',
+      end_date: '2026-09-30'
     });
 
     assert.equal(result.total, 2);
@@ -59,9 +65,39 @@ test('admin orders service returns global summary with list data', async () => {
       ord_count: 1,
       ren_count: 1
     });
+    assert.deepEqual(summaryFilters, {
+      startDate: '2026-09-01',
+      endDate: '2026-09-30'
+    });
   } finally {
     orderRepository.countAdminOrders = originalCountAdminOrders;
     orderRepository.listAdminOrders = originalListAdminOrders;
     orderRepository.summarizeAdminOrders = originalSummarizeAdminOrders;
   }
+});
+
+test('admin order repository applies the date range to summary SQL', async () => {
+  let capturedSql;
+  let capturedParams;
+  const db = {
+    prepare(sql) {
+      capturedSql = sql;
+      return {
+        async get(...params) {
+          capturedParams = params;
+          return { total_amount: 0, ord_count: 0, ren_count: 0 };
+        }
+      };
+    }
+  };
+
+  await orderRepository.summarizeAdminOrders(db, {
+    startDate: '2026-09-01',
+    endDate: '2026-09-30'
+  });
+
+  assert.match(capturedSql, /FROM orders o\s+WHERE 1=1/);
+  assert.match(capturedSql, /o\.created_at >= \?/);
+  assert.match(capturedSql, /o\.created_at < \?/);
+  assert.deepEqual(capturedParams, [1788192000, 1790784000]);
 });

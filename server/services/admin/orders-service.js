@@ -41,7 +41,10 @@ async function listOrders(db, query) {
     limit,
     offset
   });
-  const summaryRow = await orderRepository.summarizeAdminOrders(db);
+  const summaryRow = await orderRepository.summarizeAdminOrders(db, {
+    startDate: filters.startDate,
+    endDate: filters.endDate
+  });
 
   return {
     total: Number(totalRow.total) || 0,
