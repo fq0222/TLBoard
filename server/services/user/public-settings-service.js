@@ -1,6 +1,7 @@
 const systemSettingsRepository = require('../../repositories/system-settings-repository');
 
 const ONLINE_CUSTOMER_SERVICE_URL_KEY = 'online_customer_service_url';
+const RESOURCE_CONFIG_KEY = 'resource_config';
 
 /**
  * 用户端公开设置服务。
@@ -22,13 +23,23 @@ function normalizePublicUrl(value) {
  * 获取用户端匿名可读取的公开设置。
  *
  * @param {Object} db - 数据库实例
- * @returns {Promise<{online_customer_service_url:string}>} 公开设置
+ * @returns {Promise<{online_customer_service_url:string,home_ip_info_url:string}>} 公开设置
  */
 async function getPublicSettings(db) {
-  const row = await systemSettingsRepository.findSettingByKey(db, ONLINE_CUSTOMER_SERVICE_URL_KEY);
+  const [row, resourceRow] = await Promise.all([
+    systemSettingsRepository.findSettingByKey(db, ONLINE_CUSTOMER_SERVICE_URL_KEY),
+    systemSettingsRepository.findSettingByKey(db, RESOURCE_CONFIG_KEY)
+  ]);
+  let homeIpInfoUrl = '';
+  try {
+    homeIpInfoUrl = normalizePublicUrl(JSON.parse(resourceRow?.value || '{}').home_ip_info_url);
+  } catch (error) {
+    // 历史资源配置损坏时仍返回公开设置默认值。
+  }
 
   return {
-    online_customer_service_url: normalizePublicUrl(row?.value)
+    online_customer_service_url: normalizePublicUrl(row?.value),
+    home_ip_info_url: homeIpInfoUrl
   };
 }
 

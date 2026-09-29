@@ -117,6 +117,9 @@ async function saveResourceConfig(req, res) {
     logger.info(`保存资源配置成功: ${JSON.stringify(data)}`);
     return legacySuccess(res, data);
   } catch (error) {
+    if (error.expose && error.statusCode === 400) {
+      return legacyValidationError(res, { message: error.message });
+    }
     return handleControllerError(res, '保存资源配置', error);
   }
 }

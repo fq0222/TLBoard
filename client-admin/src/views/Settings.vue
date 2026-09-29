@@ -123,6 +123,9 @@
               <el-input-number v-model="resourceForm.blog_video_speed_limit" :min="0" />
               <span class="form-hint">KB/s，所有博客视频播放/下载共享，0 表示不限速</span>
             </el-form-item>
+            <el-form-item label="住宅 IP 说明链接">
+              <el-input v-model="resourceForm.home_ip_info_url" placeholder="可选，填写 http 或 https 链接" />
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="resourceSaving" @click="saveResourceConfig">保存配置</el-button>
             </el-form-item>
@@ -414,7 +417,8 @@ const testSending = ref(false)
 const resourceForm = ref({
   max_file_size: 100,
   download_speed_limit: 0,
-  blog_video_speed_limit: 300
+  blog_video_speed_limit: 300,
+  home_ip_info_url: ''
 })
 const resourceSaving = ref(false)
 

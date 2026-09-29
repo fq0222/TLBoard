@@ -200,7 +200,10 @@
           <section ref="broadbandSectionRef" class="plan-section broadband-section">
             <div class="section-head">
               <div>
-                <h2>家宽IP套餐</h2>
+                <div class="broadband-title-row">
+                  <h2>家宽IP套餐</h2>
+                  <a href="/user/help" class="home-ip-info-link" @click.prevent="openHomeIpInfo">什么是住宅IP？</a>
+                </div>
                 <p>家宽 IP 套餐只限制使用时间，不限制流量。</p>
               </div>
               <div class="section-actions">
@@ -585,6 +588,27 @@ async function loadPageData() {
   } finally {
     pageLoading.value = false
   }
+}
+
+/**
+ * 在当前标签页打开住宅 IP 说明链接。
+ * 核心分支：公开设置含有效 http/https 地址时跳转该地址；空值、非法值或读取失败时进入用户教程页。
+ */
+async function openHomeIpInfo() {
+  try {
+    const response = await api.user.getPublicSettings()
+    const configuredUrl = String(response.code === 0 ? response.data?.home_ip_info_url || '' : '').trim()
+    if (configuredUrl) {
+      const url = new URL(configuredUrl)
+      if (url.protocol === 'http:' || url.protocol === 'https:') {
+        window.location.assign(url.href)
+        return
+      }
+    }
+  } catch (error) {
+    console.error('获取住宅 IP 说明链接失败:', error)
+  }
+  await router.push('/user/help')
 }
 
 /**
@@ -1095,6 +1119,20 @@ onBeforeUnmount(() => {
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1.7;
+}
+
+.broadband-title-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.home-ip-info-link {
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 1.7;
+  text-decoration: underline;
 }
 
 .section-count {

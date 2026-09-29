@@ -46,7 +46,12 @@ router.put('/resource', authenticateAdmin, [
     .withMessage('下载速度限制必须是大于等于0的整数'),
   body('blog_video_speed_limit')
     .isInt({ min: 0 })
-    .withMessage('博客视频速度限制必须是大于等于0的整数')
+    .withMessage('博客视频速度限制必须是大于等于0的整数'),
+  body('home_ip_info_url')
+    .optional({ values: 'falsy' })
+    .trim()
+    .isURL({ require_protocol: true, require_tld: false, protocols: ['http', 'https'] })
+    .withMessage('住宅 IP 说明链接必须是有效的 http 或 https 地址')
 ], systemSettingsController.saveResourceConfig);
 
 router.get('/subscription', authenticateAdmin, systemSettingsController.getSubscriptionConfig);

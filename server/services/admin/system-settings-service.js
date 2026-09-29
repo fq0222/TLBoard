@@ -30,7 +30,8 @@ const DEFAULT_EMAIL_CONFIG = {
 const DEFAULT_RESOURCE_CONFIG = {
   max_file_size: 100,
   download_speed_limit: 0,
-  blog_video_speed_limit: 300
+  blog_video_speed_limit: 300,
+  home_ip_info_url: ''
 };
 
 /**
@@ -71,6 +72,25 @@ async function saveSystemSettingValue(db, key, value) {
  */
 function normalizeOptionalUrl(value) {
   return String(value || '').trim();
+}
+
+/**
+ * 校验可选的住宅 IP 说明链接。
+ * 关键参数：value 为管理端提交值；空值允许清除，非空值必须是 http/https 绝对地址。
+ */
+function normalizeHomeIpInfoUrl(value) {
+  if (value !== undefined && typeof value !== 'string') {
+    throw new AppError('住宅 IP 说明链接必须是有效的 http 或 https 地址', { statusCode: 400, code: 400 });
+  }
+  const url = normalizeOptionalUrl(value);
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return url;
+  } catch (error) {
+    // 非法地址统一由下方返回参数错误。
+  }
+  throw new AppError('住宅 IP 说明链接必须是有效的 http 或 https 地址', { statusCode: 400, code: 400 });
 }
 
 /**
@@ -232,7 +252,8 @@ async function getResourceConfig(db) {
       blog_video_speed_limit: normalizeNonNegativeInteger(
         parsedConfig.blog_video_speed_limit,
         DEFAULT_RESOURCE_CONFIG.blog_video_speed_limit
-      )
+      ),
+      home_ip_info_url: normalizeOptionalUrl(parsedConfig.home_ip_info_url)
     };
   } catch (error) {
     return { ...DEFAULT_RESOURCE_CONFIG };
@@ -256,7 +277,8 @@ async function saveResourceConfig(db, payload) {
     blog_video_speed_limit: normalizeNonNegativeInteger(
       payload.blog_video_speed_limit,
       DEFAULT_RESOURCE_CONFIG.blog_video_speed_limit
-    )
+    ),
+    home_ip_info_url: normalizeHomeIpInfoUrl(payload.home_ip_info_url)
   };
 
   await saveSystemSettingValue(db, RESOURCE_CONFIG_KEY, JSON.stringify(config));

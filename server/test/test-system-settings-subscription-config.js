@@ -1,5 +1,6 @@
 const assert = require('assert');
 const systemSettingsService = require('../services/admin/system-settings-service');
+const publicSettingsService = require('../services/user/public-settings-service');
 
 /**
  * 构造最小系统设置数据库替身。
@@ -133,7 +134,8 @@ async function testResourceConfigDefaults() {
   assert.deepStrictEqual(config, {
     max_file_size: 100,
     download_speed_limit: 0,
-    blog_video_speed_limit: 300
+    blog_video_speed_limit: 300,
+    home_ip_info_url: ''
   });
 }
 
@@ -141,7 +143,8 @@ async function testSaveResourceConfig() {
   const db = createSettingsDb();
   await systemSettingsService.saveResourceConfig(db, {
     max_file_size: 512,
-    download_speed_limit: 2048
+    download_speed_limit: 2048,
+    home_ip_info_url: '  https://example.com/home-ip  '
   });
 
   const config = await systemSettingsService.getResourceConfig(db);
@@ -149,12 +152,47 @@ async function testSaveResourceConfig() {
   assert.deepStrictEqual(config, {
     max_file_size: 512,
     download_speed_limit: 2048,
-    blog_video_speed_limit: 300
+    blog_video_speed_limit: 300,
+    home_ip_info_url: 'https://example.com/home-ip'
   });
   assert.strictEqual(
     db.settings.resource_config,
-    JSON.stringify({ max_file_size: 512, download_speed_limit: 2048, blog_video_speed_limit: 300 })
+    JSON.stringify({ max_file_size: 512, download_speed_limit: 2048, blog_video_speed_limit: 300, home_ip_info_url: 'https://example.com/home-ip' })
   );
+}
+
+/** 非 http/https 地址必须在写入前被拒绝，原资源配置保持不变。 */
+async function testRejectInvalidHomeIpInfoUrl() {
+  const db = createSettingsDb();
+  for (const value of ['javascript:alert(1)', false]) {
+    await assert.rejects(
+      () => systemSettingsService.saveResourceConfig(db, {
+        max_file_size: 100,
+        download_speed_limit: 0,
+        blog_video_speed_limit: 300,
+        home_ip_info_url: value
+      }),
+      /住宅 IP 说明链接/
+    );
+  }
+  assert.strictEqual(db.settings.resource_config, undefined);
+}
+
+/** 公开设置只输出允许用户读取的链接，资源配置中的其他字段不应外泄。 */
+async function testPublicHomeIpInfoUrlWhitelist() {
+  const db = createSettingsDb({
+    online_customer_service_url: 'https://service.example.com',
+    resource_config: JSON.stringify({ max_file_size: 999, home_ip_info_url: 'https://example.com/home-ip' }),
+    brevo_api_key: 'secret-value'
+  });
+  assert.deepStrictEqual(await publicSettingsService.getPublicSettings(db), {
+    online_customer_service_url: 'https://service.example.com',
+    home_ip_info_url: 'https://example.com/home-ip'
+  });
+  assert.deepStrictEqual(await publicSettingsService.getPublicSettings(createSettingsDb()), {
+    online_customer_service_url: '',
+    home_ip_info_url: ''
+  });
 }
 
 /** 最低提现配置缺失或旧值不合法时默认 2000 分，不影响其他设置键。 */
@@ -192,7 +230,9 @@ async function run() {
   await testSaveEmailConfig();
   await testResourceConfigDefaults();
   await testSaveResourceConfig();
-  console.log('✓ 系统设置测试通过：10/10（含最低提现整数分、原有订阅/邮件/资源配置）');
+  await testRejectInvalidHomeIpInfoUrl();
+  await testPublicHomeIpInfoUrlWhitelist();
+  console.log('✓ 系统设置测试通过：12/12（含住宅 IP 说明链接校验及公开白名单）');
 }
 
 run().catch((error) => {
