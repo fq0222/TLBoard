@@ -1559,6 +1559,7 @@ onBeforeUnmount(() => {
 @media (max-width: 768px) {
   .plans-page {
     min-height: calc(100vh - 116px);
+    padding-bottom: 52px;
   }
 
   .desktop-payment-panel {

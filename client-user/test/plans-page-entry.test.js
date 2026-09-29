@@ -168,3 +168,12 @@ test('套餐分页按钮使用完整边框热区并同步交互状态', () => {
   assert.match(plansSource, /:deep\(\.plans-pagination \.btn-prev:not\(:disabled\):hover\)/)
   assert.match(plansSource, /:deep\(\.plans-pagination \.btn-prev:disabled\)/)
 })
+
+test('套餐页移动端复用首页底部间距避让工单铃铛', () => {
+  const plansSource = readFileSync(plansPageUrl, 'utf8')
+
+  assert.match(
+    plansSource,
+    /@media \(max-width: 768px\)\s*\{[\s\S]*?\.plans-page\s*\{[\s\S]*?padding-bottom:\s*52px;/
+  )
+})
