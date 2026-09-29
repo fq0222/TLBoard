@@ -112,7 +112,7 @@
 
             <div class="plan-footer">
               <div class="plan-highlight">
-                <span>{{ plan.plan_type === 'home_ip' ? '住宅 IP 套餐仅供展示，暂不支持在线购买。' : plan.is_soldout ? '当前暂不可下单，你仍可先查看套餐信息。' : '点击立即购买，完成付款后系统会自动注册并开通账号。' }}</span>
+                <span>{{ plan.plan_type === 'home_ip' ? '住宅 IP 套餐仅供展示，不支持首次注册购买。' : plan.is_soldout ? '当前暂不可下单，你仍可先查看套餐信息。' : '点击立即购买，完成付款后系统会自动注册并开通账号。' }}</span>
               </div>
               <el-button
                 type="primary"

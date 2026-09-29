@@ -26,7 +26,7 @@ test('住宅 IP 流量指标显示不限制流量', () => {
 test('住宅 IP 购买按钮始终禁用，普通套餐保留售罄防护', () => {
   assert.match(source, /:disabled="[^"]*plan\.is_soldout\s*\|\|\s*plan\.plan_type\s*===\s*'home_ip'[^"]*"/)
   assert.match(source, /plan\.plan_type\s*===\s*'home_ip'\s*\?\s*'仅展示'\s*:\s*plan\.is_soldout\s*\?\s*'已售罄'/)
-  assert.match(source, /plan\.plan_type\s*===\s*'home_ip'\s*\?\s*'住宅 IP 套餐仅供展示[^']*'\s*:\s*plan\.is_soldout/)
+  assert.match(source, /plan\.plan_type\s*===\s*'home_ip'\s*\?\s*'住宅 IP 套餐仅供展示，不支持首次注册购买。'\s*:\s*plan\.is_soldout/)
 })
 
 test('住宅 IP 禁用按钮常态与交互态均保持主按钮颜色', () => {
