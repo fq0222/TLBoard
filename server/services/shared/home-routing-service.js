@@ -427,6 +427,9 @@ async function formatRoute(db, route) {
   return {
     home_proxy_tag: route.home_proxy_tag,
     server_ids: serverIds,
+    show_home_node_prefix: route.show_home_node_prefix !== false
+      && route.show_home_node_prefix !== 0
+      && route.show_home_node_prefix !== '0',
     servers: serverIds.map((id) => {
       const server = serverMap.get(Number(id));
       return {
@@ -639,6 +642,7 @@ async function deleteSuccessfulRoute(db, userId) {
  * @param {Object} db - 数据库代理对象
  * @param {number} userId - 用户 ID
  * @param {Object} payload - 前端提交数据
+ * @param {boolean|number|string} [payload.show_home_node_prefix] - 可选节点前缀开关；false、0、'0' 关闭，省略时保留已有选择
  * @param {Object} logger - 日志实例
  * @param {Object} [options={}] - 同步选项
  * @param {boolean} [options.skipCooldown=false] - 是否跳过手动修改冷却，管理端操作使用。
@@ -657,6 +661,10 @@ async function updateHomeRouting(db, userId, payload = {}, logger = console, opt
     repository.findUserHomeRoute(db, userId),
     repository.listOnlineServers(db)
   ]);
+  const prefixValue = payload.show_home_node_prefix == null
+    ? currentRoute?.show_home_node_prefix
+    : payload.show_home_node_prefix;
+  const showHomeNodePrefix = prefixValue !== false && prefixValue !== 0 && prefixValue !== '0';
   const cooldownRemaining = getCooldownRemaining(currentRoute, now);
 
   if (!options.skipCooldown && cooldownRemaining > 0) {
@@ -702,6 +710,7 @@ async function updateHomeRouting(db, userId, payload = {}, logger = console, opt
     userId,
     homeProxyTag: entitlement.homeProxyTag,
     serverIds: nextServerIds,
+    showHomeNodePrefix,
     syncedAt: now,
     message: `同步成功，共处理 ${involvedServers.length} 台服务器`
   });

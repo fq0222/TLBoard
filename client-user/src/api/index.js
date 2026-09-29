@@ -272,11 +272,13 @@ const userApi = {
   /**
    * 更新当前用户家宽 IP routing 绑定
    * @param {Array<number>} serverIds - 目标 3X-UI 服务器 ID，最多两个
+   * @param {boolean} showHomeNodePrefix - 是否在家宽节点名称中显示落地标识
    * @returns {Promise<Object>} 更新后的绑定信息
    */
-  updateHomeRouting(serverIds) {
+  updateHomeRouting(serverIds, showHomeNodePrefix) {
     return apiClient.put('/subscription/home-routing', {
-      server_ids: serverIds
+      server_ids: serverIds,
+      show_home_node_prefix: showHomeNodePrefix
     }, { timeout: 120000 })
   },
 

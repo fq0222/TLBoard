@@ -135,7 +135,10 @@ async function getActiveHomeServerIds(db, userId) {
   }
 
   const route = await homeRoutingRepository.findUserHomeRoute(db, userId);
-  if (!route || route.last_sync_status !== 'success'
+  if (!route || route.show_home_node_prefix === false
+    || route.show_home_node_prefix === 0
+    || route.show_home_node_prefix === '0'
+    || route.last_sync_status !== 'success'
     || route.home_proxy_tag !== entitlement.home_proxy_tag) {
     return new Set();
   }

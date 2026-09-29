@@ -244,6 +244,7 @@ const tableDefinitions = [
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         home_proxy_tag VARCHAR(255) NOT NULL,
         server_ids TEXT NOT NULL DEFAULT '[]',
+        show_home_node_prefix INTEGER NOT NULL DEFAULT 1,
         last_synced_at BIGINT,
         last_sync_status VARCHAR(30) NOT NULL DEFAULT 'success',
         last_sync_message TEXT NOT NULL DEFAULT '',

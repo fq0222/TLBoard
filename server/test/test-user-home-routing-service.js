@@ -5,6 +5,7 @@
 
 const assert = require('assert');
 const homeRoutingService = require('../services/shared/home-routing-service');
+const homeRoutingRepository = require('../repositories/user-home-routing-repository');
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -65,7 +66,8 @@ function createMemoryRepository(initialState = {}) {
         server_ids: JSON.stringify(payload.serverIds),
         last_synced_at: payload.syncedAt,
         last_sync_status: 'success',
-        last_sync_message: payload.message || ''
+        last_sync_message: payload.message || '',
+        show_home_node_prefix: payload.showHomeNodePrefix
       };
     },
     async deleteUserHomeRoute(db, userId) {
@@ -423,6 +425,90 @@ async function testUpdateCanSkipCooldownForAdmin() {
   assert.deepStrictEqual(repository.state.savedRoutes[0].serverIds, [2]);
 }
 
+/**
+ * 验证新绑定默认开启，显式布尔值和 0/1 可切换，管理端未传字段保留已有选择。
+ * @returns {Promise<void>} 所有输入分支和返回的布尔状态均应符合用户选择。
+ */
+async function testHomeNodePrefixTogglePersistsAcrossUpdates() {
+  const cases = [
+    { initial: undefined, input: undefined, expected: true },
+    { initial: undefined, input: false, expected: false },
+    { initial: undefined, input: 0, expected: false },
+    { initial: undefined, input: '0', expected: false },
+    { initial: undefined, input: true, expected: true },
+    { initial: undefined, input: 1, expected: true },
+    { initial: undefined, input: '1', expected: true },
+    { initial: 0, input: undefined, expected: false },
+    { initial: 1, input: undefined, expected: true }
+  ];
+
+  for (const scenario of cases) {
+    const configs = { 1: { inbounds: [{ tag: 'in-a' }], routing: { rules: [] } } };
+    const calls = { get: [], update: [] };
+    const route = scenario.initial === undefined ? undefined : {
+      user_id: 1,
+      home_proxy_tag: 'local-ip-lax',
+      server_ids: '[1]',
+      last_synced_at: Math.floor(Date.now() / 1000) - 600,
+      show_home_node_prefix: scenario.initial
+    };
+    const repository = createMemoryRepository({
+      entitlement: createEntitlement(), route, servers: [createServer(1)]
+    });
+    installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+    const payload = { server_ids: [1] };
+    if (scenario.input !== undefined) payload.show_home_node_prefix = scenario.input;
+
+    const options = await homeRoutingService.updateHomeRouting({}, 1, payload);
+
+    assert.strictEqual(repository.state.savedRoutes[0].showHomeNodePrefix, scenario.expected);
+    assert.strictEqual(options.route.show_home_node_prefix, scenario.expected);
+    assert.deepStrictEqual(calls.update, [1]);
+  }
+}
+
+/**
+ * 验证历史绑定没有开关字段时，配置接口仍返回布尔开启状态。
+ * @returns {Promise<void>} 正常和过期权益均按兼容默认值展示。
+ */
+async function testLegacyRouteDefaultsPrefixEnabled() {
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement(),
+    route: { home_proxy_tag: 'local-ip-lax', server_ids: '[1]', last_synced_at: 0 },
+    servers: [createServer(1)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory({}, { get: [], update: [] }));
+  const active = await homeRoutingService.getHomeRoutingOptions({}, 1);
+  assert.strictEqual(active.route.show_home_node_prefix, true);
+
+  repository.state.entitlement = createEntitlement({ home_status: 'expired' });
+  const expired = await homeRoutingService.getHomeRoutingOptions({}, 1);
+  assert.strictEqual(expired.route.show_home_node_prefix, true);
+}
+
+/**
+ * 验证仓储写入开关列，冲突更新沿用新值，布尔值写入为 PostgreSQL 整数。
+ * @returns {Promise<void>} 两次写入分别携带 0 和 1，且冲突分支覆盖开关列。
+ */
+async function testHomeNodePrefixIsStoredAsInteger() {
+  const writes = [];
+  const db = {
+    prepare(sql) {
+      return { run: async (...params) => { writes.push({ sql, params }); } };
+    }
+  };
+  const payload = {
+    userId: 1, homeProxyTag: 'local-ip-lax', serverIds: [1], syncedAt: 1234, message: 'ok'
+  };
+  await homeRoutingRepository.upsertUserHomeRoute(db, { ...payload, showHomeNodePrefix: false });
+  await homeRoutingRepository.upsertUserHomeRoute(db, { ...payload, showHomeNodePrefix: true });
+
+  assert.match(writes[0].sql, /show_home_node_prefix\s*=\s*EXCLUDED\.show_home_node_prefix/);
+  assert.ok(writes[0].sql.includes('show_home_node_prefix'));
+  assert.strictEqual(writes[0].params[3], 0);
+  assert.strictEqual(writes[1].params[3], 1);
+}
+
 async function testDuplicateRulesAreCollapsed() {
   const configs = {
     1: {
@@ -725,6 +811,9 @@ async function run() {
     await testRemoteWriteFailureDoesNotSaveOrCooldown();
     await testCooldownBlocksRecentSuccessfulChange();
     await testUpdateCanSkipCooldownForAdmin();
+    await testHomeNodePrefixTogglePersistsAcrossUpdates();
+    await testLegacyRouteDefaultsPrefixEnabled();
+    await testHomeNodePrefixIsStoredAsInteger();
     await testDuplicateRulesAreCollapsed();
     await testMergesUsersIntoSameHomeRoutingRule();
     await testRemovingUserKeepsSharedHomeRoutingRule();

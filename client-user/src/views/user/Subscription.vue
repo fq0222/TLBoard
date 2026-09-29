@@ -338,6 +338,10 @@
             />
           </el-select>
         </el-form-item>
+        <div class="home-routing-prefix-row">
+          <span>显示家宽落地标识</span>
+          <el-switch v-model="homeRoutingForm.show_home_node_prefix" aria-label="显示家宽落地标识" />
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="homeRoutingDialogVisible = false">取消</el-button>
@@ -415,7 +419,8 @@ const homeRoutingBusy = ref(false)
 const homeRoutingForm = ref({
   home_proxy_tag: '',
   server_id_1: null,
-  server_id_2: null
+  server_id_2: null,
+  show_home_node_prefix: true
 })
 const optimizeProgress = ref(0)
 const optimizeStatusText = ref('')
@@ -528,7 +533,7 @@ function fallbackCopyText(text) {
 
 /**
  * 打开家宽 IP routing 添加或修改弹窗。
- * 核心分支：已有绑定时回填服务器选择；未绑定时仅预选当前家宽 IP tag。
+ * 核心分支：已有绑定时回填服务器与标识开关；未绑定或旧数据缺少开关时默认显示。
  */
 function openHomeRoutingDialog() {
   if (homeRoutingExpired.value) {
@@ -540,7 +545,8 @@ function openHomeRoutingDialog() {
   homeRoutingForm.value = {
     home_proxy_tag: homeRoutingOptions.value.home_proxy_tag || '',
     server_id_1: routeServerIds[0] || null,
-    server_id_2: routeServerIds[1] || null
+    server_id_2: routeServerIds[1] || null,
+    show_home_node_prefix: Boolean(homeRoutingRoute.value?.show_home_node_prefix ?? true)
   }
   homeRoutingDialogVisible.value = true
 }
@@ -577,7 +583,7 @@ async function submitHomeRouting() {
 
   homeRoutingBusy.value = true
   try {
-    const response = await api.user.updateHomeRouting(serverIds)
+    const response = await api.user.updateHomeRouting(serverIds, homeRoutingForm.value.show_home_node_prefix)
     homeRoutingOptions.value = {
       ...homeRoutingOptions.value,
       ...(response.data || {})
@@ -1119,6 +1125,14 @@ onBeforeUnmount(() => {
 
 .home-routing-table {
   width: 100%;
+}
+
+.home-routing-prefix-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  white-space: nowrap;
 }
 
 .home-routing-mobile-list {

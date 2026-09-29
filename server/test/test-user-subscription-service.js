@@ -284,6 +284,39 @@ async function testActiveHomeRouteShouldDecorateSubscriptionFormats() {
 }
 
 /**
+ * 验证关闭前缀开关后通用和 Clash 订阅均输出原始名称，绑定数据不变。
+ * @returns {Promise<void>} 两种订阅格式都不添加家宽前缀。
+ */
+async function testDisabledHomeNodePrefixShouldKeepSubscriptionNames() {
+  const nodeName = '日本[4K]-hy2';
+  const subscription = {
+    user_id: 12, sub_id: 'prefix-off-token', email: 'user@example.com', enabled: 1,
+    traffic_used: 0, traffic_limit: 1024, expire_at: 0,
+    nodes_data: JSON.stringify([{
+      server_id: 8, server_name: '日本', node_name: nodeName,
+      link: `vless://11111111-1111-1111-1111-111111111111@example.com:443?encryption=none#${encodeURIComponent(nodeName)}`
+    }])
+  };
+  const entitlement = {
+    home_plan_id: 3, home_expire_at: Math.floor(Date.now() / 1000) + 3600,
+    home_status: 'normal', plan_type: 'home_ip', home_proxy_tag: 'home', home_proxy_id: 6
+  };
+  for (const prefixValue of [0, '0']) {
+    const route = {
+      server_ids: '[8]', home_proxy_tag: 'home', last_sync_status: 'success',
+      show_home_node_prefix: prefixValue
+    };
+    const db = createHomeRoutingFakeDb(subscription, entitlement, route);
+    const generic = await subscriptionService.getSubscriptionContent(db, 'prefix-off-token', {});
+    assert.ok(Buffer.from(generic.body, 'base64').toString('utf8').endsWith(`#${encodeURIComponent(nodeName)}`));
+    const clash = await subscriptionService.getSubscriptionContent(db, 'prefix-off-token', { clash: '1' });
+    assert.ok(clash.body.includes(`name: ${nodeName}`));
+    assert.ok(!clash.body.includes('家宽落地-'));
+    assert.strictEqual(route.server_ids, '[8]');
+  }
+}
+
+/**
  * 验证绑定范围、权益失效及解绑都会在现有缓存上即时反映。
  * 关键参数：两台服务器共用一份缓存；核心分支只命中绑定 ID，过期、未购买和解绑都恢复普通名称。
  * @returns {Promise<void>}
@@ -427,6 +460,19 @@ async function testSubscriptionInfoShouldDecorateOnlyActiveHomeServers() {
     );
     assert.deepStrictEqual(activeInfo.nodes.map((node) => node.node_name), [
       '家宽落地-日本[4K]-hy2', '美国[4K]-hy2'
+    ]);
+
+    const disabledInfo = await subscriptionService.getSubscriptionInfo(
+      createHomeRoutingFakeDb(undefined, active, { ...route, show_home_node_prefix: false }, servers), user.id
+    );
+    assert.deepStrictEqual(disabledInfo.nodes.map((node) => node.node_name), [
+      '日本[4K]-hy2', '美国[4K]-hy2'
+    ]);
+    const stringDisabledInfo = await subscriptionService.getSubscriptionInfo(
+      createHomeRoutingFakeDb(undefined, active, { ...route, show_home_node_prefix: '0' }, servers), user.id
+    );
+    assert.deepStrictEqual(stringDisabledInfo.nodes.map((node) => node.node_name), [
+      '日本[4K]-hy2', '美国[4K]-hy2'
     ]);
 
     servers[0].name = '家宽落地-日本';
@@ -1543,6 +1589,7 @@ async function run() {
   await testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgroundCooldown();
   await testClashSubscriptionShouldRenderYaml();
   await testActiveHomeRouteShouldDecorateSubscriptionFormats();
+  await testDisabledHomeNodePrefixShouldKeepSubscriptionNames();
   await testHomeRouteStateShouldDecorateOnlyBoundServers();
   await testLegacyHomeCacheShouldMatchBoundServerName();
   await testAdminPrefixedNodeNameShouldRemainIntact();

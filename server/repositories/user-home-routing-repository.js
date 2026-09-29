@@ -102,6 +102,7 @@ async function listServersByIds(db, ids) {
  * @param {number} payload.userId - 用户 ID
  * @param {string} payload.homeProxyTag - 家宽 outbound tag
  * @param {number[]} payload.serverIds - 已成功同步服务器 ID
+ * @param {boolean} payload.showHomeNodePrefix - 订阅节点是否展示家宽前缀
  * @param {number} payload.syncedAt - 成功同步时间
  * @param {string} payload.message - 成功摘要
  * @returns {Promise<void>}
@@ -109,12 +110,13 @@ async function listServersByIds(db, ids) {
 async function upsertUserHomeRoute(db, payload) {
   await db.prepare(`
     INSERT INTO user_home_proxy_routes (
-      user_id, home_proxy_tag, server_ids, last_synced_at, last_sync_status, last_sync_message, created_at, updated_at
+      user_id, home_proxy_tag, server_ids, show_home_node_prefix, last_synced_at, last_sync_status, last_sync_message, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, 'success', ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, 'success', ?, ?, ?)
     ON CONFLICT (user_id) DO UPDATE SET
       home_proxy_tag = EXCLUDED.home_proxy_tag,
       server_ids = EXCLUDED.server_ids,
+      show_home_node_prefix = EXCLUDED.show_home_node_prefix,
       last_synced_at = EXCLUDED.last_synced_at,
       last_sync_status = EXCLUDED.last_sync_status,
       last_sync_message = EXCLUDED.last_sync_message,
@@ -123,6 +125,7 @@ async function upsertUserHomeRoute(db, payload) {
     payload.userId,
     payload.homeProxyTag,
     JSON.stringify(payload.serverIds || []),
+    payload.showHomeNodePrefix ? 1 : 0,
     payload.syncedAt,
     payload.message || '',
     payload.syncedAt,
