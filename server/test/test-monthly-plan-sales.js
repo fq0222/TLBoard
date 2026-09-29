@@ -2218,6 +2218,7 @@ test('subscription content keeps lifetime plan token valid with expire at zero',
           get(token) {
             assert.equal(token, 'lifetime-token');
             return {
+              user_id: 44,
               sub_id: 'lifetime-token',
               email: 'lifetime-token@example.com',
               enabled: 1,
@@ -2234,6 +2235,14 @@ test('subscription content keeps lifetime plan token valid with expire at zero',
         return {
           all() {
             return [];
+          }
+        };
+      }
+      if (sql.includes('u.home_plan_id') && sql.includes('FROM users u')) {
+        return {
+          get(userId) {
+            assert.equal(userId, 44);
+            return { home_plan_id: null };
           }
         };
       }

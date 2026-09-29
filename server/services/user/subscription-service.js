@@ -16,6 +16,7 @@ const { isTimedPlan } = require('../shared/plan-type');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const subscriptionRepository = require('../../repositories/subscription-repository');
+const homeRoutingRepository = require('../../repositories/user-home-routing-repository');
 const { runWithConcurrency } = require('../../utils/concurrency');
 const { generatePublicSubscriptionId } = require('../../utils/subscription-id');
 const { getUserAppBaseUrl } = require('../../shared/utils/site-url');
@@ -114,6 +115,94 @@ function buildSubscriptionNodeName(server, remark, sequence = null) {
       : '';
   const suffix = sequence ? `-${sequence}` : '';
   return `${server.name}${badge}-${remark}${suffix}`;
+}
+
+/**
+ * 查询当前有效家宽权益所覆盖的已成功绑定服务器。
+ * @param {Object} db - 数据库代理对象。
+ * @param {number} userId - 当前订阅用户 ID。
+ * @returns {Promise<Set<number>>} 可显示家宽前缀的服务器 ID 集合；未购买、过期或绑定未成功时为空。
+ */
+async function getActiveHomeServerIds(db, userId) {
+  const entitlement = await homeRoutingRepository.findHomeRoutingEntitlement(db, userId);
+  if (!entitlement?.home_plan_id
+    || entitlement.plan_type !== 'home_ip'
+    || entitlement.home_status === 'expired'
+    || Number(entitlement.home_expire_at || 0) <= Math.floor(Date.now() / 1000)
+    || !String(entitlement.home_proxy_tag || '').trim()
+    || !entitlement.home_proxy_id) {
+    return new Set();
+  }
+
+  const route = await homeRoutingRepository.findUserHomeRoute(db, userId);
+  if (!route || route.last_sync_status !== 'success'
+    || route.home_proxy_tag !== entitlement.home_proxy_tag) {
+    return new Set();
+  }
+
+  let serverIds;
+  try {
+    serverIds = typeof route.server_ids === 'string'
+      ? JSON.parse(route.server_ids)
+      : route.server_ids;
+  } catch (error) {
+    return new Set();
+  }
+  return new Set((Array.isArray(serverIds) ? serverIds : [])
+    .map(Number)
+    .filter((id) => Number.isInteger(id) && id > 0));
+}
+
+/**
+ * 根据家宽绑定状态生成节点展示名，同时保留管理员设置的原始名称。
+ * @param {string} nodeName - 原节点名，可能由管理员设置为家宽前缀开头。
+ * @param {boolean} homeBound - 当前服务器是否有有效家宽绑定。
+ * @returns {string} 未绑定时原样返回；绑定时仅对未带前缀的名称添加一次。
+ */
+function decorateHomeNodeName(nodeName, homeBound) {
+  const originalName = String(nodeName || '');
+  return homeBound && !originalName.startsWith('家宽落地-')
+    ? `家宽落地-${originalName}`
+    : originalName;
+}
+
+/**
+ * 按当前服务器绑定状态装饰缓存节点，不修改缓存对象。
+ * @param {Object} node - 含普通名称及服务器标识的缓存节点；旧缓存可能只有 server_name。
+ * @param {Set<number>} homeServerIds - 当前有效家宽绑定的服务器 ID。
+ * @param {Map<string,number>} legacyServerIds - 旧缓存服务器名称到 ID 的映射。
+ * @returns {Object} 链接备注与节点名称同步更新后的输出节点；无绑定时保留缓存原始名称。
+ */
+function decorateHomeNode(node, homeServerIds, legacyServerIds) {
+  const serverId = node.server_id == null
+    ? legacyServerIds.get(String(node.server_name || ''))
+    : Number(node.server_id);
+  const nodeName = decorateHomeNodeName(node.node_name, homeServerIds.has(serverId));
+  return {
+    ...node,
+    node_name: nodeName,
+    link: node.link ? replaceNodeRemark(node.link, nodeName) : node.link
+  };
+}
+
+/**
+ * 为旧缓存按服务器名称建立兼容映射；名称重复时拒绝猜测归属。
+ * @param {Object} db - 数据库代理对象。
+ * @param {Set<number>} homeServerIds - 当前已绑定的服务器 ID，包含离线服务器。
+ * @returns {Promise<Map<string,number>>} 唯一服务器名称到 ID 的映射。
+ */
+async function getLegacyServerIdsByName(db, homeServerIds) {
+  const servers = await subscriptionRepository.listAllServerIdentities(db);
+  const idsByName = new Map();
+  for (const server of servers) {
+    const name = String(server.name || '');
+    if (idsByName.has(name)) {
+      idsByName.set(name, null);
+    } else {
+      idsByName.set(name, homeServerIds.has(Number(server.id)) ? Number(server.id) : null);
+    }
+  }
+  return idsByName;
 }
 
 /**
@@ -1054,6 +1143,7 @@ function composeSubscriptionNodes(nodeConfigs, sourceMap, serversById, cfIps, lo
         );
 
         allNodes.push({
+          server_id: server.id,
           server_name: server.name,
           node_name: nodeName,
           protocol: config.protocol,
@@ -1076,6 +1166,7 @@ function composeSubscriptionNodes(nodeConfigs, sourceMap, serversById, cfIps, lo
     );
 
     allNodes.push({
+      server_id: server.id,
       server_name: server.name,
       node_name: nodeName,
       protocol: config.protocol,
@@ -1768,6 +1859,7 @@ async function getSubscriptionInfo(db, userId) {
     ? await subscriptionRepository.listOnlineServersForDisplay(db)
     : [];
   const nodes = [];
+  const homeServerIds = subscriptionReady ? await getActiveHomeServerIds(db, userId) : new Set();
 
   for (const server of servers) {
     const serverNodes = await subscriptionRepository.listServerNodes(db, server.id);
@@ -1787,8 +1879,9 @@ async function getSubscriptionInfo(db, userId) {
             cfIps.length > 1 ? index + 1 : null
           );
           nodes.push({
+            server_id: server.id,
             server_name: server.name,
-            node_name: nodeName,
+            node_name: decorateHomeNodeName(nodeName, homeServerIds.has(Number(server.id))),
             protocol: protocolDetail,
             strategy,
             uuid: config.uuid,
@@ -1803,8 +1896,12 @@ async function getSubscriptionInfo(db, userId) {
 
       const defaultIp = String(server.api_url || '').match(/\/\/([^:]+)/);
       nodes.push({
+        server_id: server.id,
         server_name: server.name,
-        node_name: buildSubscriptionNodeName(server, node.remark),
+        node_name: decorateHomeNodeName(
+          buildSubscriptionNodeName(server, node.remark),
+          homeServerIds.has(Number(server.id))
+        ),
         protocol: protocolDetail,
         strategy,
         uuid: config.uuid,
@@ -1878,9 +1975,14 @@ async function getSubscriptionContent(db, token, query) {
     return fallback;
   }
 
+  const cachedNodes = JSON.parse(subscription.nodes_data || '[]');
+  const homeServerIds = await getActiveHomeServerIds(db, subscription.user_id);
+  const legacyServerIds = homeServerIds.size > 0 && cachedNodes.some((node) => node.server_id == null)
+    ? await getLegacyServerIdsByName(db, homeServerIds)
+    : new Map();
   const nodes = await appendAnnouncementVirtualNodes(
     db,
-    JSON.parse(subscription.nodes_data || '[]')
+    cachedNodes.map((node) => decorateHomeNode(node, homeServerIds, legacyServerIds))
   );
   if (query.clash === '1') {
     const clashHeaderConfig = await getClashSubscriptionHeaderConfig(db);

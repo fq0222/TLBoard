@@ -42,6 +42,36 @@ function createFakeDb(subscription, settings = {}) {
   };
 }
 
+/**
+ * 构造包含家宽权益和成功绑定状态的订阅假数据库。
+ * @param {Object} subscription - 订阅缓存记录。
+ * @param {Object|undefined} entitlement - 当前家宽套餐权益。
+ * @param {Object|undefined} route - 当前已持久化的家宽绑定。
+ * @param {Array<Object>} servers - 数据库中的服务器记录，含离线服务器。
+ * @returns {Object} 仅响应本组订阅读取的假数据库。
+ */
+function createHomeRoutingFakeDb(subscription, entitlement, route, servers = []) {
+  const db = createFakeDb(subscription);
+  const originalPrepare = db.prepare;
+  db.prepare = (sql) => {
+    if (sql.includes('u.home_plan_id')) {
+      return { get: () => entitlement };
+    }
+    if (sql.includes('FROM user_home_proxy_routes')) {
+      return { get: () => route };
+    }
+    if (sql.includes('FROM xui_servers')) {
+      return { all: (...ids) => sql.includes('WHERE status = 1')
+        ? servers.filter((server) => server.status === 1)
+        : sql.includes('WHERE id IN')
+          ? servers.filter((server) => ids.includes(server.id))
+          : servers };
+    }
+    return originalPrepare(sql);
+  };
+  return db;
+}
+
 function createFakeDbWithUserSubscriptionId(user, settings = {}) {
   return {
     prepare(sql) {
@@ -220,6 +250,221 @@ async function testClashSubscriptionShouldRenderYaml() {
   assert.ok(result.body.includes('type: vless'));
   assert.ok(result.body.includes('server: 2606:4700:4700::1111'));
   assert.ok(result.body.includes('Host: cdn.example.com'));
+}
+
+/**
+ * 验证已绑定的有效家宽服务器在每次订阅请求中动态展示前缀。
+ * 关键参数：缓存保持普通名称，家宽记录由假数据库返回；核心分支覆盖通用与 Clash 输出。
+ *
+ * @returns {Promise<void>}
+ */
+async function testActiveHomeRouteShouldDecorateSubscriptionFormats() {
+  const link = 'vless://11111111-1111-1111-1111-111111111111@example.com:443?encryption=none&security=tls&type=ws#日本[4K]-hy2';
+  const subscription = {
+    user_id: 12,
+    sub_id: 'home-token',
+    email: 'user@example.com',
+    enabled: 1,
+    traffic_used: 0,
+    traffic_limit: 1024,
+    expire_at: 0,
+    nodes_data: JSON.stringify([{ server_id: 8, server_name: '日本', node_name: '日本[4K]-hy2', link }])
+  };
+  const db = createHomeRoutingFakeDb(subscription,
+    { home_plan_id: 3, home_expire_at: Math.floor(Date.now() / 1000) + 3600, home_status: 'normal', plan_type: 'home_ip', home_proxy_tag: 'home', home_proxy_id: 6 },
+    { server_ids: '[8]', home_proxy_tag: 'home', last_sync_status: 'success' });
+
+  const generic = await subscriptionService.getSubscriptionContent(db, 'home-token', {});
+  assert.ok(Buffer.from(generic.body, 'base64').toString('utf8').includes('#' + encodeURIComponent('家宽落地-日本[4K]-hy2')));
+
+  const clash = await subscriptionService.getSubscriptionContent(db, 'home-token', { clash: '1' });
+  assert.ok(clash.body.includes('name: 家宽落地-日本[4K]-hy2'));
+  assert.ok(clash.body.includes('      - 家宽落地-日本[4K]-hy2'));
+  assert.ok(!subscription.nodes_data.includes('家宽落地-'));
+}
+
+/**
+ * 验证绑定范围、权益失效及解绑都会在现有缓存上即时反映。
+ * 关键参数：两台服务器共用一份缓存；核心分支只命中绑定 ID，过期、未购买和解绑都恢复普通名称。
+ * @returns {Promise<void>}
+ */
+async function testHomeRouteStateShouldDecorateOnlyBoundServers() {
+  const baseNode = (serverId, name) => ({
+    server_id: serverId,
+    server_name: name,
+    node_name: `${name}-direct`,
+    link: `vless://11111111-1111-1111-1111-111111111111@example.com:443?encryption=none#${name}-direct`
+  });
+  const subscription = {
+    user_id: 12, sub_id: 'state-token', email: 'user@example.com', enabled: 1,
+    traffic_used: 0, traffic_limit: 1024, expire_at: 0,
+    nodes_data: JSON.stringify([baseNode(8, '日本'), baseNode(9, '美国')])
+  };
+  const active = { home_plan_id: 3, home_expire_at: Math.floor(Date.now() / 1000) + 3600, home_status: 'normal', plan_type: 'home_ip', home_proxy_tag: 'home', home_proxy_id: 6 };
+  const route = { server_ids: '[8]', home_proxy_tag: 'home', last_sync_status: 'success' };
+  const scenarios = [
+    { entitlement: active, route, expected: ['家宽落地-日本-direct', '美国-direct'] },
+    { entitlement: { ...active, home_status: 'expired' }, route, expected: ['日本-direct', '美国-direct'] },
+    { entitlement: { ...active, home_expire_at: Math.floor(Date.now() / 1000) - 1 }, route, expected: ['日本-direct', '美国-direct'] },
+    { entitlement: undefined, route, expected: ['日本-direct', '美国-direct'] },
+    { entitlement: { ...active, home_proxy_id: null }, route, expected: ['日本-direct', '美国-direct'] },
+    { entitlement: active, route: undefined, expected: ['日本-direct', '美国-direct'] },
+    { entitlement: active, route: { ...route, last_sync_status: 'failed' }, expected: ['日本-direct', '美国-direct'] }
+  ];
+
+  for (const scenario of scenarios) {
+    const result = await subscriptionService.getSubscriptionContent(
+      createHomeRoutingFakeDb(subscription, scenario.entitlement, scenario.route),
+      'state-token', { clash: '1' }
+    );
+    const names = Array.from(result.body.split('proxy-groups:')[0].matchAll(/^  - name: (.+)$/gm), (match) => match[1]);
+    assert.deepStrictEqual(names, scenario.expected);
+  }
+}
+
+/**
+ * 验证旧缓存按绑定服务器名称兼容匹配，且重复输出不会叠加前缀。
+ * 核心分支：旧缓存没有 server_id，服务器虽离线仍应按已绑定记录识别。
+ * @returns {Promise<void>}
+ */
+async function testLegacyHomeCacheShouldMatchBoundServerName() {
+  const subscription = {
+    user_id: 12, sub_id: 'legacy-home-token', email: 'user@example.com', enabled: 1,
+    traffic_used: 0, traffic_limit: 1024, expire_at: 0,
+    nodes_data: JSON.stringify([{
+      server_name: '日本', node_name: '日本[4K]-hy2',
+      link: 'vless://11111111-1111-1111-1111-111111111111@example.com:443?encryption=none#%E6%97%A5%E6%9C%AC%5B4K%5D-hy2'
+    }])
+  };
+  const active = { home_plan_id: 3, home_expire_at: Math.floor(Date.now() / 1000) + 3600, home_status: 'normal', plan_type: 'home_ip', home_proxy_tag: 'home', home_proxy_id: 6 };
+  const route = { server_ids: '[8]', home_proxy_tag: 'home', last_sync_status: 'success' };
+  const db = createHomeRoutingFakeDb(subscription, active, route, [{ id: 8, name: '日本', status: 0 }]);
+  const result = await subscriptionService.getSubscriptionContent(db, 'legacy-home-token', { clash: '1' });
+  assert.ok(result.body.includes('name: 家宽落地-日本[4K]-hy2'));
+  assert.ok(!result.body.includes('家宽落地-家宽落地-'));
+
+  const duplicateNames = createHomeRoutingFakeDb(subscription, active, route, [
+    { id: 8, name: '日本', status: 1 },
+    { id: 9, name: '日本', status: 1 }
+  ]);
+  const ambiguous = await subscriptionService.getSubscriptionContent(duplicateNames, 'legacy-home-token', { clash: '1' });
+  assert.ok(ambiguous.body.includes('name: 日本[4K]-hy2'));
+  assert.ok(!ambiguous.body.includes('name: 家宽落地-日本[4K]-hy2'));
+
+  const expired = createHomeRoutingFakeDb(subscription, { ...active, home_status: 'expired' }, route);
+  const plain = await subscriptionService.getSubscriptionContent(expired, 'legacy-home-token', {});
+  assert.ok(Buffer.from(plain.body, 'base64').toString('utf8').endsWith('#' + encodeURIComponent('日本[4K]-hy2')));
+}
+
+/**
+ * 验证管理员原始节点名自带家宽字样时，解绑和过期均保留原始名称。
+ * 核心分支：已绑定不重复加前缀；未绑定或权益过期时不改写缓存名称与通用链接备注。
+ * @returns {Promise<void>}
+ */
+async function testAdminPrefixedNodeNameShouldRemainIntact() {
+  const originalName = '家宽落地-日本[4K]-hy2';
+  const subscription = {
+    user_id: 12, sub_id: 'admin-name-token', email: 'user@example.com', enabled: 1,
+    traffic_used: 0, traffic_limit: 1024, expire_at: 0,
+    nodes_data: JSON.stringify([{
+      server_id: 8, server_name: '家宽落地-日本', node_name: originalName,
+      link: `vless://11111111-1111-1111-1111-111111111111@example.com:443?encryption=none#${encodeURIComponent(originalName)}`
+    }])
+  };
+  const active = { home_plan_id: 3, home_expire_at: Math.floor(Date.now() / 1000) + 3600, home_status: 'normal', plan_type: 'home_ip', home_proxy_tag: 'home', home_proxy_id: 6 };
+  const route = { server_ids: '[8]', home_proxy_tag: 'home', last_sync_status: 'success' };
+  const scenarios = [
+    { entitlement: active, route },
+    { entitlement: active, route: undefined },
+    { entitlement: { ...active, home_status: 'expired' }, route }
+  ];
+  for (const scenario of scenarios) {
+    const db = createHomeRoutingFakeDb(subscription, scenario.entitlement, scenario.route);
+    const generic = await subscriptionService.getSubscriptionContent(db, 'admin-name-token', {});
+    assert.ok(Buffer.from(generic.body, 'base64').toString('utf8').endsWith(`#${encodeURIComponent(originalName)}`));
+    const clash = await subscriptionService.getSubscriptionContent(db, 'admin-name-token', { clash: '1' });
+    assert.ok(clash.body.includes(`name: ${originalName}`));
+    assert.ok(!clash.body.includes('家宽落地-家宽落地-'));
+  }
+}
+
+/**
+ * 验证用户端订阅详情与内容输出使用相同的家宽服务器范围和到期判断。
+ * 核心分支：一台已绑定、一台未绑定；权益到期后两台均恢复普通名称。
+ * @returns {Promise<void>}
+ */
+async function testSubscriptionInfoShouldDecorateOnlyActiveHomeServers() {
+  const originals = {
+    findSubscriptionUserById: subscriptionRepository.findSubscriptionUserById,
+    findLatestUserSubscription: subscriptionRepository.findLatestUserSubscription,
+    listEnabledUserCfIps: subscriptionRepository.listEnabledUserCfIps,
+    listOnlineServersForDisplay: subscriptionRepository.listOnlineServersForDisplay,
+    listServerNodes: subscriptionRepository.listServerNodes
+  };
+  const user = {
+    id: 12, email: 'user@example.com', sub_id: 'home-detail-token', enabled: 1,
+    traffic_used: 0, traffic_limit: 1024, referral_traffic_limit: 0, expire_at: 0
+  };
+  const servers = [
+    { id: 8, name: '日本', status: 1, api_url: 'https://jp.example.com', host: 'jp.example.com' },
+    { id: 9, name: '美国', status: 1, api_url: 'https://us.example.com', host: 'us.example.com' }
+  ];
+  subscriptionRepository.findSubscriptionUserById = async () => user;
+  subscriptionRepository.findLatestUserSubscription = async () => ({ id: 1 });
+  subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
+  subscriptionRepository.listOnlineServersForDisplay = async () => servers;
+  subscriptionRepository.listServerNodes = async () => [{
+    inbound_id: 10, remark: 'hy2', port: 443, protocol: 'hysteria2',
+    settings: JSON.stringify({ clients: [{ email: user.email, id: 'test-uuid' }] }),
+    stream_settings: JSON.stringify({ network: 'udp', security: 'tls' })
+  }];
+
+  const active = { home_plan_id: 3, home_expire_at: Math.floor(Date.now() / 1000) + 3600, home_status: 'normal', plan_type: 'home_ip', home_proxy_tag: 'home', home_proxy_id: 6 };
+  const route = { server_ids: '[8]', home_proxy_tag: 'home', last_sync_status: 'success' };
+  try {
+    const activeInfo = await subscriptionService.getSubscriptionInfo(
+      createHomeRoutingFakeDb(undefined, active, route, servers), user.id
+    );
+    assert.deepStrictEqual(activeInfo.nodes.map((node) => node.node_name), [
+      '家宽落地-日本[4K]-hy2', '美国[4K]-hy2'
+    ]);
+
+    servers[0].name = '家宽落地-日本';
+    const prefixedServerInfo = await subscriptionService.getSubscriptionInfo(
+      createHomeRoutingFakeDb(undefined, active, route, servers), user.id
+    );
+    assert.strictEqual(prefixedServerInfo.nodes[0].node_name, '家宽落地-日本[4K]-hy2');
+    const prefixedExpiredInfo = await subscriptionService.getSubscriptionInfo(
+      createHomeRoutingFakeDb(undefined, { ...active, home_status: 'expired' }, route, servers), user.id
+    );
+    assert.strictEqual(prefixedExpiredInfo.nodes[0].node_name, '家宽落地-日本[4K]-hy2');
+    servers[0].name = '日本';
+
+    const expiredInfo = await subscriptionService.getSubscriptionInfo(
+      createHomeRoutingFakeDb(undefined, { ...active, home_status: 'expired' }, route, servers), user.id
+    );
+    assert.deepStrictEqual(expiredInfo.nodes.map((node) => node.node_name), [
+      '日本[4K]-hy2', '美国[4K]-hy2'
+    ]);
+
+    const missingProxyInfo = await subscriptionService.getSubscriptionInfo(
+      createHomeRoutingFakeDb(undefined, { ...active, home_proxy_id: null }, route, servers), user.id
+    );
+    assert.strictEqual(missingProxyInfo.nodes[0].node_name, '日本[4K]-hy2');
+
+    servers[0].name = '家宽落地-日本';
+    subscriptionRepository.listServerNodes = async () => [{
+      inbound_id: 11, remark: 'cf', port: 443, protocol: 'vless',
+      settings: JSON.stringify({ clients: [{ email: user.email, id: 'test-uuid' }] }),
+      stream_settings: JSON.stringify({ network: 'ws', security: 'tls' })
+    }];
+    const cfInfo = await subscriptionService.getSubscriptionInfo(
+      createHomeRoutingFakeDb(undefined, active, route, servers), user.id
+    );
+    assert.strictEqual(cfInfo.nodes[0].node_name, '家宽落地-日本[AI]-cf');
+  } finally {
+    Object.assign(subscriptionRepository, originals);
+  }
 }
 
 /**
@@ -943,6 +1188,8 @@ async function testGenerateSubscriptionShouldRefreshMismatchedSourceCache() {
 
   assert.strictEqual(fetchCount, 1);
   assert.strictEqual(savedNodes.length, 1);
+  assert.strictEqual(savedNodes[0].server_id, 1);
+  assert.strictEqual(savedNodes[0].node_name, '测试-direct');
   assert.ok(savedNodes[0].link.includes('flow=xtls-rprx-vision'));
   assert.ok(savedNodes[0].link.includes('security=reality'));
   assert.ok(!savedNodes[0].link.includes('type=ws'));
@@ -1226,6 +1473,8 @@ async function testGenerateSubscriptionShouldKeepRefreshedHy2SourceCache() {
 
   assert.strictEqual(fetchCount, 1);
   assert.strictEqual(savedNodes.length, 1);
+  assert.strictEqual(savedNodes[0].server_id, 2);
+  assert.strictEqual(savedNodes[0].node_name, '测试[4K]-hy2');
   assert.strictEqual(savedNodes[0].hy2_ports, '40000-40010');
   assert.ok(savedNodes[0].link.startsWith('hysteria2://ps6ne77kxinlotaz@us00.bidding.dpdns.org:32458?'));
   assert.ok(savedNodes[0].link.includes('mport=40000-40010'));
@@ -1293,6 +1542,11 @@ async function run() {
   await testDefaultSubscriptionContentShouldReturnBase64AndUserinfo();
   await testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgroundCooldown();
   await testClashSubscriptionShouldRenderYaml();
+  await testActiveHomeRouteShouldDecorateSubscriptionFormats();
+  await testHomeRouteStateShouldDecorateOnlyBoundServers();
+  await testLegacyHomeCacheShouldMatchBoundServerName();
+  await testAdminPrefixedNodeNameShouldRemainIntact();
+  await testSubscriptionInfoShouldDecorateOnlyActiveHomeServers();
   testClashHy2SubscriptionShouldUseCachedPortsRange();
   testClashHy2SubscriptionShouldOmitPortsWhenDisabled();
   testHy2StrategyShouldOmitMportWhenPortsDisabled();

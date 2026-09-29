@@ -193,6 +193,15 @@ async function saveUserSubscriptionCache(db, userId, subId, nodes) {
 }
 
 /**
+ * 查询所有服务器的 ID 与名称，用于识别旧订阅缓存中的同名歧义。
+ * @param {Object} db - 数据库代理对象。
+ * @returns {Promise<Array<{id:number,name:string}>>} 包含离线服务器的标识列表。
+ */
+async function listAllServerIdentities(db) {
+  return db.prepare('SELECT id, name FROM xui_servers').all();
+}
+
+/**
  * 替换用户公开订阅链接 ID。
  *
  * @param {Object} db - 数据库代理对象
@@ -299,6 +308,7 @@ module.exports = {
   listEnabledUserCfIps,
   listOnlineServers,
   listOnlineServersForDisplay,
+  listAllServerIdentities,
   listNodeSnapshots,
   listUserNodeConfigs,
   listUserSubscriptionSources,
