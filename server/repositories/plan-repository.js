@@ -15,7 +15,6 @@ async function findEnabledPlans(db) {
     FROM plans
     WHERE enabled = 1
       AND show_on_home = 1
-      AND COALESCE(plan_type, 'lifetime') != 'home_ip'
     ORDER BY sort_order ASC, id ASC
   `).all();
 }

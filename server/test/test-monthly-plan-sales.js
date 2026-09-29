@@ -382,7 +382,9 @@ test('user home plans query filters show_on_home', async () => {
   };
 
   await planRepository.findEnabledPlans(db);
+  assert.match(capturedSql, /enabled = 1/);
   assert.match(capturedSql, /show_on_home = 1/);
+  assert.doesNotMatch(capturedSql, /home_ip/i);
 });
 
 test('renew plan list includes both lifetime and timed traffic plans', async () => {

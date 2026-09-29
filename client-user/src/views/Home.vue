@@ -26,6 +26,7 @@
             type="button"
             class="filter-button"
             :class="{ active: activePlanFilter === filter.value }"
+            :aria-pressed="activePlanFilter === filter.value"
             @click="activePlanFilter = filter.value"
           >
             {{ filter.label }}
@@ -93,7 +94,7 @@
             <div class="plan-metrics">
               <div class="metric-card">
                 <span class="metric-label">流量</span>
-                <strong class="metric-value">{{ plan.traffic_text }}</strong>
+                <strong class="metric-value">{{ formatPlanTraffic(plan) }}</strong>
               </div>
               <div class="metric-card">
                 <span class="metric-label">时长</span>
@@ -111,16 +112,17 @@
 
             <div class="plan-footer">
               <div class="plan-highlight">
-                <span>{{ plan.is_soldout ? '当前暂不可下单，你仍可先查看套餐信息。' : '点击立即购买，完成付款后系统会自动注册并开通账号。' }}</span>
+                <span>{{ plan.plan_type === 'home_ip' ? '住宅 IP 套餐仅供展示，暂不支持在线购买。' : plan.is_soldout ? '当前暂不可下单，你仍可先查看套餐信息。' : '点击立即购买，完成付款后系统会自动注册并开通账号。' }}</span>
               </div>
               <el-button
                 type="primary"
                 size="large"
                 class="buy-btn"
-                :disabled="plan.is_soldout"
+                :class="{ 'is-home-ip': plan.plan_type === 'home_ip' }"
+                :disabled="plan.is_soldout || plan.plan_type === 'home_ip'"
                 @click="selectPlan(plan)"
               >
-                {{ plan.is_soldout ? '已售罄' : '立即购买' }}
+                {{ plan.plan_type === 'home_ip' ? '仅展示' : plan.is_soldout ? '已售罄' : '立即购买' }}
                 <el-icon class="btn-icon"><ArrowRight /></el-icon>
               </el-button>
             </div>
@@ -157,7 +159,8 @@ const activePlanFilter = ref('all')
 const planFilters = [
   { label: '全部', value: 'all' },
   { label: '限时', value: 'limited' },
-  { label: '不限时', value: 'unlimited' }
+  { label: '不限时', value: 'unlimited' },
+  { label: '住宅IP', value: 'home_ip' }
 ]
 
 const isLoggedIn = computed(() => userStore.isLoggedIn)
@@ -197,8 +200,24 @@ function formatDuration(durationDays) {
   return Number(durationDays) === 0 ? '不限时' : `${durationDays} 天`
 }
 
+/**
+ * 输出首页套餐卡片的流量指标。
+ * @param {Object} plan - 当前卡片的套餐数据。
+ * @returns {string} 住宅 IP 固定显示不限制流量，其他套餐沿用原流量文案。
+ */
+function formatPlanTraffic(plan) {
+  if (plan.plan_type === 'home_ip') {
+    return '不限制流量'
+  }
+  return plan.traffic_text
+}
+
 function getPlanSummary(plan) {
   if (plan.description) return plan.description
+
+  if (plan.plan_type === 'home_ip') {
+    return '住宅 IP 套餐不限制流量，具体服务请参考套餐详情。'
+  }
 
   const duration = Number(plan.duration_days)
   if (duration === 0) {
@@ -231,6 +250,10 @@ async function initializeReferralTracking() {
 }
 
 function selectPlan(plan) {
+  if (plan.plan_type === 'home_ip') {
+    return
+  }
+
   if (plan.is_soldout) {
     ElMessage.warning('该套餐已售罄')
     return
@@ -380,7 +403,7 @@ onMounted(() => {
 
 .filter-button {
   flex: 1;
-  min-width: 70px;
+  min-width: 0;
   padding: 8px 14px;
   border: none;
   border-radius: 999px;
@@ -706,6 +729,16 @@ onMounted(() => {
   font-weight: 700;
   border: none;
   background: linear-gradient(135deg, #0f766e 0%, #115e59 100%);
+}
+
+.buy-btn.is-home-ip.is-disabled,
+.buy-btn.is-home-ip.is-disabled:hover,
+.buy-btn.is-home-ip.is-disabled:focus,
+.buy-btn.is-home-ip.is-disabled:active {
+  background: linear-gradient(135deg, #0f766e 0%, #115e59 100%);
+  border-color: transparent;
+  color: #ffffff;
+  opacity: 1;
 }
 
 .buy-btn :deep(span) {
