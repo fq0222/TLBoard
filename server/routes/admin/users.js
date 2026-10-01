@@ -25,8 +25,8 @@ router.get('/', authenticateAdmin, [
     .withMessage('关键词必须是字符串'),
   query('status')
     .optional()
-    .isIn(['active', 'expired', 'disabled'])
-    .withMessage('状态必须是active、expired或disabled'),
+    .isIn(['active', 'renew', 'has_home_plan'])
+    .withMessage('状态筛选值无效'),
   query('plan_id')
     .optional()
     .isInt({ min: 1 })

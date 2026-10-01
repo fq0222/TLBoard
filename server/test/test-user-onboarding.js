@@ -72,6 +72,7 @@ function runMiddleware(middleware, req) {
  */
 function createListUsersDb(rows) {
   let listSql = '';
+  let listParams = [];
 
   return {
     db: {
@@ -86,7 +87,8 @@ function createListUsersDb(rows) {
 
         listSql = sql;
         return {
-          all() {
+          all(...params) {
+            listParams = params;
             return rows;
           }
         };
@@ -94,6 +96,9 @@ function createListUsersDb(rows) {
     },
     getListSql() {
       return listSql;
+    },
+    getListParams() {
+      return listParams;
     }
   };
 }
@@ -164,6 +169,28 @@ test('admin user list marks traffic limited disabled account as renew status', a
     { email: 'traffic-limited@example.com', status: 'renew', status_text: '续费' },
     { email: 'expired-disabled@example.com', status: 'renew', status_text: '续费' }
   ]);
+});
+
+test('admin user list filters accounts that need renewal by disable reason', async () => {
+  const { db, getListSql, getListParams } = createListUsersDb([]);
+
+  await usersService.listUsers(db, { page: 1, limit: 15, status: 'renew' });
+
+  assert.match(getListSql(), /u\.enabled = 0/);
+  assert.match(getListSql(), /u\.disable_reason IN \(\?, \?\)/);
+  assert.deepEqual(getListParams().slice(0, 2), [
+    DISABLE_REASONS.TRAFFIC_LIMIT,
+    DISABLE_REASONS.EXPIRED
+  ]);
+});
+
+test('admin user list filters every account with a home plan including expired entitlements', async () => {
+  const { db, getListSql } = createListUsersDb([]);
+
+  await usersService.listUsers(db, { page: 1, limit: 15, status: 'has_home_plan' });
+
+  assert.match(getListSql(), /u\.home_plan_id IS NOT NULL/);
+  assert.doesNotMatch(getListSql(), /AND u\.home_(?:status|expire_at)/);
 });
 
 test('admin user list sorts traffic used before pagination when requested', async () => {
@@ -240,6 +267,32 @@ test('admin user list route accepts balance descending sort parameters', async (
   }
 
   assert.deepEqual(validationResult(req).array(), []);
+});
+
+test('admin user list route accepts renew and home plan status filters', async () => {
+  const listRouteLayer = usersRouter.stack.find((layer) => layer.route && layer.route.path === '/');
+  const validatorMiddlewares = listRouteLayer.route.stack.slice(1, -1).map((layer) => layer.handle);
+
+  for (const status of ['renew', 'has_home_plan']) {
+    const req = { query: { status }, body: {}, params: {}, headers: {}, cookies: {} };
+    for (const middleware of validatorMiddlewares) {
+      await runMiddleware(middleware, req);
+    }
+    assert.equal(validationResult(req).isEmpty(), true, `${status} should pass route validation`);
+  }
+});
+
+test('admin user list route rejects removed expired and disabled filters', async () => {
+  const listRouteLayer = usersRouter.stack.find((layer) => layer.route && layer.route.path === '/');
+  const validatorMiddlewares = listRouteLayer.route.stack.slice(1, -1).map((layer) => layer.handle);
+
+  for (const status of ['expired', 'disabled']) {
+    const req = { query: { status }, body: {}, params: {}, headers: {}, cookies: {} };
+    for (const middleware of validatorMiddlewares) {
+      await runMiddleware(middleware, req);
+    }
+    assert.equal(validationResult(req).isEmpty(), false, `${status} should fail route validation`);
+  }
 });
 
 test('admin user list returns formatted ip location text', async () => {

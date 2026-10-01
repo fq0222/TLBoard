@@ -305,11 +305,11 @@ function buildUserListWhere(query) {
   if (status === 'active') {
     whereClause += ' AND u.enabled = 1 AND (u.expire_at = 0 OR u.expire_at = \'0\' OR u.expire_at IS NULL OR u.expire_at > ?)';
     params.push(now);
-  } else if (status === 'expired') {
-    whereClause += ' AND u.enabled = 1 AND u.expire_at != 0 AND u.expire_at != \'0\' AND u.expire_at IS NOT NULL AND u.expire_at <= ?';
-    params.push(now);
-  } else if (status === 'disabled') {
-    whereClause += ' AND u.enabled = 0';
+  } else if (status === 'renew') {
+    whereClause += ' AND u.enabled = 0 AND u.disable_reason IN (?, ?)';
+    params.push(DISABLE_REASONS.TRAFFIC_LIMIT, DISABLE_REASONS.EXPIRED);
+  } else if (status === 'has_home_plan') {
+    whereClause += ' AND u.home_plan_id IS NOT NULL';
   }
 
   if (planId) {
