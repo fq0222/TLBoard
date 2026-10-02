@@ -11,6 +11,10 @@
           <el-icon><Plus /></el-icon>
           添加服务器
         </el-button>
+        <el-button type="primary" plain @click="runXuiUserSyncTask" :loading="xuiUserSyncSubmitting">
+          <el-icon><Refresh /></el-icon>
+          {{ xuiUserSyncSubmitting ? '提交中' : '执行同步任务' }}
+        </el-button>
         <el-button type="success" @click="fetchAllServersOnlineCount" :loading="queryingAllOnline">
           <el-icon><Refresh /></el-icon>
           {{ queryingAllOnline ? '获取中' : '获取在线人数' }}
@@ -213,6 +217,7 @@ const serverFormRef = ref(null)
 const syncingId = ref(null)
 const queryingOnlineId = ref(null)
 const queryingAllOnline = ref(false)
+const xuiUserSyncSubmitting = ref(false)
 const backupTaskRunning = ref(false)
 const backupTaskId = ref(null)
 const backupStatusText = ref('')
@@ -449,6 +454,24 @@ async function fetchAllServersOnlineCount() {
     ElMessage.success('已获取全部服务器的在线人数')
   } finally {
     queryingAllOnline.value = false
+  }
+}
+
+/**
+ * 将全量用户同步提交到统一 3X-UI 队列。
+ * 核心分支：后端会区分新入队和与已有四小时同步任务合并两种结果。
+ */
+async function runXuiUserSyncTask() {
+  xuiUserSyncSubmitting.value = true
+  try {
+    const response = await api.admin.runXuiUserSyncTask()
+    if (response.code === 0) {
+      ElMessage.success(response.data.message)
+    }
+  } catch (error) {
+    console.error('提交 3X-UI 用户同步任务失败:', error)
+  } finally {
+    xuiUserSyncSubmitting.value = false
   }
 }
 

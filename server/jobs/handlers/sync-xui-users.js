@@ -672,10 +672,10 @@ function registerXuiSyncJob({ db, intervals, registerTimeout }) {
  * 同名任务运行中或排队时由调度器合并，避免并发访问 3X-UI。
  *
  * @param {Object} db - 数据库实例
- * @returns {void}
+ * @returns {boolean} 是否成功加入队列；false 表示同名任务已合并
  */
 function scheduleXuiUserSync(db) {
-  xuiJobScheduler.schedule('xui-user-sync', async () => {
+  return xuiJobScheduler.schedule('xui-user-sync', async () => {
     await runXuiSync(db);
   });
 }
@@ -720,6 +720,7 @@ async function runXuiSync(db) {
 
 module.exports = {
   registerXuiSyncJob,
+  scheduleXuiUserSync,
   __testables: {
     getServerClientSyncMismatches,
     getServerClientFromInboundSnapshots,

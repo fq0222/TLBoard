@@ -14,6 +14,8 @@ router.get('/', authenticateAdmin, serversController.listServers);
 
 router.post('/backup/run', authenticateAdmin, serversController.runBackupTask);
 
+router.post('/sync-users/run', authenticateAdmin, serversController.runXuiUserSyncTask);
+
 router.post('/', authenticateAdmin, [
   body('name')
     .notEmpty()

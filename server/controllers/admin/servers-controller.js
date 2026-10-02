@@ -210,6 +210,23 @@ async function runBackupTask(req, res) {
   }
 }
 
+/**
+ * 将 3X-UI 用户全量同步任务提交到统一后台队列。
+ *
+ * @param {Object} req - Express 请求对象
+ * @param {Object} res - Express 响应对象
+ * @returns {Promise<void>}
+ */
+async function runXuiUserSyncTask(req, res) {
+  try {
+    const result = serversService.runXuiUserSyncTask(req.app.locals.db);
+    logger.info(`提交 3X-UI 用户同步任务: queued=${result.queued}, merged=${result.merged}`);
+    return legacySuccess(res, result);
+  } catch (error) {
+    return handleControllerError(res, '提交 3X-UI 用户同步任务', error);
+  }
+}
+
 module.exports = {
   listServers,
   createServer,
@@ -219,6 +236,7 @@ module.exports = {
   syncServer,
   getServerOnlineCount,
   runBackupTask,
+  runXuiUserSyncTask,
   updateServerUser,
   deleteServerUser
 };

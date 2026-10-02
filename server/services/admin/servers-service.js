@@ -4,6 +4,7 @@ const XuiService = require('../../integrations/xui/xui-service');
 const serversRepository = require('../../repositories/servers-repository');
 const xuiNodeSnapshotService = require('../shared/xui-node-snapshot-service');
 const xuiBackupTaskService = require('./xui-backup-task-service');
+const { scheduleXuiUserSync } = require('../../jobs/handlers/sync-xui-users');
 
 const logger = createLogger('ADMIN-SERVERS');
 const DEFAULT_HY2_PORTS = '40000-50000';
@@ -470,6 +471,24 @@ function runBackupTask(db) {
 }
 
 /**
+ * 将一次 3X-UI 用户全量同步提交到统一后台队列。
+ * 核心分支：同名任务已运行或排队时返回合并状态，不重复创建任务。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @returns {{queued: boolean, merged: boolean, message: string}} 入队或合并结果
+ */
+function runXuiUserSyncTask(db) {
+  const queued = scheduleXuiUserSync(db);
+  return {
+    queued,
+    merged: !queued,
+    message: queued
+      ? '同步任务已加入队列'
+      : '已有同步任务正在执行或等待，已自动合并'
+  };
+}
+
+/**
  * 更新指定服务器某个节点上的用户信息。
  *
  * @param {Object} db - 数据库实例
@@ -542,6 +561,7 @@ module.exports = {
   syncServer,
   getServerOnlineCount,
   runBackupTask,
+  runXuiUserSyncTask,
   updateServerUser,
   deleteServerUser
 };

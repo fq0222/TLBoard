@@ -158,6 +158,7 @@ server/test/*
 !server/test/test-login-traffic-disabled.js
 !server/test/test-xui-server-cascade-cleanup.js
 !server/test/test-admin-orders-summary.js
+!server/test/test-admin-xui-user-sync.js
 !server/test/test-plans-updated-at-migration.js
 !server/test/test-user-announcements-auth.js
 !server/test/test-user-orders-privacy.js

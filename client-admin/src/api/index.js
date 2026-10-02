@@ -251,6 +251,14 @@ const adminApi = {
   },
 
   /**
+   * 将 3X-UI 用户全量同步任务提交到统一后台队列
+   * @returns {Promise<Object>} 入队或同名任务合并结果
+   */
+  runXuiUserSyncTask() {
+    return apiClient.post('/servers/sync-users/run', {}, { timeout: 10000 })
+  },
+
+  /**
    * 更新3X-UI用户信息
    * @param {number} serverId - 服务器ID
    * @param {Object} data - 用户数据
