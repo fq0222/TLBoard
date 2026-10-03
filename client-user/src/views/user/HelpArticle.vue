@@ -32,12 +32,14 @@ import { ArrowLeft } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import api from '@/api'
 import { loadManualLazyImage, prepareManualLazyImages } from '@/utils/manual-lazy-images'
+import { MarkdownCodeCopyController } from '@/utils/markdown-code-copy'
 
 const route = useRoute()
 const article = ref(null)
 const loading = ref(false)
 const markdownBodyRef = ref(null)
 let imageObserver = null
+let codeCopyController = null
 
 function sanitizeHtml(html) {
   const template = document.createElement('template')
@@ -93,6 +95,23 @@ function setupManualLazyImages() {
   images.forEach((image) => imageObserver.observe(image))
 }
 
+/** 为当前文章代码块挂载复制按钮，并兼容文章内容重新渲染。 */
+function setupCodeCopyButtons() {
+  const root = markdownBodyRef.value
+  if (!root) return
+
+  if (codeCopyController?.root !== root) {
+    codeCopyController?.destroy()
+    codeCopyController = new MarkdownCodeCopyController(root, {
+      onError: () => ElMessage.error('复制失败，请长按选择代码')
+    })
+    codeCopyController.mount()
+    return
+  }
+
+  codeCopyController.refresh()
+}
+
 const renderedContent = computed(() => {
   if (!article.value?.content) return ''
   return sanitizeHtml(marked(article.value.content))
@@ -131,10 +150,13 @@ onMounted(() => {
 watch(renderedContent, async () => {
   await nextTick()
   setupManualLazyImages()
+  setupCodeCopyButtons()
 })
 
 onBeforeUnmount(() => {
   disconnectImageObserver()
+  codeCopyController?.destroy()
+  codeCopyController = null
 })
 </script>
 
@@ -240,6 +262,65 @@ onBeforeUnmount(() => {
   overflow-x: auto;
 }
 
+.markdown-body :deep(.markdown-code-block) {
+  position: relative;
+  margin: 0 0 16px;
+}
+
+.markdown-body :deep(.markdown-code-block pre) {
+  margin: 0;
+  padding-top: 52px;
+}
+
+.markdown-body :deep(.markdown-details-code-block) {
+  position: relative;
+}
+
+.markdown-body :deep(.markdown-details-code-block > details > summary) {
+  box-sizing: border-box;
+  min-height: 52px;
+  padding-top: 14px;
+  padding-right: 84px;
+  padding-bottom: 14px;
+}
+
+.markdown-body :deep(.markdown-code-copy-button) {
+  position: absolute;
+  z-index: 1;
+  top: 8px;
+  right: 8px;
+  min-width: 64px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  background: #fff;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: color 0.2s, border-color 0.2s, background-color 0.2s;
+}
+
+.markdown-body :deep(.markdown-code-copy-button:hover) {
+  color: #409eff;
+  border-color: #a0cfff;
+  background: #ecf5ff;
+}
+
+.markdown-body :deep(.markdown-code-copy-button.is-copied) {
+  color: #67c23a;
+  border-color: #b3e19d;
+  background: #f0f9eb;
+}
+
+.markdown-body :deep(.markdown-code-copy-button.is-error) {
+  color: #f56c6c;
+  border-color: #fab6b6;
+  background: #fef0f0;
+}
+
 .markdown-body :deep(pre code) {
   background: transparent;
   padding: 0;
@@ -277,6 +358,22 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 768px) {
+  .markdown-body :deep(.markdown-code-copy-button) {
+    min-width: 72px;
+    min-height: 44px;
+  }
+
+  .markdown-body :deep(.markdown-code-block pre) {
+    padding-top: 60px;
+  }
+
+  .markdown-body :deep(.markdown-details-code-block > details > summary) {
+    min-height: 60px;
+    padding-top: 18px;
+    padding-right: 92px;
+    padding-bottom: 18px;
+  }
+
   .markdown-body :deep(video) {
     max-height: 70vh;
     max-height: 70dvh;
