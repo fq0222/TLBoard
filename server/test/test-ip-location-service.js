@@ -87,7 +87,7 @@ test('formatIpLocationText falls back to subscription then default text', () => 
   assert.equal(ipLocationService.formatIpLocationText('not-json'), '暂未获取');
 });
 
-test('formatIpLocationText shows country when MaxMind has no province or city', () => {
+test('formatIpLocationText shows country when lookup has no province or city', () => {
   assert.equal(ipLocationService.formatIpLocationText(JSON.stringify({
     login: {
       country: '中国',
@@ -99,7 +99,7 @@ test('formatIpLocationText shows country when MaxMind has no province or city', 
   })), '中国 [China Mobile Group JiLin]');
 });
 
-test('formatIpLocationText trims verbose ASN organization suffix', () => {
+test('formatIpLocationText trims verbose historical operator suffix', () => {
   assert.equal(ipLocationService.formatIpLocationText(JSON.stringify({
     login: {
       country: '中国',
@@ -128,24 +128,81 @@ test('isMainlandChinaLocation rejects overseas and Hong Kong Macau Taiwan', () =
   }), false);
 });
 
-test('shouldSkipIp keeps public IPv6 for MaxMind lookup', () => {
+test('shouldSkipIp keeps public IPv6 for IP2Region lookup', () => {
   assert.equal(
     ipLocationService.shouldSkipIp('2409:8931:a91:1598:41a8:2084:ab64:7a63'),
     false
   );
 });
 
-test('lookupIpLocation resolves mainland IPv6 with MaxMind country and ASN data', async () => {
-  const cityDbPath = path.join(__dirname, '..', 'ipData', 'GeoLite2-City.mmdb');
-  if (!fs.existsSync(cityDbPath)) {
-    assert.fail(`缺少 MaxMind City 数据库文件: ${cityDbPath}`);
+test('parseIp2RegionLocation converts placeholders into project location fields', () => {
+  const location = ipLocationService.__testables.parseIp2RegionLocation(
+    '113.118.113.77',
+    '中国|广东省|0|电信|CN'
+  );
+
+  assert.deepEqual({
+    ip: location.ip,
+    country: location.country,
+    province: location.province,
+    city: location.city,
+    district: location.district,
+    isp: location.isp
+  }, {
+    ip: '113.118.113.77',
+    country: '中国',
+    province: '广东省',
+    city: '',
+    district: '',
+    isp: '电信'
+  });
+  assert.equal(Number.isInteger(location.updated_at), true);
+});
+
+test('lookupIpLocation resolves mainland IPv6 with IP2Region data', async (t) => {
+  const ipv6DbPath = path.join(__dirname, '..', 'ipData', 'ip2region_v6.xdb');
+  if (!fs.existsSync(ipv6DbPath)) {
+    t.skip(`本机未安装 IP2Region IPv6 数据库: ${ipv6DbPath}`);
+    return;
   }
 
-  const location = await ipLocationService.lookupIpLocation('2409:8918:90fa:1d81:d8c3:31ff:fe7d:16f0');
+  const location = await ipLocationService.lookupIpLocation('240e:3b7:3272:d8d0:db09:c067:8d59:539e');
 
-  assert.equal(location.ip, '2409:8918:90fa:1d81:d8c3:31ff:fe7d:16f0');
+  assert.equal(location.ip, '240e:3b7:3272:d8d0:db09:c067:8d59:539e');
   assert.equal(location.country, '中国');
-  assert.match(location.isp, /China Mobile/i);
+  assert.equal(location.province, '广东省');
+  assert.equal(location.city, '深圳市');
+  assert.equal(location.isp, '电信');
+});
+
+test('Ip2RegionLookup retries initialization after a transient failure', async () => {
+  let loadAttempts = 0;
+  const lookup = new ipLocationService.__testables.Ip2RegionLookup({ 4: 'fake-v4.xdb' }, {
+    fileExists: () => true,
+    loadModule: async () => {
+      loadAttempts += 1;
+      if (loadAttempts === 1) throw new Error('temporary import failure');
+      return {
+        IPv4: { name: 'IPv4' },
+        IPv6: { name: 'IPv6' },
+        verifyFromFile() {},
+        loadContentFromFile() { return Buffer.from('xdb'); },
+        newWithBuffer() {
+          return {
+            async search() {
+              return '中国|广东省|深圳市|电信|CN';
+            }
+          };
+        }
+      };
+    }
+  });
+
+  await assert.rejects(() => lookup.lookup('113.118.113.77'), /temporary import failure/);
+  const location = await lookup.lookup('113.118.113.77');
+
+  assert.equal(loadAttempts, 2);
+  assert.equal(location.city, '深圳市');
 });
 
 test('recordUserIpLocation skips non-mainland lookup result', async () => {

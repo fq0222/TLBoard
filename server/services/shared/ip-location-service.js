@@ -6,16 +6,14 @@
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
-const maxmind = require('maxmind');
 const userRepository = require('../../repositories/user-repository');
 
 const MAINLAND_EXCLUDED_PROVINCES = ['香港', '澳门', '台湾', '香港特别行政区', '澳门特别行政区'];
 
-const DEFAULT_CITY_DB_PATH = path.join(__dirname, '..', '..', 'ipData', 'GeoLite2-City.mmdb');
-const DEFAULT_ASN_DB_PATH = path.join(__dirname, '..', '..', 'ipData', 'GeoLite2-ASN.mmdb');
-
-let cityLookupPromise;
-let asnLookupPromise;
+const DEFAULT_XDB_PATHS = {
+  4: path.join(__dirname, '..', '..', 'ipData', 'ip2region_v4.xdb'),
+  6: path.join(__dirname, '..', '..', 'ipData', 'ip2region_v6.xdb')
+};
 
 /**
  * 获取秒级 Unix 时间戳。
@@ -67,82 +65,104 @@ function shouldSkipIp(ip) {
 }
 
 /**
- * 读取 MaxMind 数据库路径，支持环境变量覆盖生产环境文件位置。
+ * 将 XDB 的空值占位符转换为项目可用字段。
  *
- * @param {'city'|'asn'} type - 数据库类型
- * @returns {string} mmdb 文件路径
+ * @param {string|undefined} value - XDB 字段值
+ * @returns {string} 规范化后的字段值
  */
-function getMaxMindDbPath(type) {
-  if (type === 'asn') {
-    return process.env.MAXMIND_ASN_DB_PATH || DEFAULT_ASN_DB_PATH;
-  }
-  return process.env.MAXMIND_CITY_DB_PATH || DEFAULT_CITY_DB_PATH;
+function normalizeRegionField(value) {
+  const text = String(value || '').trim();
+  return text === '0' ? '' : text;
 }
 
 /**
- * 懒加载 MaxMind City 查询器，避免模块加载时立即做文件 IO。
- *
- * @returns {Promise<Object|undefined>} City 查询器；文件缺失时返回 undefined
- */
-async function getCityLookup() {
-  if (!cityLookupPromise) {
-    const dbPath = getMaxMindDbPath('city');
-    cityLookupPromise = fs.existsSync(dbPath)
-      ? maxmind.open(dbPath)
-      : Promise.resolve(undefined);
-  }
-  return cityLookupPromise;
-}
-
-/**
- * 懒加载 MaxMind ASN 查询器。ASN 数据库可选，缺失时不影响省市查询。
- *
- * @returns {Promise<Object|undefined>} ASN 查询器；文件缺失时返回 undefined
- */
-async function getAsnLookup() {
-  if (!asnLookupPromise) {
-    const dbPath = getMaxMindDbPath('asn');
-    asnLookupPromise = fs.existsSync(dbPath)
-      ? maxmind.open(dbPath)
-      : Promise.resolve(undefined);
-  }
-  return asnLookupPromise;
-}
-
-/**
- * 按中文优先级读取 MaxMind 多语言名称。
- *
- * @param {Object|undefined} item - MaxMind 名称对象容器
- * @returns {string} 可展示名称
- */
-function getLocalizedName(item) {
-  const names = item && item.names ? item.names : {};
-  return names['zh-CN'] || names.zh || names.en || '';
-}
-
-/**
- * 将 MaxMind City/ASN 查询结果解析成统一结构。
+ * 将 IP2Region 查询结果解析成项目统一归属地结构。
  *
  * @param {string} ip - 查询 IP
- * @param {Object|undefined} cityResult - MaxMind City 结果
- * @param {Object|undefined} asnResult - MaxMind ASN 结果
- * @returns {Object|undefined} 归属地结构
+ * @param {string} region - 国家|省份|城市|运营商|国家代码
+ * @returns {Object|undefined} 归属地结构；空结果返回 undefined
  */
-function parseMaxMindLocation(ip, cityResult, asnResult) {
-  if (!cityResult) return undefined;
-  const countryItem = cityResult.country || cityResult.registered_country;
-  const subdivision = Array.isArray(cityResult.subdivisions) ? cityResult.subdivisions[0] : undefined;
+function parseIp2RegionLocation(ip, region) {
+  if (!region) return undefined;
+  const [country, province, city, isp] = region.split('|');
 
   return {
     ip,
-    country: getLocalizedName(countryItem),
-    province: getLocalizedName(subdivision),
-    city: getLocalizedName(cityResult.city),
+    country: normalizeRegionField(country),
+    province: normalizeRegionField(province),
+    city: normalizeRegionField(city),
     district: '',
-    isp: asnResult?.autonomous_system_organization || '',
+    isp: normalizeRegionField(isp),
     updated_at: getNowTimestamp()
   };
 }
+
+/**
+ * IP2Region 离线查询器管理类。
+ * 职责：按 IP 版本校验并懒加载官方 XDB，在进程生命周期内复用内存查询器。
+ */
+class Ip2RegionLookup {
+  /**
+   * @param {Object<number,string>} dbPaths - IPv4/IPv6 对应的 XDB 文件路径
+   * @param {Object} [options] - 文件检测和模块加载依赖
+   * @param {Function} [options.fileExists] - 判断 XDB 是否存在
+   * @param {Function} [options.loadModule] - 加载官方 IP2Region 模块
+   */
+  constructor(dbPaths, options = {}) {
+    this.dbPaths = dbPaths;
+    this.fileExists = options.fileExists || fs.existsSync;
+    this.loadModule = options.loadModule || (() => import('ip2region.js'));
+    this.searcherPromises = new Map();
+  }
+
+  /**
+   * 获取指定 IP 版本的共享内存查询器。
+   * 核心分支：数据库未部署时返回 undefined；存在时只校验并加载一次。
+   *
+   * @param {4|6} ipVersion - IP 协议版本
+   * @returns {Promise<Object|undefined>} IP2Region 查询器
+   */
+  async getSearcher(ipVersion) {
+    const dbPath = this.dbPaths[ipVersion];
+    if (!dbPath || !this.fileExists(dbPath)) return undefined;
+
+    if (!this.searcherPromises.has(ipVersion)) {
+      const searcherPromise = this.loadModule()
+        .then((ip2region) => {
+          const version = ipVersion === 4 ? ip2region.IPv4 : ip2region.IPv6;
+          ip2region.verifyFromFile(dbPath);
+          const content = ip2region.loadContentFromFile(dbPath);
+          return ip2region.newWithBuffer(version, content);
+        })
+        .catch((error) => {
+          if (this.searcherPromises.get(ipVersion) === searcherPromise) {
+            this.searcherPromises.delete(ipVersion);
+          }
+          throw error;
+        });
+      this.searcherPromises.set(ipVersion, searcherPromise);
+    }
+
+    return this.searcherPromises.get(ipVersion);
+  }
+
+  /**
+   * 查询已验证的公网 IP。
+   *
+   * @param {string} ip - 已规范化的公网 IPv4 或 IPv6 地址
+   * @returns {Promise<Object|undefined>} 项目统一归属地结构
+   */
+  async lookup(ip) {
+    const ipVersion = net.isIP(ip);
+    const searcher = await this.getSearcher(ipVersion);
+    if (!searcher) return undefined;
+
+    const region = await searcher.search(ip);
+    return parseIp2RegionLocation(ip, region);
+  }
+}
+
+const ip2RegionLookup = new Ip2RegionLookup(DEFAULT_XDB_PATHS);
 
 /**
  * 查询 IP 归属地。
@@ -153,16 +173,7 @@ function parseMaxMindLocation(ip, cityResult, asnResult) {
 async function lookupIpLocation(rawIp) {
   const ip = normalizeIp(rawIp);
   if (shouldSkipIp(ip)) return undefined;
-
-  const cityLookup = await getCityLookup();
-  if (!cityLookup) return undefined;
-
-  const asnLookup = await getAsnLookup();
-  return parseMaxMindLocation(
-    ip,
-    cityLookup.get(ip),
-    asnLookup ? asnLookup.get(ip) : undefined
-  );
+  return ip2RegionLookup.lookup(ip);
 }
 
 /**
@@ -192,9 +203,9 @@ function hasDisplayLocation(location) {
 }
 
 /**
- * 精简 ASN 组织名称里对管理端展示价值较低的尾缀。
+ * 精简历史归属地数据里对管理端展示价值较低的运营商尾缀。
  *
- * @param {string} value - MaxMind ASN 组织名称
+ * @param {string} value - 运营商名称
  * @returns {string} 管理端展示名称
  */
 function formatIspText(value) {
@@ -262,8 +273,8 @@ module.exports = {
   recordUserIpLocation,
   formatIpLocationText,
   __testables: {
-    parseMaxMindLocation,
-    getMaxMindDbPath,
+    Ip2RegionLookup,
+    parseIp2RegionLocation,
     formatIspText
   }
 };
