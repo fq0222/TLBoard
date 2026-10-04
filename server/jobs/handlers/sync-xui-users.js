@@ -10,6 +10,7 @@ const xuiNodeSnapshotService = require('../../services/shared/xui-node-snapshot-
 const { getStrategyFromRemark } = require('../../services/shared/subscription-strategy');
 const { createLogger } = require('../../utils/logger');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
+const { resolveServerClientCredentials } = require('../../services/shared/xui-credential-resolver');
 const xuiJobScheduler = require('../xui-job-scheduler');
 
 const logger = createLogger('JOBS');
@@ -484,7 +485,6 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
     let syncCount = 0;
 
     if (isPanelVersionAtLeast(server.panel_version, '3.4.2')) {
-      const crypto = require('crypto');
       const inbounds = inboundsResult.data || [];
       const inboundIds = inbounds.map((inbound) => inbound.id);
       const requiresFlow = inbounds.some((inbound) => getStrategyFromRemark(inbound.remark) === 'direct');
@@ -496,22 +496,13 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
             activeLogger.warn(`服务器 ${server.name} inbound 快照解析失败，回退 clients API 查询: user=${user.email}`);
             existing = await xuiService.getServerClientByEmail(user.email);
           }
-          const firstInbound = inbounds[0];
-          const firstConfig = firstInbound
-            ? await repository.findUserNodeConfig(db, user.id, server.id, firstInbound.id)
-            : null;
-          const uuid = existing.success
-            ? (existing.client.uuid || existing.client.id || crypto.randomUUID())
-            : (firstConfig?.uuid || crypto.randomUUID());
-          const password = existing.success
-            ? (existing.client.password || firstConfig?.password || crypto.randomBytes(8).toString('hex'))
-            : (firstConfig?.password || crypto.randomBytes(8).toString('hex'));
-          const auth = existing.success
-            ? (existing.client.auth || firstConfig?.auth || generateXuiAuth())
-            : (firstConfig?.auth || generateXuiAuth());
-          const subId = existing.success
-            ? (existing.client.subId || firstConfig?.sub_id || crypto.randomBytes(8).toString('hex'))
-            : (firstConfig?.sub_id || crypto.randomBytes(8).toString('hex'));
+          const localConfigs = await repository.listUserNodeConfigsByServer(db, user.id, server.id);
+          const credentials = resolveServerClientCredentials({
+            localConfigs,
+            remoteClient: existing.success ? existing.client : null,
+            expectedEmail: user.email
+          });
+          const { uuid, password, auth, subId } = credentials;
           const desiredClient = {
             id: uuid,
             password,

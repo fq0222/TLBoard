@@ -26,6 +26,22 @@ async function findUserNodeConfig(db, userId, serverId, inboundId) {
 }
 
 /**
+ * 查询用户在单台 3X-UI 服务器下的全部本地节点配置。
+ * @param {Object} db - 数据库代理对象
+ * @param {number} userId - 用户 ID
+ * @param {number} serverId - 服务器 ID
+ * @returns {Promise<Array<Object>>} 按 inbound_id 升序排列的配置
+ */
+async function listUserNodeConfigsByServer(db, userId, serverId) {
+  return db.prepare(`
+    SELECT inbound_id, uuid, password, auth, sub_id
+    FROM user_node_configs
+    WHERE user_id = ? AND server_id = ?
+    ORDER BY inbound_id ASC
+  `).all(userId, serverId);
+}
+
+/**
  * 保存用户节点配置，存在则更新，不存在则插入。
  *
  * @param {Object} db - 数据库代理对象
@@ -388,6 +404,7 @@ async function insertServerNodeSnapshot(db, payload) {
 
 module.exports = {
   findUserNodeConfig,
+  listUserNodeConfigsByServer,
   saveUserNodeConfig,
   upsertClientModelMigrationAudit,
   listAllUsersForClientModelMigration,

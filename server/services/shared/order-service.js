@@ -17,6 +17,7 @@ const { getStrategyFromRemark } = require('./subscription-strategy');
 const { createLogger } = require('../../utils/logger');
 const { runWithConcurrency } = require('../../utils/concurrency');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
+const { resolveServerClientCredentials } = require('./xui-credential-resolver');
 const orderRepository = require('../../repositories/order-repository');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const referralService = require('../referral-service');
@@ -279,20 +280,13 @@ async function ensureNodeConfig(db, user, server, inbound, existingClient = null
  * @returns {Promise<{uuid:string,password:string,auth:string,subId:string}>} 统一凭证。
  */
 async function ensureServerNodeConfigs(db, user, server, inbounds, existingClient = null, overrides = {}) {
-  const firstInbound = inbounds[0];
-  const firstConfig = firstInbound
-    ? await xuiSyncRepository.findUserNodeConfig(db, user.id, server.id, firstInbound.id)
-    : null;
-  const generated = generateServerClientCredentials();
-  const uuid = existingClient?.uuid || existingClient?.id || firstConfig?.uuid || generated.uuid;
-  const password = existingClient?.password || firstConfig?.password || generated.password;
-  const auth = isValidXuiAuth(existingClient?.auth)
-    ? existingClient.auth
-    : (isValidXuiAuth(firstConfig?.auth) ? firstConfig.auth : generated.auth);
-  const subId = normalizeXuiSubId(overrides.subId)
-    || normalizeXuiSubId(existingClient?.subId)
-    || normalizeXuiSubId(firstConfig?.sub_id)
-    || generated.subId;
+  const localConfigs = await xuiSyncRepository.listUserNodeConfigsByServer(db, user.id, server.id);
+  const { uuid, password, auth, subId } = resolveServerClientCredentials({
+    localConfigs,
+    remoteClient: existingClient,
+    expectedEmail: user.email,
+    overrideSubId: normalizeXuiSubId(overrides.subId)
+  });
 
   for (const inbound of inbounds) {
     await xuiSyncRepository.saveUserNodeConfig(db, {
