@@ -11,7 +11,7 @@ const SNAPSHOT_LOCK_NAMESPACE = 31001;
  * @param {Object} db - 数据库代理对象，必须暴露 pool.connect()
  * @param {number} serverId - 3X-UI 服务器 ID，用作快照归属和锁粒度
  * @param {Array<Object>} nodes - 已规范化的节点快照行
- * @returns {Promise<void>}
+ * @returns {Promise<{removedNodeConfigCount:number,removedSourceCount:number,invalidatedUserCount:number}>}
  */
 async function replaceServerNodeSnapshots(db, serverId, nodes) {
   const client = await db.pool.connect();
@@ -43,7 +43,47 @@ async function replaceServerNodeSnapshots(db, serverId, nodes) {
       ]);
     }
 
+    const activeInboundIds = nodes.map((node) => Number(node.inbound_id));
+    const affectedUsersResult = await client.query(`
+      SELECT DISTINCT user_id
+      FROM (
+        SELECT user_id
+        FROM user_node_configs
+        WHERE server_id = $1
+          AND NOT (inbound_id = ANY($2::int[]))
+        UNION
+        SELECT user_id
+        FROM user_subscription_sources
+        WHERE server_id = $1
+          AND NOT (inbound_id = ANY($2::int[]))
+      ) stale_users
+    `, [serverId, activeInboundIds]);
+    const affectedUserIds = affectedUsersResult.rows.map((row) => Number(row.user_id));
+
+    const sourceDeleteResult = await client.query(`
+      DELETE FROM user_subscription_sources
+      WHERE server_id = $1
+        AND NOT (inbound_id = ANY($2::int[]))
+    `, [serverId, activeInboundIds]);
+    const configDeleteResult = await client.query(`
+      DELETE FROM user_node_configs
+      WHERE server_id = $1
+        AND NOT (inbound_id = ANY($2::int[]))
+    `, [serverId, activeInboundIds]);
+
+    if (affectedUserIds.length > 0) {
+      await client.query(
+        'DELETE FROM user_subscriptions WHERE user_id = ANY($1::int[])',
+        [affectedUserIds]
+      );
+    }
+
     await client.query('COMMIT');
+    return {
+      removedNodeConfigCount: configDeleteResult.rowCount,
+      removedSourceCount: sourceDeleteResult.rowCount,
+      invalidatedUserCount: affectedUserIds.length
+    };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

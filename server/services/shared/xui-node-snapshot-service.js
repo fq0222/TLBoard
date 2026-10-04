@@ -44,7 +44,7 @@ function normalizeInboundSnapshot(inbound, options = {}) {
  * @param {Object} options - 刷新选项
  * @param {boolean} options.allowEmpty - 是否允许空 inbound 清空本地快照
  * @param {Map<number, number>} options.onlineCountByInboundId - inbound_id 到在线人数的映射
- * @returns {Promise<{success:boolean, skipped:boolean, nodeCount:number}>} 刷新结果
+ * @returns {Promise<{success:boolean, skipped:boolean, nodeCount:number, cleanup?:Object}>} 刷新结果
  */
 async function refreshServerNodeSnapshots(db, serverId, inbounds, options = {}) {
   if (!Array.isArray(inbounds)) {
@@ -64,12 +64,13 @@ async function refreshServerNodeSnapshots(db, serverId, inbounds, options = {}) 
     onlineCount: onlineCountByInboundId.get(inbound.inbound_id || inbound.id)
   }));
 
-  await xuiNodeSnapshotRepository.replaceServerNodeSnapshots(db, serverId, nodes);
+  const cleanup = await xuiNodeSnapshotRepository.replaceServerNodeSnapshots(db, serverId, nodes);
 
   return {
     success: true,
     skipped: false,
-    nodeCount: nodes.length
+    nodeCount: nodes.length,
+    cleanup
   };
 }
 
