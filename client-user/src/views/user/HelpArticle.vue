@@ -18,9 +18,21 @@
           <p>{{ article.summary }}</p>
         </header>
 
-        <div ref="markdownBodyRef" class="markdown-body" v-html="renderedContent"></div>
+        <div
+          ref="markdownBodyRef"
+          class="markdown-body"
+          @click="handleMarkdownImageClick"
+          v-html="renderedContent"
+        ></div>
       </article>
     </div>
+
+    <ArticleImageViewer
+      v-if="previewImage"
+      :src="previewImage.src"
+      :alt="previewImage.alt"
+      @close="previewImage = null"
+    />
   </div>
 </template>
 
@@ -31,6 +43,7 @@ import { ElMessage } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import api from '@/api'
+import ArticleImageViewer from '@/components/ArticleImageViewer.vue'
 import { loadManualLazyImage, prepareManualLazyImages } from '@/utils/manual-lazy-images'
 import { MarkdownCodeCopyController } from '@/utils/markdown-code-copy'
 
@@ -38,8 +51,24 @@ const route = useRoute()
 const article = ref(null)
 const loading = ref(false)
 const markdownBodyRef = ref(null)
+const previewImage = ref(null)
 let imageObserver = null
 let codeCopyController = null
+
+/** 点击正文图片时使用其原始资源地址打开单图预览。 */
+function handleMarkdownImageClick(event) {
+  const image = event.target.closest?.('img')
+  if (!image || !markdownBodyRef.value?.contains(image)) return
+
+  const src = image.currentSrc || image.getAttribute('src') || image.getAttribute('data-src')
+  if (!src) return
+
+  event.preventDefault()
+  previewImage.value = {
+    src,
+    alt: image.getAttribute('alt') || ''
+  }
+}
 
 function sanitizeHtml(html) {
   const template = document.createElement('template')
@@ -339,6 +368,7 @@ onBeforeUnmount(() => {
   height: auto;
   border-radius: 8px;
   border: 1px solid #ebeef5;
+  cursor: zoom-in;
 }
 
 .markdown-body :deep(.manual-lazy-image) {

@@ -196,3 +196,63 @@ describe('HelpArticle Markdown 代码复制', () => {
     expect(writeText).toHaveBeenCalledWith('function main() {\n  return true\n}\n')
   })
 })
+
+describe('HelpArticle 图片预览', () => {
+  it('点击正文图片后使用原图地址打开单图预览并锁定页面滚动', async () => {
+    apiMocks.getHelpArticle.mockResolvedValue({
+      code: 0,
+      data: {
+        id: 7,
+        title: '图片预览测试',
+        summary: '点击查看原图',
+        content: '![节点配置图](https://example.com/original-guide.png)',
+        category: '教程',
+        updated_at: 1700000000
+      }
+    })
+
+    const wrapper = mountHelpArticle()
+    await settle()
+    await wrapper.get('.markdown-body img').trigger('click')
+
+    const viewer = wrapper.get('.article-image-viewer')
+    expect(viewer.get('.article-image-viewer__image').attributes('src')).toBe('https://example.com/original-guide.png')
+    expect(viewer.get('.article-image-viewer__image').attributes('alt')).toBe('节点配置图')
+    expect(document.body.style.overflow).toBe('hidden')
+  })
+
+  it('仅通过关闭按钮、遮罩空白或 Escape 关闭预览并恢复页面滚动', async () => {
+    apiMocks.getHelpArticle.mockResolvedValue({
+      code: 0,
+      data: {
+        id: 7,
+        title: '图片关闭测试',
+        summary: '测试关闭行为',
+        content: '![示例图](https://example.com/close-test.png)',
+        category: '教程',
+        updated_at: 1700000000
+      }
+    })
+
+    const wrapper = mountHelpArticle()
+    await settle()
+    const articleImage = wrapper.get('.markdown-body img')
+
+    await articleImage.trigger('click')
+    await wrapper.get('.article-image-viewer__image').trigger('click')
+    expect(wrapper.find('.article-image-viewer').exists()).toBe(true)
+
+    await wrapper.get('.article-image-viewer__close').trigger('click')
+    expect(wrapper.find('.article-image-viewer').exists()).toBe(false)
+    expect(document.body.style.overflow).toBe('')
+
+    await articleImage.trigger('click')
+    await wrapper.get('.article-image-viewer__canvas').trigger('click')
+    expect(wrapper.find('.article-image-viewer').exists()).toBe(false)
+
+    await articleImage.trigger('click')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(wrapper.find('.article-image-viewer').exists()).toBe(false)
+  })
+})
