@@ -1,6 +1,8 @@
 import { defineComponent, h, nextTick } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const apiMocks = vi.hoisted(() => ({
   getHelpArticle: vi.fn()
@@ -94,6 +96,15 @@ afterEach(() => {
 })
 
 describe('HelpArticle Markdown 代码复制', () => {
+  it('在宽屏可用空间内水平居中文章容器', async () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/views/user/HelpArticle.vue'), 'utf8')
+    const containerRule = source.match(/\.article-container\s*\{([^}]*)\}/)?.[1] || ''
+
+    expect(containerRule).toMatch(/max-width:\s*920px/)
+    expect(containerRule).toMatch(/width:\s*100%/)
+    expect(containerRule).toMatch(/margin:\s*0\s+auto/)
+  })
+
   it('为代码块增加移动端可访问的复制按钮并复制原始代码文本', async () => {
     vi.useFakeTimers()
     const writeText = vi.fn().mockResolvedValue(undefined)

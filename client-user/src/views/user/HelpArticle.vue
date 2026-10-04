@@ -162,7 +162,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .article-container {
+  width: 100%;
   max-width: 920px;
+  margin: 0 auto;
 }
 
 .content-card {
