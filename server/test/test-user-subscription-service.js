@@ -211,6 +211,33 @@ async function testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgrou
 }
 
 /**
+ * 验证原始订阅请求超时会返回可供刷新日志稳定分类的内部错误码。
+ *
+ * @returns {Promise<void>}
+ */
+async function testFetchOriginalSubscriptionShouldExposeStableTimeoutCode() {
+  const server = http.createServer((req, res) => {
+    setTimeout(() => res.end('late response'), 100);
+  });
+
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address();
+    await assert.rejects(
+      sharedSubscriptionService.fetchOriginalSubscription(
+        `http://127.0.0.1:${port}/sub/`,
+        'token',
+        { timeout: 10 }
+      ),
+      error => error.code === 'SUBSCRIPTION_FETCH_TIMEOUT'
+        && error.message === '获取原始订阅超时: 10ms'
+    );
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+/**
  * 验证 Clash 订阅输出会正确展开 YAML 与 IPv6 地址。
  *
  * @returns {Promise<void>}
@@ -1148,6 +1175,96 @@ async function testSourceRefreshShouldFetchSharedSubIdOnce() {
 }
 
 /**
+ * 验证原始订阅模板刷新失败时，日志会输出可定位的网络错误信息，且不会泄露订阅地址或 token。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshShouldLogSanitizedNetworkErrorDetails() {
+  const refreshSubscriptionSources = subscriptionService.__testables.refreshSubscriptionSources;
+  const user = { id: 1, email: 'user@example.com' };
+  const server = { id: 1, name: '测试节点', sub_url: 'https://panel.example.com/sub/' };
+  const config = {
+    user_id: 1,
+    server_id: 1,
+    inbound_id: 2,
+    sub_id: 'sensitive-subscription-token',
+    uuid: 'a8c40026-06cd-4e53-98a2-af99f4c76971',
+    remark: 'direct',
+    protocol: 'vless',
+    settings: JSON.stringify({ clients: [] }),
+    stream_settings: JSON.stringify({ network: 'tcp', security: 'reality' })
+  };
+  const warnings = [];
+  const networkError = new Error(
+    'connect ECONNREFUSED https://panel.example.com/sub/sensitive-subscription-token?secret=hidden'
+  );
+  networkError.code = 'ECONNREFUSED';
+
+  const result = await refreshSubscriptionSources(
+    {},
+    user,
+    [config],
+    new Map([[1, server]]),
+    { info() {}, warn: (message) => warnings.push(message), error() {} },
+    {
+      fetchOriginalSubscription: async () => {
+        throw networkError;
+      }
+    }
+  );
+
+  assert.strictEqual(result.failedConfigs.length, 1);
+  assert.ok(warnings.some((message) => message.includes('errorType=NetworkError')));
+  assert.ok(warnings.some((message) => message.includes('errorCode=ECONNREFUSED')));
+  assert.ok(warnings.some((message) => message.includes('errorMessage="连接被远端拒绝"')));
+  assert.ok(warnings.every((message) => !message.includes('panel.example.com')));
+  assert.ok(warnings.every((message) => !message.includes('sensitive-subscription-token')));
+}
+
+/**
+ * 验证原始订阅请求超时会以稳定的内部错误码写入刷新失败日志。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshShouldLogSubscriptionFetchTimeoutDetails() {
+  const refreshSubscriptionSources = subscriptionService.__testables.refreshSubscriptionSources;
+  const user = { id: 1, email: 'user@example.com' };
+  const server = { id: 1, name: '测试节点', sub_url: 'https://panel.example.com/sub/' };
+  const config = {
+    user_id: 1,
+    server_id: 1,
+    inbound_id: 2,
+    sub_id: 'sensitive-subscription-token',
+    uuid: 'a8c40026-06cd-4e53-98a2-af99f4c76971',
+    remark: 'direct',
+    protocol: 'vless',
+    settings: JSON.stringify({ clients: [] }),
+    stream_settings: JSON.stringify({ network: 'tcp', security: 'reality' })
+  };
+  const warnings = [];
+  const timeoutError = new Error('获取原始订阅超时: 15000ms');
+  timeoutError.code = 'SUBSCRIPTION_FETCH_TIMEOUT';
+
+  const result = await refreshSubscriptionSources(
+    {},
+    user,
+    [config],
+    new Map([[1, server]]),
+    { info() {}, warn: (message) => warnings.push(message), error() {} },
+    {
+      fetchOriginalSubscription: async () => {
+        throw timeoutError;
+      }
+    }
+  );
+
+  assert.strictEqual(result.failedConfigs.length, 1);
+  assert.ok(warnings.some((message) => message.includes('errorType=SubscriptionFetchTimeout')));
+  assert.ok(warnings.some((message) => message.includes('errorCode=SUBSCRIPTION_FETCH_TIMEOUT')));
+  assert.ok(warnings.some((message) => message.includes('errorMessage="获取原始订阅超时: 15000ms"')));
+}
+
+/**
  * 验证历史误选的原始模板缓存会因 inbound 特征不匹配而自动刷新。
  *
  * @returns {Promise<void>}
@@ -1587,6 +1704,7 @@ async function testGenerateSubscriptionShouldAskForSpeedChannelOptimization() {
 async function run() {
   await testDefaultSubscriptionContentShouldReturnBase64AndUserinfo();
   await testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgroundCooldown();
+  await testFetchOriginalSubscriptionShouldExposeStableTimeoutCode();
   await testClashSubscriptionShouldRenderYaml();
   await testActiveHomeRouteShouldDecorateSubscriptionFormats();
   await testDisabledHomeNodePrefixShouldKeepSubscriptionNames();
@@ -1614,6 +1732,8 @@ async function run() {
   await testUserCfIpQueriesShouldMatchCurrentSchema();
   await testSourceRefreshShouldPickInboundMatchedRealityLink();
   await testSourceRefreshShouldFetchSharedSubIdOnce();
+  await testSourceRefreshShouldLogSubscriptionFetchTimeoutDetails();
+  await testSourceRefreshShouldLogSanitizedNetworkErrorDetails();
   await testGenerateSubscriptionShouldRefreshMismatchedSourceCache();
   await testGenerateSubscriptionShouldQueueFailedSourceRefreshRetry();
   await testSourceRefreshRetryShouldRegenerateSubscriptionCache();

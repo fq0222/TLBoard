@@ -139,7 +139,9 @@ async function fetchOriginalSubscription(subUrl, subId, options = {}) {
 
     /** @returns {void} 请求超时时销毁底层连接并携带明确的毫秒数。 */
     function handleRequestTimeout() {
-      request.destroy(new Error(`获取原始订阅超时: ${timeout}ms`));
+      const error = new Error(`获取原始订阅超时: ${timeout}ms`);
+      error.code = 'SUBSCRIPTION_FETCH_TIMEOUT';
+      request.destroy(error);
     }
 
     request = client.get(fullUrl, (res) => {

@@ -873,6 +873,90 @@ function collectSourceCacheStatus(nodeConfigs, sourceMap, serversById) {
 }
 
 /**
+ * 将原始错误消息转换为可写入日志的安全文本。
+ * 职责：移除 URL、查询参数和调用方提供的敏感值，避免订阅地址或 token 出现在诊断日志中。
+ *
+ * @param {*} message - 原始错误消息
+ * @param {Array<string>} [sensitiveValues=[]] - 需额外隐藏的敏感值
+ * @returns {string} 截断后的安全错误消息
+ */
+function sanitizeSourceRefreshErrorMessage(message, sensitiveValues = []) {
+  let sanitized = String(message || '未知错误')
+    .replace(/https?:\/\/[^\s"']+/gi, '[已隐藏URL]');
+
+  for (const value of sensitiveValues) {
+    if (!value) continue;
+    sanitized = sanitized.split(String(value)).join('[已隐藏]');
+  }
+
+  return sanitized.replace(/\s+/g, ' ').trim().slice(0, 300) || '未知错误';
+}
+
+/**
+ * 归类原始订阅拉取失败原因，提供稳定的诊断字段供后台重试日志使用。
+ *
+ * @param {*} cause - 原始失败原因
+ * @param {Object} context - 当前刷新上下文，含用于日志脱敏的敏感值
+ * @returns {{errorType:string,errorCode:string,httpStatus:number|undefined,errorMessage:string}} 脱敏后的诊断信息
+ */
+function buildSourceRefreshErrorDetails(cause, context = {}) {
+  const rawCode = String(cause?.code || '').trim();
+  const rawMessage = String(cause?.message || cause || '未知错误');
+  const statusCandidate = cause?.statusCode || cause?.status || cause?.response?.status;
+  const httpStatus = Number.isInteger(Number(statusCandidate))
+    ? Number(statusCandidate)
+    : Number(rawMessage.match(/HTTP 状态码:\s*(\d{3})/)?.[1]) || undefined;
+  const sensitiveValues = [context.subUrl, context.subId];
+  const safeMessage = sanitizeSourceRefreshErrorMessage(rawMessage, sensitiveValues);
+
+  if (rawCode === 'SUBSCRIPTION_FETCH_TIMEOUT' || /^获取原始订阅超时:/.test(rawMessage)) {
+    return {
+      errorType: 'SubscriptionFetchTimeout',
+      errorCode: 'SUBSCRIPTION_FETCH_TIMEOUT',
+      errorMessage: safeMessage
+    };
+  }
+
+  if (httpStatus) {
+    return {
+      errorType: 'HttpStatusError',
+      errorCode: rawCode || `HTTP_${httpStatus}`,
+      httpStatus,
+      errorMessage: `获取原始订阅失败，HTTP 状态码: ${httpStatus}`
+    };
+  }
+
+  const networkErrors = {
+    ECONNREFUSED: '连接被远端拒绝',
+    ECONNRESET: '网络连接被重置',
+    ENOTFOUND: '域名解析失败',
+    EHOSTUNREACH: '目标主机不可达',
+    ENETUNREACH: '网络不可达'
+  };
+  if (networkErrors[rawCode]) {
+    return {
+      errorType: 'NetworkError',
+      errorCode: rawCode,
+      errorMessage: networkErrors[rawCode]
+    };
+  }
+
+  if (rawCode === 'ETIMEDOUT' || rawCode === 'ESOCKETTIMEDOUT') {
+    return {
+      errorType: 'NetworkTimeout',
+      errorCode: rawCode,
+      errorMessage: '请求连接超时'
+    };
+  }
+
+  return {
+    errorType: 'UnknownError',
+    errorCode: rawCode || 'NONE',
+    errorMessage: safeMessage
+  };
+}
+
+/**
  * 创建服务内部拥有的来源刷新失败对象，避免修改冻结 Error 或字符串等外部拒绝值。
  *
  * @param {*} cause - 原始失败原因，仅作为 cause 保留，不写入日志
@@ -882,13 +966,11 @@ function collectSourceCacheStatus(nodeConfigs, sourceMap, serversById) {
 function createSourceRefreshError(cause, context) {
   const error = new Error('原始订阅模板刷新失败', { cause });
   error.name = 'SourceRefreshError';
-  const rawErrorType = String(cause?.code || cause?.name || 'Error');
-  const errorType = rawErrorType
-    .replace(/[^A-Za-z0-9_.-]/g, '_')
-    .slice(0, 64) || 'Error';
+  const details = buildSourceRefreshErrorDetails(cause, context);
+  const { subUrl, subId, ...safeContext } = context;
   error.sourceRefreshContext = {
-    ...context,
-    errorType
+    ...safeContext,
+    ...details
   };
   return error;
 }
@@ -977,6 +1059,8 @@ async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, lo
           serverId: server?.id || config.server_id,
           serverName: server?.name,
           inboundId: config.inbound_id,
+          subUrl: server?.sub_url,
+          subId: config.sub_id,
           duration: Date.now() - itemStartedAt
         });
       }
@@ -1000,7 +1084,11 @@ async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, lo
         id: context.serverId || config.server_id,
         name: context.serverName
       }])}, inbound=${context.inboundId || config.inbound_id}, `
-      + `duration=${context.duration ?? Date.now() - startedAt}ms, errorType=${context.errorType || 'Error'}`
+      + `duration=${context.duration ?? Date.now() - startedAt}ms, `
+      + `errorType=${context.errorType || 'UnknownError'}, `
+      + `errorCode=${context.errorCode || 'NONE'}`
+      + `${context.httpStatus ? `, httpStatus=${context.httpStatus}` : ''}, `
+      + `errorMessage="${context.errorMessage || '未知错误'}"`
     );
   });
   logger.info(
