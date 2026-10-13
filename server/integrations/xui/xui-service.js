@@ -30,7 +30,9 @@ function isTransientXuiNetworkError(message) {
   return normalized.includes('client network socket disconnected')
     || normalized.includes('econnreset')
     || normalized.includes('socket hang up')
-    || normalized.includes('tls connection');
+    || normalized.includes('tls connection')
+    || normalized.includes('request timeout')
+    || normalized.includes('cannot connect to server');
 }
 
 /**
