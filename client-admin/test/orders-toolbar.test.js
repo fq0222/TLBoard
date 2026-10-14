@@ -20,9 +20,9 @@ test('订单邮箱筛选提供可点击搜索按钮', () => {
   assert.match(orders, /<el-icon><Search\s*\/><\/el-icon>/)
 })
 
-test('订单筛选项桌面端按 2:1:3 排列且移动端切换为单列', () => {
+test('订单筛选项桌面端按 2:2:1:2.5 排列且移动端切换为单列', () => {
   const orders = readOrdersView()
 
-  assert.match(orders, /grid-template-columns:\s*minmax\(0,\s*2fr\)\s+minmax\(0,\s*1fr\)\s+minmax\(0,\s*3fr\)/)
+  assert.match(orders, /grid-template-columns:\s*minmax\(0,\s*2fr\)\s+minmax\(0,\s*2fr\)\s+minmax\(0,\s*1fr\)\s+minmax\(0,\s*2\.5fr\)/)
   assert.match(orders, /@media \(max-width: 767px\)[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/)
 })

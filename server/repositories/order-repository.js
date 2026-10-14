@@ -469,6 +469,7 @@ function parseAdminDateToUnix(date) {
 function buildAdminOrderFilters(filters = {}) {
   const {
     status,
+    orderNo,
     email,
     startDate,
     endDate
@@ -484,6 +485,12 @@ function buildAdminOrderFilters(filters = {}) {
   if (email) {
     whereClause += ' AND o.email LIKE ?';
     params.push(`%${email}%`);
+  }
+
+  // 订单号与邮箱均使用包含匹配，参数绑定使分页和总数共享安全的筛选语义。
+  if (orderNo) {
+    whereClause += ' AND o.out_trade_no LIKE ?';
+    params.push(`%${orderNo}%`);
   }
 
   if (startDate) {

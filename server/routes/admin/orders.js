@@ -23,6 +23,10 @@ router.get('/', authenticateAdmin, [
     .optional()
     .isIn(['pending', 'paid', 'expired'])
     .withMessage('状态必须是pending、paid或expired'),
+  query('order_no')
+    .optional()
+    .isString()
+    .withMessage('订单号必须是字符串'),
   query('email')
     .optional()
     .isString()

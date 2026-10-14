@@ -21,6 +21,23 @@
     <div class="content-card">
       <div class="toolbar">
         <el-input
+          v-model="orderNo"
+          class="toolbar-order-no"
+          placeholder="搜索订单号"
+          @keyup.enter="fetchOrders"
+        >
+          <template #append>
+            <el-button
+              class="order-no-search-button"
+              aria-label="搜索订单号"
+              title="搜索"
+              @click="fetchOrders"
+            >
+              <el-icon><Search /></el-icon>
+            </el-button>
+          </template>
+        </el-input>
+        <el-input
           v-model="email"
           class="toolbar-email"
           placeholder="搜索邮箱"
@@ -111,6 +128,7 @@ import { Search } from '@element-plus/icons-vue'
 import api from '@/api'
 
 const orders = ref([])
+const orderNo = ref('')
 const email = ref('')
 const status = ref('')
 const dateRange = ref(null)
@@ -129,6 +147,7 @@ async function fetchOrders() {
       page: page.value,
       limit: limit.value
     }
+    if (orderNo.value) params.order_no = orderNo.value
     if (email.value) params.email = email.value
     if (status.value) params.status = status.value
     if (dateRange.value && dateRange.value.length === 2) {
@@ -212,7 +231,7 @@ onMounted(() => {
 
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 3fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr) minmax(0, 2.5fr);
   align-items: center;
   gap: 10px;
   margin-bottom: 20px;

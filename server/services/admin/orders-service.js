@@ -31,6 +31,7 @@ async function listOrders(db, query) {
   });
   const filters = {
     status: query.status,
+    orderNo: query.order_no,
     email: query.email,
     startDate: query.start_date,
     endDate: query.end_date
