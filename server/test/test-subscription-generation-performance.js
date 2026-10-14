@@ -212,20 +212,33 @@ async function testInboundRequestTimeoutNormalization() {
  * @returns {void}
  */
 function testCompleteLocalSnapshotShouldSkipRemoteSync() {
+  const user = { email: 'user@example.com' };
   const servers = [{ id: 1 }, { id: 2 }];
   const snapshots = [
     { server_id: 1, inbound_id: 11 },
     { server_id: 2, inbound_id: 21 }
   ];
-  const nodeConfigs = [
-    { server_id: 1, inbound_id: 11 },
-    { server_id: 2, inbound_id: 21 }
-  ];
+  const nodeConfigs = snapshots.map((snapshot) => ({
+    ...snapshot,
+    remark: `node-${snapshot.inbound_id}`,
+    protocol: 'vless',
+    uuid: `uuid-${snapshot.inbound_id}`,
+    sub_id: `sub-${snapshot.inbound_id}`,
+    settings: {
+      clients: [{
+        email: `${user.email}-node-${snapshot.inbound_id}`,
+        id: `uuid-${snapshot.inbound_id}`,
+        subId: `sub-${snapshot.inbound_id}`
+      }]
+    },
+    stream_settings: '{}'
+  }));
 
   const missingServers = userSubscriptionService.__testables.findServersRequiringSync(
     servers,
     snapshots,
-    nodeConfigs
+    nodeConfigs,
+    user
   );
 
   assert.deepStrictEqual(missingServers, []);
@@ -237,17 +250,34 @@ function testCompleteLocalSnapshotShouldSkipRemoteSync() {
  * @returns {void}
  */
 function testOnlyGapServersShouldBeSelected() {
+  const user = { email: 'user@example.com' };
   const servers = [{ id: 1 }, { id: 2 }, { id: 3 }];
   const snapshots = [
     { server_id: 1, inbound_id: 11 },
     { server_id: 2, inbound_id: 21 }
   ];
-  const nodeConfigs = [{ server_id: 1, inbound_id: 11 }];
+  const nodeConfigs = [{
+    server_id: 1,
+    inbound_id: 11,
+    remark: 'node-11',
+    protocol: 'vless',
+    uuid: 'uuid-11',
+    sub_id: 'sub-11',
+    settings: {
+      clients: [{
+        email: `${user.email}-node-11`,
+        id: 'uuid-11',
+        subId: 'sub-11'
+      }]
+    },
+    stream_settings: '{}'
+  }];
 
   const missingServers = userSubscriptionService.__testables.findServersRequiringSync(
     servers,
     snapshots,
-    nodeConfigs
+    nodeConfigs,
+    user
   );
 
   assert.deepStrictEqual(missingServers.map((server) => server.id), [2, 3]);
@@ -451,7 +481,7 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
     assert.strictEqual(selectedSyncCalls, 0);
     assert.strictEqual(remoteCalls, 0);
 
-    const inboundSnapshotCache = new Map();
+    const inboundSnapshotCache = new Map([['2', { fetchedAt: Date.now(), result: { success: true, data: [] } }]]);
     const selectedServerIds = [];
     let receivedUserSyncPlan;
     subscriptionRepository.listNodeSnapshots = async () => [
@@ -482,6 +512,13 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
         dependencies: {
           async syncSelectedServers(db, selectedServers) {
             selectedServerIds.push(...selectedServers.map((server) => server.id));
+            if (selectedServers.some((server) => server.id === 2) && receivedUserSyncPlan) {
+              assert.strictEqual(
+                inboundSnapshotCache.has('2'),
+                false,
+                '用户写入 3X-UI 后必须清除 server 2 的旧 inbound 快照缓存'
+              );
+            }
             return { success: true, syncedCount: 2, failedCount: 0, totalCount: 2, results: [] };
           },
           async syncUserToXuiServers(db, syncedUser, plan) {
@@ -494,7 +531,7 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
         }
       });
 
-    assert.deepStrictEqual(selectedServerIds, [2, 3]);
+    assert.deepStrictEqual(selectedServerIds, [2, 3, 2]);
     assert.deepStrictEqual(receivedUserSyncPlan.serverIds, [2]);
     assert.strictEqual(receivedUserSyncPlan.inboundSnapshotCache, inboundSnapshotCache);
     assert.strictEqual(remoteCalls, 0);
@@ -1372,8 +1409,12 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
   const fetchCounts = new Map();
   const repairCalls = [];
   const userSyncPlans = [];
+  const repairEvents = [];
   const logs = [];
-  const inboundSnapshotCache = new Map();
+  const inboundSnapshotCache = new Map([['2', {
+    fetchedAt: Date.now(),
+    result: { success: true, data: [] }
+  }]]);
   let repairUserSynced = false;
   let savedNodes;
 
@@ -1420,9 +1461,11 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
           ).toString('base64');
         },
         async syncSelectedServers(db, selectedServers, options) {
+          repairEvents.push('snapshot-sync');
           repairCalls.push({
             ids: selectedServers.map((server) => server.id),
-            cache: options.inboundSnapshotCache
+            cache: options.inboundSnapshotCache,
+            staleCachePresent: options.inboundSnapshotCache.has('2')
           });
           return {
             success: true,
@@ -1433,6 +1476,7 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
           };
         },
         async syncUserToXuiServers(db, user, plan) {
+          repairEvents.push('user-sync');
           userSyncPlans.push(plan);
           repairUserSynced = true;
           return { success: true, successCount: 1, failureCount: 0 };
@@ -1441,8 +1485,10 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
     });
 
     assert.strictEqual(result, 'private-user-token');
+    assert.deepStrictEqual(repairEvents, ['user-sync', 'snapshot-sync']);
     assert.deepStrictEqual(repairCalls.map((call) => call.ids), [[2]]);
     assert.strictEqual(repairCalls[0].cache, inboundSnapshotCache);
+    assert.strictEqual(repairCalls[0].staleCachePresent, false);
     assert.deepStrictEqual(userSyncPlans.map((plan) => plan.serverIds), [[2]]);
     assert.strictEqual(userSyncPlans[0].inboundSnapshotCache, inboundSnapshotCache);
     assert.deepStrictEqual(Object.fromEntries(fetchCounts), {
@@ -1611,7 +1657,7 @@ async function testPersistentSourceFailureShouldNotBlockSuccessfulNodes() {
 
   assert.deepStrictEqual(Object.fromEntries(scenario.fetchCounts), { 1: 1, 2: 2, 3: 1 });
   assert.deepStrictEqual(scenario.repairCalls, [[2]]);
-  assert.deepStrictEqual(scenario.userSyncServerIds, []);
+  assert.deepStrictEqual(scenario.userSyncServerIds, [[2]]);
   assert.strictEqual(scenario.businessError, undefined);
   assert.strictEqual(scenario.savedNodes.length, 2);
 }
@@ -1626,7 +1672,7 @@ async function testAllPersistentSourceFailuresShouldStopAfterSingleRepairRound()
 
   assert.deepStrictEqual(Object.fromEntries(scenario.fetchCounts), { 1: 2, 2: 2, 3: 2 });
   assert.deepStrictEqual(scenario.repairCalls, [[1, 2, 3]]);
-  assert.deepStrictEqual(scenario.userSyncServerIds, []);
+  assert.deepStrictEqual(scenario.userSyncServerIds, [[1, 2, 3]]);
   assert.strictEqual(scenario.savedNodes, undefined);
   assert(scenario.businessError);
   assert.strictEqual(scenario.businessError.code, 500);

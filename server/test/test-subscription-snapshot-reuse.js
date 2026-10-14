@@ -145,6 +145,7 @@ function createGenerationScenario({
   const refreshedPairs = [];
   const syncCalls = [];
   const logs = [];
+  let savedSubscriptionNodes = [];
   const firstTrustedIds = new Set(
     trustedAfterFirstServerIds || (remainUntrusted ? [] : [1, 2])
   );
@@ -185,7 +186,9 @@ function createGenerationScenario({
       refreshedPairs.push(`${payload.server_id}:${payload.inbound_id}`);
       sources.set(`${payload.server_id}:${payload.inbound_id}`, payload);
     },
-    saveUserSubscriptionCache: async () => {}
+    saveUserSubscriptionCache: async (db, userId, subId, nodes) => {
+      savedSubscriptionNodes = nodes;
+    }
   };
   const dependencies = {
     syncSelectedServers: async (db, selectedServers) => {
@@ -225,7 +228,8 @@ function createGenerationScenario({
     refreshedPairs,
     logs,
     getConfigReadCount: () => configReadCount,
-    getCompensationCalls: () => compensationCalls
+    getCompensationCalls: () => compensationCalls,
+    getSavedSubscriptionNodes: () => savedSubscriptionNodes
   };
 }
 
@@ -478,6 +482,69 @@ async function testFirstGenerationStageLogsUseEmail() {
     message.includes('用户 user@example.com 首次模板刷新结果')
   )));
   assert.ok(!scenario.logs.join('\n').includes('用户 19 首次'));
+}
+
+/**
+ * 验证首次生成会按当前用户检查快照客户端，并在定向同步后重读配置再刷新全部模板。
+ *
+ * @returns {Promise<void>}
+ */
+async function testFirstGenerationSyncsUntrustedUserSnapshotsBeforeFetchingTemplates() {
+  const scenario = createGenerationScenario({ firstGeneration: true });
+
+  await withRepositoryMocks(scenario.repositoryMocks, async () => {
+    await subscriptionService.generateSubscription({}, 19, scenario.logger, {
+      dependencies: scenario.dependencies
+    });
+  });
+
+  assert.deepStrictEqual(
+    scenario.syncCalls,
+    [['美国01-达拉斯', '日本']],
+    '首次生成应同步存在节点行但当前用户客户端不可信的服务器'
+  );
+  assert.ok(
+    scenario.getConfigReadCount() >= 2,
+    '首次定向同步完成后必须重新读取用户节点配置'
+  );
+  assert.deepStrictEqual(
+    [...new Set(scenario.refreshedPairs)].sort(),
+    ['1:10', '1:11', '2:20', '2:21'],
+    '首次生成同步后应使用最新配置拉取所有原始订阅模板'
+  );
+}
+
+/**
+ * 验证首次同步中单台服务器失败时，其他成功服务器仍能生成并保存可用节点。
+ *
+ * @returns {Promise<void>}
+ */
+async function testFirstGenerationKeepsNodesWhenOneServerSyncFails() {
+  const scenario = createGenerationScenario({
+    firstGeneration: true,
+    trustedAfterFirstServerIds: [2],
+    syncResultFor: (round, server) => server.id === 2
+  });
+
+  await withRepositoryMocks(scenario.repositoryMocks, async () => {
+    await subscriptionService.generateSubscription({}, 19, scenario.logger, {
+      dependencies: scenario.dependencies
+    });
+  });
+
+  assert.deepStrictEqual(scenario.syncCalls, [['美国01-达拉斯', '日本']]);
+  const savedNodes = scenario.getSavedSubscriptionNodes();
+  const summaryLog = scenario.logs.find((message) => message.includes('订阅生成汇总'));
+  assert.ok(summaryLog.includes('inboundSuccess=1'));
+  assert.ok(summaryLog.includes('inboundFailed=1'));
+  assert.ok(
+    savedNodes.some((node) => node.server_id === 2),
+    'server 2 同步成功且快照可信时应保留其订阅节点'
+  );
+  assert.ok(
+    !savedNodes.some((node) => node.server_id === 1),
+    'server 1 同步失败且快照不可信时不得保存其订阅节点'
+  );
 }
 
 /**
@@ -1095,6 +1162,8 @@ async function run() {
   await testGenerateSubscriptionSummaryUsesLatestRemoteOutcome();
   await testSourceRefreshStageLogsUseEmail();
   await testFirstGenerationStageLogsUseEmail();
+  await testFirstGenerationSyncsUntrustedUserSnapshotsBeforeFetchingTemplates();
+  await testFirstGenerationKeepsNodesWhenOneServerSyncFails();
   console.log('subscription snapshot reuse tests passed');
 }
 

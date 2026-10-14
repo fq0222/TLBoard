@@ -633,14 +633,15 @@ function filterOnlineNodeConfigs(nodeConfigs, serversById) {
 }
 
 /**
- * 按 server_id + inbound_id 判断哪些在线服务器缺少快照或当前用户配置。
+ * 判断哪些在线服务器缺少节点配置或快照无法证明当前用户配置可信。
  *
  * @param {Array<Object>} servers - 在线服务器列表。
  * @param {Array<Object>} snapshots - 本地 xui_nodes 快照。
  * @param {Array<Object>} nodeConfigs - 当前用户的 user_node_configs。
- * @returns {Array<Object>} 需要远程同步的服务器；无快照或任一快照缺配置都会入选。
+ * @param {Object} user - 当前用户，用于校验 JOIN 快照中的 UUID 与 sub_id。
+ * @returns {Array<Object>} 需要远程同步的服务器；缺配置或存在不可信 JOIN 配置时入选。
  */
-function findServersRequiringSync(servers, snapshots, nodeConfigs) {
+function findServersRequiringSync(servers, snapshots, nodeConfigs, user) {
   const snapshotKeysByServer = new Map();
   for (const snapshot of snapshots) {
     const serverId = String(snapshot.server_id);
@@ -652,12 +653,22 @@ function findServersRequiringSync(servers, snapshots, nodeConfigs) {
     );
   }
 
-  const configKeys = new Set(
-    nodeConfigs.map((config) => buildSourceCacheKey(config.server_id, config.inbound_id))
+  const configsByKey = new Map(
+    nodeConfigs.map((config) => [
+      buildSourceCacheKey(config.server_id, config.inbound_id),
+      config
+    ])
   );
   return servers.filter((server) => {
     const snapshotKeys = snapshotKeysByServer.get(String(server.id));
-    return !snapshotKeys || snapshotKeys.some((key) => !configKeys.has(key));
+    if (!snapshotKeys || snapshotKeys.some((key) => !configsByKey.has(key))) {
+      return true;
+    }
+
+    return nodeConfigs.some((config) => (
+      String(config.server_id) === String(server.id)
+        && !inspectUserInNodeSnapshot(user, config).trusted
+    ));
   });
 }
 
@@ -759,11 +770,32 @@ async function ensureUserNodeConfigsComplete(db, user, servers, logger, options 
     logger.warn(`同步用户节点配置未完全成功: user=${user.email}, message=${syncResult.message || 'unknown'}`);
   }
 
+  const affectedServers = servers.filter((server) => serverIds.includes(server.id));
+  await refreshNodeSnapshotsAfterUserSync(db, affectedServers, options);
+
   nodeConfigs = filterOnlineNodeConfigs(
     await subscriptionRepository.listUserNodeConfigs(db, user.id),
     serversById
   );
   return nodeConfigs;
+}
+
+/**
+ * 用户写入 3X-UI 后清除旧批量快照并重新同步，确保 xui_nodes.settings 反映最新客户端。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {Array<Object>} servers - 本次用户同步涉及的服务器
+ * @param {Object} [options={}] - 生成选项与可替换同步依赖
+ * @returns {Promise<Object>} 最新节点快照同步结果
+ */
+async function refreshNodeSnapshotsAfterUserSync(db, servers, options = {}) {
+  const inboundSnapshotCache = options.inboundSnapshotCache;
+  for (const server of servers) {
+    inboundSnapshotCache?.delete(String(server.id));
+  }
+
+  const syncServers = options.dependencies?.syncSelectedServers || syncSelectedServers;
+  return syncServers(db, servers, { inboundSnapshotCache });
 }
 
 /**
@@ -774,11 +806,14 @@ async function ensureUserNodeConfigsComplete(db, user, servers, logger, options 
  * @param {Array<Object>} repairServers - 首轮模板失败且无有效缓存的服务器
  * @param {Object} logger - 日志实例
  * @param {Object} [options={}] - 生成选项与依赖覆盖
- * @returns {Promise<Array<Object>>} 修复服务器上的最新用户节点配置
+ * @returns {Promise<{nodeConfigs:Array<Object>,snapshotSyncResult:Object}>} 最新配置与强制快照同步结果
  */
 async function reloadRepairNodeConfigs(db, user, repairServers, logger, options = {}) {
   if (repairServers.length === 0) {
-    return [];
+    return {
+      nodeConfigs: [],
+      snapshotSyncResult: { results: [], syncedCount: 0, failedCount: 0, totalCount: 0 }
+    };
   }
 
   const repairServerIds = repairServers.map((server) => server.id);
@@ -796,9 +831,12 @@ async function reloadRepairNodeConfigs(db, user, repairServers, logger, options 
     );
   }
 
+  const snapshotSyncResult = await refreshNodeSnapshotsAfterUserSync(db, repairServers, options);
+
   const repairIds = new Set(repairServerIds);
-  return (await subscriptionRepository.listUserNodeConfigs(db, user.id))
+  const nodeConfigs = (await subscriptionRepository.listUserNodeConfigs(db, user.id))
     .filter((config) => repairIds.has(config.server_id));
+  return { nodeConfigs, snapshotSyncResult };
 }
 
 /**
@@ -1615,17 +1653,17 @@ async function generateSubscription(db, userId, logger, options = {}) {
   if (isFirstGeneration) {
     const snapshots = await subscriptionRepository.listNodeSnapshots(db);
     const nodeConfigs = await subscriptionRepository.listUserNodeConfigs(db, user.id);
-    const missingServers = findServersRequiringSync(servers, snapshots, nodeConfigs);
-    if (missingServers.length > 0) {
-      logger.info(`用户 ${user.email} 首次生成订阅，定向同步 ${missingServers.length} 台缺口服务器`);
+    const serversRequiringSync = findServersRequiringSync(servers, snapshots, nodeConfigs, user);
+    if (serversRequiringSync.length > 0) {
+      logger.info(`用户 ${user.email} 首次生成订阅，定向同步 ${serversRequiringSync.length} 台节点配置不完整服务器`);
       const syncServers = options.dependencies?.syncSelectedServers || syncSelectedServers;
-      const syncResult = await syncServers(db, missingServers, {
+      const syncResult = await syncServers(db, serversRequiringSync, {
         inboundSnapshotCache: options.inboundSnapshotCache
       });
-      missingServers.forEach((server, index) => {
+      serversRequiringSync.forEach((server, index) => {
         recordInboundResult(server, syncResult.results?.[index]);
       });
-      logger.info(`首次生成前节点同步完成: ${syncResult.syncedCount || 0}/${syncResult.totalCount || missingServers.length} 台服务器`);
+      logger.info(`首次生成前节点同步完成: ${syncResult.syncedCount || 0}/${syncResult.totalCount || serversRequiringSync.length} 台服务器`);
     } else {
       logger.info(`用户 ${user.email} 首次生成订阅，本地快照和节点配置完整，跳过远程节点同步`);
     }
@@ -1674,24 +1712,18 @@ async function generateSubscription(db, userId, logger, options = {}) {
       summary.repairServers = repairServers.length;
 
       if (repairServers.length > 0) {
-        const syncServers = options.dependencies?.syncSelectedServers || syncSelectedServers;
-        const repairSyncResult = await syncServers(db, repairServers, {
-          inboundSnapshotCache: options.inboundSnapshotCache
-        });
-        repairServers.forEach((server, index) => {
-          recordInboundResult(server, repairSyncResult.results?.[index]);
-        });
-        const successfulRepairServers = repairServers.filter(
-          (server, index) => repairSyncResult.results?.[index]?.success
-        );
-
-        const latestRepairConfigs = await reloadRepairNodeConfigs(
+        const repairResult = await reloadRepairNodeConfigs(
           db,
           user,
-          successfulRepairServers,
+          repairServers,
           logger,
           options
         );
+        const repairSyncResult = repairResult.snapshotSyncResult;
+        repairServers.forEach((server, index) => {
+          recordInboundResult(server, repairSyncResult.results?.[index]);
+        });
+        const latestRepairConfigs = repairResult.nodeConfigs;
         const latestRepairConfigMap = new Map(
           latestRepairConfigs.map((config) => [
             buildSourceCacheKey(config.server_id, config.inbound_id),
@@ -1808,21 +1840,14 @@ async function generateSubscription(db, userId, logger, options = {}) {
         );
         if (compensationServers.length > 0) {
           summary.repairServers = compensationServers.length;
-          await reloadRepairNodeConfigs(
+          const compensationResult = await reloadRepairNodeConfigs(
             db,
             user,
             compensationServers,
             logger,
             options
           );
-
-          // 用户补偿会修改远端客户端；再补拉一次才能让 xui_nodes 反映补偿后的真实状态。
-          for (const server of compensationServers) {
-            options.inboundSnapshotCache.delete(String(server.id));
-          }
-          const verificationSyncResult = await syncServers(db, compensationServers, {
-            inboundSnapshotCache: options.inboundSnapshotCache
-          });
+          const verificationSyncResult = compensationResult.snapshotSyncResult;
           compensationServers.forEach((server, index) => {
             recordInboundResult(server, verificationSyncResult.results?.[index]);
           });
