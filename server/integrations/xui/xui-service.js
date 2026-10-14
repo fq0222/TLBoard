@@ -13,6 +13,7 @@ const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const { isValidXuiAuth } = require('../../utils/xui-auth');
 
 const logger = createLogger('XUI-SERVICE');
+const XUI_RETRY_DELAY_MS = 500;
 
 // 禁用环境变量代理，避免连接问题
 delete process.env.http_proxy;
@@ -27,12 +28,22 @@ function isClientApiNotFoundMessage(message) {
 
 function isTransientXuiNetworkError(message) {
   const normalized = String(message || '').toLowerCase();
-  return normalized.includes('client network socket disconnected')
+  return normalized.includes('aborted')
+    || normalized.includes('client network socket disconnected')
     || normalized.includes('econnreset')
     || normalized.includes('socket hang up')
     || normalized.includes('tls connection')
     || normalized.includes('request timeout')
     || normalized.includes('cannot connect to server');
+}
+
+/**
+ * 等待下一次 3X-UI 请求重试，避免网络瞬时抖动时立即再次失败。
+ * @param {number} delayMs - 等待时长，单位毫秒。
+ * @returns {Promise<void>} 延迟完成后兑现。
+ */
+function waitBeforeRetry(delayMs) {
+  return new Promise(resolve => setTimeout(resolve, delayMs));
 }
 
 /**
@@ -282,7 +293,11 @@ class XuiService {
       } catch (error) {
         lastError = error;
         if (attempt < maxAttempts && isTransientXuiNetworkError(error.message)) {
-          logger.warn(`获取 inbounds 遇到瞬时网络错误，准备重试: attempt=${attempt}/${maxAttempts}, error=${error.message}`);
+          logger.warn(
+            `获取 inbounds 遇到瞬时网络错误，${XUI_RETRY_DELAY_MS}ms 后重试: ` +
+            `attempt=${attempt}/${maxAttempts}, error=${error.message}`
+          );
+          await waitBeforeRetry(XUI_RETRY_DELAY_MS);
           continue;
         }
         break;

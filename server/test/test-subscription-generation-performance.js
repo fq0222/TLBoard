@@ -160,6 +160,58 @@ async function testXuiServiceShouldForwardInboundOptions() {
 }
 
 /**
+ * 验证响应被中途终止时会等待 500ms，并按现有默认次数重试。
+ *
+ * @returns {Promise<void>}
+ */
+async function testXuiServiceShouldRetryAbortedAfterDelay() {
+  let attempts = 0;
+  const service = new XuiService('http://127.0.0.1', 'token');
+  service.client = {
+    async getInbounds() {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error('aborted');
+      }
+      return { success: true, obj: [{ id: 1 }] };
+    }
+  };
+  const startedAt = Date.now();
+
+  const result = await service.getInbounds();
+
+  assert.deepStrictEqual(result, { success: true, data: [{ id: 1 }] });
+  assert.strictEqual(attempts, 2);
+  assert(Date.now() - startedAt >= 450, 'aborted 重试前应等待约 500ms');
+}
+
+/**
+ * 验证已有的瞬时网络错误同样统一等待 500ms 后再重试。
+ *
+ * @returns {Promise<void>}
+ */
+async function testXuiServiceShouldDelayAllTransientRetries() {
+  let attempts = 0;
+  const service = new XuiService('http://127.0.0.1', 'token');
+  service.client = {
+    async getInbounds() {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error('socket hang up');
+      }
+      return { success: true, obj: [] };
+    }
+  };
+  const startedAt = Date.now();
+
+  const result = await service.getInbounds();
+
+  assert.strictEqual(result.success, true);
+  assert.strictEqual(attempts, 2);
+  assert(Date.now() - startedAt >= 450, '所有瞬时错误重试前都应等待约 500ms');
+}
+
+/**
  * 验证 inbound 快照请求的默认单次超时常量保持为 10 秒。
  *
  * @returns {void}
@@ -1784,6 +1836,8 @@ async function run() {
   await testInterruptedOriginalSubscriptionShouldReject();
   await testApiClientShouldWriteTimeoutToAxiosConfig();
   await testXuiServiceShouldForwardInboundOptions();
+  await testXuiServiceShouldRetryAbortedAfterDelay();
+  await testXuiServiceShouldDelayAllTransientRetries();
   testInboundRequestTimeoutConstant();
   await testInboundRequestTimeoutNormalization();
   testCompleteLocalSnapshotShouldSkipRemoteSync();
