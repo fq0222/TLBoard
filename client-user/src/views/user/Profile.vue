@@ -1592,6 +1592,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  container-name: profile-content;
+  container-type: inline-size;
 }
 
 .dashboard-card-grid {
@@ -1616,7 +1618,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-width: 0;
   height: clamp(188px, 18vw, 260px);
-  min-height: 0;
+  min-height: 260px;
   padding: 18px;
 }
 
@@ -2495,10 +2497,6 @@ onBeforeUnmount(() => {
   margin: 0 -18px -18px;
 }
 
-.announcement-card {
-  min-height: 100%;
-}
-
 .announcement-card-title {
   padding-bottom: 14px;
   border-bottom: 1px solid #eef2f7;
@@ -3114,11 +3112,25 @@ onBeforeUnmount(() => {
   }
 }
 
-@media (max-width: 1024px) {
+/* 以 1080P 全屏内容区为四列基准；低于 1600px 后再切换为三列。 */
+@container profile-content (max-width: 1599px) {
+  .dashboard-card-grid,
+  .current-plan-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container profile-content (max-width: 1203px) {
   .dashboard-card-grid,
   .current-plan-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    min-height: 0;
+  }
+}
+
+@container profile-content (max-width: 791px) {
+  .dashboard-card-grid,
+  .current-plan-list {
+    grid-template-columns: 1fr;
   }
 }
 

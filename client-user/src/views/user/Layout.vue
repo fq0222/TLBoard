@@ -522,6 +522,7 @@ onBeforeUnmount(() => {
 
 .main-content {
   flex: 1;
+  min-width: 0;
   margin-left: 260px;
   padding: 20px;
 }
