@@ -639,7 +639,7 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
 
 /**
  * 注册 3X-UI 用户同步任务
- * 启动后延迟 1 分钟执行第一次，之后每 4 小时执行一次。
+ * 启动后延迟 1 分钟执行第一次，之后每 6 小时执行一次。
  * @param {Object} context - 任务上下文
  * @param {Object} context.db - 数据库实例
  * @param {Array} context.intervals - 间隔任务引用集合
@@ -652,10 +652,10 @@ function registerXuiSyncJob({ db, intervals, registerTimeout }) {
 
   const interval = setInterval(() => {
     scheduleXuiUserSync(db);
-  }, 4 * 60 * 60 * 1000);
+  }, 6 * 60 * 60 * 1000);
 
   intervals.push(interval);
-  logger.info('3X-UI用户同步任务已注册（每4小时执行一次）');
+  logger.info('3X-UI用户同步任务已注册（每6小时执行一次）');
 }
 
 /**

@@ -152,7 +152,7 @@ function requestJson(server, options) {
   });
 }
 
-test('手动触发与四小时定时任务使用同一个队列任务名', t => {
+test('手动触发与六小时定时任务使用同一个队列任务名', t => {
   const observation = loadSyncHandlerWithScheduler(true);
   t.after(observation.restore);
 
@@ -165,30 +165,36 @@ test('手动触发与四小时定时任务使用同一个队列任务名', t => 
   assert.equal(typeof observation.scheduled[0].handler, 'function');
 });
 
-test('启动延迟任务和四小时定时任务复用同一个同步入队入口', t => {
+test('启动延迟一分钟和每六小时定时任务复用同一个同步入队入口', t => {
   const observation = loadSyncHandlerWithScheduler(true);
   const originalSetInterval = global.setInterval;
   const intervalCallbacks = [];
   const timeoutCallbacks = [];
+  const intervalDelays = [];
+  const timeoutDelays = [];
   t.after(() => {
     global.setInterval = originalSetInterval;
     observation.restore();
   });
-  global.setInterval = callback => {
+  global.setInterval = (callback, delay) => {
     intervalCallbacks.push(callback);
+    intervalDelays.push(delay);
     return { type: 'interval' };
   };
 
   observation.syncHandler.registerXuiSyncJob({
     db: {},
     intervals: [],
-    registerTimeout(callback) {
+    registerTimeout(callback, delay) {
       timeoutCallbacks.push(callback);
+      timeoutDelays.push(delay);
     }
   });
 
   assert.equal(timeoutCallbacks.length, 1);
   assert.equal(intervalCallbacks.length, 1);
+  assert.equal(intervalDelays[0], 6 * 60 * 60 * 1000);
+  assert.equal(timeoutDelays[0], 1 * 60 * 1000);
   timeoutCallbacks[0]();
   intervalCallbacks[0]();
   assert.deepEqual(observation.scheduled.map(item => item.name), [
@@ -208,7 +214,7 @@ test('管理端手动同步入口返回新任务已入队状态', t => {
   });
 });
 
-test('已有四小时同步任务时管理端手动入口返回合并状态', t => {
+test('已有六小时同步任务时管理端手动入口返回合并状态', t => {
   const observation = loadServersServiceWithSyncResult(false);
   t.after(observation.restore);
 
