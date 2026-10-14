@@ -128,7 +128,7 @@ function createGenerationScenario({
       inbound_id: config.inbound_id,
       sub_id: config.sub_id,
       original_link: `vless://${config.uuid}@origin.example:443?security=none&type=tcp#old`,
-      node_fingerprint: 'stale-fingerprint',
+      node_fingerprint: 'v2:stale-fingerprint',
       server_fingerprint: cacheService.computeServerFingerprint(
         servers.find((server) => server.id === config.server_id)
       ),
@@ -440,7 +440,8 @@ async function testSourceRefreshStageLogsUseEmail() {
   assert.ok(logs.some((message) => (
     message.includes('刷新原始订阅模板失败: user=user@example.com')
       && message.includes('servers=[香港节点]')
-      && message.includes('errorType=ECONNABORTED')
+      && message.includes('errorType=NetworkTimeout')
+      && message.includes('errorCode=ECONNABORTED')
   )));
   const combinedLogs = logs.join('\n');
   assert.ok(!combinedLogs.includes('server=1'), '来源刷新日志不得输出服务器数字 ID');
@@ -823,6 +824,88 @@ function testBuildInboundRefreshPlan() {
 }
 
 /**
+ * 验证来源缓存评估同时保留有效项，并按原因及服务器汇总失效项。
+ * @returns {void}
+ */
+function testCollectSourceCacheStatusGroupsReasons() {
+  const collectSourceCacheStatus = subscriptionService.__testables.collectSourceCacheStatus;
+  assert.strictEqual(typeof collectSourceCacheStatus, 'function');
+  const servers = [
+    { id: 1, name: '香港', sub_url: 'https://hk.example/sub/', host: 'hk.example', client_port: 443 },
+    { id: 2, name: '日本', sub_url: 'https://jp.example/sub/', host: 'jp.example', client_port: 443 }
+  ];
+  const configs = [
+    createJoinedConfig({ server_id: 1, inbound_id: 10, sub_id: 'sub-a', uuid: 'uuid-a' }),
+    createJoinedConfig({ server_id: 1, inbound_id: 11, remark: 'direct-2', sub_id: 'sub-b', uuid: 'uuid-b' }),
+    createJoinedConfig({ server_id: 2, inbound_id: 20, remark: 'direct-3', sub_id: 'sub-c', uuid: 'uuid-c' })
+  ];
+  const sources = new Map(configs.map((config) => {
+    const server = servers.find((item) => item.id === config.server_id);
+    return [`${config.server_id}:${config.inbound_id}`, {
+      sub_id: config.sub_id,
+      original_link: `vless://${config.uuid}@origin.example:443?security=none&type=tcp#cached`,
+      node_fingerprint: cacheService.computeNodeFingerprint(config),
+      server_fingerprint: cacheService.computeServerFingerprint(server),
+      fetched_at: 1
+    }];
+  }));
+  sources.get('1:11').node_fingerprint = 'v2:stale';
+  sources.get('2:20').server_fingerprint = 'v2:stale';
+
+  const result = collectSourceCacheStatus(
+    configs,
+    sources,
+    new Map(servers.map((server) => [server.id, server]))
+  );
+
+  assert.deepStrictEqual(result.validPairs.map((pair) => pair.key), ['1:10']);
+  assert.deepStrictEqual(result.invalidPairs.map((pair) => pair.key), ['1:11', '2:20']);
+  assert.deepStrictEqual(result.reasonCounts, {
+    node_fingerprint_mismatch: 1,
+    server_fingerprint_mismatch: 1
+  });
+  assert.deepStrictEqual(result.reasonsByServer, {
+    1: { node_fingerprint_mismatch: 1 },
+    2: { server_fingerprint_mismatch: 1 }
+  });
+}
+
+/**
+ * 验证来源缓存本身有效时，当前用户从 inbound 快照中消失仍会进入定向修复。
+ * @returns {void}
+ */
+function testValidSourceRejectsMissingCurrentUserSnapshot() {
+  const collectSourceCacheStatus = subscriptionService.__testables.collectSourceCacheStatus;
+  const user = { email: 'user@example.com' };
+  const config = createJoinedConfig({ settings: JSON.stringify({ clients: [] }) });
+  const server = {
+    id: config.server_id,
+    name: '香港',
+    sub_url: 'https://hk.example/sub/',
+    host: 'hk.example',
+    client_port: 443
+  };
+  const source = {
+    sub_id: config.sub_id,
+    original_link: `vless://${config.uuid}@origin.example:443?security=none&type=tcp#cached`,
+    node_fingerprint: cacheService.computeNodeFingerprint(config),
+    server_fingerprint: cacheService.computeServerFingerprint(server),
+    fetched_at: 1
+  };
+
+  const result = collectSourceCacheStatus(
+    [config],
+    new Map([[`${config.server_id}:${config.inbound_id}`, source]]),
+    new Map([[server.id, server]]),
+    user
+  );
+
+  assert.strictEqual(result.usable, false);
+  assert.strictEqual(result.invalidPairs[0].reason, 'snapshot_missing_user');
+  assert.deepStrictEqual(result.reasonCounts, { snapshot_missing_user: 1 });
+}
+
+/**
  * 验证静默评估来源缓存时，节点指纹不匹配不会输出失效日志。
  *
  * @returns {void}
@@ -845,7 +928,7 @@ function testNodeFingerprintMismatchStaysSilent() {
   };
   const source = {
     sub_id: 'abcdef1234567890',
-    node_fingerprint: 'stale-node-fingerprint',
+    node_fingerprint: 'v2:stale-node-fingerprint',
     server_fingerprint: cacheService.computeServerFingerprint(server),
     fetched_at: 1710000000
   };
@@ -901,11 +984,11 @@ function testInvalidNodeSettingsUsesUnifiedWarnLogger() {
     cacheService.computeNodeFingerprint({
       server_id: 1,
       inbound_id: 10,
-      settings: '{invalid-json',
-      stream_settings: '{}'
+      settings: '{}',
+      stream_settings: '{invalid-json'
     });
 
-    assert.strictEqual(warnings.length, 1, '非法节点 settings 应输出一条解析警告');
+    assert.strictEqual(warnings.length, 1, '非法节点 stream_settings 应输出一条解析警告');
     assert.ok(
       warnings[0].includes('[SUBSCRIPTION-CACHE-SERVICE] [WARN]')
         && warnings[0].includes('stableJson 解析 JSON 失败'),
@@ -939,7 +1022,7 @@ function testNodeFingerprintMismatchUsesUnifiedLogger() {
   };
   const source = {
     sub_id: 'abcdef1234567890',
-    node_fingerprint: 'stale-node-fingerprint',
+    node_fingerprint: 'v2:stale-node-fingerprint',
     server_fingerprint: cacheService.computeServerFingerprint(server),
     fetched_at: 1710000000
   };
@@ -998,6 +1081,8 @@ async function testListUserNodeConfigsSelectsAuth() {
 async function run() {
   testFormatServerNames();
   testBuildInboundRefreshPlan();
+  testCollectSourceCacheStatusGroupsReasons();
+  testValidSourceRejectsMissingCurrentUserSnapshot();
   testNodeFingerprintMismatchStaysSilent();
   testInvalidNodeSettingsUsesUnifiedWarnLogger();
   testNodeFingerprintMismatchUsesUnifiedLogger();

@@ -432,9 +432,9 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
       { server_id: 3, inbound_id: 31 }
     ];
     subscriptionRepository.listUserNodeConfigs = async () => [
-      { server_id: 1, inbound_id: 11, sub_id: 'sub-1', remark: 'direct-1', protocol: 'vless', port: 443, settings: '{}', stream_settings: '{}' },
-      { server_id: 2, inbound_id: 21, sub_id: 'sub-2', remark: 'direct-2', protocol: 'vless', port: 443, settings: '{}', stream_settings: '{}' },
-      { server_id: 3, inbound_id: 31, sub_id: 'sub-3', remark: 'direct-3', protocol: 'vless', port: 443, settings: '{}', stream_settings: '{}' }
+      { server_id: 1, inbound_id: 11, sub_id: 'sub-1', uuid: '00000000-0000-0000-0000-000000000001', remark: 'direct-1', protocol: 'vless', port: 443, settings: JSON.stringify({ clients: [{ email: 'user@example.com-direct-1', id: '00000000-0000-0000-0000-000000000001', subId: 'sub-1' }] }), stream_settings: '{}' },
+      { server_id: 2, inbound_id: 21, sub_id: 'sub-2', uuid: '00000000-0000-0000-0000-000000000001', remark: 'direct-2', protocol: 'vless', port: 443, settings: JSON.stringify({ clients: [{ email: 'user@example.com-direct-2', id: '00000000-0000-0000-0000-000000000001', subId: 'sub-2' }] }), stream_settings: '{}' },
+      { server_id: 3, inbound_id: 31, sub_id: 'sub-3', uuid: '00000000-0000-0000-0000-000000000001', remark: 'direct-3', protocol: 'vless', port: 443, settings: JSON.stringify({ clients: [{ email: 'user@example.com-direct-3', id: '00000000-0000-0000-0000-000000000001', subId: 'sub-3' }] }), stream_settings: '{}' }
     ];
     let selectedSyncCalls = 0;
     await userSubscriptionService.generateSubscription({}, user.id, logger, {
@@ -459,7 +459,23 @@ async function testGenerateSubscriptionShouldWireTargetedSyncDependencies() {
       { server_id: 2, inbound_id: 21 }
     ];
     subscriptionRepository.listUserNodeConfigs = async () => [
-      { server_id: 1, inbound_id: 11, sub_id: 'sub-1', remark: 'direct-1', protocol: 'vless', port: 443, settings: '{}', stream_settings: '{}' }
+      {
+        server_id: 1,
+        inbound_id: 11,
+        sub_id: 'sub-1',
+        uuid: '00000000-0000-0000-0000-000000000001',
+        remark: 'direct-1',
+        protocol: 'vless',
+        port: 443,
+        settings: JSON.stringify({
+          clients: [{
+            email: 'user@example.com-direct-1',
+            id: '00000000-0000-0000-0000-000000000001',
+            subId: 'sub-1'
+          }]
+        }),
+        stream_settings: '{}'
+      }
     ];
     await userSubscriptionService.generateSubscription({}, user.id, logger, {
         inboundSnapshotCache,
@@ -509,7 +525,15 @@ async function testGenerateSubscriptionShouldCreateRequestScopedInboundCache() {
   const config = {
     user_id: 801, server_id: 1, inbound_id: 11, sub_id: 'cache-node-sub',
     uuid: '00000000-0000-0000-0000-000000000801', remark: 'direct',
-    protocol: 'vless', port: 443, settings: '{}', stream_settings: '{}'
+    protocol: 'vless', port: 443,
+    settings: JSON.stringify({
+      clients: [{
+        email: 'cache@example.com-direct',
+        id: '00000000-0000-0000-0000-000000000801',
+        subId: 'cache-node-sub'
+      }]
+    }),
+    stream_settings: '{}'
   };
   const caches = [];
   let configReads = 0;
@@ -584,12 +608,20 @@ async function testExistingGenerationMissingSnapshotsShouldUseConcurrentBatchSyn
     user_id: 802, server_id: server.id, inbound_id: server.id * 10,
     sub_id: `missing-sub-${server.id}`, uuid: `missing-uuid-${server.id}`,
     remark: `direct-${server.id}`, protocol: 'vless', port: 443,
-    settings: '{}', stream_settings: '{}'
+    settings: JSON.stringify({
+      clients: [{
+        email: `missing@example.com-direct-${server.id}`,
+        id: `missing-uuid-${server.id}`,
+        subId: `missing-sub-${server.id}`
+      }]
+    }),
+    stream_settings: '{}'
   }));
   const now = Math.floor(Date.now() / 1000);
   const sources = configs.map((config) => ({
     user_id: 802, server_id: config.server_id, inbound_id: config.inbound_id,
-    sub_id: config.sub_id, original_link: `vless://cached-${config.server_id}`,
+    sub_id: config.sub_id,
+    original_link: `vless://${config.uuid}@127.0.0.1:443?encryption=none&type=tcp#cached-${config.server_id}`,
     node_fingerprint: computeNodeFingerprint(config),
     server_fingerprint: computeServerFingerprint(servers[config.server_id - 1]),
     fetched_at: now
@@ -662,6 +694,7 @@ async function testExistingGenerationMissingSnapshotsShouldUseConcurrentBatchSyn
  * @param {Function} [options.createFailure] - 按节点序号创建失败原因，支持非 Error 拒绝值。
  * @param {Function} [options.getDelayMs] - 按节点序号返回模拟网络耗时。
  * @param {Object} [options.serverOverrides] - 按节点序号覆盖服务器字段。
+ * @param {boolean} [options.existingSubscription=false] - 是否按非首次生成路径验证缓存复用。
  * @returns {Promise<Object>} 生成结果、并发统计和最终写入节点。
  */
 async function runSourceRefreshScenario({
@@ -669,7 +702,10 @@ async function runSourceRefreshScenario({
   seedSources = [],
   createFailure = () => new Error('模拟网络失败：敏感内容 token-uuid'),
   getDelayMs = () => 5,
-  serverOverrides = {}
+  serverOverrides = {},
+  existingSubscription = false,
+  repeatCount = 1,
+  beforeGenerate = async () => {}
 } = {}) {
   const repositoryMethods = [
     'findLatestUserSubscription',
@@ -707,10 +743,17 @@ async function runSourceRefreshScenario({
     server_id: server.id,
     inbound_id: index + 101,
     sub_id: `node-sub-${index + 1}`,
+    uuid: `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
     remark: `direct-${index + 1}`,
     protocol: 'vless',
     port: 443,
-    settings: '{}',
+    settings: JSON.stringify({
+      clients: [{
+        email: `concurrency@example.com-direct-${index + 1}`,
+        id: `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
+        subId: `node-sub-${index + 1}`
+      }]
+    }),
     stream_settings: '{}'
   }));
   const sources = new Map(seedSources.map((source) => [
@@ -725,7 +768,9 @@ async function runSourceRefreshScenario({
   let savedNodes;
   const logMessages = [];
 
-  subscriptionRepository.findLatestUserSubscription = async () => undefined;
+  subscriptionRepository.findLatestUserSubscription = async () => (
+    existingSubscription ? { id: 1 } : undefined
+  );
   subscriptionRepository.findSubscriptionUserById = async () => user;
   subscriptionRepository.listEnabledUserCfIps = async () => [{ ip: '1.1.1.1' }];
   subscriptionRepository.listOnlineServers = async () => servers;
@@ -740,12 +785,15 @@ async function runSourceRefreshScenario({
   };
 
   try {
-    const result = await userSubscriptionService.generateSubscription({}, user.id, {
-      info(message) { logMessages.push(message); },
-      warn(message) { logMessages.push(message); },
-      error(message) { logMessages.push(message); }
-    }, {
-      dependencies: {
+    let result;
+    for (let callIndex = 0; callIndex < repeatCount; callIndex += 1) {
+      await beforeGenerate({ callIndex, nodeConfigs, sources });
+      result = await userSubscriptionService.generateSubscription({}, user.id, {
+        info(message) { logMessages.push(message); },
+        warn(message) { logMessages.push(message); },
+        error(message) { logMessages.push(message); }
+      }, {
+        dependencies: {
         async syncSelectedServers(db, selectedServers) {
           repairServerSelections.push(selectedServers.map((server) => server.id));
           return {
@@ -776,8 +824,9 @@ async function runSourceRefreshScenario({
             activeCount -= 1;
           }
         }
-      }
-    });
+        }
+      });
+    }
 
     return {
       result,
@@ -808,11 +857,14 @@ async function testSourceRefreshShouldLimitConcurrencyAndKeepPartialSuccess() {
 
   assert.strictEqual(scenario.result, 'user-sub-token');
   assert.strictEqual(scenario.maxActiveCount, 10);
-  assert.deepStrictEqual(new Set(scenario.timeoutValues), new Set([5000]));
+  assert.deepStrictEqual(new Set(scenario.timeoutValues), new Set([15000]));
   assert.strictEqual(scenario.sources.size, 23);
   assert.strictEqual(scenario.savedNodes.length, 23);
   const logs = scenario.logMessages.join('\n');
   assert(logs.includes('success=23, failed=2'));
+  assert(logs.includes('sourceFetchServers=25'));
+  assert(logs.includes('sourceFetchPairs=25'));
+  assert(logs.includes('sourceFetchGroups=25'));
   assert(logs.includes('user=concurrency@example.com, servers=[source-7], inbound=107, duration='));
   assert(!logs.includes('user=concurrency@example.com, server=7'));
   assert(!logs.includes('token-uuid'));
@@ -859,6 +911,111 @@ function createSourceCache(nodeConfig, server, overrides = {}) {
 }
 
 /**
+ * 验证公共生成流程只升级一次旧版指纹，后续连续生成及其他用户变化均不触发远程拉取。
+ *
+ * @returns {Promise<void>}
+ */
+async function testPublicGenerationShouldUpgradeLegacyCacheOnlyOnce() {
+  const servers = Array.from({ length: 25 }, (_, index) => ({
+    id: index + 1,
+    name: `source-${index + 1}`,
+    sub_url: `https://subscription.example/${index + 1}/`,
+    host: `node-${index + 1}.example.com`,
+    client_port: 443
+  }));
+  const configs = servers.map((server, index) => ({
+    server_id: server.id,
+    inbound_id: index + 101,
+    sub_id: `node-sub-${index + 1}`,
+    uuid: `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
+    remark: `direct-${index + 1}`,
+    protocol: 'vless',
+    port: 443,
+    settings: JSON.stringify({
+      clients: [{
+        email: `concurrency@example.com-direct-${index + 1}`,
+        id: `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
+        subId: `node-sub-${index + 1}`
+      }]
+    }),
+    stream_settings: '{}'
+  }));
+  const seedSources = configs.map((config, index) => createSourceCache(config, servers[index]));
+  seedSources[0].node_fingerprint = seedSources[0].node_fingerprint.replace(/^v2:/, '');
+
+  const scenario = await runSourceRefreshScenario({
+    seedSources,
+    existingSubscription: true,
+    repeatCount: 3,
+    beforeGenerate({ callIndex, nodeConfigs }) {
+      if (callIndex !== 2) return;
+      const settings = JSON.parse(nodeConfigs[0].settings);
+      settings.clients.push({ email: 'other-user@example.com', id: 'other-user-id', subId: 'other-sub-id' });
+      nodeConfigs[0].settings = JSON.stringify(settings);
+    }
+  });
+
+  assert.deepStrictEqual(Object.fromEntries(scenario.fetchCounts), { 1: 1 });
+  assert.deepStrictEqual(scenario.repairServerSelections, []);
+  assert(scenario.sources.get('1:101').node_fingerprint.startsWith('v2:'));
+}
+
+/**
+ * 验证同一服务器、同一 sub_id 下的多个 inbound 共享一次原始订阅请求。
+ *
+ * @returns {Promise<void>}
+ */
+async function testSourceRefreshShouldDeduplicateSharedSubIdRequest() {
+  const originalUpsert = subscriptionRepository.upsertSubscriptionSource;
+  const server = {
+    id: 1,
+    name: 'shared-sub-id',
+    sub_url: 'https://subscription.example/shared/',
+    host: 'shared.example.com',
+    client_port: 443
+  };
+  const configs = [101, 102].map((inboundId, index) => ({
+    server_id: 1,
+    inbound_id: inboundId,
+    sub_id: 'shared-sub-id',
+    uuid: `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
+    remark: `shared-${index + 1}`,
+    protocol: 'vless',
+    port: 443,
+    settings: JSON.stringify({ clients: [] }),
+    stream_settings: '{}'
+  }));
+  let fetchCount = 0;
+  let upsertCount = 0;
+
+  subscriptionRepository.upsertSubscriptionSource = async () => {
+    upsertCount += 1;
+  };
+  try {
+    const result = await userSubscriptionService.__testables.refreshSubscriptionSources(
+      {},
+      { id: 91, email: 'shared@example.com' },
+      configs,
+      new Map([[1, server]]),
+      { info() {}, warn() {} },
+      {
+        async fetchOriginalSubscription() {
+          fetchCount += 1;
+          const link = 'vless://00000000-0000-0000-0000-000000000001@127.0.0.1:443?encryption=none#shared';
+          return Buffer.from(link).toString('base64');
+        }
+      }
+    );
+
+    assert.strictEqual(fetchCount, 1);
+    assert.strictEqual(upsertCount, 2);
+    assert.strictEqual(result.successfulConfigs.length, 2);
+  } finally {
+    subscriptionRepository.upsertSubscriptionSource = originalUpsert;
+  }
+}
+
+/**
  * 验证刷新失败时仍可复用匹配当前 sub_id 和指纹的旧模板。
  *
  * @returns {Promise<void>}
@@ -875,10 +1032,11 @@ async function testSourceRefreshShouldReuseValidOldCache() {
     server_id: 1,
     inbound_id: 101,
     sub_id: 'node-sub-1',
+    uuid: '00000000-0000-0000-0000-000000000001',
     remark: 'direct-1',
     protocol: 'vless',
     port: 443,
-    settings: '{}',
+    settings: JSON.stringify({ clients: [{ email: 'concurrency@example.com-direct-1', id: '00000000-0000-0000-0000-000000000001', subId: 'node-sub-1' }] }),
     stream_settings: '{}'
   };
   const scenario = await runSourceRefreshScenario({
@@ -912,7 +1070,14 @@ async function testRepairShouldRetryOnlyFailedNodesWithoutValidCache() {
     sub_id: `mixed-sub-${index + 1}`,
     uuid: `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
     remark: `direct-${index + 1}`, protocol: 'vless', port: 443,
-    settings: '{}', stream_settings: '{}'
+    settings: JSON.stringify({
+      clients: [{
+        email: `mixed@example.com-direct-${index + 1}`,
+        id: `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
+        subId: `mixed-sub-${index + 1}`
+      }]
+    }),
+    stream_settings: '{}'
   }));
   const sources = new Map([[
     '1:101',
@@ -996,16 +1161,17 @@ async function testSourceRefreshShouldRejectInvalidOldCache() {
     server_id: 1,
     inbound_id: 101,
     sub_id: 'node-sub-1',
+    uuid: '00000000-0000-0000-0000-000000000001',
     remark: 'direct-1',
     protocol: 'vless',
     port: 443,
-    settings: '{}',
+    settings: JSON.stringify({ clients: [{ email: 'concurrency@example.com-direct-1', id: '00000000-0000-0000-0000-000000000001', subId: 'node-sub-1' }] }),
     stream_settings: '{}'
   };
 
   for (const invalidSource of [
     createSourceCache(nodeConfig, server, { sub_id: 'stale-sub-id' }),
-    createSourceCache(nodeConfig, server, { node_fingerprint: 'stale-fingerprint' })
+    createSourceCache(nodeConfig, server, { node_fingerprint: 'v2:stale-fingerprint' })
   ]) {
     const scenario = await runSourceRefreshScenario({
       failedIndexes: new Set([1]),
@@ -1033,10 +1199,11 @@ function createFirstSourceFixture() {
     server_id: 1,
     inbound_id: 101,
     sub_id: 'node-sub-1',
+    uuid: '00000000-0000-0000-0000-000000000001',
     remark: 'direct-1',
     protocol: 'vless',
     port: 443,
-    settings: '{}',
+    settings: JSON.stringify({ clients: [{ email: 'concurrency@example.com-direct-1', id: '00000000-0000-0000-0000-000000000001', subId: 'node-sub-1' }] }),
     stream_settings: '{}'
   };
 
@@ -1068,8 +1235,7 @@ async function testSourceRefreshShouldFailWithInvalidServerFingerprintCache() {
 }
 
 /**
- * 验证超过 24 小时的旧模板，在全部刷新失败时不能兜底生成订阅。
- * 核心分支：通过公共 generateSubscription 链路校验，最终必须返回零节点业务失败。
+ * 验证超过 24 小时但状态未变化的模板仍可复用，不受同步生成时间窗影响。
  *
  * @returns {Promise<void>}
  */
@@ -1080,13 +1246,14 @@ async function testSourceRefreshShouldFailWithExpiredCache() {
     fetched_at: Math.floor(Date.now() / 1000) - (24 * 60 * 60) - 1
   });
 
-  await assert.rejects(
-    runSourceRefreshScenario({
-      failedIndexes: allFailedIndexes,
-      seedSources: [invalidSource]
-    }),
-    (error) => error.code === 500 && error.message.includes('未生成任何可用节点')
-  );
+  const scenario = await runSourceRefreshScenario({
+    failedIndexes: allFailedIndexes,
+    seedSources: [invalidSource],
+    existingSubscription: true
+  });
+
+  assert.strictEqual(scenario.savedNodes.length, 1);
+  assert.strictEqual(scenario.fetchCounts.has(1), false, '过期时间本身不应触发模板重拉');
 }
 
 /**
@@ -1185,7 +1352,13 @@ async function testFirstGenerationShouldRepairFailedServerOnlyOnce() {
     remark: `direct-${server.id}`,
     protocol: 'vless',
     port: 443,
-    settings: '{}',
+    settings: JSON.stringify({
+      clients: [{
+        email: 'secret-user@example.com',
+        id: `private-uuid-${server.id}`,
+        subId: `private-sub-${server.id}`
+      }]
+    }),
     stream_settings: '{}'
   }));
   const addedNodeConfig = {
@@ -1345,7 +1518,13 @@ async function runPersistentSourceFailureScenario(failedServerIds) {
     remark: `direct-${server.id}`,
     protocol: 'vless',
     port: 443,
-    settings: '{}',
+    settings: JSON.stringify({
+      clients: [{
+        email: 'persistent@example.com',
+        id: `persistent-uuid-${server.id}`,
+        subId: `persistent-sub-${server.id}`
+      }]
+    }),
     stream_settings: '{}'
   }));
   const failedIds = new Set(failedServerIds);
@@ -1472,16 +1651,24 @@ async function testExistingSubscriptionIncrementalSyncShouldReportSummary() {
     user_id: 701, server_id: server.id, inbound_id: server.id * 10,
     sub_id: `summary-sub-${server.id}`, uuid: `summary-uuid-${server.id}`,
     remark: `direct-${server.id}`, protocol: 'vless', port: 443,
-    settings: '{}', stream_settings: '{}'
+    settings: JSON.stringify({
+      clients: [{
+        email: `summary@example.com-direct-${server.id}`,
+        id: `summary-uuid-${server.id}`,
+        subId: `summary-sub-${server.id}`
+      }]
+    }),
+    stream_settings: '{}'
   }));
   const now = Math.floor(Date.now() / 1000);
   const sources = new Map(configs.map((config) => {
     const server = servers[config.server_id - 1];
     return [`${config.server_id}:${config.inbound_id}`, {
       user_id: 701, server_id: config.server_id, inbound_id: config.inbound_id,
-      sub_id: config.sub_id, original_link: `vless://old-${config.server_id}`,
+      sub_id: config.sub_id,
+      original_link: `vless://00000000-0000-0000-0000-${String(config.server_id).padStart(12, '0')}@127.0.0.1:443?encryption=none&type=tcp#old-${config.server_id}`,
       node_fingerprint: computeNodeFingerprint(config),
-      server_fingerprint: config.server_id === 2 ? '损坏指纹' : computeServerFingerprint(server),
+      server_fingerprint: config.server_id === 2 ? 'v2:损坏指纹' : computeServerFingerprint(server),
       fetched_at: now
     }];
   }));
@@ -1527,13 +1714,15 @@ async function testExistingSubscriptionIncrementalSyncShouldReportSummary() {
       }
     });
 
-    assert.deepStrictEqual(syncCalls, [2, 2]);
+    assert.deepStrictEqual(syncCalls, []);
     const summary = logs.find((message) => message.includes('订阅生成汇总:'));
     assert(summary.includes('user=summary@example.com'));
-    assert(summary.includes('localServers=[summary-1, summary-3]'));
-    assert(summary.includes('remoteServers=[summary-2]'));
-    assert(summary.includes('inboundSuccess=1'));
+    assert(summary.includes('localServers=[summary-1, summary-2, summary-3]'));
+    assert(summary.includes('remoteServers=[]'));
+    assert(summary.includes('inboundSuccess=0'));
     assert(summary.includes('inboundFailed=0'));
+    assert(summary.includes('sourceFetchServers=1'));
+    assert(summary.includes('sourceFetchPairs=1'));
   } finally {
     for (const method of methods) subscriptionRepository[method] = originals[method];
   }
@@ -1560,6 +1749,8 @@ async function run() {
   await testExistingGenerationMissingSnapshotsShouldUseConcurrentBatchSync();
   await testSourceRefreshShouldLimitConcurrencyAndKeepPartialSuccess();
   await testSourceRefreshShouldFailWhenNoNodeCanBeComposed();
+  await testPublicGenerationShouldUpgradeLegacyCacheOnlyOnce();
+  await testSourceRefreshShouldDeduplicateSharedSubIdRequest();
   await testSourceRefreshShouldReuseValidOldCache();
   await testRepairShouldRetryOnlyFailedNodesWithoutValidCache();
   await testSourceRefreshShouldRejectInvalidOldCache();

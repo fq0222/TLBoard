@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { createLogger } = require('../../utils/logger');
 
 const logger = createLogger('SUBSCRIPTION-CACHE-SERVICE');
+const SOURCE_FINGERPRINT_VERSION = 'v2';
 
 /**
  * 统一规范化值，避免空值、空白和键顺序影响指纹结果。
@@ -74,6 +75,16 @@ function hashPayload(payload) {
 }
 
 /**
+ * 为来源缓存生成带算法版本的稳定指纹。
+ * @param {*} payload - 已按业务边界投影的数据。
+ * @param {boolean} silent - 是否静默处理 JSON 解析警告。
+ * @returns {string} 形如 `v2:<sha256>` 的版本化指纹。
+ */
+function versionFingerprint(payload, silent = false) {
+  return `${SOURCE_FINGERPRINT_VERSION}:${hashPayload(stableJson(payload, silent))}`;
+}
+
+/**
  * 统一处理数字字段，空值或非法值转为 0。
  * @param {*} value
  * @returns {number}
@@ -84,22 +95,69 @@ function normalizeNumber(value) {
 }
 
 /**
+ * 从完整客户端快照中只提取当前节点凭据对应客户端的 flow。
+ * @param {Object} node - 含当前用户本地凭据和 inbound settings 的节点记录。
+ * @param {boolean} silent - 是否静默处理 settings 解析警告。
+ * @returns {string} 唯一匹配客户端的 flow；存在客户端但无法唯一匹配时返回隔离标记。
+ */
+function getCurrentClientFlow(node, silent = false) {
+  if (!node.settings) {
+    return normalizeValue(node.flow);
+  }
+
+  let settings;
+  try {
+    settings = typeof node.settings === 'string' ? JSON.parse(node.settings) : node.settings;
+  } catch (error) {
+    if (!silent) {
+      logger.warn(`节点 settings 解析失败，无法提取当前客户端 flow: ${error.message}`);
+    }
+    return '__invalid_settings__';
+  }
+
+  if (!Array.isArray(settings?.clients)) {
+    return normalizeValue(node.flow);
+  }
+
+  const matches = settings.clients.filter((client) => {
+    if (!client) return false;
+    return (!!node.sub_id && String(client.subId || '') === String(node.sub_id))
+      || (!!node.uuid && String(client.id || '') === String(node.uuid))
+      || (!!node.auth && String(client.auth || client.password || '') === String(node.auth))
+      || (!!node.password && String(client.password || client.auth || '') === String(node.password));
+  });
+
+  if (matches.length === 1) {
+    return normalizeValue(matches[0].flow);
+  }
+  return settings.clients.length > 0 ? '__unmatched_client__' : normalizeValue(node.flow);
+}
+
+/**
  * 计算节点级缓存指纹。
- * 规则：server_id + inbound_id + remark + protocol + port + settings + stream_settings
+ * 规则：仅包含 inbound 连接字段和当前用户凭据，不包含完整 settings.clients。
  * @param {Object} node
  * @param {boolean} silent - 是否静默处理指纹解析警告
  * @returns {string}
  */
 function computeNodeFingerprint(node = {}, silent = false) {
-  return hashPayload(stableJson({
-    server_id: normalizeNumber(node.server_id),
-    inbound_id: normalizeNumber(node.inbound_id),
-    remark: normalizeValue(node.remark),
-    protocol: normalizeValue(node.protocol),
-    port: normalizeNumber(node.port),
-    settings: stableJson(node.settings, silent),
-    stream_settings: stableJson(node.stream_settings, silent)
-  }, silent));
+  return versionFingerprint({
+    inbound: {
+      server_id: normalizeNumber(node.server_id),
+      inbound_id: normalizeNumber(node.inbound_id),
+      remark: normalizeValue(node.remark),
+      protocol: normalizeValue(node.protocol),
+      port: normalizeNumber(node.port),
+      stream_settings: stableJson(node.stream_settings, silent)
+    },
+    credential: {
+      sub_id: normalizeValue(node.sub_id),
+      uuid: normalizeValue(node.uuid),
+      auth: normalizeValue(node.auth),
+      password: normalizeValue(node.password),
+      flow: getCurrentClientFlow(node, silent)
+    }
+  }, silent);
 }
 
 /**
@@ -109,12 +167,12 @@ function computeNodeFingerprint(node = {}, silent = false) {
  * @returns {string}
  */
 function computeServerFingerprint(server = {}) {
-  return hashPayload(stableJson({
+  return versionFingerprint({
     server_id: normalizeNumber(server.server_id || server.id),
     sub_url: normalizeValue(server.sub_url),
     host: normalizeValue(server.host),
     client_port: normalizeNumber(server.client_port)
-  }));
+  });
 }
 
 /**
@@ -160,6 +218,13 @@ function isSourceCacheUsable({
     return { usable: false, reason: 'sub_id_mismatch' };
   }
 
+  const versionPrefix = `${SOURCE_FINGERPRINT_VERSION}:`;
+  if (!String(source.node_fingerprint || '').startsWith(versionPrefix)
+    || !String(source.server_fingerprint || '').startsWith(versionPrefix)) {
+    logCacheInvalid('来源缓存失效：指纹版本需要升级', silent);
+    return { usable: false, reason: 'fingerprint_version_mismatch' };
+  }
+
   const nodeFingerprint = computeNodeFingerprint(node, silent);
   if (String(source.node_fingerprint || '') !== nodeFingerprint) {
     logCacheInvalid('来源缓存失效：节点指纹不匹配', silent);
@@ -172,19 +237,11 @@ function isSourceCacheUsable({
     return { usable: false, reason: 'server_fingerprint_mismatch' };
   }
 
-  if (normalizeNumber(maxAgeSeconds) > 0) {
-    const currentTime = normalizeNumber(now);
-    const fetchedAt = normalizeNumber(source.fetched_at);
-    if (currentTime - fetchedAt > normalizeNumber(maxAgeSeconds)) {
-      logCacheInvalid('来源缓存失效：缓存已过期', silent);
-      return { usable: false, reason: 'cache_expired' };
-    }
-  }
-
   return { usable: true, reason: 'ok' };
 }
 
 module.exports = {
+  SOURCE_FINGERPRINT_VERSION,
   stableJson,
   computeNodeFingerprint,
   computeServerFingerprint,

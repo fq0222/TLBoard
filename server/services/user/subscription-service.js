@@ -21,7 +21,6 @@ const { runWithConcurrency } = require('../../utils/concurrency');
 const { generatePublicSubscriptionId } = require('../../utils/subscription-id');
 const { getUserAppBaseUrl } = require('../../shared/utils/site-url');
 
-const SOURCE_CACHE_MAX_AGE_SECONDS = 24 * 60 * 60;
 const SOURCE_FETCH_CONCURRENCY = 10;
 const SOURCE_FETCH_TIMEOUT_MS = 15000;
 const CLASH_CONFIG_NAME_KEY = 'clash_config_name';
@@ -488,15 +487,6 @@ function isOriginalLinkMatchedToInbound(originalLink, config) {
 }
 
 /**
- * 判断缓存失效是否需要触发服务器级快照修复。
- * @param {string} reason - 缓存失效原因。
- * @returns {boolean} 是否需要重新同步服务器快照。
- */
-function shouldRepairServerForCacheReason(reason) {
-  return reason === 'node_fingerprint_mismatch' || reason === 'server_fingerprint_mismatch';
-}
-
-/**
  * 按输入顺序格式化服务器名称，优先使用服务器 ID、缺失时使用名称去重。
  *
  * @param {Array<Object>} servers - 待格式化的服务器列表
@@ -827,12 +817,16 @@ function mapSourcesByKey(sources) {
  * @param {Array} nodeConfigs - 用户节点配置
  * @param {Map<string,Object>} sourceMap - 来源缓存映射
  * @param {Map<number,Object>} serversById - 在线服务器映射
- * @returns {{usable:boolean,invalidPairs:Array,invalidPairKeys:Set<string>,invalidServerIds:Set<number>}} 评估结果
+ * @param {Object} [user] - 当前用户；传入时有效来源仍需验证其 inbound 客户端快照。
+ * @returns {Object} 有效/失效节点、原因统计及受影响服务器集合
  */
-function collectSourceCacheStatus(nodeConfigs, sourceMap, serversById) {
+function collectSourceCacheStatus(nodeConfigs, sourceMap, serversById, user) {
   const invalidServerIds = new Set();
   const invalidPairKeys = new Set();
   const invalidPairs = [];
+  const validPairs = [];
+  const reasonCounts = {};
+  const reasonsByServer = {};
   const now = Math.floor(Date.now() / 1000);
 
   for (const config of nodeConfigs) {
@@ -845,30 +839,39 @@ function collectSourceCacheStatus(nodeConfigs, sourceMap, serversById) {
       server,
       subId: config.sub_id,
       now,
-      maxAgeSeconds: SOURCE_CACHE_MAX_AGE_SECONDS,
       silent: true
     });
 
     const sourceMatched = result.usable
       ? isOriginalLinkMatchedToInbound(source.original_link, config)
       : false;
+    let reason = result.usable ? 'original_link_mismatch' : result.reason;
     if (result.usable && sourceMatched) {
-      continue;
+      const snapshotInspection = user ? inspectUserInNodeSnapshot(user, config) : { trusted: true };
+      if (snapshotInspection.trusted) {
+        validPairs.push({ key, config, source });
+        continue;
+      }
+      reason = `snapshot_${snapshotInspection.reason}`;
     }
 
-    const reason = result.usable ? 'original_link_mismatch' : result.reason;
     invalidPairKeys.add(key);
     invalidPairs.push({ key, config, reason });
-    if (shouldRepairServerForCacheReason(reason)) {
-      invalidServerIds.add(config.server_id);
-    }
+    invalidServerIds.add(config.server_id);
+    reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+    const serverKey = String(config.server_id);
+    reasonsByServer[serverKey] = reasonsByServer[serverKey] || {};
+    reasonsByServer[serverKey][reason] = (reasonsByServer[serverKey][reason] || 0) + 1;
   }
 
   return {
     usable: invalidPairs.length === 0,
+    validPairs,
     invalidPairs,
     invalidPairKeys,
-    invalidServerIds
+    invalidServerIds,
+    reasonCounts,
+    reasonsByServer
   };
 }
 
@@ -941,7 +944,7 @@ function buildSourceRefreshErrorDetails(cause, context = {}) {
     };
   }
 
-  if (rawCode === 'ETIMEDOUT' || rawCode === 'ESOCKETTIMEDOUT') {
+  if (rawCode === 'ECONNABORTED' || rawCode === 'ETIMEDOUT' || rawCode === 'ESOCKETTIMEDOUT') {
     return {
       errorType: 'NetworkTimeout',
       errorCode: rawCode,
@@ -952,7 +955,7 @@ function buildSourceRefreshErrorDetails(cause, context = {}) {
   return {
     errorType: 'UnknownError',
     errorCode: rawCode || 'NONE',
-    errorMessage: safeMessage
+    errorMessage: '未知错误'
   };
 }
 
@@ -1583,7 +1586,13 @@ async function generateSubscription(db, userId, logger, options = {}) {
     sourceSuccess: 0,
     sourceFailed: 0,
     repairServers: 0,
-    nodes: 0
+    nodes: 0,
+    cacheReusedPairs: 0,
+    cacheInvalidPairs: 0,
+    sourceFetchServers: 0,
+    sourceFetchPairs: 0,
+    sourceFetchGroups: 0,
+    inboundRemoteServers: 0
   };
   const existingSubscription = await subscriptionRepository.findLatestUserSubscription(db, userId);
   const user = assertActiveSubscriptionUser(
@@ -1632,6 +1641,12 @@ async function generateSubscription(db, userId, logger, options = {}) {
 
   if (isFirstGeneration) {
     logger.info(`用户 ${user.email} 首次生成订阅，开始拉取全部原始订阅模板`);
+    summary.cacheInvalidPairs = nodeConfigs.length;
+    summary.sourceFetchServers = new Set(nodeConfigs.map((config) => config.server_id)).size;
+    summary.sourceFetchPairs = nodeConfigs.length;
+    summary.sourceFetchGroups = new Set(
+      nodeConfigs.map((config) => `${config.server_id}:${config.sub_id}`)
+    ).size;
     const firstRefreshResult = await refreshSubscriptionSources(
       db,
       user,
@@ -1649,7 +1664,8 @@ async function generateSubscription(db, userId, logger, options = {}) {
       const failedCacheStatus = collectSourceCacheStatus(
         firstRefreshResult.failedConfigs,
         sourceMap,
-        serversById
+        serversById,
+        user
       );
       const repairServerIds = new Set(
         failedCacheStatus.invalidPairs.map((pair) => pair.config.server_id)
@@ -1724,7 +1740,14 @@ async function generateSubscription(db, userId, logger, options = {}) {
     const sourceMap = mapSourcesByKey(
       await subscriptionRepository.listUserSubscriptionSources(db, userId)
     );
-    const cacheStatus = collectSourceCacheStatus(nodeConfigs, sourceMap, serversById);
+    const cacheStatus = collectSourceCacheStatus(nodeConfigs, sourceMap, serversById, user);
+    summary.cacheReusedPairs = cacheStatus.validPairs.length;
+    summary.cacheInvalidPairs = cacheStatus.invalidPairs.length;
+    logger.info(
+      `原始订阅模板缓存评估: user=${user.email}, totalPairs=${nodeConfigs.length}, `
+      + `validPairs=${cacheStatus.validPairs.length}, invalidPairs=${cacheStatus.invalidPairs.length}, `
+      + `reasons=${JSON.stringify(cacheStatus.reasonCounts)}`
+    );
 
     if (cacheStatus.usable) {
       logger.info(`用户 ${user.email} 的原始订阅模板缓存可用，直接复用本地拼装`);
@@ -1742,7 +1765,7 @@ async function generateSubscription(db, userId, logger, options = {}) {
         + `invalidPairs=${cacheStatus.invalidPairs.length}, `
         + `reusedPairs=${refreshPlan.reusablePairs.length}, `
         + `remotePairs=${refreshPlan.remotePairs.length}, `
-        + `reasons=${JSON.stringify(refreshPlan.reasonCounts)}`
+        + `snapshotReasons=${JSON.stringify(refreshPlan.reasonCounts)}`
       );
 
       if (refreshPlan.remoteServers.length > 0) {
@@ -1849,6 +1872,18 @@ async function generateSubscription(db, userId, logger, options = {}) {
           buildSourceCacheKey(config.server_id, config.inbound_id)
         )
       ));
+      const sourceServerIds = new Set(repairConfigs.map((config) => config.server_id));
+      const sourceFetchGroups = new Set(
+        repairConfigs.map((config) => `${config.server_id}:${config.sub_id}`)
+      );
+      summary.sourceFetchServers = sourceServerIds.size;
+      summary.sourceFetchPairs = repairConfigs.length;
+      summary.sourceFetchGroups = sourceFetchGroups.size;
+      logger.info(
+        `原始订阅模板刷新计划: user=${user.email}, `
+        + `servers=${formatServerNames(servers.filter((server) => sourceServerIds.has(server.id)))}, `
+        + `pairs=${summary.sourceFetchPairs}, fetchGroups=${summary.sourceFetchGroups}`
+      );
       const refreshResult = await refreshSubscriptionSources(
         db,
         user,
@@ -1865,7 +1900,7 @@ async function generateSubscription(db, userId, logger, options = {}) {
   const latestSourceMap = mapSourcesByKey(
     await subscriptionRepository.listUserSubscriptionSources(db, userId)
   );
-  const latestCacheStatus = collectSourceCacheStatus(nodeConfigs, latestSourceMap, serversById);
+  const latestCacheStatus = collectSourceCacheStatus(nodeConfigs, latestSourceMap, serversById, user);
   for (const invalidPair of latestCacheStatus.invalidPairs) {
     latestSourceMap.delete(invalidPair.key);
   }
@@ -1879,6 +1914,7 @@ async function generateSubscription(db, userId, logger, options = {}) {
   const localServers = servers.filter((server) => !remoteServerIds.has(server.id));
   summary.inboundSuccess = Array.from(inboundOutcomes.values()).filter(Boolean).length;
   summary.inboundFailed = inboundOutcomes.size - summary.inboundSuccess;
+  summary.inboundRemoteServers = remoteServerIds.size;
   const allNodes = composeSubscriptionNodes(nodeConfigs, latestSourceMap, serversById, cfIps, logger);
   summary.nodes = allNodes.length;
   logger.info(
@@ -1888,6 +1924,9 @@ async function generateSubscription(db, userId, logger, options = {}) {
     + `inboundSuccess=${summary.inboundSuccess}, `
     + `inboundFailed=${summary.inboundFailed}, sourceSuccess=${summary.sourceSuccess}, `
     + `sourceFailed=${summary.sourceFailed}, repairServers=${summary.repairServers}, `
+    + `cacheReusedPairs=${summary.cacheReusedPairs}, cacheInvalidPairs=${summary.cacheInvalidPairs}, `
+    + `sourceFetchServers=${summary.sourceFetchServers}, sourceFetchPairs=${summary.sourceFetchPairs}, `
+    + `sourceFetchGroups=${summary.sourceFetchGroups}, inboundRemoteServers=${summary.inboundRemoteServers}, `
     + `nodes=${summary.nodes}, duration=${Date.now() - generationStartedAt}ms`
   );
   if (allNodes.length === 0) {
@@ -2341,6 +2380,7 @@ module.exports = {
     formatServerNames,
     buildSubscriptionNodeName,
     buildInboundRefreshPlan,
+    collectSourceCacheStatus,
     refreshSubscriptionSources,
     enqueueFailedSourceRefreshRetry,
     retrySubscriptionSourceRefreshTask
