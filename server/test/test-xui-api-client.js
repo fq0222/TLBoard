@@ -7,11 +7,13 @@ const Module = require('module');
 
 const originalLoad = Module._load;
 const requests = [];
+const clientOptions = [];
 
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === 'axios') {
     return {
       create(options) {
+        clientOptions.push(options);
         return {
           defaults: { headers: {} },
           interceptors: {
@@ -63,6 +65,87 @@ async function run() {
   const v360ResolvedResult = resolveClientVersion('3.6.0');
   const fallbackResult = resolveClientVersion('9.9.9');
   const v325Client = new XuiApiClientV325('https://xui.example.com/', 'secret-token', { timeout: 4321 });
+  const proxiedClient = new XuiApiClient('https://proxied-xui.example.com/', 'proxy-token', {
+    proxy: {
+      enabled: true,
+      protocol: 'http',
+      host: '127.0.0.1',
+      port: 27890,
+      username: 'proxy-user',
+      password: 'proxy-password'
+    }
+  });
+  const directClient = new XuiApiClient('https://direct-xui.example.com/', 'direct-token', {
+    proxy: { enabled: false }
+  });
+  const unauthenticatedProxyClient = new XuiApiClient(
+    'https://unauthenticated-proxy.example.com/',
+    'proxy-token',
+    {
+      proxy: {
+        enabled: true,
+        protocol: 'http',
+        host: '127.0.0.1',
+        port: 27890
+      }
+    }
+  );
+
+  const proxiedOptions = clientOptions.find((options) => options.baseURL === 'https://proxied-xui.example.com');
+  const directOptions = clientOptions.find((options) => options.baseURL === 'https://direct-xui.example.com');
+  const unauthenticatedProxyOptions = clientOptions.find(
+    (options) => options.baseURL === 'https://unauthenticated-proxy.example.com'
+  );
+  assert.deepStrictEqual(proxiedOptions.proxy, {
+    protocol: 'http',
+    host: '127.0.0.1',
+    port: 27890,
+    auth: {
+      username: 'proxy-user',
+      password: 'proxy-password'
+    }
+  });
+  assert.strictEqual(directOptions.proxy, false);
+  assert.deepStrictEqual(unauthenticatedProxyOptions.proxy, {
+    protocol: 'http',
+    host: '127.0.0.1',
+    port: 27890
+  });
+  assert.throws(
+    () => new XuiApiClient('https://invalid-proxy.example.com/', 'invalid-token', {
+      proxy: {
+        enabled: true,
+        protocol: 'http',
+        host: '',
+        port: 27890
+      }
+    }),
+    /3X-UI 代理主机不能为空/
+  );
+  assert.throws(
+    () => new XuiApiClient('https://invalid-port.example.com/', 'invalid-token', {
+      proxy: {
+        enabled: true,
+        protocol: 'http',
+        host: '127.0.0.1',
+        port: 0
+      }
+    }),
+    /3X-UI 代理端口无效/
+  );
+  assert.throws(
+    () => new XuiApiClient('https://incomplete-auth.example.com/', 'invalid-token', {
+      proxy: {
+        enabled: true,
+        protocol: 'http',
+        host: '127.0.0.1',
+        port: 27890,
+        username: 'proxy-user',
+        password: ''
+      }
+    }),
+    /3X-UI 代理用户名和密码必须同时配置/
+  );
 
   const loginResult = await client.login();
   assert.deepStrictEqual(loginResult, { success: true, msg: 'Authenticated via API token' });

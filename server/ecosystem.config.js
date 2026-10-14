@@ -29,6 +29,14 @@ module.exports = {
         DB_POOL_MAX: 20,
         DB_IDLE_TIMEOUT: 60000, // 空闲超时60秒
         DB_CONNECT_TIMEOUT: 5000, // 连接超时5秒
+
+        // 3X-UI 专用 HTTP 代理（不影响其他外部请求）
+        XUI_PROXY_ENABLED: 'false',
+        XUI_PROXY_PROTOCOL: 'http',
+        XUI_PROXY_HOST: '127.0.0.1',
+        XUI_PROXY_PORT: 27890,
+        XUI_PROXY_USERNAME: '',
+        XUI_PROXY_PASSWORD: '',
         
         // 日志级别
         LOG_LEVEL: 'info',
@@ -61,6 +69,14 @@ module.exports = {
         DB_POOL_MAX: 20,
         DB_IDLE_TIMEOUT: 60000, // 空闲超时60秒
         DB_CONNECT_TIMEOUT: 5000, // 连接超时5秒
+
+        XUI_PROXY_ENABLED: 'false',
+        XUI_PROXY_PROTOCOL: 'http',
+        XUI_PROXY_HOST: '127.0.0.1',
+        XUI_PROXY_PORT: 27890,
+        XUI_PROXY_USERNAME: '',
+        XUI_PROXY_PASSWORD: '',
+
         LOG_LEVEL: 'warn',
         TELEGRAM_INTERNAL_API_ENABLED: 'true',
         TELEGRAM_INTERNAL_API_SECRET: 'dasfdafdsaf45sadfasw234erwerwe8765rwerrw',

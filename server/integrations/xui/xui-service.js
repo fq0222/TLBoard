@@ -98,12 +98,16 @@ class XuiService {
         this.apiToken,
         {
           timeout: config.xui.timeout || 20000,
-          apiVersion: this.apiVersion
+          apiVersion: this.apiVersion,
+          proxy: config.xui.proxy
         }
       );
       this.client = client;
       this.apiVersion = resolvedVersion;
       logger.info(`初始化 3X-UI 客户端: ${this.apiUrl}`);
+      if (config.xui.proxy?.enabled) {
+        logger.info(`3X-UI 代理已启用: ${config.xui.proxy.protocol}://${config.xui.proxy.host}:${config.xui.proxy.port}`);
+      }
       if (requestedVersion !== resolvedVersion) {
         logger.warn(`未识别的 3X-UI API 版本 ${requestedVersion}，已回退到 ${resolvedVersion}`);
       } else {

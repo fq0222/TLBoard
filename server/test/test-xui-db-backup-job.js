@@ -3,7 +3,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { backupXuiDatabases, sanitizeFileName } = require('../jobs/backupDB');
+const config = require('../config');
+const { backupXuiDatabases, buildClient, sanitizeFileName } = require('../jobs/backupDB');
 
 function createDb(servers) {
   return {
@@ -140,8 +141,36 @@ function testSanitizeFileName() {
   assert.strictEqual(sanitizeFileName(''), 'server');
 }
 
+function testProductionBackupClientUsesDedicatedXuiProxy() {
+  const originalProxy = config.xui.proxy;
+  config.xui.proxy = {
+    enabled: true,
+    protocol: 'http',
+    host: '127.0.0.1',
+    port: 27890,
+    username: '',
+    password: ''
+  };
+
+  try {
+    const client = buildClient({
+      api_url: 'https://backup.example.com',
+      api_token: 'backup-token',
+      panel_version: '3.4.2'
+    });
+    assert.deepStrictEqual(client.api.defaults.proxy, {
+      protocol: 'http',
+      host: '127.0.0.1',
+      port: 27890
+    });
+  } finally {
+    config.xui.proxy = originalProxy;
+  }
+}
+
 async function main() {
   testSanitizeFileName();
+  testProductionBackupClientUsesDedicatedXuiProxy();
   await testBackupAllServersAndOverwriteByName();
   await testAlwaysUsesGetDbAndSavesPostgresDump();
   await testRejectsInvalidBackupResponsesWithoutWritingFiles();

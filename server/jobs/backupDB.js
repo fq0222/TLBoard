@@ -9,6 +9,7 @@ const path = require('path');
 const {
   createXuiApiClient
 } = require('../integrations/xui/xui-api-client-factory');
+const config = require('../config');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('XUI-DB-BACKUP');
@@ -109,7 +110,8 @@ function buildClient(server, options = {}) {
 
   const { client } = createXuiApiClient(server.api_url, server.api_token, {
     timeout: 30000,
-    apiVersion: options.apiVersion || server.panel_version
+    apiVersion: options.apiVersion || server.panel_version,
+    proxy: config.xui.proxy
   });
   return client;
 }
