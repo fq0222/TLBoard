@@ -570,12 +570,27 @@ async function login(db, payload) {
     });
   }
 
+  assertUserCanLogin(user);
+  return issueLoginResult(user);
+}
+
+/**
+ * 共享登录账号检查；user 为密码或 Passkey 已验证身份后的用户快照。
+ * 核心分支：人工封禁与未支付拒绝登录，流量超限和到期暂停允许登录续费。
+ */
+function assertUserCanLogin(user) {
   if (shouldBlockDisabledUserLogin(user)) {
     throw createLegacyBusinessError(getDisabledLoginMessage(user), {
       code: 2003
     });
   }
+}
 
+/**
+ * 为 user 签发共享 JWT 和旧版登录响应；调用前须验证身份并执行账号状态检查。
+ * 核心分支：字段、有效期配置和固定 expires_in 与原密码登录完全一致。
+ */
+function issueLoginResult(user) {
   const token = jwt.sign(
     {
       id: user.id,
@@ -696,6 +711,8 @@ async function completeOnboarding(db, userId) {
 module.exports = {
   registerAndPay,
   login,
+  assertUserCanLogin,
+  issueLoginResult,
   requestPasswordReset,
   resetPassword,
   getProfile,

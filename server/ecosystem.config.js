@@ -12,6 +12,10 @@ module.exports = {
         // 用户端端口
         USER_PORT: 30000,
         USER_APP_URL: 'https://your-user-site.example.com',
+        // 非敏感 WebAuthn 站点配置；生产运行环境要求 Node.js 20 及以上。
+        WEBAUTHN_RP_NAME: '订阅管理系统',
+        WEBAUTHN_RP_ID: 'tl.lolok.dpdns.org',
+        WEBAUTHN_ORIGIN: 'https://tl.lolok.dpdns.org',
         
         // 管理端端口
         ADMIN_PORT: 30001,
@@ -56,6 +60,9 @@ module.exports = {
       // 生产环境配置
       env_production: {
         NODE_ENV: 'production',
+        WEBAUTHN_RP_NAME: '订阅管理系统',
+        WEBAUTHN_RP_ID: 'tl.lolok.dpdns.org',
+        WEBAUTHN_ORIGIN: 'https://tl.lolok.dpdns.org',
         USER_PORT: 30000,
         USER_APP_URL: 'https://your-user-site.example.com',
         ADMIN_PORT: 30001,

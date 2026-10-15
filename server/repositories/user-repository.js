@@ -662,6 +662,16 @@ async function deleteUserLocalRelatedData(db, user) {
       params: [userId]
     },
     {
+      key: 'user_passkeys',
+      sql: 'DELETE FROM user_passkeys WHERE user_id = ?',
+      params: [userId]
+    },
+    {
+      key: 'webauthn_challenges',
+      sql: 'DELETE FROM webauthn_challenges WHERE user_id = ?',
+      params: [userId]
+    },
+    {
       key: 'resource_distributions',
       sql: 'DELETE FROM resource_distributions WHERE user_id = ?',
       params: [userId]

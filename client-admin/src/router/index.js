@@ -68,6 +68,12 @@ const routes = [
         meta: { title: '用户管理' }
       },
       {
+        path: 'passkeys',
+        name: 'Passkeys',
+        component: () => import('@/views/Passkeys.vue'),
+        meta: { title: 'Passkey 管理' }
+      },
+      {
         path: 'orders',
         name: 'Orders',
         component: () => import('@/views/Orders.vue'),

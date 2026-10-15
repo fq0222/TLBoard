@@ -3,6 +3,43 @@
  * 负责按照既有顺序创建数据库表，并输出对应初始化日志。
  */
 
+// Passkey 表定义由全新安装和增量迁移共用，保证字段及约束保持一致。
+const passkeyTableDefinitions = [
+  {
+    logMessage: '用户 Passkey 表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_passkeys (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name VARCHAR(100) NOT NULL,
+        credential_id TEXT NOT NULL UNIQUE,
+        public_key BYTEA NOT NULL,
+        counter BIGINT NOT NULL DEFAULT 0 CHECK (counter >= 0),
+        transports JSONB NOT NULL DEFAULT '[]'::jsonb,
+        device_type VARCHAR(32) NOT NULL,
+        backed_up BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at BIGINT NOT NULL DEFAULT FLOOR(EXTRACT(EPOCH FROM NOW())),
+        last_used_at BIGINT
+      )
+    `
+  },
+  {
+    logMessage: 'WebAuthn 挑战表初始化完成',
+    sql: `
+      CREATE TABLE IF NOT EXISTS webauthn_challenges (
+        id VARCHAR(64) PRIMARY KEY,
+        type VARCHAR(32) NOT NULL CHECK (type IN ('registration', 'authentication')),
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        challenge TEXT NOT NULL,
+        created_at BIGINT NOT NULL DEFAULT FLOOR(EXTRACT(EPOCH FROM NOW())),
+        expires_at BIGINT NOT NULL,
+        used_at BIGINT,
+        CHECK (type <> 'registration' OR user_id IS NOT NULL)
+      )
+    `
+  }
+];
+
 const tableDefinitions = [
   {
     logMessage: '用户表初始化完成',
@@ -11,6 +48,7 @@ const tableDefinitions = [
         id SERIAL PRIMARY KEY,
         email VARCHAR(255) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
+        webauthn_user_id VARCHAR(64),
         plan_id INTEGER,
         subscription_token VARCHAR(255) UNIQUE,
         sub_id VARCHAR(255) UNIQUE,
@@ -37,6 +75,7 @@ const tableDefinitions = [
       )
     `
   },
+  ...passkeyTableDefinitions,
   {
     logMessage: '管理员表初始化完成',
     sql: `
@@ -791,5 +830,6 @@ async function initTables(client, logger) {
 }
 
 module.exports = {
-  initTables
+  initTables,
+  passkeyTableDefinitions
 };

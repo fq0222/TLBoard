@@ -1,5 +1,7 @@
 <template>
   <div class="my-container">
+    <PasskeyCard />
+
     <section class="content-card wallet-card">
       <div class="wallet-heading">
         <div class="wallet-title-wrap">
@@ -294,6 +296,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, CircleCheck, Loading, Upload, UploadFilled, Wallet, Warning } from '@element-plus/icons-vue'
 import api from '@/api'
+import PasskeyCard from '@/components/profile/PasskeyCard.vue'
 import ReferralPosterDialog from '@/components/ReferralPosterDialog.vue'
 import { useUserStore } from '@/stores/user'
 import { normalizeReferralRewardPercent } from '@/utils/referral-reward-display'

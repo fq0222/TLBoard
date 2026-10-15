@@ -6,6 +6,7 @@
  */
 
 const userAuthRoutes = require('../routes/user/auth');
+const userPasskeyRoutes = require('../routes/user/passkeys');
 const userPlansRoutes = require('../routes/user/plans');
 const userOrdersRoutes = require('../routes/user/orders');
 const userSubscriptionRoutes = require('../routes/user/subscription');
@@ -27,6 +28,7 @@ function registerUserRoutes(app, logger) {
   const userPrefix = '/api/user';
 
   app.use(userPrefix, userAuthRoutes);
+  app.use(`${userPrefix}/auth`, userPasskeyRoutes);
   app.use(`${userPrefix}/plans`, userPlansRoutes);
   app.use(`${userPrefix}/orders`, userOrdersRoutes);
   app.use(`${userPrefix}/subscription`, userSubscriptionRoutes);

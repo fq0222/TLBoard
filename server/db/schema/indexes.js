@@ -3,7 +3,16 @@
  * 负责创建 DB 初始化阶段依赖的全部索引定义。
  */
 
+// 增量迁移复用相同索引定义，稳定 handle 唯一性由部分唯一索引保证。
+const passkeyIndexStatements = [
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_webauthn_user_id ON users(webauthn_user_id) WHERE webauthn_user_id IS NOT NULL',
+  'CREATE INDEX IF NOT EXISTS idx_user_passkeys_user_created ON user_passkeys(user_id, created_at DESC, id DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_webauthn_challenges_expires_at ON webauthn_challenges(expires_at)',
+  'CREATE INDEX IF NOT EXISTS idx_webauthn_challenges_user_id ON webauthn_challenges(user_id)'
+];
+
 const indexStatements = [
+  ...passkeyIndexStatements,
   'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)',
   'CREATE INDEX IF NOT EXISTS idx_users_plan_id ON users(plan_id)',
   'CREATE INDEX IF NOT EXISTS idx_users_subscription_token ON users(subscription_token)',
@@ -98,5 +107,6 @@ async function createIndexes(client, logger) {
 }
 
 module.exports = {
-  createIndexes
+  createIndexes,
+  passkeyIndexStatements
 };

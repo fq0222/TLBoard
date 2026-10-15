@@ -98,16 +98,50 @@
           </div>
 
           <el-form-item>
-            <el-button
-              type="primary"
-              size="large"
-              class="login-btn"
-              :loading="loading"
-              :disabled="isRegisterMode && planInfo.is_soldout"
-              @click="handleSubmit"
-            >
-              {{ isRegisterMode && planInfo.is_soldout ? '套餐已售罄' : (isRegisterMode ? '提交并前往支付' : '登录') }}
-            </el-button>
+            <div :class="{ 'login-actions': !isRegisterMode }" class="login-submit-area">
+              <el-button
+                type="primary"
+                size="large"
+                class="login-btn"
+                :loading="loading"
+                :disabled="passkeyLoading || (isRegisterMode && planInfo.is_soldout)"
+                @click="handleSubmit"
+              >
+                {{ isRegisterMode && planInfo.is_soldout ? '套餐已售罄' : (isRegisterMode ? '提交并前往支付' : '登录') }}
+              </el-button>
+              <el-tooltip
+                v-if="!isRegisterMode"
+                :content="passkeySupportTip"
+                :disabled="passkeySupported"
+                :trigger="['hover', 'focus', 'click']"
+                :show-after="0"
+                :hide-after="0"
+                placement="top"
+              >
+                <!-- 禁用按钮由可聚焦包装接收悬停、键盘焦点和触屏点击，不新增可见说明行。 -->
+                <span
+                  class="passkey-login-hint"
+                  :tabindex="passkeySupported ? -1 : 0"
+                  :role="passkeySupported ? undefined : 'button'"
+                  :aria-label="passkeySupported ? undefined : 'Passkey 登录不可用，查看原因'"
+                >
+                  <el-button
+                    plain
+                    native-type="button"
+                    size="large"
+                    class="passkey-login-btn"
+                    :icon="Key"
+                    :loading="passkeyLoading"
+                    :disabled="!passkeySupported || loading || passkeyLoading"
+                    :title="passkeySupportTip"
+                    :aria-label="passkeySupportTip ? `Passkey 登录：${passkeySupportTip}` : 'Passkey 登录'"
+                    @click="handlePasskeyLogin"
+                  >
+                    Passkey 登录
+                  </el-button>
+                </span>
+              </el-tooltip>
+            </div>
           </el-form-item>
         </el-form>
 
@@ -202,7 +236,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import api from '@/api'
 import { ElMessage } from 'element-plus'
-import { Lock, Message } from '@element-plus/icons-vue'
+import { Key, Lock, Message } from '@element-plus/icons-vue'
+import { PasskeyClient } from '@/utils/passkey-client'
 
 const router = useRouter()
 const route = useRoute()
@@ -210,6 +245,10 @@ const userStore = useUserStore()
 
 const formRef = ref(null)
 const loading = ref(false)
+const passkeyClient = new PasskeyClient()
+const passkeyLoading = ref(false)
+const passkeySupported = ref(false)
+const passkeySupportTip = ref('正在检测 Passkey 支持情况')
 const onlineCustomerServiceUrl = ref('')
 
 const selectedPlanId = computed(() => {
@@ -288,9 +327,11 @@ const formRules = computed(() => ({
 }))
 
 async function handleSubmit() {
+  if (loading.value || passkeyLoading.value) return
+  // 在异步校验前锁定登录入口，防止校验期间切入另一种认证方式。
+  loading.value = true
   try {
     await formRef.value.validate()
-    loading.value = true
 
     if (isRegisterMode.value) {
       const result = await userStore.registerAndPay({
@@ -342,6 +383,34 @@ async function handleSubmit() {
   }
 }
 
+/**
+ * 独立执行 Passkey 登录，不访问表单字段或触发表单校验。
+ * 核心分支：浏览器取消保持静默；成功复用 store 状态入口并遵循原 redirect；其他错误展示提示。
+ */
+async function handlePasskeyLogin() {
+  if (!passkeySupported.value || loading.value || passkeyLoading.value) return
+  passkeyLoading.value = true
+  try {
+    const data = await passkeyClient.login()
+    if (!data) return
+    userStore.applyLoginResult(data)
+    ElMessage.success('登录成功')
+    router.push(route.query.redirect || '/user')
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || error?.userMessage || error?.message || 'Passkey 登录失败')
+  } finally {
+    passkeyLoading.value = false
+  }
+}
+
+/** 探测 Passkey 能力；不可用原因放在按钮提示中，保持原登录区域外的布局不变。 */
+async function initializePasskeySupport() {
+  passkeySupported.value = await passkeyClient.isSupported()
+  passkeySupportTip.value = passkeySupported.value
+    ? ''
+    : (globalThis.isSecureContext ? '当前浏览器不支持 Passkey 登录' : 'Passkey 登录需要 HTTPS 安全上下文')
+}
+
 function switchToLogin() {
   router.push({
     name: 'Login',
@@ -384,6 +453,7 @@ async function loadPublicSettings() {
 }
 
 onMounted(() => {
+  initializePasskeySupport()
   initializeReferralTracking()
   loadPublicSettings()
 })
@@ -692,14 +762,66 @@ onMounted(() => {
   font-size: 15px;
 }
 
-.login-btn {
+.login-submit-area {
   width: 100%;
+}
+
+/* 两列占用原按钮区域；清除 Element Plus 相邻按钮外边距，避免等宽列溢出。 */
+.login-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.login-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
+/* 包装与按钮共用原网格列；禁用时让指针事件到达包装，以便触屏点击打开说明。 */
+.passkey-login-hint {
+  display: flex;
+  min-width: 0;
+  border-radius: 16px;
+}
+
+.passkey-login-hint:focus-visible {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
+}
+
+.passkey-login-hint .passkey-login-btn:disabled {
+  pointer-events: none;
+}
+
+.login-btn,
+.passkey-login-btn {
+  width: 100%;
+  min-width: 0;
   height: 52px;
   border-radius: 16px;
-  border: none;
   font-size: 16px;
   font-weight: 700;
+}
+
+.login-btn {
+  border: none;
   background: linear-gradient(135deg, #0f766e 0%, #115e59 100%);
+}
+
+.passkey-login-btn {
+  --el-button-text-color: #0f766e;
+  --el-button-bg-color: #f3faf9;
+  --el-button-border-color: #0f766e;
+  --el-button-hover-text-color: #115e59;
+  --el-button-hover-bg-color: #e4f2ef;
+  --el-button-hover-border-color: #115e59;
+  --el-button-active-text-color: #115e59;
+  --el-button-active-bg-color: #e4f2ef;
+  --el-button-active-border-color: #115e59;
+  --el-button-disabled-text-color: #7aa7a2;
+  --el-button-disabled-bg-color: #f3faf9;
+  --el-button-disabled-border-color: #b9d5d1;
+  padding: 12px;
 }
 
 .login-footer {
@@ -884,9 +1006,20 @@ onMounted(() => {
     gap: 8px;
   }
 
-  .login-btn {
+  .login-actions {
+    gap: 8px;
+  }
+
+  .login-btn,
+  .passkey-login-btn,
+  .passkey-login-hint {
     height: 48px;
     border-radius: 14px;
+  }
+
+  .passkey-login-btn {
+    padding: 10px 8px;
+    font-size: 14px;
   }
 
   .login-footer p {

@@ -38,6 +38,10 @@ apiClient.interceptors.response.use(
   },
   (error) => {
     console.error('响应拦截器错误:', error)
+    // Passkey 页面自行呈现错误；401 仍按统一流程清理过期会话。
+    if (error.config?.skipErrorMessage && error.response?.status !== 401) {
+      return Promise.reject(error)
+    }
     
     if (error.response) {
       const { status, data } = error.response
@@ -328,6 +332,19 @@ const adminApi = {
    */
   getUsers(params) {
     return apiClient.get('/users', { params })
+  },
+
+  /**
+   * 按用户获取 Passkey 分组；params 包含 page、limit、keyword，total 按用户统计。
+   * 页面负责错误提示，避免响应拦截器与页面重复弹出消息。
+   */
+  getPasskeys(params) {
+    return apiClient.get('/passkeys', { params, skipErrorMessage: true })
+  },
+
+  /** 撤销指定 id 的单个密钥；管理员鉴权即可，不提交用户密码或其他密钥数据。 */
+  revokePasskey(id) {
+    return apiClient.delete(`/passkeys/${id}`, { skipErrorMessage: true })
   },
 
   /**

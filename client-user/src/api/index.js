@@ -20,6 +20,15 @@ export function shouldSuppressGlobalErrorMessage(status, data = {}) {
   return [4091, 4092].includes(Number(data?.code))
 }
 
+/**
+ * 按请求约定显示全局错误；页面负责错误提示时只抑制弹窗，保留消息整理和鉴权副作用。
+ * @param {Object} error - Axios 错误，config.skipGlobalError 标记由页面处理提示
+ * @param {string} message - 本次全局错误文案
+ */
+function showGlobalErrorMessage(error, message) {
+  if (!error.config?.skipGlobalError) ElMessage.error(message)
+}
+
 const apiClient = axios.create({
   baseURL: '/api/user',
   timeout: 10000,
@@ -60,7 +69,7 @@ apiClient.interceptors.response.use(
         case 409:
           // 续费确认类冲突交给续费页面弹窗处理；其他 409 仍正常提示。
           if (!shouldSuppressGlobalErrorMessage(status, data)) {
-            ElMessage.error(userMessage)
+            showGlobalErrorMessage(error, userMessage)
           }
           break
         case 401:
@@ -70,31 +79,31 @@ apiClient.interceptors.response.use(
           }
           break
         case 403:
-          ElMessage.error('没有权限访问')
+          showGlobalErrorMessage(error, '没有权限访问')
           break
         case 404:
-          ElMessage.error('请求的资源不存在')
+          showGlobalErrorMessage(error, '请求的资源不存在')
           break
         case 429:
           if (Number(data?.code) !== 1003) {
-            ElMessage.error('请求过于频繁，请稍后再试')
+            showGlobalErrorMessage(error, '请求过于频繁，请稍后再试')
           }
           break
         case 500:
-          ElMessage.error('服务器内部错误')
+          showGlobalErrorMessage(error, '服务器内部错误')
           break
         case 503:
           // 503 业务错误交给具体页面展示，避免响应拦截器与页面重复弹窗
           break
         default:
-          ElMessage.error(userMessage)
+          showGlobalErrorMessage(error, userMessage)
       }
     } else if (error.code === 'ECONNABORTED') {
       userMessage = '请求超时，请检查网络连接'
-      ElMessage.error(userMessage)
+      showGlobalErrorMessage(error, userMessage)
     } else {
       userMessage = '网络连接失败'
-      ElMessage.error(userMessage)
+      showGlobalErrorMessage(error, userMessage)
     }
 
     // 将后端返回的业务提示挂到错误对象，供 store 和页面优先展示
@@ -111,6 +120,36 @@ const userApi = {
    */
   login(data) {
     return apiClient.post('/login', data)
+  },
+
+  /** 获取匿名 Passkey 登录挑战，不提交邮箱或密码。 */
+  getPasskeyLoginOptions() {
+    return apiClient.post('/auth/passkey/login/options', {}, { skipAuthRedirect: true, skipGlobalError: true })
+  },
+
+  /** 验证 Passkey 登录；payload 包含 ceremony_id 和浏览器 response。 */
+  verifyPasskeyLogin(payload) {
+    return apiClient.post('/auth/passkey/login/verify', payload, { skipAuthRedirect: true, skipGlobalError: true })
+  },
+
+  /** 获取当前登录用户的 Passkey 列表；错误提示统一交给管理卡片。 */
+  getPasskeys() {
+    return apiClient.get('/auth/passkeys', { skipGlobalError: true })
+  },
+
+  /** 复验密码并创建注册挑战；payload 含 password/可选 name，错误交给调用页面。 */
+  getPasskeyRegistrationOptions(payload) {
+    return apiClient.post('/auth/passkeys/registration/options', payload, { skipGlobalError: true })
+  },
+
+  /** 绑定 Passkey；payload 含 ceremony_id/response/可选 name，错误交给调用页面。 */
+  verifyPasskeyRegistration(payload) {
+    return apiClient.post('/auth/passkeys/registration/verify', payload, { skipGlobalError: true })
+  },
+
+  /** 撤销 id 对应的本人凭据；payload.password 用于复验，错误交给管理卡片。 */
+  deletePasskey(id, payload) {
+    return apiClient.delete(`/auth/passkeys/${id}`, { data: payload, skipGlobalError: true })
   },
 
   /**

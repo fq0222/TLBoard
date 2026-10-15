@@ -24,6 +24,7 @@ const adminTelegramRoutes = require('../routes/admin/telegram');
 const adminFeedbackRoutes = require('../routes/admin/feedback');
 const adminHomeProxiesRoutes = require('../routes/admin/home-proxies');
 const adminWalletRoutes = require('../routes/admin/wallet');
+const adminPasskeyRoutes = require('../routes/admin/passkeys');
 
 function registerAdminRoutes(app, logger) {
   const adminPrefix = '/api/admin';
@@ -47,6 +48,7 @@ function registerAdminRoutes(app, logger) {
   app.use(`${adminPrefix}/telegram`, adminTelegramRoutes);
   app.use(`${adminPrefix}/feedback`, adminFeedbackRoutes);
   app.use(`${adminPrefix}/wallets`, adminWalletRoutes);
+  app.use(`${adminPrefix}/passkeys`, adminPasskeyRoutes);
 
   app.use((req, res) => {
     res.status(404).json({ code: 404, message: '接口不存在', data: null });

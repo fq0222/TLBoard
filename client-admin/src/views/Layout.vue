@@ -34,6 +34,10 @@
           <el-icon><User /></el-icon>
           <span v-if="!isCollapsed || mobileSidebarOpen">用户管理</span>
         </router-link>
+        <router-link to="/admin/passkeys" class="nav-item" active-class="active" aria-label="Passkey 管理">
+          <el-icon><Key /></el-icon>
+          <span v-if="!isCollapsed || mobileSidebarOpen">Passkey 管理</span>
+        </router-link>
         <router-link to="/admin/orders" class="nav-item" active-class="active">
           <el-icon><Document /></el-icon>
           <span v-if="!isCollapsed || mobileSidebarOpen">订单管理</span>
@@ -180,6 +184,7 @@ import {
   Fold,
   Folder,
   Goods,
+  Key,
   Link,
   Message,
   Monitor,

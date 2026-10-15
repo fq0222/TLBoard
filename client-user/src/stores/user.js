@@ -53,6 +53,15 @@ export const useUserStore = defineStore('user', () => {
   }
 
   /**
+   * 统一应用密码或 Passkey 登录结果，保证持久化 token 和内存用户状态一致。
+   * @param {Object} data - 成功认证返回的 token 与 user
+   */
+  function applyLoginResult(data) {
+    setToken(data.token)
+    userInfo.value = data.user
+  }
+
+  /**
    * 用户登录
    * @param {Object} loginData - 登录数据
    * @returns {Promise<Object>} 登录结果
@@ -63,8 +72,7 @@ export const useUserStore = defineStore('user', () => {
       const response = await api.user.login(loginData)
 
       if (response.code === 0) {
-        setToken(response.data.token)
-        userInfo.value = response.data.user
+        applyLoginResult(response.data)
         return { success: true, data: response.data }
       }
 
@@ -149,6 +157,7 @@ export const useUserStore = defineStore('user', () => {
     trafficPercent,
     setToken,
     clearToken,
+    applyLoginResult,
     ensureValidSession,
     login,
     registerAndPay,
