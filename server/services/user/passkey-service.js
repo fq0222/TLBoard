@@ -61,7 +61,7 @@ class PasskeyService {
 
   /**
    * 发起无用户名认证；无请求参数，RP 配置只读取部署配置。
-   * 核心分支：不发送 allowCredentials，要求用户验证，保存匿名五分钟一次性挑战。
+   * 核心分支：不发送 allowCredentials，要求用户验证，保存匿名 120 秒一次性挑战。
    */
   async createAuthenticationOptions() {
     const webauthn = await this.getWebauthn();
@@ -134,7 +134,7 @@ class PasskeyService {
 
   /**
    * 为 userId 发起注册；payload 为 password/name，返回 ceremony_id/options。
-   * 核心分支：先复验密码和名称/名额，再生成稳定 handle、固定安全选项及五分钟挑战。
+   * 核心分支：先复验密码和名称/名额，再生成稳定 handle、固定安全选项及 120 秒挑战。
    */
   async createRegistrationOptions(userId, payload = {}) {
     const user = await this.verifyPassword(userId, payload.password);

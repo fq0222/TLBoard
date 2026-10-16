@@ -1,5 +1,6 @@
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
+const getIpRateLimitKey = require('../utils/ip-rate-limit-key');
 
 /**
  * 创建基于 IP + 邮箱组合的认证频率限制器。
@@ -20,7 +21,7 @@ function createAuthLimiter(options = {}) {
     max,
     message,
     keyGenerator: (req) => {
-      const ip = req.ip || req.socket.remoteAddress;
+      const ip = getIpRateLimitKey(req.ip || req.socket.remoteAddress);
       const email = req.body?.email || 'unknown';
       return `${ip}:${email}`;
     },
@@ -33,7 +34,7 @@ function createAuthLimiter(options = {}) {
 }
 
 /**
- * 创建基于单 IP 的频率限制器。
+ * 创建基于 IP 的频率限制器：IPv4 按单地址、原生 IPv6 按 /64 共用额度。
  * 职责：保护邮件发送类接口，防止攻击者批量触发外发邮件。
  *
  * @param {Object} options - 限流配置
@@ -51,7 +52,7 @@ function createIpLimiter(options = {}) {
     windowMs,
     max,
     message,
-    keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown',
+    keyGenerator: (req) => getIpRateLimitKey(req.ip || req.socket.remoteAddress),
     headers: true,
     skipSuccessfulRequests,
     handler: (req, res) => {
@@ -73,7 +74,7 @@ const passkeyPasswordVerificationLimiter = rateLimit({
   message: { code: 1003, message: '密码复验尝试过于频繁，请稍后再试', data: null }
 });
 
-// 匿名挑战按 IP 独立限制签发量：每分钟最多 20 次，成功响应也计数，避免无限创建数据库记录。
+// 匿名挑战按 IPv4 地址 / IPv6 /64 独立限制签发量：每分钟最多 20 次，成功响应也计数，避免无限创建数据库记录。
 // 验证仍沿用独立的失败窗口；成功登录不会清空或消耗挑战签发额度。
 const passkeyLoginOptionsLimiter = createIpLimiter({
   windowMs: 60 * 1000,

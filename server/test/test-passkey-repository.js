@@ -54,7 +54,6 @@ async function run() {
 
     assert.equal(config.webauthn.rpId, process.env.WEBAUTHN_RP_ID || 'tl.lolok.dpdns.org');
     assert.equal(config.webauthn.origin, process.env.WEBAUTHN_ORIGIN || 'https://tl.lolok.dpdns.org');
-    assert.equal(config.webauthn.challengeTtlSeconds, 300);
     assert.equal(config.webauthn.maxPasskeys, 2);
     assert.ok(config.webauthn.rpName);
     const repository = new PasskeyRepository({ pool: fresh });
@@ -93,7 +92,7 @@ async function run() {
     console.log('PASS 数量上限：并发注册最多两个，认证状态持久化且列表隐藏敏感字段');
 
     const challenge = await repository.createChallenge({ type: 'registration', userId: user.id, challenge: 'test-only-registration' });
-    assert.equal(Number(challenge.expires_at) - Number(challenge.created_at), 300);
+    assert.equal(Number(challenge.expires_at) - Number(challenge.created_at), 120);
     assert.equal(await repository.consumeChallenge({ id: challenge.id, type: 'authentication', userId: user.id }), null);
     assert.equal(await repository.consumeChallenge({ id: challenge.id, type: 'registration', userId: user2.id }), null);
     assert.equal(await repository.consumeChallenge({ id: 'missing', type: 'registration', userId: user.id }), null);

@@ -164,6 +164,7 @@ server/test/*
 !server/test/test-plans-updated-at-migration.js
 !server/test/test-user-announcements-auth.js
 !server/test/test-user-orders-privacy.js
+!server/test/test-rate-limiter-ip.js
 server/config.js
 server/uploads/
 server/backupDB/

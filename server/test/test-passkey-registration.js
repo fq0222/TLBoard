@@ -99,10 +99,10 @@ async function run() {
     assert.equal(first.options.authenticatorSelection.residentKey, 'required');
     assert.equal(first.options.authenticatorSelection.userVerification, 'required');
     assert.equal(first.options.attestation, 'none');
-    assert.equal(first.options.timeout, 300000);
+    assert.equal(first.options.timeout, 120000);
     assert.deepEqual(first.options.excludeCredentials, []);
     const challenge = (await pool.query('SELECT * FROM webauthn_challenges WHERE id = $1', [first.ceremony_id])).rows[0];
-    assert.equal(Number(challenge.expires_at) - Number(challenge.created_at), 300);
+    assert.equal(Number(challenge.expires_at) - Number(challenge.created_at), 120);
     assert.equal(challenge.user_id, userId);
     assert.equal(challenge.type, 'registration');
     assert.equal(challenge.challenge, first.options.challenge);
@@ -121,7 +121,7 @@ async function run() {
     assert.deepEqual(stored.transports, ['internal']);
     assert.equal(stored.device_type, 'multiDevice');
     assert.equal(stored.backed_up, true);
-    console.log('PASS 固定注册策略、300 秒挑战、真实证明验证、安全返回和默认名称');
+    console.log('PASS 固定注册策略、120 秒挑战、真实证明验证、安全返回和默认名称');
 
     const second = await service.createRegistrationOptions(userId, { password, name: '旧名' });
     assert.deepEqual(second.options.excludeCredentials.map(item => item.id), [firstResponse.id]);

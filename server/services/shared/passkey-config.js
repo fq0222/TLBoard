@@ -4,6 +4,7 @@
  */
 const { isIP } = require('node:net');
 const config = require('../../config');
+const defaults = require('./passkey-defaults');
 
 class PasskeyConfig {
   /**
@@ -16,7 +17,7 @@ class PasskeyConfig {
     try {
       if (!settings || typeof settings.rpId !== 'string' || typeof settings.origin !== 'string') throw new Error();
       // 本地 config.js 被 Git 忽略；缺字段或错误类型必须明确失败，不能把上限比较变成 NaN。
-      if (settings.maxPasskeys !== 2 || settings.challengeTtlSeconds !== 300 ||
+      if (settings.maxPasskeys !== defaults.maxPasskeys || settings.challengeTtlSeconds !== defaults.challengeTtlSeconds ||
         typeof settings.rpName !== 'string' || !settings.rpName.trim()) throw new Error();
       const { rpId, origin } = settings;
       const labels = rpId.split('.');

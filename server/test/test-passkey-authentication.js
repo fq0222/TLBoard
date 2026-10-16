@@ -141,13 +141,13 @@ async function run() {
     const ceremony = await service.createAuthenticationOptions();
     assert.equal(ceremony.options.rpId, 'tl.lolok.dpdns.org');
     assert.equal(ceremony.options.userVerification, 'required');
-    assert.equal(ceremony.options.timeout, 300000);
+    assert.equal(ceremony.options.timeout, 120000);
     assert.equal(Object.hasOwn(ceremony.options, 'allowCredentials'), false);
     const stored = (await pool.query('SELECT * FROM webauthn_challenges WHERE id = $1', [ceremony.ceremony_id])).rows[0];
     assert.equal(stored.type, 'authentication');
     assert.equal(stored.user_id, null);
-    assert.equal(Number(stored.expires_at) - Number(stored.created_at), 300);
-    console.log('PASS 无用户名选项省略 allowCredentials，固定 RP、UV 与匿名五分钟挑战');
+    assert.equal(Number(stored.expires_at) - Number(stored.created_at), 120);
+    console.log('PASS 无用户名选项省略 allowCredentials，固定 RP、UV 与匿名 120 秒挑战');
 
     const payload = { ceremony_id: ceremony.ceremony_id, response: authenticator.response(ceremony.options, { userHandle: handle }) };
     const login = await service.verifyAuthentication(payload);
@@ -278,7 +278,7 @@ async function run() {
       { origin: 'https://other.example.test' }, { origin: 'https://sub.tl.lolok.dpdns.org' },
       // 固定配额/TTL 与 RP 名称也属于部署安全边界，忽略文件漏字段时必须拒绝。
       ...[undefined, null, 0, 1, 3, -1, NaN, Infinity, '2'].map(maxPasskeys => ({ maxPasskeys })),
-      ...[undefined, null, 0, 299, 301, -1, NaN, Infinity, '300'].map(challengeTtlSeconds => ({ challengeTtlSeconds })),
+      ...[undefined, null, 0, 119, 121, 300, -1, NaN, Infinity, '120'].map(challengeTtlSeconds => ({ challengeTtlSeconds })),
       ...[undefined, null, '', '   ', 42].map(rpName => ({ rpName }))
     ];
     const endpoints = [
@@ -321,7 +321,7 @@ async function run() {
       assert.equal(validProduction.status, 200);
       assert.equal(validProduction.body.data.options.rpId, 'tl.lolok.dpdns.org');
       assert.equal((await pool.query('SELECT id FROM user_passkeys WHERE id = $1', [key.id])).rows.length, 1);
-      console.log('PASS RP/Origin、非空 RP 名称、固定上限 2 和 TTL 300 校验令用户六入口和管理两入口一致返回 503；有效配置恢复正常');
+      console.log('PASS RP/Origin、非空 RP 名称、固定上限 2 和 TTL 120 校验令用户六入口和管理两入口一致返回 503；有效配置恢复正常');
       process.env.NODE_ENV = 'development';
       config.webauthn = { ...originalWebauthn, rpId: 'localhost', origin: 'http://localhost:5173' };
       const localOptions = await new PasskeyService({ db: { pool } }).createAuthenticationOptions();
