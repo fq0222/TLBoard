@@ -9,6 +9,10 @@ const { createLogger } = require('../utils/logger');
 const { createQueryWithRetry } = require('./query-runner');
 const { createDbProxy: buildDbProxy } = require('./proxy');
 const { convertPlaceholders: toPgPlaceholders } = require('./sql-utils');
+const {
+  instrumentPoolConnectionDiagnostics,
+  registerPoolErrorDiagnostics
+} = require('./pool-diagnostics');
 const { initTables: initSchemaTables } = require('./schema/tables');
 const { createIndexes: createSchemaIndexes } = require('./schema/indexes');
 const { initDefaultData: initSchemaDefaultData } = require('./schema/default-data');
@@ -39,9 +43,8 @@ class DatabaseManager {
         application_name: 'subscription_manager'
       });
 
-      this.pool.on('error', (err) => {
-        logger.error(`连接池错误: ${err.message}`);
-      });
+      instrumentPoolConnectionDiagnostics(this.pool, logger);
+      registerPoolErrorDiagnostics(this.pool, logger);
 
       const client = await this.pool.connect();
       logger.info(`PostgreSQL 连接成功: ${config.database.host}:${config.database.port}/${config.database.database}`);
