@@ -95,7 +95,7 @@ afterAll(() => { axios.defaults.adapter = originalAdapter })
 describe('Passkey 密钥展示', () => {
   it.each([
     { layout: '桌面', mobile: false, sectionPadding: '16px', cardPadding: '16px', titleSize: '18px', titleMargin: '14px', headerGap: '16px', headerMargin: '16px', rowPadding: '8px 12px', rowGap: '16px', timesGap: '16px', emptyPadding: '20px 12px' },
-    { layout: '移动', mobile: true, sectionPadding: '12px', cardPadding: '12px', titleSize: '17px', titleMargin: '12px', headerGap: '10px', headerMargin: '12px', rowPadding: '12px 0px', rowGap: '8px', timesGap: '6px', emptyPadding: '16px 8px' }
+    { layout: '移动', mobile: true, sectionPadding: '8px', cardPadding: '10px', titleSize: '17px', titleMargin: '8px', headerGap: '6px', headerMargin: '8px', rowPadding: '8px 0px', rowGap: '6px', timesGap: '3px', emptyPadding: '12px 8px' }
   ])('$layout 布局保持外大内小的标题层级、紧凑间距及可触控操作', async expected => {
     applyCardStyles(expected.mobile, expected.mobile)
     const wrapper = await mountCard([firstKey])
@@ -119,13 +119,56 @@ describe('Passkey 密钥展示', () => {
       expect(style('.passkey-row').padding).toBe(expected.rowPadding)
       expect(style('.passkey-row').gap).toBe(expected.rowGap)
       expect(style('.passkey-times').gap).toBe(expected.timesGap)
-      expect(parseFloat(style('.passkey-add-button').height)).toBeGreaterThanOrEqual(40)
-      expect(parseFloat(style('.passkey-delete-button').minHeight)).toBeGreaterThanOrEqual(40)
+      expect(style('.passkey-add-button').height).toBe(expected.mobile ? '36px' : '40px')
+      expect(style('.passkey-delete-button').minHeight).toBe(expected.mobile ? '36px' : '40px')
       expect(getComputedStyle(emptyWrapper.get('.passkey-empty').element).padding).toBe(expected.emptyPadding)
     } finally {
       wrapper.element.remove()
       emptyWrapper.element.remove()
     }
+  })
+
+  it.each([
+    { layout: '桌面', narrow: false, mobile: false, descriptionSize: '14px', descriptionHeight: '1.6', countSize: '14px', timeSize: '14px', actionsGap: '16px', timeFieldGap: '' },
+    { layout: '窄容器', narrow: true, mobile: false, descriptionSize: '12px', descriptionHeight: '1.4', countSize: '12px', timeSize: '12px', actionsGap: '6px', timeFieldGap: '6px' },
+    { layout: '移动', narrow: true, mobile: true, descriptionSize: '12px', descriptionHeight: '1.4', countSize: '12px', timeSize: '12px', actionsGap: '6px', timeFieldGap: '6px' }
+  ])('$layout 的描述、计数、时间和操作间距采用真实源 CSS 计算结果', async expected => {
+    applyCardStyles(expected.narrow, expected.mobile)
+    const wrapper = await mountCard([firstKey, secondKey])
+    document.body.appendChild(wrapper.element)
+    try {
+      const style = selector => getComputedStyle(wrapper.get(selector).element)
+      expect(style('.passkey-heading p').fontSize).toBe(expected.descriptionSize)
+      expect(style('.passkey-heading p').lineHeight).toBe(expected.descriptionHeight)
+      expect(style('.passkey-count').fontSize).toBe(expected.countSize)
+      expect(style('.passkey-times').fontSize).toBe(expected.timeSize)
+      expect(style('.passkey-header-actions').gap).toBe(expected.actionsGap)
+      expect(style('.passkey-times div').gap).toBe(expected.timeFieldGap)
+    } finally { wrapper.element.remove() }
+  })
+
+  it('移动端两条密钥在两行描述与完整时间标签下满足纵向几何预算', async () => {
+    applyCardStyles(true, true)
+    const wrapper = await mountCard([firstKey, secondKey])
+    document.body.appendChild(wrapper.element)
+    try {
+      // jsdom 不执行排版；按真实计算样式累加盒模型，标题正常行高按 1.5 倍保守预算。
+      // 两行描述覆盖常见窄屏换行，每条密钥包含按钮首行及两行完整日期。
+      const style = selector => getComputedStyle(wrapper.get(selector).element)
+      const px = value => parseFloat(value) || 0
+      const verticalBox = css => px(css.paddingTop) + px(css.paddingBottom) + px(css.borderTopWidth) + px(css.borderBottomWidth)
+      const title = style('.passkey-section-title')
+      const heading = style('.passkey-heading h3')
+      const description = style('.passkey-heading p')
+      const header = style('.passkey-header')
+      const row = style('.passkey-row')
+      const times = style('.passkey-times')
+      const rowHeight = Math.max(px(row.minHeight), verticalBox(row) + px(style('.passkey-delete-button').minHeight) + px(row.gap) + 2 * px(times.fontSize) * 1.5 + px(times.gap))
+      const headerHeight = px(heading.fontSize) * 1.5 + px(description.marginTop) + 2 * px(description.fontSize) * px(description.lineHeight) + px(header.gap) + px(style('.passkey-add-button').height) + px(header.marginBottom)
+      const sectionHeight = verticalBox(style('.passkey-section')) + px(title.fontSize) * 1.5 + px(title.marginBottom) + verticalBox(style('.passkey-card')) + headerHeight + wrapper.findAll('.passkey-row').length * rowHeight
+      expect(rowHeight).toBeLessThanOrEqual(98)
+      expect(sectionHeight).toBeLessThanOrEqual(440)
+    } finally { wrapper.element.remove() }
   })
 
   it.each([false, true])('窄布局=%s 时每个日期标签保留无障碍可见性，并按布局切换视觉隐藏', async narrow => {

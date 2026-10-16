@@ -420,26 +420,35 @@ onMounted(loadPasskeys)
 /* 按内容区宽度切换，避免平板侧栏占位后把桌面列表挤出横向滚动条。 */
 @container passkey-content (max-width: 680px) {
   .passkey-section-title {
-    margin-bottom: 12px;
+    margin-bottom: 8px;
     font-size: 17px;
   }
   .passkey-card {
-    padding: 12px;
+    padding: 10px;
   }
   .passkey-header {
     flex-direction: column;
     align-items: stretch;
-    gap: 10px;
-    margin-bottom: 12px;
+    gap: 6px;
+    margin-bottom: 8px;
   }
   .passkey-heading h3 {
     font-size: 16px;
   }
+  /* 窄屏缩减辅助文字与留白，保留标题层级及完整时间字段。 */
+  .passkey-heading p {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .passkey-count {
+    font-size: 12px;
+  }
   .passkey-header-actions {
     justify-content: space-between;
-    gap: 12px;
+    gap: 6px;
   }
   .passkey-add-button {
+    height: 36px;
     padding: 0 12px;
   }
   .passkey-list-header {
@@ -447,8 +456,8 @@ onMounted(loadPasskeys)
   }
   .passkey-row {
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    padding: 12px 0;
+    gap: 6px;
+    padding: 8px 0;
     border-top: 1px solid #e7ecf3;
     border-bottom: 0;
   }
@@ -456,13 +465,13 @@ onMounted(loadPasskeys)
     grid-row: 2;
     grid-column: 1 / -1;
     grid-template-columns: 1fr;
-    gap: 6px;
-    font-size: 13px;
+    gap: 3px;
+    font-size: 12px;
   }
   .passkey-times div {
     display: flex;
     justify-content: space-between;
-    gap: 12px;
+    gap: 6px;
   }
   .passkey-times dt {
     display: block;
@@ -481,13 +490,14 @@ onMounted(loadPasskeys)
   .passkey-delete-button {
     grid-row: 1;
     grid-column: 2;
+    min-height: 36px;
   }
   .passkey-name {
     gap: 10px;
     font-size: 14px;
   }
   .passkey-empty {
-    padding: 16px 8px;
+    padding: 12px 8px;
   }
   .passkey-load-error {
     flex-direction: column;
@@ -496,7 +506,7 @@ onMounted(loadPasskeys)
 }
 @media (max-width: 768px) {
   .passkey-section {
-    padding: 12px;
+    padding: 8px;
   }
 }
 </style>
