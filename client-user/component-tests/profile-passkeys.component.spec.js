@@ -60,11 +60,12 @@ function responseError(status, message) {
   return Object.assign(new Error('transport failed'), { response: { status, data: { code: status, message, data: null } } })
 }
 
-/** 将组件真实 CSS 注入 jsdom；narrow 仅选择容器规则分支，检查实际标签的计算样式。 */
-function applyCardStyles(narrow = false) {
+/** 将组件真实 CSS 注入 jsdom；narrow 选择窄容器，mobile 同时展开移动媒体规则以检查真实标签的样式。 */
+function applyCardStyles(narrow = false, mobile = false) {
   const css = postcss.parse(parseVue(passkeyCardSource).descriptor.styles[0].content)
   css.walkAtRules(rule => {
     if (narrow && rule.name === 'container') rule.replaceWith(...rule.nodes)
+    else if (mobile && rule.name === 'media' && rule.params === '(max-width: 768px)') rule.replaceWith(...rule.nodes)
     else rule.remove()
   })
   const style = document.createElement('style')
@@ -92,6 +93,41 @@ afterEach(() => {
 afterAll(() => { axios.defaults.adapter = originalAdapter })
 
 describe('Passkey 密钥展示', () => {
+  it.each([
+    { layout: '桌面', mobile: false, sectionPadding: '16px', cardPadding: '16px', titleSize: '18px', titleMargin: '14px', headerGap: '16px', headerMargin: '16px', rowPadding: '8px 12px', rowGap: '16px', timesGap: '16px', emptyPadding: '20px 12px' },
+    { layout: '移动', mobile: true, sectionPadding: '12px', cardPadding: '12px', titleSize: '17px', titleMargin: '12px', headerGap: '10px', headerMargin: '12px', rowPadding: '12px 0px', rowGap: '8px', timesGap: '6px', emptyPadding: '16px 8px' }
+  ])('$layout 布局保持外大内小的标题层级、紧凑间距及可触控操作', async expected => {
+    applyCardStyles(expected.mobile, expected.mobile)
+    const wrapper = await mountCard([firstKey])
+    const emptyWrapper = await mountCard()
+    document.body.append(wrapper.element, emptyWrapper.element)
+    try {
+      const style = selector => getComputedStyle(wrapper.get(selector).element)
+      const outerTitle = style('.passkey-section-title')
+      const innerTitle = style('.passkey-heading h3')
+      expect(outerTitle.fontSize).toBe(expected.titleSize)
+      expect(innerTitle.fontSize).toBe('16px')
+      expect(parseFloat(outerTitle.fontSize)).toBeGreaterThan(parseFloat(innerTitle.fontSize))
+      expect(outerTitle.marginBottom).toBe(expected.titleMargin)
+      expect(style('.passkey-section').padding).toBe(expected.sectionPadding)
+      expect(style('.passkey-card').padding).toBe(expected.cardPadding)
+      expect(style('.passkey-header').gap).toBe(expected.headerGap)
+      expect(style('.passkey-header').marginBottom).toBe(expected.headerMargin)
+      expect(style('.passkey-heading p').marginTop).toBe('4px')
+      expect(style('.passkey-list-header').padding).toBe('10px 12px')
+      expect(style('.passkey-row').minHeight).toBe('56px')
+      expect(style('.passkey-row').padding).toBe(expected.rowPadding)
+      expect(style('.passkey-row').gap).toBe(expected.rowGap)
+      expect(style('.passkey-times').gap).toBe(expected.timesGap)
+      expect(parseFloat(style('.passkey-add-button').height)).toBeGreaterThanOrEqual(40)
+      expect(parseFloat(style('.passkey-delete-button').minHeight)).toBeGreaterThanOrEqual(40)
+      expect(getComputedStyle(emptyWrapper.get('.passkey-empty').element).padding).toBe(expected.emptyPadding)
+    } finally {
+      wrapper.element.remove()
+      emptyWrapper.element.remove()
+    }
+  })
+
   it.each([false, true])('窄布局=%s 时每个日期标签保留无障碍可见性，并按布局切换视觉隐藏', async narrow => {
     applyCardStyles(narrow)
     const wrapper = await mountCard([firstKey])

@@ -259,20 +259,20 @@ onMounted(loadPasskeys)
 .passkey-section {
   container: passkey-content / inline-size;
   min-width: 0;
-  padding: 20px;
+  padding: 16px;
   border-radius: 8px;
   background: #fff;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
 }
 .passkey-section-title {
-  margin: 0 0 24px;
+  margin: 0 0 14px;
   color: #1e293b;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
 }
 .passkey-card {
   min-width: 0;
-  padding: 24px;
+  padding: 16px;
   border: 1px solid #e7ecf3;
   border-radius: 8px;
 }
@@ -282,8 +282,8 @@ onMounted(loadPasskeys)
 }
 .passkey-header {
   justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 28px;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 .passkey-heading {
   min-width: 0;
@@ -291,18 +291,18 @@ onMounted(loadPasskeys)
 .passkey-heading h3 {
   margin: 0;
   color: #1e293b;
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 600;
 }
 .passkey-heading p {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   color: #8492a6;
   font-size: 14px;
   line-height: 1.6;
 }
 .passkey-header-actions {
   flex-shrink: 0;
-  gap: 24px;
+  gap: 16px;
 }
 .passkey-count {
   color: #8492a6;
@@ -318,12 +318,12 @@ onMounted(loadPasskeys)
 .passkey-row {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(0, 2fr) 80px;
-  gap: 20px;
+  gap: 16px;
   align-items: center;
 }
 .passkey-list-header {
   grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) 80px;
-  padding: 14px 16px;
+  padding: 10px 12px;
   border-radius: 6px 6px 0 0;
   background: #f7f9fb;
   color: #8492a6;
@@ -338,12 +338,12 @@ onMounted(loadPasskeys)
   list-style: none;
 }
 .passkey-row {
-  min-height: 74px;
-  padding: 12px 16px;
+  min-height: 56px;
+  padding: 8px 12px;
   border-bottom: 1px solid #e7ecf3;
 }
 .passkey-name {
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
   color: #334155;
   font-size: 15px;
@@ -359,7 +359,7 @@ onMounted(loadPasskeys)
 .passkey-times {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
+  gap: 16px;
   min-width: 0;
   margin: 0;
   color: #8492a6;
@@ -382,10 +382,13 @@ onMounted(loadPasskeys)
 }
 .passkey-delete-button {
   justify-self: end;
+  /* 压缩列表留白时仍保留足够的删除触控高度。 */
+  min-height: 40px;
+  padding: 0 8px;
   gap: 6px;
 }
 .passkey-empty {
-  padding: 32px 12px;
+  padding: 20px 12px;
   text-align: center;
   color: #8492a6;
 }
@@ -393,7 +396,7 @@ onMounted(loadPasskeys)
   font-size: 28px;
 }
 .passkey-empty p {
-  margin: 12px 0 8px;
+  margin: 8px 0 4px;
   color: #64748b;
   font-size: 15px;
 }
@@ -417,20 +420,20 @@ onMounted(loadPasskeys)
 /* 按内容区宽度切换，避免平板侧栏占位后把桌面列表挤出横向滚动条。 */
 @container passkey-content (max-width: 680px) {
   .passkey-section-title {
-    margin-bottom: 18px;
-    font-size: 18px;
+    margin-bottom: 12px;
+    font-size: 17px;
   }
   .passkey-card {
-    padding: 16px;
+    padding: 12px;
   }
   .passkey-header {
     flex-direction: column;
     align-items: stretch;
-    gap: 16px;
-    margin-bottom: 18px;
+    gap: 10px;
+    margin-bottom: 12px;
   }
   .passkey-heading h3 {
-    font-size: 20px;
+    font-size: 16px;
   }
   .passkey-header-actions {
     justify-content: space-between;
@@ -444,8 +447,8 @@ onMounted(loadPasskeys)
   }
   .passkey-row {
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 14px 8px;
-    padding: 18px 0;
+    gap: 8px;
+    padding: 12px 0;
     border-top: 1px solid #e7ecf3;
     border-bottom: 0;
   }
@@ -453,7 +456,7 @@ onMounted(loadPasskeys)
     grid-row: 2;
     grid-column: 1 / -1;
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: 6px;
     font-size: 13px;
   }
   .passkey-times div {
@@ -483,6 +486,9 @@ onMounted(loadPasskeys)
     gap: 10px;
     font-size: 14px;
   }
+  .passkey-empty {
+    padding: 16px 8px;
+  }
   .passkey-load-error {
     flex-direction: column;
     align-items: flex-start;
@@ -490,7 +496,7 @@ onMounted(loadPasskeys)
 }
 @media (max-width: 768px) {
   .passkey-section {
-    padding: 15px;
+    padding: 12px;
   }
 }
 </style>
