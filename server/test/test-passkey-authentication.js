@@ -334,7 +334,7 @@ async function run() {
     }
     // 签发额度累计成功响应，不能由 verify 的失败计数或成功认证清空。
     const quotaIp = '203.0.113.50';
-    for (let index = 0; index < 20; index++) {
+    for (let index = 0; index < 5; index++) {
       assert.equal((await request(app, base + '/passkey/login/options', { ip: quotaIp })).status, 200);
     }
     const countBeforeQuota = Number((await pool.query('SELECT COUNT(*) AS count FROM webauthn_challenges')).rows[0].count);
@@ -346,7 +346,7 @@ async function run() {
     assert.equal(Number((await pool.query('SELECT COUNT(*) AS count FROM webauthn_challenges')).rows[0].count), countBeforeQuota);
     assert.equal((await request(app, base + '/passkey/login/options', { ip: '203.0.113.51' })).status, 200);
     assert.equal((await request(app, base + '/passkey/login/verify', { ip: quotaIp, body: {} })).status, 400);
-    console.log('PASS 匿名 options 单 IP 每分钟最多签发 20 次，成功也占额度，拒绝不写库、IP 和 verify 窗口独立');
+    console.log('PASS 匿名 options 单 IP 每分钟最多签发 5 次，成功也占额度，拒绝不写库、IP 和 verify 窗口独立');
     const validationUser = (await pool.query(`INSERT INTO users
       (email, password_hash, plan_id, expire_at, enabled, payment_count)
       VALUES ('validation@example.test', $1, 1, 0, 1, 1) RETURNING *`, [hash])).rows[0];

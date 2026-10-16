@@ -38,13 +38,13 @@ function createApp(limiter, status = 200) {
   return app;
 }
 
-test('同一 IPv6 /64 轮换地址共享 Passkey options 20 次签发额度，不同 /64 隔离', async () => {
+test('同一 IPv6 /64 轮换地址共享 Passkey options 5 次签发额度，不同 /64 隔离', async () => {
   const app = createApp(passkeyLoginOptionsLimiter);
-  for (let index = 1; index <= 20; index++) {
+  for (let index = 1; index <= 5; index++) {
     assert.equal((await request(app, `2001:db8:100:200::${index.toString(16)}`)).status, 200);
   }
   const blocked = await request(app, '2001:0DB8:0100:0200:ffff:ffff:ffff:ffff');
-  assert.equal(blocked.status, 429, '相同 /64 的新地址不能获取第 21 次签发额度');
+  assert.equal(blocked.status, 429, '相同 /64 的新地址不能获取第 6 次签发额度');
   assert.ok(Number(blocked.headers['retry-after']) > 0);
   assert.ok(Number(blocked.headers['retry-after']) <= 60);
   assert.equal((await request(app, '2001:db8:100:201::1')).status, 200);

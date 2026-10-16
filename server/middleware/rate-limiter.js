@@ -74,11 +74,11 @@ const passkeyPasswordVerificationLimiter = rateLimit({
   message: { code: 1003, message: '密码复验尝试过于频繁，请稍后再试', data: null }
 });
 
-// 匿名挑战按 IPv4 地址 / IPv6 /64 独立限制签发量：每分钟最多 20 次，成功响应也计数，避免无限创建数据库记录。
+// 匿名挑战按 IPv4 地址 / IPv6 /64 独立限制签发量：每分钟最多 5 次，成功响应也计数，避免无限创建数据库记录。
 // 验证仍沿用独立的失败窗口；成功登录不会清空或消耗挑战签发额度。
 const passkeyLoginOptionsLimiter = createIpLimiter({
   windowMs: 60 * 1000,
-  max: 20,
+  max: 5,
   message: { code: 1003, message: 'Passkey 登录尝试过于频繁，请稍后再试', data: null }
 });
 const passkeyLoginVerifyLimiter = createIpLimiter({
