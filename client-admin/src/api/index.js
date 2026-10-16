@@ -6,6 +6,20 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus/es/components/message/index.mjs'
 
+/**
+ * 提取可记录的数值诊断信息，避免原始 Axios 错误携带密码、令牌或业务请求体。
+ * @param {Object} error - 请求错误；仅读取响应状态和数值业务码，不记录 URL 或任意文本。
+ * @returns {Object} 仅含有效 HTTP status 和安全整数 code 的独立对象；缺失或非数值字段省略。
+ */
+function getSafeErrorDetails(error) {
+  const details = {}
+  const status = error?.response?.status
+  const code = error?.response?.data?.code
+  if (Number.isInteger(status) && status >= 100 && status <= 599) details.status = status
+  if (Number.isSafeInteger(code)) details.code = code
+  return details
+}
+
 // 创建axios实例
 const apiClient = axios.create({
   baseURL: '/api/admin',
@@ -26,7 +40,7 @@ apiClient.interceptors.request.use(
     return config
   },
   (error) => {
-    console.error('请求拦截器错误:', error)
+    console.error('请求拦截器错误:', getSafeErrorDetails(error))
     return Promise.reject(error)
   }
 )
@@ -37,7 +51,7 @@ apiClient.interceptors.response.use(
     return response.data
   },
   (error) => {
-    console.error('响应拦截器错误:', error)
+    console.error('响应拦截器错误:', getSafeErrorDetails(error))
     // Passkey 页面自行呈现错误；401 仍按统一流程清理过期会话。
     if (error.config?.skipErrorMessage && error.response?.status !== 401) {
       return Promise.reject(error)

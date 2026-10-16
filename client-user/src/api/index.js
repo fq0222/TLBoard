@@ -7,6 +7,20 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
 /**
+ * 提取可记录的数值诊断信息，避免原始 Axios 错误携带密码、令牌或 WebAuthn 响应。
+ * @param {Object} error - 请求错误；仅读取响应状态和数值业务码，不记录 URL 或任意文本。
+ * @returns {Object} 仅含有效 HTTP status 和安全整数 code 的独立对象；缺失或非数值字段省略。
+ */
+function getSafeErrorDetails(error) {
+  const details = {}
+  const status = error?.response?.status
+  const code = error?.response?.data?.code
+  if (Number.isInteger(status) && status >= 100 && status <= 599) details.status = status
+  if (Number.isSafeInteger(code)) details.code = code
+  return details
+}
+
+/**
  * 判断错误响应是否应交给页面级流程处理，避免响应拦截器重复弹出全局错误。
  * @param {number} status - HTTP 状态码。
  * @param {Object} data - 后端错误响应体，读取业务 code。
@@ -46,7 +60,7 @@ apiClient.interceptors.request.use(
     return config
   },
   (error) => {
-    console.error('请求拦截器错误:', error)
+    console.error('请求拦截器错误:', getSafeErrorDetails(error))
     return Promise.reject(error)
   }
 )
@@ -54,7 +68,7 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    console.error('响应拦截器错误:', error)
+    console.error('响应拦截器错误:', getSafeErrorDetails(error))
 
     let userMessage = '请求失败'
 
