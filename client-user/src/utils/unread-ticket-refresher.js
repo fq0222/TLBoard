@@ -3,36 +3,36 @@
  * 职责：降低未读工单数量接口调用频率，同时保留导航、点击和前台恢复等关键刷新时机。
  */
 
-export const TICKET_UNREAD_ROUTE_REFRESH_COOLDOWN_MS = 30 * 1000
+export const TICKET_UNREAD_REFRESH_INTERVAL_MS = 2 * 60 * 1000
 
 /**
  * 控制未读工单数量刷新节奏。
  * 关键参数：fetchUnreadCount 负责请求接口，setUnreadCount 负责写回界面状态。
- * 核心分支：路由刷新有 30 秒冷却；强制刷新跳过冷却；并发刷新复用同一个请求。
+ * 核心分支：所有刷新来源共享 2 分钟间隔；首次刷新立即执行；并发刷新复用同一个请求。
  */
 export class UnreadTicketRefresher {
   constructor({ fetchUnreadCount, setUnreadCount, now = () => Date.now() }) {
     this.fetchUnreadCount = fetchUnreadCount
     this.setUnreadCount = setUnreadCount
     this.now = now
-    this.lastRouteRefreshAt = Number.NEGATIVE_INFINITY
+    this.lastRefreshAt = Number.NEGATIVE_INFINITY
     this.refreshPromise = null
   }
 
   /**
    * 刷新未读工单数量。
-   * @param {{ force?: boolean }} options - force 为 true 时跳过路由冷却判断。
    * @returns {Promise<void>}
    */
-  async refresh({ force = false } = {}) {
-    if (!force && !this.canRefreshAfterRouteChange()) {
-      return
-    }
-
+  async refresh() {
     if (this.refreshPromise) {
       return this.refreshPromise
     }
 
+    if (!this.canRefresh()) {
+      return
+    }
+
+    this.lastRefreshAt = this.now()
     this.refreshPromise = this.fetchAndUpdate()
 
     try {
@@ -47,16 +47,11 @@ export class UnreadTicketRefresher {
    * @returns {Promise<void>}
    */
   async refreshAfterRouteChange() {
-    if (!this.canRefreshAfterRouteChange()) {
-      return
-    }
-
-    this.lastRouteRefreshAt = this.now()
-    await this.refresh({ force: true })
+    await this.refresh()
   }
 
-  canRefreshAfterRouteChange() {
-    return this.now() - this.lastRouteRefreshAt >= TICKET_UNREAD_ROUTE_REFRESH_COOLDOWN_MS
+  canRefresh() {
+    return this.now() - this.lastRefreshAt >= TICKET_UNREAD_REFRESH_INTERVAL_MS
   }
 
   async fetchAndUpdate() {

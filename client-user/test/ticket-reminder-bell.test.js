@@ -18,9 +18,9 @@ test('用户中心布局提供全局工单提醒铃铛并跳转到工单列表',
 test('工单提醒铃铛读取未读数并在路由变化后刷新', () => {
   assert.match(layoutSource, /const unreadTicketCount = ref\(0\)/)
   assert.match(layoutSource, /api\.user\.getTicketUnreadCount\(\)/)
-  assert.match(layoutSource, /response\.data\.count/)
+  assert.match(layoutSource, /new UnreadTicketRefresher/)
   assert.match(layoutSource, /watch\(\(\) => route\.path/)
-  assert.match(layoutSource, /fetchUnreadTicketCount\(\)/)
+  assert.match(layoutSource, /refreshUnreadTicketCountAfterRouteChange\(\)/)
 })
 
 test('有未读工单时铃铛显示红点和晃动动画', () => {

@@ -189,12 +189,12 @@ function createUnreadTicketRefresher() {
   })
 }
 
-async function refreshUnreadTicketCount(options) {
+async function refreshUnreadTicketCount() {
   if (!unreadTicketRefresher) {
     unreadTicketRefresher = createUnreadTicketRefresher()
   }
 
-  await unreadTicketRefresher.refresh(options)
+  await unreadTicketRefresher.refresh()
 }
 
 async function refreshUnreadTicketCountAfterRouteChange() {
@@ -207,12 +207,12 @@ async function refreshUnreadTicketCountAfterRouteChange() {
 
 function handleVisibilityChange() {
   if (!document.hidden) {
-    refreshUnreadTicketCount({ force: true })
+    refreshUnreadTicketCount()
   }
 }
 
 function handleTicketReadStateChanged() {
-  refreshUnreadTicketCount({ force: true })
+  refreshUnreadTicketCount()
 }
 
 /**
@@ -247,7 +247,7 @@ async function handleNavClick(item) {
  */
 async function goToTickets() {
   if (route.path.startsWith('/user/tickets')) {
-    await refreshUnreadTicketCount({ force: true })
+    await refreshUnreadTicketCount()
     return
   }
 
@@ -285,7 +285,7 @@ watch(() => route.path, async (newPath) => {
 
 onMounted(() => {
   preloadNavPages()
-  refreshUnreadTicketCount({ force: true })
+  refreshUnreadTicketCount()
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('ticket-read-state-changed', handleTicketReadStateChanged)
 })
