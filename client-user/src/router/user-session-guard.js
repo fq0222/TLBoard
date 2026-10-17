@@ -11,14 +11,16 @@
  * @param {Object} userStore - 用户状态仓库
  * @returns {Promise<Object|null>} vue-router 跳转目标；null 表示继续当前导航
  */
-export async function resolveUserNavigation(to, userStore) {
+export async function resolveUserNavigation(to, userStore, onInvalidSession = () => {}) {
   const hasValidSession = await userStore.ensureValidSession()
+  const hadInvalidToken = !hasValidSession && Boolean(userStore.consumeInvalidToken?.())
 
   if (to.path === '/' && hasValidSession) {
     return { path: '/user' }
   }
 
   if (to.meta.requiresAuth && !hasValidSession) {
+    if (hadInvalidToken) onInvalidSession(to.fullPath)
     return { name: 'Login', query: { redirect: to.fullPath } }
   }
 

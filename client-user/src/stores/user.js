@@ -7,6 +7,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import api from '@/api'
 import { SessionValidator } from './session-validator'
+import { SessionLifecycle } from './session-lifecycle'
+import { handleUnauthorized, resetUnauthorizedHandling } from '@/utils/auth-session'
 
 /**
  * 提取可直接展示给用户的错误文案
@@ -25,12 +27,12 @@ export const useUserStore = defineStore('user', () => {
   const loading = ref(false)
   const sessionValidator = new SessionValidator({
     getToken: () => token.value,
-    getUserInfo: () => userInfo.value,
-    fetchProfile: () => api.user.getProfile({ skipAuthRedirect: true }),
-    setUserInfo: (profile) => {
-      userInfo.value = profile
-    },
-    clearToken
+    clearSession: clearToken
+  })
+  const sessionLifecycle = new SessionLifecycle({
+    getToken: () => token.value,
+    onExpired: context => handleUnauthorized(context),
+    onStorageToken: syncTokenFromStorage
   })
 
   const isLoggedIn = computed(() => !!token.value)
@@ -44,12 +46,35 @@ export const useUserStore = defineStore('user', () => {
   function setToken(newToken) {
     token.value = newToken
     localStorage.setItem('user_token', newToken)
+    resetUnauthorizedHandling()
+    sessionLifecycle.schedule(newToken)
   }
 
   function clearToken() {
     token.value = ''
     userInfo.value = null
     localStorage.removeItem('user_token')
+    sessionLifecycle.schedule('')
+  }
+
+  /**
+   * 同步其他标签页写入的 token，不重复写 localStorage。
+   * @param {string} newToken - storage 事件携带的新 token
+   */
+  function syncTokenFromStorage(newToken) {
+    token.value = newToken || ''
+    userInfo.value = null
+    if (newToken) resetUnauthorizedHandling()
+  }
+
+  /** 初始化一次性到期定时器和浏览器生命周期监听。 */
+  function initializeSessionMonitoring() {
+    sessionLifecycle.initialize()
+  }
+
+  /** 销毁会话监听与定时器，供应用卸载时释放资源。 */
+  function destroySessionMonitoring() {
+    sessionLifecycle.destroy()
   }
 
   /**
@@ -140,6 +165,11 @@ export const useUserStore = defineStore('user', () => {
     return sessionValidator.ensureValidSession()
   }
 
+  /** 消费路由本地校验发现的已有无效 token 标记，避免重复提示。 */
+  function consumeInvalidToken() {
+    return sessionValidator.consumeInvalidToken()
+  }
+
   function logout() {
     clearToken()
   }
@@ -157,8 +187,11 @@ export const useUserStore = defineStore('user', () => {
     trafficPercent,
     setToken,
     clearToken,
+    initializeSessionMonitoring,
+    destroySessionMonitoring,
     applyLoginResult,
     ensureValidSession,
+    consumeInvalidToken,
     login,
     registerAndPay,
     fetchUserProfile,

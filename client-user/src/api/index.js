@@ -5,6 +5,7 @@
 
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { handleUnauthorized, isRequestFromCurrentSession } from '../utils/auth-session.js'
 
 /**
  * 提取可记录的数值诊断信息，避免原始 Axios 错误携带密码、令牌或 WebAuthn 响应。
@@ -54,6 +55,7 @@ const apiClient = axios.create({
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('user_token')
+    config.authTokenSnapshot = token || null
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
@@ -87,9 +89,8 @@ apiClient.interceptors.response.use(
           }
           break
         case 401:
-          localStorage.removeItem('user_token')
-          if (!error.config?.skipAuthRedirect) {
-            window.location.href = '/login'
+          if (isRequestFromCurrentSession(error.config?.authTokenSnapshot, localStorage.getItem('user_token'))) {
+            handleUnauthorized({ source: 'api', skipRedirect: Boolean(error.config?.skipAuthRedirect) })
           }
           break
         case 403:

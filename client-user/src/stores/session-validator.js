@@ -1,72 +1,52 @@
+/** 用户会话本地校验器：解析 JWT 到期时间，不请求服务器。 */
+
 /**
- * 用户会话校验器。
- * 职责：为路由守卫提供轻量登录态确认，避免导航切换时重复请求 profile。
+ * 解析 JWT 的 exp 字段。
+ * @param {string} token - JWT 字符串
+ * @returns {number|null} 毫秒级过期时间；格式无效时返回 null
  */
-
-export const SESSION_VALIDATION_CACHE_MS = 10 * 60 * 1000
+export function getJwtExpiresAt(token) {
+  if (typeof token !== 'string') return null
+  const parts = token.split('.')
+  if (parts.length !== 3 || !parts[1]) return null
+  try {
+    const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padding = '='.repeat((4 - normalized.length % 4) % 4)
+    const payload = JSON.parse(globalThis.atob(normalized + padding))
+    const expiresAt = payload?.exp * 1000
+    return Number.isFinite(payload?.exp) && payload.exp > 0 && Number.isFinite(expiresAt) ? expiresAt : null
+  } catch {
+    return null
+  }
+}
 
 /**
- * 管理用户会话校验的缓存与并发请求复用。
- * 关键参数：依赖通过构造函数注入，便于 Pinia store 使用并方便单元测试。
- * 核心分支：无 token 直接失败；缓存命中直接成功；并发请求复用同一个 Promise；校验失败清 token。
+ * 管理路由鉴权所需的本地 JWT 校验。
+ * 关键参数：getToken 读取当前 token，clearSession 清理 Pinia 与持久化状态。
+ * 核心分支：token 缺失、格式无效或已经到期时清理会话；有效时直接放行。
  */
 export class SessionValidator {
-  constructor({ getToken, getUserInfo, fetchProfile, setUserInfo, clearToken, now = () => Date.now() }) {
+  constructor({ getToken, clearSession, now = () => Date.now() }) {
     this.getToken = getToken
-    this.getUserInfo = getUserInfo
-    this.fetchProfile = fetchProfile
-    this.setUserInfo = setUserInfo
-    this.clearToken = clearToken
+    this.clearSession = clearSession
     this.now = now
-    this.validatedAt = 0
-    this.validationPromise = null
+    this.invalidTokenPending = false
   }
 
-  /**
-   * 校验当前 token 是否仍可用。
-   * @returns {Promise<boolean>} token 有效时返回 true，否则返回 false。
-   */
+  /** 本地校验当前 token，不发起 profile 请求。 */
   async ensureValidSession() {
-    if (!this.getToken()) {
-      return false
-    }
-
-    if (this.isCacheValid()) {
-      return true
-    }
-
-    if (this.validationPromise) {
-      return this.validationPromise
-    }
-
-    this.validationPromise = this.validateWithServer()
-
-    try {
-      return await this.validationPromise
-    } finally {
-      this.validationPromise = null
-    }
-  }
-
-  isCacheValid() {
-    return Boolean(this.getUserInfo()) && this.now() - this.validatedAt < SESSION_VALIDATION_CACHE_MS
-  }
-
-  async validateWithServer() {
-    try {
-      const response = await this.fetchProfile()
-
-      if (response.code === 0) {
-        this.setUserInfo(response.data)
-        this.validatedAt = this.now()
-        return true
-      }
-    } catch (error) {
-      console.error('校验用户登录态失败:', error)
-    }
-
-    this.validatedAt = 0
-    this.clearToken()
+    const token = this.getToken()
+    const expiresAt = getJwtExpiresAt(token)
+    if (expiresAt !== null && expiresAt > this.now()) return true
+    if (token) this.invalidTokenPending = true
+    this.clearSession()
     return false
+  }
+
+  /** 返回并消费“本次失败来自已有无效 token”标记，确保只提示一次。 */
+  consumeInvalidToken() {
+    const pending = this.invalidTokenPending
+    this.invalidTokenPending = false
+    return pending
   }
 }

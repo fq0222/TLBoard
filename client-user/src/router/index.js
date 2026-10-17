@@ -6,6 +6,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { resolveUserNavigation } from './user-session-guard'
+import { handleUnauthorized } from '@/utils/auth-session'
 
 const routes = [
   {
@@ -154,7 +155,9 @@ router.beforeEach(async (to, from, next) => {
   document.title = to.meta.title ? `${to.meta.title} - 天澜大陆` : '天澜大陆'
 
   const userStore = useUserStore()
-  const redirect = await resolveUserNavigation(to, userStore)
+  const redirect = await resolveUserNavigation(to, userStore, fullPath => {
+    handleUnauthorized({ source: 'expiry', fullPath, skipRedirect: true })
+  })
 
   if (redirect) {
     next(redirect)

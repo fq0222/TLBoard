@@ -1,85 +1,60 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { SessionValidator, SESSION_VALIDATION_CACHE_MS } from '../src/stores/session-validator.js'
+import { SessionValidator, getJwtExpiresAt } from '../src/stores/session-validator.js'
 
-function createValidator(options = {}) {
-  let now = options.now || 1000
-  let userInfo = options.userInfo ?? null
-  const calls = []
-  const validator = new SessionValidator({
-    getToken: () => options.token ?? 'token',
-    getUserInfo: () => userInfo,
-    fetchProfile: async () => {
-      calls.push(now)
-      return options.response || { code: 0, data: { email: 'user@example.com' } }
-    },
-    setUserInfo: options.setUserInfo || ((profile) => {
-      userInfo = profile
-    }),
-    clearToken: options.clearToken || (() => {}),
-    now: () => now
-  })
-
-  return {
-    calls,
-    validator,
-    advance(ms) {
-      now += ms
-    }
-  }
+function createToken(payload) {
+  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url')
+  return `header.${encoded}.signature`
 }
 
-test('无 token 时不会请求 profile', async () => {
-  const { calls, validator } = createValidator({ token: '' })
-
-  const result = await validator.ensureValidSession()
-
-  assert.equal(result, false)
-  assert.equal(calls.length, 0)
+test('解析 JWT 的 exp 为毫秒时间戳', () => {
+  assert.equal(getJwtExpiresAt(createToken({ exp: 1234 })), 1234000)
 })
 
-test('10 分钟缓存窗口内复用上次成功校验结果', async () => {
-  const { calls, validator, advance } = createValidator()
-
-  assert.equal(await validator.ensureValidSession(), true)
-  advance(SESSION_VALIDATION_CACHE_MS - 1)
-  assert.equal(await validator.ensureValidSession(), true)
-
-  assert.equal(calls.length, 1)
+test('格式错误或缺少 exp 的 token 返回 null', () => {
+  assert.equal(getJwtExpiresAt('invalid-token'), null)
+  assert.equal(getJwtExpiresAt(createToken({ sub: 1 })), null)
+  assert.equal(getJwtExpiresAt(createToken({ exp: Number.MAX_VALUE })), null)
 })
 
-test('超过 10 分钟缓存窗口后重新请求 profile', async () => {
-  const { calls, validator, advance } = createValidator()
-
-  assert.equal(await validator.ensureValidSession(), true)
-  advance(SESSION_VALIDATION_CACHE_MS + 1)
-  assert.equal(await validator.ensureValidSession(), true)
-
-  assert.equal(calls.length, 2)
-})
-
-test('并发会话校验复用同一个 profile 请求', async () => {
-  let resolveProfile
-  let requestCount = 0
+test('有效 token 通过本地校验且不请求 profile', async () => {
+  let cleared = 0
   const validator = new SessionValidator({
-    getToken: () => 'token',
-    getUserInfo: () => null,
-    fetchProfile: async () => {
-      requestCount += 1
-      return new Promise(resolve => {
-        resolveProfile = resolve
-      })
-    },
-    setUserInfo: () => {},
-    clearToken: () => {},
+    getToken: () => createToken({ exp: 2 }),
+    clearSession: () => { cleared += 1 },
     now: () => 1000
   })
 
-  const first = validator.ensureValidSession()
-  const second = validator.ensureValidSession()
+  assert.equal(await validator.ensureValidSession(), true)
+  assert.equal(cleared, 0)
+})
 
-  assert.equal(requestCount, 1)
-  resolveProfile({ code: 0, data: { email: 'user@example.com' } })
-  assert.deepEqual(await Promise.all([first, second]), [true, true])
+test('无 token、格式无效或已过期时清理完整会话', async () => {
+  const tokens = ['', 'invalid-token', createToken({ exp: 1 })]
+
+  for (const token of tokens) {
+    let cleared = 0
+    const validator = new SessionValidator({
+      getToken: () => token,
+      clearSession: () => { cleared += 1 },
+      now: () => 1000
+    })
+    assert.equal(await validator.ensureValidSession(), false)
+    assert.equal(cleared, 1)
+  }
+})
+
+test('已有无效 token 标记不会被紧随其后的无 token 校验覆盖', async () => {
+  let token = 'invalid-token'
+  const validator = new SessionValidator({
+    getToken: () => token,
+    clearSession: () => { token = '' },
+    now: () => 1000
+  })
+
+  assert.equal(await validator.ensureValidSession(), false)
+  assert.equal(await validator.ensureValidSession(), false)
+  assert.equal(validator.consumeInvalidToken(), true)
+  assert.equal(validator.consumeInvalidToken(), false)
 })

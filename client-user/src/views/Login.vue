@@ -238,6 +238,7 @@ import api from '@/api'
 import { ElMessage } from 'element-plus'
 import { Key, Lock, Message } from '@element-plus/icons-vue'
 import { PasskeyClient } from '@/utils/passkey-client'
+import { getSafeRedirect } from '@/utils/auth-session'
 
 const router = useRouter()
 const route = useRoute()
@@ -371,7 +372,7 @@ async function handleSubmit() {
 
     if (result.success) {
       ElMessage.success('登录成功')
-      const redirect = route.query.redirect || '/user'
+      const redirect = getSafeRedirect(route.query.redirect)
       router.push(redirect)
     } else {
       ElMessage.error(result.message || '登录失败')
@@ -395,7 +396,7 @@ async function handlePasskeyLogin() {
     if (!data) return
     userStore.applyLoginResult(data)
     ElMessage.success('登录成功')
-    router.push(route.query.redirect || '/user')
+    router.push(getSafeRedirect(route.query.redirect))
   } catch (error) {
     ElMessage.error(error?.response?.data?.message || error?.userMessage || error?.message || 'Passkey 登录失败')
   } finally {
