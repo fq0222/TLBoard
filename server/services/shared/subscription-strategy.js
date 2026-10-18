@@ -165,6 +165,8 @@ function applyCfStrategy(originalLink, cfConfig) {
   // 替换 host（无条件设置）
   if (cfConfig.host) {
     nodeInfo.params.host = cfConfig.host;
+    nodeInfo.params.security = 'tls';
+    nodeInfo.params.sni = cfConfig.host;
   }
   
   return buildNodeLink(nodeInfo);

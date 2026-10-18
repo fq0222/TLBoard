@@ -592,6 +592,27 @@ function testHy2StrategyShouldOmitMportWhenPortsDisabled() {
 }
 
 /**
+ * 验证 CF 策略会为客户端侧补齐 Cloudflare 边缘 TLS 参数。
+ *
+ * @returns {void}
+ */
+function testCfStrategyShouldEnableTlsAndUseHostAsSni() {
+  const link = subscriptionStrategy.processNodeLink(
+    'vless://e4fa2b14-a7b7-4d8d-8006-2a12c5e625f7@us06.example.com:26315?encryption=none&security=none&type=ws&path=%2F7o8mknfqt6wcd82q#cf',
+    'cf',
+    {
+      cfIp: '172.67.160.0',
+      clientPort: 443,
+      host: 'chus06.bidding.dpdns.org'
+    }
+  );
+
+  const parsed = subscriptionStrategy.parseNodeLink(link);
+  assert.strictEqual(parsed.params.security, 'tls');
+  assert.strictEqual(parsed.params.sni, 'chus06.bidding.dpdns.org');
+}
+
+/**
  * 验证 Clash 订阅响应头会优先使用系统设置中的订阅配置。
  *
  * @returns {Promise<void>}
@@ -1715,6 +1736,7 @@ async function run() {
   testClashHy2SubscriptionShouldUseCachedPortsRange();
   testClashHy2SubscriptionShouldOmitPortsWhenDisabled();
   testHy2StrategyShouldOmitMportWhenPortsDisabled();
+  testCfStrategyShouldEnableTlsAndUseHostAsSni();
   await testClashSubscriptionShouldUseSystemSettingsHeaders();
   await testSubscriptionHeaderShouldIgnoreReferralTrafficLimit();
   await testSystemSettingsSubscriptionDefaults();
