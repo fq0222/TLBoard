@@ -25,7 +25,10 @@ Module._load = function patchedLoad(request, parent, isMain) {
               ? await this.interceptors.request.handler({ headers: {}, ...config })
               : config;
             requests.push({ baseURL: options.baseURL, timeout: options.timeout, ...requestConfig });
-            return { data: { success: true, msg: 'ok', obj: [] }, config: requestConfig };
+            const obj = requestConfig.url === '/panel/api/clients/list'
+              ? [{ email: 'legacy+user@example.com', uuid: 'legacy-uuid' }]
+              : [];
+            return { data: { success: true, msg: 'ok', obj }, config: requestConfig };
           }
         };
       }
@@ -37,6 +40,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
 async function run() {
   const XuiApiClient = require('../integrations/xui/xui-api-client');
   const XuiApiClientV325 = require('../integrations/xui/xui-api-client-v325');
+  const XuiApiClientV3102 = require('../integrations/xui/xui-api-client-v3102');
   const {
     createXuiApiClient,
     resolveClientVersion
@@ -60,11 +64,27 @@ async function run() {
     timeout: 9012,
     apiVersion: '3.6.0'
   });
+  const v3102FactoryResult = createXuiApiClient('https://v3102-xui.example.com/', 'v3102-token', {
+    timeout: 9123,
+    apiVersion: '3.10.2',
+    proxy: { enabled: false }
+  });
   const v331ResolvedResult = resolveClientVersion('3.3.1');
   const v342ResolvedResult = resolveClientVersion('3.4.2');
   const v360ResolvedResult = resolveClientVersion('3.6.0');
+  const v3102ResolvedResult = resolveClientVersion('3.10.2');
   const fallbackResult = resolveClientVersion('9.9.9');
   const v325Client = new XuiApiClientV325('https://xui.example.com/', 'secret-token', { timeout: 4321 });
+  const proxiedV3102 = new XuiApiClientV3102('https://proxied-v3102.example.com/', 'v3102-token', {
+    proxy: {
+      enabled: true,
+      protocol: 'https:',
+      host: '127.0.0.1',
+      port: 27891,
+      username: 'v3102-user',
+      password: 'v3102-password'
+    }
+  });
   const proxiedClient = new XuiApiClient('https://proxied-xui.example.com/', 'proxy-token', {
     proxy: {
       enabled: true,
@@ -111,6 +131,16 @@ async function run() {
     host: '127.0.0.1',
     port: 27890
   });
+  const proxiedV3102Options = clientOptions.find(
+    (options) => options.baseURL === 'https://proxied-v3102.example.com'
+  );
+  assert.deepStrictEqual(proxiedV3102Options.proxy, {
+    protocol: 'https',
+    host: '127.0.0.1',
+    port: 27891,
+    auth: { username: 'v3102-user', password: 'v3102-password' }
+  });
+  assert.strictEqual(proxiedV3102.version, '3.10.2');
   assert.throws(
     () => new XuiApiClient('https://invalid-proxy.example.com/', 'invalid-token', {
       proxy: {
@@ -174,6 +204,14 @@ async function run() {
   assert.strictEqual(v360FactoryResult.resolvedVersion, '3.6.0');
   assert.strictEqual(v360ResolvedResult.requestedVersion, '3.6.0');
   assert.strictEqual(v360ResolvedResult.resolvedVersion, '3.6.0');
+  assert.strictEqual(v3102FactoryResult.client.constructor, XuiApiClientV3102);
+  assert.strictEqual(v3102FactoryResult.client.version, '3.10.2');
+  assert.strictEqual(v3102FactoryResult.client.supportsClientApi, true);
+  assert.strictEqual(v3102FactoryResult.requestedVersion, '3.10.2');
+  assert.strictEqual(v3102FactoryResult.resolvedVersion, '3.10.2');
+  assert.strictEqual(v3102ResolvedResult.ClientClass, XuiApiClientV3102);
+  assert.strictEqual(v3102ResolvedResult.resolvedVersion, '3.10.2');
+  assert.strictEqual(v3102FactoryResult.client instanceof XuiApiClientV325, false);
   assert.strictEqual(fallbackResult.requestedVersion, '9.9.9');
   assert.strictEqual(fallbackResult.resolvedVersion, '3.0.2');
 
@@ -362,6 +400,165 @@ async function run() {
   assert.strictEqual(requests[15].url, '/panel/api/server/getMigration');
   assert.strictEqual(requests[15].responseType, 'arraybuffer');
   assert.strictEqual(requests[15].headers.Authorization, 'Bearer secret-token');
+
+  const v3102 = v3102FactoryResult.client;
+  const v3102RequestStart = requests.length;
+  await v3102.getInbounds({ timeout: 60000 });
+  await v3102.getInbound(7);
+  await v3102.addInbound({ remark: '新增节点' });
+  await v3102.updateInbound(7, { remark: '更新节点' });
+  await v3102.deleteInbound(7);
+  await v3102.addClient({
+    id: 7,
+    settings: JSON.stringify({
+      clients: [{
+        id: 'legacy-uuid',
+        email: 'legacy+user@example.com',
+        enable: '0',
+        expiryTime: 123,
+        totalGB: 456,
+        limitIp: 2,
+        tgId: 3,
+        subId: 'legacy-sub',
+        flow: 'xtls-rprx-vision',
+        comment: '保留当前字段',
+        reset: 1,
+        group: 'legacy-group',
+        limitHwid: 9,
+        resetDay: 8,
+        reverse: { tag: '不得发送' }
+      }]
+    })
+  });
+  await v3102.addClient({
+    client: {
+      id: 'modern-uuid',
+      password: 'modern-password',
+      auth: 'modern-auth',
+      email: 'modern@example.com',
+      enable: true,
+      expiryTime: 789,
+      totalGB: 1024,
+      limitIp: 1,
+      tgId: 4,
+      subId: 'modern-sub',
+      security: 'auto'
+    },
+    inboundIds: [8, '9', 0, 'bad']
+  });
+  await v3102.getClientByEmail('legacy+user@example.com');
+  await v3102.attachClient('legacy+user@example.com', [7, '8', 0]);
+  await v3102.detachClient('legacy+user@example.com', [9]);
+  await v3102.updateClient('ignored-id', {
+    id: 7,
+    settings: JSON.stringify({
+      clients: [{
+        id: 'legacy-uuid',
+        email: 'legacy+user@example.com',
+        enable: false,
+        expiryTime: 321,
+        totalGB: 654,
+        limitIp: 1,
+        tgId: 5,
+        subId: 'updated-sub',
+        limitHwid: 9,
+        resetWeekday: 6,
+        resetMax: 5
+      }]
+    })
+  });
+  await v3102.deleteClientByEmail(7, 'legacy+user@example.com');
+  await v3102.deleteClient(7, 'legacy-uuid');
+  await v3102.getClientTrafficsByEmail('legacy+user@example.com');
+  await v3102.getClientTrafficsById('legacy-uuid');
+  await v3102.getClientIps('legacy+user@example.com');
+  await v3102.clearClientIps('legacy+user@example.com');
+  await v3102.resetClientTraffic('legacy+user@example.com');
+  await v3102.getOnlineClients();
+  await v3102.getLastOnline();
+  await v3102.updateClientTraffic('legacy+user@example.com', { up: 1, down: 2 });
+  await v3102.resetAllTraffics();
+  await v3102.resetAllClientTraffics(7);
+  await v3102.deleteDepletedClients(7);
+  await v3102.importInbound({ inbounds: [] });
+  await v3102.createBackup();
+  await v3102.getServerStatus();
+  await v3102.getDb();
+  await v3102.getMigration();
+  await v3102.getXrayConfig({ timeout: 45000 });
+  await v3102.updateXrayConfig({ outbounds: [] }, 'https://check.example.com', { timeout: 46000 });
+
+  const v3102Requests = requests.slice(v3102RequestStart);
+  assert.deepStrictEqual(
+    v3102Requests.map(({ method, url }) => `${method.toUpperCase()} ${url}`),
+    [
+      'GET /panel/api/inbounds/list',
+      'GET /panel/api/inbounds/get/7',
+      'POST /panel/api/inbounds/add',
+      'POST /panel/api/inbounds/update/7',
+      'POST /panel/api/inbounds/del/7',
+      'POST /panel/api/clients/add',
+      'POST /panel/api/clients/add',
+      'GET /panel/api/clients/get/legacy%2Buser%40example.com',
+      'POST /panel/api/clients/legacy%2Buser%40example.com/attach',
+      'POST /panel/api/clients/legacy%2Buser%40example.com/detach',
+      'POST /panel/api/clients/update/legacy%2Buser%40example.com',
+      'POST /panel/api/clients/del/legacy%2Buser%40example.com',
+      'GET /panel/api/clients/list',
+      'POST /panel/api/clients/del/legacy%2Buser%40example.com',
+      'GET /panel/api/clients/traffic/legacy%2Buser%40example.com',
+      'GET /panel/api/clients/list',
+      'GET /panel/api/clients/traffic/legacy%2Buser%40example.com',
+      'POST /panel/api/clients/ips/legacy%2Buser%40example.com',
+      'POST /panel/api/clients/clearIps/legacy%2Buser%40example.com',
+      'POST /panel/api/clients/resetTraffic/legacy%2Buser%40example.com',
+      'POST /panel/api/clients/onlines',
+      'POST /panel/api/clients/lastOnline',
+      'POST /panel/api/clients/updateTraffic/legacy%2Buser%40example.com',
+      'POST /panel/api/inbounds/resetAllTraffics',
+      'POST /panel/api/inbounds/resetAllClientTraffics/7',
+      'POST /panel/api/inbounds/delDepletedClients/7',
+      'POST /panel/api/inbounds/import',
+      'GET /panel/api/inbounds/createbackup',
+      'GET /panel/api/server/status',
+      'GET /panel/api/server/getDb',
+      'GET /panel/api/server/getMigration',
+      'POST /panel/api/xray/',
+      'POST /panel/api/xray/update'
+    ]
+  );
+  assert.strictEqual(v3102Requests[0].timeout, 60000);
+  assert.strictEqual(v3102Requests[0].headers.Authorization, 'Bearer v3102-token');
+  assert.deepStrictEqual(v3102Requests[5].data, {
+    client: {
+      email: 'legacy+user@example.com',
+      enable: false,
+      expiryTime: 123,
+      totalGB: 456,
+      limitIp: 2,
+      tgId: 3,
+      subId: 'legacy-sub',
+      id: 'legacy-uuid',
+      flow: 'xtls-rprx-vision',
+      comment: '保留当前字段',
+      reset: 1,
+      group: 'legacy-group'
+    },
+    inboundIds: [7]
+  });
+  assert.deepStrictEqual(v3102Requests[6].data.inboundIds, [8, 9]);
+  assert.strictEqual(Object.hasOwn(v3102Requests[5].data.client, 'limitHwid'), false);
+  assert.strictEqual(Object.hasOwn(v3102Requests[5].data.client, 'resetDay'), false);
+  assert.strictEqual(Object.hasOwn(v3102Requests[5].data.client, 'reverse'), false);
+  assert.strictEqual(Object.hasOwn(v3102Requests[10].data, 'resetWeekday'), false);
+  assert.strictEqual(Object.hasOwn(v3102Requests[10].data, 'resetMax'), false);
+  assert.strictEqual(v3102Requests[29].responseType, 'arraybuffer');
+  assert.strictEqual(v3102Requests[30].responseType, 'arraybuffer');
+  assert.strictEqual(v3102Requests[31].timeout, 45000);
+  assert.strictEqual(v3102Requests[32].timeout, 46000);
+  assert.strictEqual(v3102Requests[32].headers['Content-Type'], 'application/x-www-form-urlencoded');
+  assert.strictEqual(v3102Requests[32].data.get('xraySetting'), '{"outbounds":[]}');
+  assert.strictEqual(v3102Requests[32].data.get('outboundTestUrl'), 'https://check.example.com');
 
   console.log('test-xui-api-client: PASS');
 }

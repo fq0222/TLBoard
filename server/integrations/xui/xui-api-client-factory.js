@@ -6,6 +6,7 @@
 const XuiApiClientV302 = require('./xui-api-client-v302');
 const XuiApiClientV325 = require('./xui-api-client-v325');
 const XuiApiClientV342 = require('./xui-api-client-v342');
+const XuiApiClientV3102 = require('./xui-api-client-v3102');
 
 const DEFAULT_XUI_API_VERSION = '3.0.2';
 const CLIENT_REGISTRY = {
@@ -15,7 +16,9 @@ const CLIENT_REGISTRY = {
   '3.3.1': XuiApiClientV325,
   '3.4.2': XuiApiClientV342,
   // 3.6.0 保留 3.4.2 已适配的 clients/server 路由族，复用迁移备份客户端。
-  '3.6.0': XuiApiClientV342
+  '3.6.0': XuiApiClientV342,
+  // v3.10.2 使用完全独立的适配器，避免后续版本调整影响旧实现。
+  '3.10.2': XuiApiClientV3102
 };
 
 /**
