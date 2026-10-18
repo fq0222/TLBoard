@@ -305,13 +305,26 @@ class XuiApiClientV3102 {
   /** 重置所有 inbound 流量。 */
   resetAllTraffics() { return this.request('post', `${this.basePath}/resetAllTraffics`); }
   /** 重置指定 inbound 的全部客户端流量。 */
-  resetAllClientTraffics(inboundId) { return this.request('post', `${this.basePath}/resetAllClientTraffics/${inboundId}`); }
-  /** 删除耗尽流量的客户端，默认作用于全部 inbound。 */
-  deleteDepletedClients(inboundId = -1) { return this.request('post', `${this.basePath}/delDepletedClients/${inboundId}`); }
+  resetAllClientTraffics(inboundId) { return this.request('post', `${this.basePath}/${inboundId}/resetTraffic`); }
+  /**
+   * 删除全部 inbound 中耗尽流量的客户端。
+   * 核心分支：v3.10.2 仅提供全局接口，传入具体 inbound 时显式拒绝，避免扩大删除范围。
+   */
+  async deleteDepletedClients(inboundId = -1) {
+    if (Number(inboundId) !== -1) {
+      throw new Error('v3.10.2 不支持按 inbound 删除耗尽流量的客户端');
+    }
+    return this.request('post', `${this.clientBasePath}/delDepleted`);
+  }
   /** 导入 inbound 配置。 */
   importInbound(data) { return this.request('post', `${this.basePath}/import`, data); }
-  /** 触发面板创建备份。 */
-  createBackup() { return this.request('get', `${this.basePath}/createbackup`); }
+  /**
+   * 保留旧服务层方法签名，但 v3.10.2 不提供对应路由。
+   * @returns {Promise<never>} 始终拒绝，并提示调用受支持的下载接口。
+   */
+  async createBackup() {
+    throw new Error('v3.10.2 不支持 createBackup，请使用 getDb 或 getMigration');
+  }
   /** 下载 SQLite 面板数据库。 */
   getDb() { return this.download(`${this.serverBasePath}/getDb`); }
   /** 下载跨存储引擎迁移备份。 */

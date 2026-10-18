@@ -8,6 +8,36 @@ const Module = require('module');
 const originalLoad = Module._load;
 const requests = [];
 const clientOptions = [];
+const v3102RouteWhitelist = new Set([
+  'GET /panel/api/inbounds/list',
+  'GET /panel/api/inbounds/get/7',
+  'POST /panel/api/inbounds/add',
+  'POST /panel/api/inbounds/update/7',
+  'POST /panel/api/inbounds/del/7',
+  'POST /panel/api/clients/add',
+  'GET /panel/api/clients/get/legacy%2Buser%40example.com',
+  'POST /panel/api/clients/legacy%2Buser%40example.com/attach',
+  'POST /panel/api/clients/legacy%2Buser%40example.com/detach',
+  'POST /panel/api/clients/update/legacy%2Buser%40example.com',
+  'POST /panel/api/clients/del/legacy%2Buser%40example.com',
+  'GET /panel/api/clients/list',
+  'GET /panel/api/clients/traffic/legacy%2Buser%40example.com',
+  'POST /panel/api/clients/ips/legacy%2Buser%40example.com',
+  'POST /panel/api/clients/clearIps/legacy%2Buser%40example.com',
+  'POST /panel/api/clients/resetTraffic/legacy%2Buser%40example.com',
+  'POST /panel/api/clients/onlines',
+  'POST /panel/api/clients/lastOnline',
+  'POST /panel/api/clients/updateTraffic/legacy%2Buser%40example.com',
+  'POST /panel/api/inbounds/resetAllTraffics',
+  'POST /panel/api/inbounds/7/resetTraffic',
+  'POST /panel/api/clients/delDepleted',
+  'POST /panel/api/inbounds/import',
+  'GET /panel/api/server/status',
+  'GET /panel/api/server/getDb',
+  'GET /panel/api/server/getMigration',
+  'POST /panel/api/xray/',
+  'POST /panel/api/xray/update'
+]);
 
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === 'axios') {
@@ -24,6 +54,10 @@ Module._load = function patchedLoad(request, parent, isMain) {
             const requestConfig = this.interceptors.request.handler
               ? await this.interceptors.request.handler({ headers: {}, ...config })
               : config;
+            const routeKey = `${String(requestConfig.method).toUpperCase()} ${requestConfig.url}`;
+            if (options.baseURL === 'https://v3102-xui.example.com' && !v3102RouteWhitelist.has(routeKey)) {
+              throw new Error(`v3.10.2 route is not allowed: ${routeKey}`);
+            }
             requests.push({ baseURL: options.baseURL, timeout: options.timeout, ...requestConfig });
             const obj = requestConfig.url === '/panel/api/clients/list'
               ? [{ email: 'legacy+user@example.com', uuid: 'legacy-uuid' }]
@@ -479,9 +513,16 @@ async function run() {
   await v3102.updateClientTraffic('legacy+user@example.com', { up: 1, down: 2 });
   await v3102.resetAllTraffics();
   await v3102.resetAllClientTraffics(7);
-  await v3102.deleteDepletedClients(7);
+  await v3102.deleteDepletedClients();
+  await assert.rejects(
+    () => v3102.deleteDepletedClients(7),
+    /v3\.10\.2 不支持按 inbound 删除耗尽流量的客户端/
+  );
   await v3102.importInbound({ inbounds: [] });
-  await v3102.createBackup();
+  await assert.rejects(
+    () => v3102.createBackup(),
+    /v3\.10\.2 不支持 createBackup，请使用 getDb 或 getMigration/
+  );
   await v3102.getServerStatus();
   await v3102.getDb();
   await v3102.getMigration();
@@ -516,10 +557,9 @@ async function run() {
       'POST /panel/api/clients/lastOnline',
       'POST /panel/api/clients/updateTraffic/legacy%2Buser%40example.com',
       'POST /panel/api/inbounds/resetAllTraffics',
-      'POST /panel/api/inbounds/resetAllClientTraffics/7',
-      'POST /panel/api/inbounds/delDepletedClients/7',
+      'POST /panel/api/inbounds/7/resetTraffic',
+      'POST /panel/api/clients/delDepleted',
       'POST /panel/api/inbounds/import',
-      'GET /panel/api/inbounds/createbackup',
       'GET /panel/api/server/status',
       'GET /panel/api/server/getDb',
       'GET /panel/api/server/getMigration',
@@ -552,13 +592,13 @@ async function run() {
   assert.strictEqual(Object.hasOwn(v3102Requests[5].data.client, 'reverse'), false);
   assert.strictEqual(Object.hasOwn(v3102Requests[10].data, 'resetWeekday'), false);
   assert.strictEqual(Object.hasOwn(v3102Requests[10].data, 'resetMax'), false);
+  assert.strictEqual(v3102Requests[28].responseType, 'arraybuffer');
   assert.strictEqual(v3102Requests[29].responseType, 'arraybuffer');
-  assert.strictEqual(v3102Requests[30].responseType, 'arraybuffer');
-  assert.strictEqual(v3102Requests[31].timeout, 45000);
-  assert.strictEqual(v3102Requests[32].timeout, 46000);
-  assert.strictEqual(v3102Requests[32].headers['Content-Type'], 'application/x-www-form-urlencoded');
-  assert.strictEqual(v3102Requests[32].data.get('xraySetting'), '{"outbounds":[]}');
-  assert.strictEqual(v3102Requests[32].data.get('outboundTestUrl'), 'https://check.example.com');
+  assert.strictEqual(v3102Requests[30].timeout, 45000);
+  assert.strictEqual(v3102Requests[31].timeout, 46000);
+  assert.strictEqual(v3102Requests[31].headers['Content-Type'], 'application/x-www-form-urlencoded');
+  assert.strictEqual(v3102Requests[31].data.get('xraySetting'), '{"outbounds":[]}');
+  assert.strictEqual(v3102Requests[31].data.get('outboundTestUrl'), 'https://check.example.com');
 
   console.log('test-xui-api-client: PASS');
 }
