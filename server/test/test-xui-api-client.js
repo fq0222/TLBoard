@@ -29,7 +29,6 @@ const v3102RouteWhitelist = new Set([
   'POST /panel/api/clients/lastOnline',
   'POST /panel/api/clients/updateTraffic/legacy%2Buser%40example.com',
   'POST /panel/api/inbounds/resetAllTraffics',
-  'POST /panel/api/inbounds/7/resetTraffic',
   'POST /panel/api/clients/delDepleted',
   'POST /panel/api/inbounds/import',
   'GET /panel/api/server/status',
@@ -512,7 +511,12 @@ async function run() {
   await v3102.getLastOnline();
   await v3102.updateClientTraffic('legacy+user@example.com', { up: 1, down: 2 });
   await v3102.resetAllTraffics();
-  await v3102.resetAllClientTraffics(7);
+  const requestCountBeforeUnsupportedReset = requests.length;
+  await assert.rejects(
+    () => v3102.resetAllClientTraffics(7),
+    /v3\.10\.2 不支持按 inbound 重置全部客户端流量/
+  );
+  assert.strictEqual(requests.length, requestCountBeforeUnsupportedReset);
   await v3102.deleteDepletedClients();
   await assert.rejects(
     () => v3102.deleteDepletedClients(7),
@@ -557,7 +561,6 @@ async function run() {
       'POST /panel/api/clients/lastOnline',
       'POST /panel/api/clients/updateTraffic/legacy%2Buser%40example.com',
       'POST /panel/api/inbounds/resetAllTraffics',
-      'POST /panel/api/inbounds/7/resetTraffic',
       'POST /panel/api/clients/delDepleted',
       'POST /panel/api/inbounds/import',
       'GET /panel/api/server/status',
@@ -592,13 +595,13 @@ async function run() {
   assert.strictEqual(Object.hasOwn(v3102Requests[5].data.client, 'reverse'), false);
   assert.strictEqual(Object.hasOwn(v3102Requests[10].data, 'resetWeekday'), false);
   assert.strictEqual(Object.hasOwn(v3102Requests[10].data, 'resetMax'), false);
+  assert.strictEqual(v3102Requests[27].responseType, 'arraybuffer');
   assert.strictEqual(v3102Requests[28].responseType, 'arraybuffer');
-  assert.strictEqual(v3102Requests[29].responseType, 'arraybuffer');
-  assert.strictEqual(v3102Requests[30].timeout, 45000);
-  assert.strictEqual(v3102Requests[31].timeout, 46000);
-  assert.strictEqual(v3102Requests[31].headers['Content-Type'], 'application/x-www-form-urlencoded');
-  assert.strictEqual(v3102Requests[31].data.get('xraySetting'), '{"outbounds":[]}');
-  assert.strictEqual(v3102Requests[31].data.get('outboundTestUrl'), 'https://check.example.com');
+  assert.strictEqual(v3102Requests[29].timeout, 45000);
+  assert.strictEqual(v3102Requests[30].timeout, 46000);
+  assert.strictEqual(v3102Requests[30].headers['Content-Type'], 'application/x-www-form-urlencoded');
+  assert.strictEqual(v3102Requests[30].data.get('xraySetting'), '{"outbounds":[]}');
+  assert.strictEqual(v3102Requests[30].data.get('outboundTestUrl'), 'https://check.example.com');
 
   console.log('test-xui-api-client: PASS');
 }

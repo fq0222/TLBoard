@@ -304,8 +304,14 @@ class XuiApiClientV3102 {
   updateClientTraffic(email, data) { return this.request('post', `${this.clientBasePath}/updateTraffic/${encodeURIComponent(email)}`, data); }
   /** 重置所有 inbound 流量。 */
   resetAllTraffics() { return this.request('post', `${this.basePath}/resetAllTraffics`); }
-  /** 重置指定 inbound 的全部客户端流量。 */
-  resetAllClientTraffics(inboundId) { return this.request('post', `${this.basePath}/${inboundId}/resetTraffic`); }
+  /**
+   * 保留按 inbound 重置全部客户端流量的旧方法签名。
+   * @param {number} _inboundId - 旧调用方传入的 inbound ID；v3.10.2 没有等价接口。
+   * @returns {Promise<never>} 始终拒绝，避免误用只重置 inbound 汇总流量的接口。
+   */
+  async resetAllClientTraffics(_inboundId) {
+    throw new Error('v3.10.2 不支持按 inbound 重置全部客户端流量');
+  }
   /**
    * 删除全部 inbound 中耗尽流量的客户端。
    * 核心分支：v3.10.2 仅提供全局接口，传入具体 inbound 时显式拒绝，避免扩大删除范围。
