@@ -2,6 +2,7 @@ const { formatTraffic } = require('../../shared/utils/format-traffic');
 const { createLogger } = require('../../utils/logger');
 const XuiService = require('../../integrations/xui/xui-service');
 const serversRepository = require('../../repositories/servers-repository');
+const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const xuiNodeSnapshotService = require('../shared/xui-node-snapshot-service');
 const xuiBackupTaskService = require('./xui-backup-task-service');
 const { scheduleXuiUserSync } = require('../../jobs/handlers/sync-xui-users');
@@ -112,8 +113,14 @@ function formatServerSummary(server, stats = {}) {
  */
 async function countManagedUsersByEmails(db, emails) {
   const uniqueEmails = [...new Set((emails || []).filter(Boolean))];
-  const existingEmails = await serversRepository.listExistingUserEmails(db, uniqueEmails);
-  return new Set(existingEmails).size;
+  if (uniqueEmails.length === 0) {
+    return 0;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const syncUsers = await xuiSyncRepository.listUsersForXuiSync(db, now);
+  const eligibleEmails = new Set(syncUsers.map((user) => user.email).filter(Boolean));
+  return uniqueEmails.filter((email) => eligibleEmails.has(email)).length;
 }
 
 /**

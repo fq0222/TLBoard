@@ -29,24 +29,6 @@ async function listServerNodeStats(db) {
 }
 
 /**
- * 筛选 users 表中真实存在的邮箱。
- * 空集合直接返回，避免生成无意义的数据库查询。
- *
- * @param {Object} db - 数据库实例
- * @param {Array<string>} emails - 已去重的远端客户端邮箱
- * @returns {Promise<Array<string>>} 本地存在的邮箱
- */
-async function listExistingUserEmails(db, emails) {
-  const uniqueEmails = [...new Set((emails || []).filter(Boolean))];
-  if (uniqueEmails.length === 0) {
-    return [];
-  }
-
-  const rows = await db.prepare('SELECT email FROM users WHERE email = ANY(?)').all(uniqueEmails);
-  return rows.map((row) => row.email);
-}
-
-/**
  * 更新服务器级受管用户与在线用户缓存。
  *
  * @param {Object} db - 数据库实例
@@ -73,6 +55,29 @@ async function updateServerManagedCounts(db, serverId, counts) {
 async function updateServerManagedOnlineCount(db, serverId, onlineCount) {
   await db.prepare('UPDATE xui_servers SET managed_online_count = ? WHERE id = ?')
     .run(onlineCount, serverId);
+}
+
+/**
+ * 只更新服务器级有效用户数缓存，不影响管理员按需查询得到的在线人数。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} serverId - 服务器 ID
+ * @param {number} userCount - 去重后的有效用户数
+ * @returns {Promise<void>}
+ */
+async function updateServerManagedUserCount(db, serverId, userCount) {
+  await db.prepare('UPDATE xui_servers SET managed_user_count = ? WHERE id = ?')
+    .run(userCount, serverId);
+}
+
+/**
+ * 当没有任何有效订阅用户时清空所有服务器的用户数缓存。
+ *
+ * @param {Object} db - 数据库实例
+ * @returns {Promise<void>}
+ */
+async function resetAllManagedUserCounts(db) {
+  await db.prepare('UPDATE xui_servers SET managed_user_count = 0').run();
 }
 
 /**
@@ -182,9 +187,10 @@ async function listCachedServerNodes(db, serverId) {
 module.exports = {
   listServers,
   listServerNodeStats,
-  listExistingUserEmails,
   updateServerManagedCounts,
   updateServerManagedOnlineCount,
+  updateServerManagedUserCount,
+  resetAllManagedUserCounts,
   findServerById,
   createServer,
   updateServerFields,

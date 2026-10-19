@@ -28,6 +28,34 @@ function isPanelVersionAtLeast(version, minimum) {
 }
 
 /**
+ * 复用本轮 inbounds 与有效同步用户，刷新单台服务器的去重用户数缓存。
+ * 只更新用户数，不访问在线客户端接口，也不修改在线人数缓存。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} serverId - 服务器 ID
+ * @param {Array<Object>} inbounds - 本轮已获取的 inbound 列表
+ * @param {Array<Object>} users - listUsersForXuiSync 返回的有效用户
+ * @param {Object} dependencies - 可替换的仓储依赖
+ * @returns {Promise<number>} 写入缓存的用户数
+ */
+async function updateManagedUserCountFromInbounds(db, serverId, inbounds, users, dependencies = {}) {
+  const serverRepository = dependencies.serverRepository || serversRepository;
+  const eligibleEmails = new Set((users || []).map((user) => user.email).filter(Boolean));
+  const remoteEmails = new Set((inbounds || []).flatMap((inbound) => (
+    (inbound.clientStats || []).map((client) => client.email).filter(Boolean)
+  )));
+  let userCount = 0;
+  for (const email of remoteEmails) {
+    if (eligibleEmails.has(email)) {
+      userCount++;
+    }
+  }
+
+  await serverRepository.updateServerManagedUserCount(db, serverId, userCount);
+  return userCount;
+}
+
+/**
  * 统一计算巡检补偿同步时写回 3X-UI 的总流量上限。
  *
  * @param {Object} user - 用户快照，需包含 traffic_limit
@@ -234,6 +262,14 @@ async function legacySyncUsersToServer(db, server, users) {
       logger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${inboundsResult.message}`);
       return;
     }
+
+    await updateManagedUserCountFromInbounds(
+      db,
+      server.id,
+      inboundsResult.data,
+      users,
+      { serverRepository }
+    );
 
     let syncCount = 0;
 
@@ -685,6 +721,7 @@ async function runXuiSync(db) {
 
     if (users.length === 0) {
       logger.info('没有需要同步的用户');
+      await serversRepository.resetAllManagedUserCounts(db);
       return;
     }
 
@@ -716,6 +753,8 @@ module.exports = {
     getServerClientSyncMismatches,
     getServerClientFromInboundSnapshots,
     isServerClientAlreadySynced,
-    syncUsersToServer
+    syncUsersToServer,
+    updateManagedUserCountFromInbounds,
+    runXuiSync
   }
 };

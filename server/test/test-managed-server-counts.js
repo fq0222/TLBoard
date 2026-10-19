@@ -7,14 +7,16 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const serversService = require('../services/admin/servers-service');
 const serversRepository = require('../repositories/servers-repository');
+const xuiSyncRepository = require('../repositories/xui-sync-repository');
 const xuiNodeSnapshotService = require('../services/shared/xui-node-snapshot-service');
 const XuiService = require('../integrations/xui/xui-service');
+const syncXuiUsers = require('../jobs/handlers/sync-xui-users');
 
 test('同步服务器时按邮箱跨 inbound 去重并排除非系统用户', async () => {
   const originals = {
     findServerById: serversRepository.findServerById,
     updateServerStatus: serversRepository.updateServerStatus,
-    listExistingUserEmails: serversRepository.listExistingUserEmails,
+    listUsersForXuiSync: xuiSyncRepository.listUsersForXuiSync,
     updateServerManagedCounts: serversRepository.updateServerManagedCounts,
     refreshSnapshots: xuiNodeSnapshotService.refreshServerNodeSnapshots,
     getInstance: XuiService.getInstance
@@ -25,10 +27,10 @@ test('同步服务器时按邮箱跨 inbound 去重并排除非系统用户', as
     id: 7, api_url: 'https://xui.example.com', api_token: 'token', panel_version: '3.4.2'
   });
   serversRepository.updateServerStatus = async () => {};
-  serversRepository.listExistingUserEmails = async (_db, emails) => {
-    const existing = new Set(['a@example.com', 'b@example.com']);
-    return emails.filter((email) => existing.has(email));
-  };
+  xuiSyncRepository.listUsersForXuiSync = async () => ([
+    { email: 'a@example.com' },
+    { email: 'b@example.com' }
+  ]);
   serversRepository.updateServerManagedCounts = async (_db, serverId, counts) => {
     savedCounts = { serverId, ...counts };
   };
@@ -52,7 +54,7 @@ test('同步服务器时按邮箱跨 inbound 去重并排除非系统用户', as
   } finally {
     serversRepository.findServerById = originals.findServerById;
     serversRepository.updateServerStatus = originals.updateServerStatus;
-    serversRepository.listExistingUserEmails = originals.listExistingUserEmails;
+    xuiSyncRepository.listUsersForXuiSync = originals.listUsersForXuiSync;
     serversRepository.updateServerManagedCounts = originals.updateServerManagedCounts;
     xuiNodeSnapshotService.refreshServerNodeSnapshots = originals.refreshSnapshots;
     XuiService.getInstance = originals.getInstance;
@@ -62,7 +64,7 @@ test('同步服务器时按邮箱跨 inbound 去重并排除非系统用户', as
 test('实时在线人数按邮箱去重并排除非系统用户', async () => {
   const originals = {
     findServerById: serversRepository.findServerById,
-    listExistingUserEmails: serversRepository.listExistingUserEmails,
+    listUsersForXuiSync: xuiSyncRepository.listUsersForXuiSync,
     updateOnlineCount: serversRepository.updateServerManagedOnlineCount,
     getInstance: XuiService.getInstance
   };
@@ -71,7 +73,7 @@ test('实时在线人数按邮箱去重并排除非系统用户', async () => {
   serversRepository.findServerById = async () => ({
     id: 8, api_url: 'https://xui.example.com', api_token: 'token', panel_version: '3.4.2'
   });
-  serversRepository.listExistingUserEmails = async () => ['a@example.com'];
+  xuiSyncRepository.listUsersForXuiSync = async () => ([{ email: 'a@example.com' }]);
   serversRepository.updateServerManagedOnlineCount = async (_db, serverId, onlineCount) => {
     savedOnlineCount = { serverId, onlineCount };
   };
@@ -88,7 +90,7 @@ test('实时在线人数按邮箱去重并排除非系统用户', async () => {
     assert.deepEqual(savedOnlineCount, { serverId: 8, onlineCount: 1 });
   } finally {
     serversRepository.findServerById = originals.findServerById;
-    serversRepository.listExistingUserEmails = originals.listExistingUserEmails;
+    xuiSyncRepository.listUsersForXuiSync = originals.listUsersForXuiSync;
     serversRepository.updateServerManagedOnlineCount = originals.updateOnlineCount;
     XuiService.getInstance = originals.getInstance;
   }
@@ -97,7 +99,7 @@ test('实时在线人数按邮箱去重并排除非系统用户', async () => {
 test('读取服务器详情后刷新服务器级去重人数缓存', async () => {
   const originals = {
     findServerById: serversRepository.findServerById,
-    listExistingUserEmails: serversRepository.listExistingUserEmails,
+    listUsersForXuiSync: xuiSyncRepository.listUsersForXuiSync,
     updateCounts: serversRepository.updateServerManagedCounts,
     refreshSnapshots: xuiNodeSnapshotService.refreshServerNodeSnapshots,
     getInstance: XuiService.getInstance
@@ -107,10 +109,10 @@ test('读取服务器详情后刷新服务器级去重人数缓存', async () =>
   serversRepository.findServerById = async () => ({
     id: 9, api_url: 'https://xui.example.com', api_token: 'token', panel_version: '3.4.2', status: 1
   });
-  serversRepository.listExistingUserEmails = async (_db, emails) => {
-    const existing = new Set(['a@example.com', 'b@example.com']);
-    return emails.filter((email) => existing.has(email));
-  };
+  xuiSyncRepository.listUsersForXuiSync = async () => ([
+    { email: 'a@example.com' },
+    { email: 'b@example.com' }
+  ]);
   serversRepository.updateServerManagedCounts = async (_db, serverId, counts) => {
     savedCounts = { serverId, ...counts };
   };
@@ -135,9 +137,56 @@ test('读取服务器详情后刷新服务器级去重人数缓存', async () =>
     assert.deepEqual(savedCounts, { serverId: 9, userCount: 2, onlineCount: 1 });
   } finally {
     serversRepository.findServerById = originals.findServerById;
-    serversRepository.listExistingUserEmails = originals.listExistingUserEmails;
+    xuiSyncRepository.listUsersForXuiSync = originals.listUsersForXuiSync;
     serversRepository.updateServerManagedCounts = originals.updateCounts;
     xuiNodeSnapshotService.refreshServerNodeSnapshots = originals.refreshSnapshots;
     XuiService.getInstance = originals.getInstance;
+  }
+});
+
+test('六小时同步复用 inbounds 和待同步用户更新用户数且不查询在线接口', async () => {
+  let savedUserCount = null;
+  const xuiService = {
+    getOnlineClients: async () => {
+      throw new Error('不应查询在线接口');
+    }
+  };
+  const serverRepository = {
+    updateServerManagedUserCount: async (_db, serverId, userCount) => {
+      savedUserCount = { serverId, userCount };
+    }
+  };
+
+  const count = await syncXuiUsers.__testables.updateManagedUserCountFromInbounds(
+    {},
+    10,
+    [
+      { clientStats: [{ email: 'a@example.com' }, { email: 'manual@example.com' }] },
+      { clientStats: [{ email: 'a@example.com' }, { email: 'b@example.com' }] }
+    ],
+    [{ email: 'a@example.com' }, { email: 'b@example.com' }],
+    { xuiService, serverRepository }
+  );
+
+  assert.equal(count, 2);
+  assert.deepEqual(savedUserCount, { serverId: 10, userCount: 2 });
+});
+
+test('六小时同步没有有效用户时将服务器用户数缓存归零', async () => {
+  const originalListUsers = xuiSyncRepository.listUsersForXuiSync;
+  const originalResetCounts = serversRepository.resetAllManagedUserCounts;
+  let resetCalled = false;
+
+  xuiSyncRepository.listUsersForXuiSync = async () => [];
+  serversRepository.resetAllManagedUserCounts = async () => {
+    resetCalled = true;
+  };
+
+  try {
+    await syncXuiUsers.__testables.runXuiSync({});
+    assert.equal(resetCalled, true);
+  } finally {
+    xuiSyncRepository.listUsersForXuiSync = originalListUsers;
+    serversRepository.resetAllManagedUserCounts = originalResetCounts;
   }
 });
