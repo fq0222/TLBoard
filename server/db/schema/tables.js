@@ -249,6 +249,8 @@ const tableDefinitions = [
         hy2_ports VARCHAR(20) DEFAULT '40000-50000',
         sub_url VARCHAR(500) DEFAULT '',
         status INTEGER DEFAULT 0,
+        managed_user_count INTEGER NOT NULL DEFAULT 0,
+        managed_online_count INTEGER NOT NULL DEFAULT 0,
         last_check_at BIGINT,
         created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())
       )

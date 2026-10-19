@@ -96,11 +96,24 @@ function formatServerSummary(server, stats = {}) {
     status: server.status,
     status_text: server.status === 1 ? '在线' : '离线',
     node_count: Number(stats.node_count) || 0,
-    user_count: Number(stats.user_count) || 0,
-    online_count: Number(stats.online_count) || 0,
+    user_count: Number(server.managed_user_count) || 0,
+    online_count: Number(server.managed_online_count) || 0,
     last_check_at: server.last_check_at,
     created_at: server.created_at
   };
+}
+
+/**
+ * 将远端客户端邮箱与 users 表取交集，并按邮箱去重统计系统用户。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Array<string>} emails - 3X-UI 返回的客户端邮箱
+ * @returns {Promise<number>} 本地真实存在的去重用户数
+ */
+async function countManagedUsersByEmails(db, emails) {
+  const uniqueEmails = [...new Set((emails || []).filter(Boolean))];
+  const existingEmails = await serversRepository.listExistingUserEmails(db, uniqueEmails);
+  return new Set(existingEmails).size;
 }
 
 /**
@@ -366,6 +379,17 @@ async function getServerDetail(db, serverId) {
     await xuiNodeSnapshotService.refreshServerNodeSnapshots(db, serverId, inboundsResult.data, {
       onlineCountByInboundId
     });
+    if (onlineResult.success) {
+      const clientEmails = inboundsResult.data.flatMap((inbound) => (
+        (inbound.clientStats || []).map((client) => client.email).filter(Boolean)
+      ));
+      const managedUserCount = await countManagedUsersByEmails(db, clientEmails);
+      const managedOnlineCount = await countManagedUsersByEmails(db, onlineEmails);
+      await serversRepository.updateServerManagedCounts(db, serverId, {
+        userCount: managedUserCount,
+        onlineCount: managedOnlineCount
+      });
+    }
     logger.info(`从 3X-UI 获取节点信息成功: ${nodes.length} 个节点`);
   } catch (error) {
     logger.error(`从 3X-UI 获取信息错误: ${error.message}`);
@@ -420,11 +444,22 @@ async function syncServer(db, serverId) {
     logger.info(`更新节点信息成功: ${refreshResult.nodeCount} 个节点`);
   }
 
+  let managedUserCount = 0;
+  let managedOnlineCount = 0;
+  if (syncResult.success) {
+    managedUserCount = await countManagedUsersByEmails(db, syncResult.client_emails);
+    managedOnlineCount = await countManagedUsersByEmails(db, syncResult.online_clients);
+    await serversRepository.updateServerManagedCounts(db, serverId, {
+      userCount: managedUserCount,
+      onlineCount: managedOnlineCount
+    });
+  }
+
   return {
     synced_at: syncedAt,
     node_count: syncResult.node_count,
-    user_count: syncResult.user_count,
-    online_count: syncResult.online_count,
+    user_count: syncResult.success ? managedUserCount : 0,
+    online_count: syncResult.success ? managedOnlineCount : 0,
     message: '同步完成'
   };
 }
@@ -453,9 +488,12 @@ async function getServerOnlineCount(db, serverId) {
     });
   }
 
+  const managedOnlineCount = await countManagedUsersByEmails(db, onlineResult.data);
+  await serversRepository.updateServerManagedOnlineCount(db, serverId, managedOnlineCount);
+
   return {
     server_id: serverId,
-    online_count: Number(onlineResult.count) || 0,
+    online_count: managedOnlineCount,
     queried_at: getUnixTimestamp()
   };
 }

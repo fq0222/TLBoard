@@ -414,11 +414,13 @@ class XuiService {
 
       // 统计用户数（从 inbound 的 clientStats 中获取）
       let totalUsers = 0;
+      const clientEmails = [];
       const nodes = [];
 
       for (const inbound of inbounds) {
         const clientStats = inbound.clientStats || [];
         totalUsers += clientStats.length;
+        clientEmails.push(...clientStats.map((client) => client.email).filter(Boolean));
 
         // 构建节点信息
         nodes.push({
@@ -459,6 +461,7 @@ class XuiService {
         node_count: nodes.length,
         user_count: totalUsers,
         online_count: uniqueOnlineUsers,
+        client_emails: clientEmails,
         nodes: nodes,
         online_clients: onlineClients
       };
@@ -471,6 +474,7 @@ class XuiService {
         node_count: 0,
         user_count: 0,
         online_count: 0,
+        client_emails: [],
         nodes: [],
         online_clients: []
       };

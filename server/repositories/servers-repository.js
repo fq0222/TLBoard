@@ -5,7 +5,8 @@
 
 async function listServers(db) {
   return db.prepare(`
-    SELECT id, name, api_url, api_token, panel_version, host, client_port, hy2_ports, sub_url, status, last_check_at, created_at
+    SELECT id, name, api_url, api_token, panel_version, host, client_port, hy2_ports, sub_url,
+           status, managed_user_count, managed_online_count, last_check_at, created_at
     FROM xui_servers
     ORDER BY created_at DESC
   `).all();
@@ -21,12 +22,57 @@ async function listServerNodeStats(db) {
   return db.prepare(`
     SELECT
       server_id,
-      COUNT(*) as node_count,
-      COALESCE(SUM(user_count), 0) as user_count,
-      COALESCE(SUM(online_count), 0) as online_count
+      COUNT(*) as node_count
     FROM xui_nodes
     GROUP BY server_id
   `).all();
+}
+
+/**
+ * 筛选 users 表中真实存在的邮箱。
+ * 空集合直接返回，避免生成无意义的数据库查询。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Array<string>} emails - 已去重的远端客户端邮箱
+ * @returns {Promise<Array<string>>} 本地存在的邮箱
+ */
+async function listExistingUserEmails(db, emails) {
+  const uniqueEmails = [...new Set((emails || []).filter(Boolean))];
+  if (uniqueEmails.length === 0) {
+    return [];
+  }
+
+  const rows = await db.prepare('SELECT email FROM users WHERE email = ANY(?)').all(uniqueEmails);
+  return rows.map((row) => row.email);
+}
+
+/**
+ * 更新服务器级受管用户与在线用户缓存。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} serverId - 服务器 ID
+ * @param {{userCount:number, onlineCount:number}} counts - 去重后的统计值
+ * @returns {Promise<void>}
+ */
+async function updateServerManagedCounts(db, serverId, counts) {
+  await db.prepare(`
+    UPDATE xui_servers
+    SET managed_user_count = ?, managed_online_count = ?
+    WHERE id = ?
+  `).run(counts.userCount, counts.onlineCount, serverId);
+}
+
+/**
+ * 只更新服务器级在线用户缓存，查询失败时由调用方跳过本方法以保留旧值。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {number} serverId - 服务器 ID
+ * @param {number} onlineCount - 去重后的在线用户数
+ * @returns {Promise<void>}
+ */
+async function updateServerManagedOnlineCount(db, serverId, onlineCount) {
+  await db.prepare('UPDATE xui_servers SET managed_online_count = ? WHERE id = ?')
+    .run(onlineCount, serverId);
 }
 
 /**
@@ -136,6 +182,9 @@ async function listCachedServerNodes(db, serverId) {
 module.exports = {
   listServers,
   listServerNodeStats,
+  listExistingUserEmails,
+  updateServerManagedCounts,
+  updateServerManagedOnlineCount,
   findServerById,
   createServer,
   updateServerFields,

@@ -1,0 +1,143 @@
+/**
+ * 管理端服务器人数统计测试。
+ * 验证跨 inbound 去重后的远端邮箱只统计 users 表中真实存在的用户。
+ */
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const serversService = require('../services/admin/servers-service');
+const serversRepository = require('../repositories/servers-repository');
+const xuiNodeSnapshotService = require('../services/shared/xui-node-snapshot-service');
+const XuiService = require('../integrations/xui/xui-service');
+
+test('同步服务器时按邮箱跨 inbound 去重并排除非系统用户', async () => {
+  const originals = {
+    findServerById: serversRepository.findServerById,
+    updateServerStatus: serversRepository.updateServerStatus,
+    listExistingUserEmails: serversRepository.listExistingUserEmails,
+    updateServerManagedCounts: serversRepository.updateServerManagedCounts,
+    refreshSnapshots: xuiNodeSnapshotService.refreshServerNodeSnapshots,
+    getInstance: XuiService.getInstance
+  };
+  let savedCounts = null;
+
+  serversRepository.findServerById = async () => ({
+    id: 7, api_url: 'https://xui.example.com', api_token: 'token', panel_version: '3.4.2'
+  });
+  serversRepository.updateServerStatus = async () => {};
+  serversRepository.listExistingUserEmails = async (_db, emails) => {
+    const existing = new Set(['a@example.com', 'b@example.com']);
+    return emails.filter((email) => existing.has(email));
+  };
+  serversRepository.updateServerManagedCounts = async (_db, serverId, counts) => {
+    savedCounts = { serverId, ...counts };
+  };
+  xuiNodeSnapshotService.refreshServerNodeSnapshots = async () => ({ nodeCount: 2 });
+  XuiService.getInstance = async () => ({
+    syncServerStatus: async () => ({
+      success: true,
+      status: 1,
+      node_count: 2,
+      client_emails: ['a@example.com', 'a@example.com', 'b@example.com', 'manual@example.com'],
+      online_clients: ['a@example.com', 'a@example.com', 'manual@example.com'],
+      nodes: [{ inbound_id: 1 }, { inbound_id: 2 }]
+    })
+  });
+
+  try {
+    const result = await serversService.syncServer({}, 7);
+    assert.equal(result.user_count, 2);
+    assert.equal(result.online_count, 1);
+    assert.deepEqual(savedCounts, { serverId: 7, userCount: 2, onlineCount: 1 });
+  } finally {
+    serversRepository.findServerById = originals.findServerById;
+    serversRepository.updateServerStatus = originals.updateServerStatus;
+    serversRepository.listExistingUserEmails = originals.listExistingUserEmails;
+    serversRepository.updateServerManagedCounts = originals.updateServerManagedCounts;
+    xuiNodeSnapshotService.refreshServerNodeSnapshots = originals.refreshSnapshots;
+    XuiService.getInstance = originals.getInstance;
+  }
+});
+
+test('实时在线人数按邮箱去重并排除非系统用户', async () => {
+  const originals = {
+    findServerById: serversRepository.findServerById,
+    listExistingUserEmails: serversRepository.listExistingUserEmails,
+    updateOnlineCount: serversRepository.updateServerManagedOnlineCount,
+    getInstance: XuiService.getInstance
+  };
+  let savedOnlineCount = null;
+
+  serversRepository.findServerById = async () => ({
+    id: 8, api_url: 'https://xui.example.com', api_token: 'token', panel_version: '3.4.2'
+  });
+  serversRepository.listExistingUserEmails = async () => ['a@example.com'];
+  serversRepository.updateServerManagedOnlineCount = async (_db, serverId, onlineCount) => {
+    savedOnlineCount = { serverId, onlineCount };
+  };
+  XuiService.getInstance = async () => ({
+    getOnlineClients: async () => ({
+      success: true,
+      data: ['a@example.com', 'a@example.com', 'manual@example.com']
+    })
+  });
+
+  try {
+    const result = await serversService.getServerOnlineCount({}, 8);
+    assert.equal(result.online_count, 1);
+    assert.deepEqual(savedOnlineCount, { serverId: 8, onlineCount: 1 });
+  } finally {
+    serversRepository.findServerById = originals.findServerById;
+    serversRepository.listExistingUserEmails = originals.listExistingUserEmails;
+    serversRepository.updateServerManagedOnlineCount = originals.updateOnlineCount;
+    XuiService.getInstance = originals.getInstance;
+  }
+});
+
+test('读取服务器详情后刷新服务器级去重人数缓存', async () => {
+  const originals = {
+    findServerById: serversRepository.findServerById,
+    listExistingUserEmails: serversRepository.listExistingUserEmails,
+    updateCounts: serversRepository.updateServerManagedCounts,
+    refreshSnapshots: xuiNodeSnapshotService.refreshServerNodeSnapshots,
+    getInstance: XuiService.getInstance
+  };
+  let savedCounts = null;
+
+  serversRepository.findServerById = async () => ({
+    id: 9, api_url: 'https://xui.example.com', api_token: 'token', panel_version: '3.4.2', status: 1
+  });
+  serversRepository.listExistingUserEmails = async (_db, emails) => {
+    const existing = new Set(['a@example.com', 'b@example.com']);
+    return emails.filter((email) => existing.has(email));
+  };
+  serversRepository.updateServerManagedCounts = async (_db, serverId, counts) => {
+    savedCounts = { serverId, ...counts };
+  };
+  xuiNodeSnapshotService.refreshServerNodeSnapshots = async () => ({ nodeCount: 2 });
+  XuiService.getInstance = async () => ({
+    getInbounds: async () => ({
+      success: true,
+      data: [
+        { id: 1, clientStats: [{ email: 'a@example.com' }, { email: 'manual@example.com' }] },
+        { id: 2, clientStats: [{ email: 'a@example.com' }, { email: 'b@example.com' }] }
+      ]
+    }),
+    getOnlineClients: async () => ({
+      success: true,
+      data: ['a@example.com', 'a@example.com', 'manual@example.com']
+    }),
+    extractClientsFromSettings: () => []
+  });
+
+  try {
+    await serversService.getServerDetail({}, 9);
+    assert.deepEqual(savedCounts, { serverId: 9, userCount: 2, onlineCount: 1 });
+  } finally {
+    serversRepository.findServerById = originals.findServerById;
+    serversRepository.listExistingUserEmails = originals.listExistingUserEmails;
+    serversRepository.updateServerManagedCounts = originals.updateCounts;
+    xuiNodeSnapshotService.refreshServerNodeSnapshots = originals.refreshSnapshots;
+    XuiService.getInstance = originals.getInstance;
+  }
+});
