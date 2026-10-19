@@ -263,14 +263,6 @@ async function legacySyncUsersToServer(db, server, users) {
       return;
     }
 
-    await updateManagedUserCountFromInbounds(
-      db,
-      server.id,
-      inboundsResult.data,
-      users,
-      { serverRepository }
-    );
-
     let syncCount = 0;
 
     for (const inbound of inboundsResult.data) {
@@ -509,6 +501,14 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
       activeLogger.warn(`获取服务器 ${server.name} 的 inbounds 失败: ${inboundsResult.message}`);
       return;
     }
+
+    await updateManagedUserCountFromInbounds(
+      db,
+      server.id,
+      inboundsResult.data,
+      users,
+      { serverRepository }
+    );
 
     const refreshResult = await snapshotService.refreshServerNodeSnapshots(
       db,

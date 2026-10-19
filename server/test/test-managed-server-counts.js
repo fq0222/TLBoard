@@ -172,6 +172,46 @@ test('六小时同步复用 inbounds 和待同步用户更新用户数且不查�
   assert.deepEqual(savedUserCount, { serverId: 10, userCount: 2 });
 });
 
+test('六小时任务的真实服务器同步入口会写入用户数缓存', async () => {
+  let savedUserCount = null;
+  const silentLogger = { info() {}, warn() {}, error() {} };
+  const inbounds = [{
+    id: 1,
+    remark: 'direct',
+    protocol: 'vless',
+    clientStats: [{ email: 'a@example.com' }],
+    settings: JSON.stringify({ clients: [] })
+  }];
+
+  await syncXuiUsers.__testables.syncUsersToServer(
+    {},
+    { id: 12, name: '后台同步服务器', panel_version: '3.4.2' },
+    [{ id: 1, email: 'a@example.com', enabled: 1, payment_count: 1 }],
+    {
+      logger: silentLogger,
+      xuiService: {
+        getInbounds: async () => ({ success: true, data: inbounds }),
+        upsertServerClient: async () => ({ success: true })
+      },
+      repository: {
+        listUserNodeConfigsByServer: async () => [],
+        saveUserNodeConfig: async () => {}
+      },
+      serversRepository: {
+        updateServerLastCheckAt: async () => {},
+        updateServerManagedUserCount: async (_db, serverId, userCount) => {
+          savedUserCount = { serverId, userCount };
+        }
+      },
+      snapshotService: {
+        refreshServerNodeSnapshots: async () => ({ nodeCount: 1 })
+      }
+    }
+  );
+
+  assert.deepEqual(savedUserCount, { serverId: 12, userCount: 1 });
+});
+
 test('六小时同步没有有效用户时将服务器用户数缓存归零', async () => {
   const originalListUsers = xuiSyncRepository.listUsersForXuiSync;
   const originalResetCounts = serversRepository.resetAllManagedUserCounts;
