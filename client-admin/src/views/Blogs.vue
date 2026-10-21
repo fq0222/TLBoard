@@ -133,10 +133,14 @@
                 :rows="20"
                 resize="none"
                 placeholder="请输入 Markdown 内容"
+                @click="schedulePreviewSync"
+                @keyup="schedulePreviewSync"
+                @select="schedulePreviewSync"
+                @input="schedulePreviewSync"
               />
               <div class="preview-panel">
                 <div class="preview-title">预览</div>
-                <div class="markdown-body" v-html="renderedContent"></div>
+                <div ref="previewContentRef" class="markdown-body" v-html="renderedContent"></div>
               </div>
             </div>
           </div>
@@ -163,12 +167,13 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index.mjs'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
 import { Plus, Upload } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import api from '@/api'
+import { MarkdownCursorSync } from '@/utils/markdown-cursor-sync'
 
 const articles = ref([])
 const categories = ref([])
@@ -182,8 +187,11 @@ const previewArticle = ref(null)
 const previewArticleRef = ref(null)
 const helpMediaBaseUrl = ref('')
 const contentInput = ref(null)
+const previewContentRef = ref(null)
 const editingId = ref(null)
 const total = ref(0)
+const cursorSync = new MarkdownCursorSync({ targetRatio: 0.2 })
+let previewSyncFrame = 0
 
 const pagination = reactive({ page: 1, limit: 10 })
 const filters = reactive({ keyword: '', category: '', status: '' })
@@ -249,7 +257,7 @@ function sanitizeHtml(html) {
 
 const renderedContent = computed(() => {
   if (!form.content) return '<p class="empty-preview">输入 Markdown 后在这里预览</p>'
-  return sanitizeHtml(marked(form.content))
+  return cursorSync.renderWithAnchors(form.content, sanitizeHtml)
 })
 
 const previewHtml = computed(() => {
@@ -273,6 +281,7 @@ function formatTime(timestamp) {
 }
 
 function resetForm() {
+  cursorSync.reset()
   editingId.value = null
   form.title = ''
   form.summary = ''
@@ -280,6 +289,46 @@ function resetForm() {
   form.content = ''
   form.status = 'draft'
   form.pinned = false
+}
+
+/** 执行光标内容块定位，并为尚未完成布局的媒体注册一次校正。 */
+function syncPreviewToCursor(force = false) {
+  const textarea = contentInput.value?.textarea
+  const preview = previewContentRef.value
+  if (!textarea || !preview) return
+
+  const scrolled = cursorSync.sync(form.content, textarea.selectionStart, preview, { force })
+  preview.querySelectorAll('img').forEach((image) => {
+    if (image.complete || image.dataset.cursorSyncBound) return
+    image.dataset.cursorSyncBound = '1'
+    image.addEventListener('load', schedulePreviewCorrection, { once: true })
+  })
+  preview.querySelectorAll('video').forEach((video) => {
+    if (video.readyState >= 1 || video.dataset.cursorSyncBound) return
+    video.dataset.cursorSyncBound = '1'
+    video.addEventListener('loadedmetadata', schedulePreviewCorrection, { once: true })
+  })
+
+  return scrolled
+}
+
+/** 合并连续的点击、键盘和输入事件，等待预览 DOM 更新后再定位。 */
+function schedulePreviewSync() {
+  if (previewSyncFrame) cancelAnimationFrame(previewSyncFrame)
+  previewSyncFrame = requestAnimationFrame(async () => {
+    previewSyncFrame = 0
+    await nextTick()
+    syncPreviewToCursor(false)
+  })
+}
+
+/** 图片或视频完成布局后强制校正当前块的 20% 定位。 */
+function schedulePreviewCorrection() {
+  if (previewSyncFrame) cancelAnimationFrame(previewSyncFrame)
+  previewSyncFrame = requestAnimationFrame(() => {
+    previewSyncFrame = 0
+    syncPreviewToCursor(true)
+  })
 }
 
 async function fetchCategories() {
@@ -518,6 +567,10 @@ onMounted(() => {
   fetchCategories()
   fetchArticles()
 })
+
+onBeforeUnmount(() => {
+  if (previewSyncFrame) cancelAnimationFrame(previewSyncFrame)
+})
 </script>
 
 <style scoped>
@@ -599,24 +652,26 @@ onMounted(() => {
 :deep(.blog-dialog .el-dialog__body) {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: hidden;
 }
 
 .blog-dialog-form {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 .blog-content-item {
   flex: 1;
-  min-height: 240px;
+  min-height: 0;
   margin-bottom: 0;
 }
 
 .blog-content-item :deep(.el-form-item__content) {
   display: flex;
   align-items: stretch;
+  height: 100%;
   min-height: 0;
 }
 
@@ -630,6 +685,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   flex: 1;
+  height: 100%;
   width: 100%;
   min-height: 0;
   border: 1px solid #dcdfe6;
@@ -650,6 +706,7 @@ onMounted(() => {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .editor-columns :deep(.el-textarea),
@@ -662,6 +719,8 @@ onMounted(() => {
   border-radius: 0;
   font-family: Consolas, Monaco, monospace;
   line-height: 1.6;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .preview-panel {
@@ -691,6 +750,13 @@ onMounted(() => {
 .preview-panel .markdown-body {
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
+}
+
+.markdown-body :deep(.markdown-source-anchor) {
+  display: block;
+  height: 0;
+  overflow: hidden;
 }
 
 .markdown-body :deep(h1),
@@ -795,6 +861,24 @@ onMounted(() => {
 }
 
 @media (max-width: 900px) {
+  :deep(.blog-dialog .el-dialog__body) {
+    overflow-y: auto;
+  }
+
+  .blog-dialog-form {
+    height: auto;
+    min-height: 100%;
+  }
+
+  .blog-content-item {
+    flex: none;
+    min-height: 560px;
+  }
+
+  .editor-shell {
+    height: 560px;
+  }
+
   .form-grid,
   .editor-columns {
     grid-template-columns: 1fr;

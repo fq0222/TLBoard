@@ -15,6 +15,19 @@ function declarationsFor(root, selector) {
   return declarations
 }
 
+/** 返回指定媒体查询内选择器的声明集合。 */
+function declarationsForMedia(root, mediaParams, selector) {
+  const declarations = new Map()
+  root.walkAtRules('media', rule => {
+    if (rule.params !== mediaParams) return
+    rule.walkRules(child => {
+      if (child.selector !== selector) return
+      child.walkDecls(declaration => declarations.set(declaration.prop, declaration.value))
+    })
+  })
+  return declarations
+}
+
 describe('博客编辑弹窗布局', () => {
   it('弹窗与编辑区占满可用视口，并保留独立滚动区域', () => {
     const style = parseVue(pageSource).descriptor.styles[0]
@@ -27,20 +40,41 @@ describe('博客编辑弹窗布局', () => {
     const shell = declarationsFor(css, '.editor-shell')
     const columns = declarationsFor(css, '.editor-columns')
     const preview = declarationsFor(css, '.preview-panel .markdown-body')
+    const textareaInner = declarationsFor(css, '.editor-columns :deep(.el-textarea__inner)')
+    const mobileBody = declarationsForMedia(css, '(max-width: 900px)', ':deep(.blog-dialog .el-dialog__body)')
+    const mobileContent = declarationsForMedia(css, '(max-width: 900px)', '.blog-content-item')
 
     expect(dialog.get('display')).toBe('flex')
     expect(dialog.get('flex-direction')).toBe('column')
     expect(dialog.get('height')).toBe('92dvh')
     expect(body.get('flex')).toBe('1')
     expect(body.get('min-height')).toBe('0')
-    expect(body.get('overflow-y')).toBe('auto')
+    expect(body.get('overflow-y')).toBe('hidden')
     expect(form.get('display')).toBe('flex')
+    expect(form.get('height')).toBe('100%')
+    expect(form.get('min-height')).toBe('0')
     expect(contentItem.get('flex')).toBe('1')
+    expect(contentItem.get('min-height')).toBe('0')
     expect(content.get('align-items')).toBe('stretch')
     expect(shell.get('flex')).toBe('1')
     expect(columns.get('min-height')).toBe('0')
     expect(columns.get('flex')).toBe('1')
     expect(preview.get('max-height')).toBeUndefined()
     expect(preview.get('min-height')).toBe('0')
+    expect(preview.get('overflow-y')).toBe('auto')
+    expect(textareaInner.get('overflow-y')).toBe('auto')
+    expect(mobileBody.get('overflow-y')).toBe('auto')
+    expect(parseInt(mobileContent.get('min-height'), 10)).toBeGreaterThanOrEqual(480)
+  })
+
+  it('光标变化事件只驱动预览定位，不绑定左右滚动事件', () => {
+    const template = parseVue(pageSource).descriptor.template.content
+
+    expect(template).toContain('ref="previewContentRef"')
+    expect(template).toContain('@click="schedulePreviewSync"')
+    expect(template).toContain('@keyup="schedulePreviewSync"')
+    expect(template).toContain('@select="schedulePreviewSync"')
+    expect(template).toContain('@input="schedulePreviewSync"')
+    expect(template).not.toMatch(/@scroll=/)
   })
 })
