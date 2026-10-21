@@ -77,4 +77,20 @@ describe('博客编辑弹窗布局', () => {
     expect(template).toContain('@input="schedulePreviewSync"')
     expect(template).not.toMatch(/@scroll=/)
   })
+
+  it('图片格式化选项默认关闭并位于图片和视频上传按钮之间', () => {
+    const component = parseVue(pageSource)
+    const template = component.descriptor.template.content
+    const script = component.descriptor.scriptSetup.content
+    const imageUploadAt = template.indexOf('上传图片')
+    const formatAt = template.indexOf('v-model="formatImageUpload"')
+    const videoUploadAt = template.indexOf('上传视频')
+
+    expect(imageUploadAt).toBeGreaterThan(-1)
+    expect(formatAt).toBeGreaterThan(imageUploadAt)
+    expect(videoUploadAt).toBeGreaterThan(formatAt)
+    expect(template).toContain('>格式化</el-checkbox>')
+    expect(script).toContain('const formatImageUpload = ref(false)')
+    expect(script).toContain('formatImageUpload.value = false')
+  })
 })

@@ -112,6 +112,7 @@
                   上传图片
                 </el-button>
               </el-upload>
+              <el-checkbox v-model="formatImageUpload">格式化</el-checkbox>
               <el-upload
                 action="#"
                 :show-file-list="false"
@@ -173,6 +174,7 @@ import { ElMessageBox } from 'element-plus/es/components/message-box/index.mjs'
 import { Plus, Upload } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import api from '@/api'
+import { buildBlogImageMarkup } from '@/utils/blog-image-markup'
 import { MarkdownCursorSync } from '@/utils/markdown-cursor-sync'
 
 const articles = ref([])
@@ -181,6 +183,7 @@ const loading = ref(false)
 const submitting = ref(false)
 const uploading = ref(false)
 const videoUploading = ref(false)
+const formatImageUpload = ref(false)
 const editorVisible = ref(false)
 const previewVisible = ref(false)
 const previewArticle = ref(null)
@@ -282,6 +285,7 @@ function formatTime(timestamp) {
 
 function resetForm() {
   cursorSync.reset()
+  formatImageUpload.value = false
   editingId.value = null
   form.title = ''
   form.summary = ''
@@ -511,7 +515,13 @@ async function handleImageSelected(uploadFile) {
     uploading.value = true
     const response = await api.admin.uploadBlogImage(formData)
     if (response.code === 0) {
-      insertAtCursor(response.data.markdown)
+      const markup = buildBlogImageMarkup({
+        formatted: formatImageUpload.value,
+        markdown: response.data.markdown,
+        url: response.data.url,
+        originalName: uploadFile.raw.name
+      })
+      insertAtCursor(markup)
       ElMessage.success('图片上传成功')
     }
   } catch (error) {
@@ -695,6 +705,8 @@ onBeforeUnmount(() => {
 
 .editor-toolbar {
   display: flex;
+  align-items: center;
+  gap: 12px;
   justify-content: flex-start;
   padding: 10px 12px;
   background: #f5f7fa;
