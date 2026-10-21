@@ -76,7 +76,7 @@
     </div>
 
     <el-dialog v-model="editorVisible" :title="editingId ? '编辑文章' : '新增文章'" width="92%" top="4vh" class="blog-dialog">
-      <el-form :model="form" label-width="80px">
+      <el-form :model="form" label-width="80px" class="blog-dialog-form">
         <div class="form-grid">
           <el-form-item label="标题" required>
             <el-input v-model="form.title" maxlength="200" show-word-limit placeholder="请输入文章标题" />
@@ -97,7 +97,7 @@
         <el-form-item label="置顶">
           <el-switch v-model="form.pinned" />
         </el-form-item>
-        <el-form-item label="内容" required>
+        <el-form-item label="内容" required class="blog-content-item">
           <div class="editor-shell">
             <div class="editor-toolbar">
               <el-upload
@@ -580,6 +580,46 @@ onMounted(() => {
   margin-top: 20px;
 }
 
+:deep(.blog-dialog) {
+  display: flex;
+  flex-direction: column;
+  height: 92vh;
+  height: 92dvh;
+  max-height: 92vh;
+  max-height: 92dvh;
+  margin-bottom: 0;
+  overflow: hidden;
+}
+
+:deep(.blog-dialog .el-dialog__header),
+:deep(.blog-dialog .el-dialog__footer) {
+  flex: none;
+}
+
+:deep(.blog-dialog .el-dialog__body) {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.blog-dialog-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.blog-content-item {
+  flex: 1;
+  min-height: 240px;
+  margin-bottom: 0;
+}
+
+.blog-content-item :deep(.el-form-item__content) {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 260px;
@@ -587,7 +627,11 @@ onMounted(() => {
 }
 
 .editor-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   width: 100%;
+  min-height: 0;
   border: 1px solid #dcdfe6;
   border-radius: 8px;
   overflow: hidden;
@@ -604,7 +648,8 @@ onMounted(() => {
 .editor-columns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  min-height: 520px;
+  flex: 1;
+  min-height: 0;
 }
 
 .editor-columns :deep(.el-textarea),
@@ -645,7 +690,7 @@ onMounted(() => {
 
 .preview-panel .markdown-body {
   flex: 1;
-  max-height: 480px;
+  min-height: 0;
 }
 
 .markdown-body :deep(h1),
@@ -760,6 +805,10 @@ onMounted(() => {
     border-top: 1px solid #dcdfe6;
   }
 
+  .editor-columns {
+    grid-template-rows: repeat(2, minmax(240px, 1fr));
+  }
+
   .search-input,
   .filter-select {
     width: 100%;
@@ -776,7 +825,7 @@ onMounted(() => {
   .editor-toolbar { flex-wrap: wrap; }
   .markdown-body, .preview-article { overflow-wrap: anywhere; }
   .markdown-body :deep(img), .markdown-body :deep(video) { max-width: 100%; height: auto; }
-  :deep(.el-dialog) { width: calc(100vw - 24px) !important; max-height: 92vh; overflow-y: auto; }
+  :deep(.blog-dialog) { width: calc(100vw - 24px) !important; overflow: hidden; }
   :deep(.el-form-item) { display: block; }
   :deep(.el-form-item__label) { width: auto !important; }
   :deep(.el-form-item__content) { margin-left: 0 !important; }

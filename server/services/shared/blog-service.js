@@ -8,6 +8,7 @@ const BLOG_IMAGE_PREFIX = '/api/user/help/images/';
 const BLOG_VIDEO_PREFIX = '/api/user/help/videos/';
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const ALLOWED_VIDEO_MIME_TYPES = ['video/mp4'];
+const BLOG_MEDIA_PROTECTION_MS = 24 * 60 * 60 * 1000;
 
 function buildBlogImageUrl(filename) {
   const baseUrl = getSiteBaseUrl();
@@ -217,27 +218,41 @@ function isSafeBlogVideoFilename(filename) {
   return /^[a-f0-9-]+\.mp4$/i.test(filename);
 }
 
+/**
+ * 将本地博客图片 URL 中的安全文件名加入引用集合。
+ *
+ * @param {Set<string>} filenames - 已识别文件名集合
+ * @param {string} rawUrl - Markdown 或 HTML 中提取出的图片 URL
+ */
+function addLocalBlogImageFilename(filenames, rawUrl) {
+  let pathname = rawUrl;
+
+  try {
+    pathname = new URL(rawUrl, 'http://local.test').pathname;
+  } catch {
+    pathname = rawUrl;
+  }
+
+  if (!pathname.startsWith(BLOG_IMAGE_PREFIX)) return;
+
+  const filename = decodeURIComponent(path.basename(pathname));
+  if (isSafeBlogImageFilename(filename)) {
+    filenames.add(filename);
+  }
+}
+
 function extractLocalBlogImageFilenames(content = '') {
   const filenames = new Set();
   const markdownImageRegex = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  const htmlImageRegex = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
   let match;
 
   while ((match = markdownImageRegex.exec(content))) {
-    const rawUrl = match[1];
-    let pathname = rawUrl;
+    addLocalBlogImageFilename(filenames, match[1]);
+  }
 
-    try {
-      pathname = new URL(rawUrl, 'http://local.test').pathname;
-    } catch {
-      pathname = rawUrl;
-    }
-
-    if (pathname.startsWith(BLOG_IMAGE_PREFIX)) {
-      const filename = decodeURIComponent(path.basename(pathname));
-      if (isSafeBlogImageFilename(filename)) {
-        filenames.add(filename);
-      }
-    }
+  while ((match = htmlImageRegex.exec(content))) {
+    addLocalBlogImageFilename(filenames, match[1]);
   }
 
   return Array.from(filenames);
@@ -359,6 +374,125 @@ async function cleanupUnreferencedBlogVideos(db, deletedArticle, { videoUploadDi
   return deleted;
 }
 
+/**
+ * 扫描单类博客媒体并删除超过保护期的孤立文件。
+ *
+ * @param {Object} options - 扫描参数
+ * @param {string} options.directory - 媒体目录
+ * @param {Set<string>} options.referenced - 全部文章已引用文件名
+ * @param {Function} options.isSafeFilename - 系统媒体文件名校验函数
+ * @param {string} options.mediaLabel - 日志中的媒体类型
+ * @param {number} options.now - 当前毫秒时间戳
+ * @param {Object} options.logger - 可选日志器
+ * @returns {{scanned:number,referenced:number,protected:number,invalid:number,deleted:string[],failed:Array<{filename:string,error:string}>}}
+ */
+function cleanupMediaDirectory({ directory, referenced, isSafeFilename, mediaLabel, now, logger }) {
+  const result = {
+    scanned: 0,
+    referenced: 0,
+    protected: 0,
+    invalid: 0,
+    deleted: [],
+    failed: []
+  };
+
+  if (!directory || !fs.existsSync(directory)) return result;
+
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    result.scanned += 1;
+
+    if (!isSafeFilename(entry.name)) {
+      result.invalid += 1;
+      continue;
+    }
+    if (referenced.has(entry.name)) {
+      result.referenced += 1;
+      continue;
+    }
+
+    const filePath = path.resolve(directory, entry.name);
+    const resolvedDirectory = path.resolve(directory);
+    if (!filePath.startsWith(resolvedDirectory + path.sep)) {
+      result.invalid += 1;
+      continue;
+    }
+
+    try {
+      const stats = fs.statSync(filePath);
+      if (now - stats.mtimeMs <= BLOG_MEDIA_PROTECTION_MS) {
+        result.protected += 1;
+        continue;
+      }
+      fs.unlinkSync(filePath);
+      result.deleted.push(entry.name);
+      logger?.info(`清理未引用博客${mediaLabel}成功: ${entry.name}`);
+    } catch (error) {
+      result.failed.push({ filename: entry.name, error: error.message });
+      logger?.error(`清理未引用博客${mediaLabel}失败: ${entry.name} - ${error.message}`);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * 全局清理所有文章均未引用、且上传已超过 24 小时的博客图片和视频。
+ * 单个文件失败时继续处理剩余文件，并通过返回值及日志报告清理结果。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} options - 清理配置
+ * @param {string} options.uploadDir - 博客图片目录
+ * @param {string} options.videoUploadDir - 博客视频目录
+ * @param {Object} options.logger - 可选日志器
+ * @param {number} options.now - 可选当前毫秒时间戳，供测试固定时间
+ * @returns {Promise<Object>} 图片、视频及汇总清理结果
+ */
+async function cleanupUnreferencedBlogMedia(db, { uploadDir, videoUploadDir, logger, now = Date.now() } = {}) {
+  const rows = await blogRepository.listAllArticleContents(db);
+  const referencedImages = new Set();
+  const referencedVideos = new Set();
+
+  for (const row of rows) {
+    extractLocalBlogImageFilenames(row.content).forEach((filename) => referencedImages.add(filename));
+    extractLocalBlogVideoFilenames(row.content).forEach((filename) => referencedVideos.add(filename));
+  }
+
+  const images = cleanupMediaDirectory({
+    directory: uploadDir,
+    referenced: referencedImages,
+    isSafeFilename: isSafeBlogImageFilename,
+    mediaLabel: '图片',
+    now,
+    logger
+  });
+  const videos = cleanupMediaDirectory({
+    directory: videoUploadDir,
+    referenced: referencedVideos,
+    isSafeFilename: isSafeBlogVideoFilename,
+    mediaLabel: '视频',
+    now,
+    logger
+  });
+  const summary = {
+    scanned: images.scanned + videos.scanned,
+    referenced: images.referenced + videos.referenced,
+    protected: images.protected + videos.protected,
+    invalid: images.invalid + videos.invalid,
+    deleted: images.deleted.length + videos.deleted.length,
+    failed: images.failed.length + videos.failed.length
+  };
+
+  logger?.info(`博客孤立媒体清理汇总: 扫描 ${summary.scanned}，引用中 ${summary.referenced}，保护期内 ${summary.protected}，忽略非法 ${summary.invalid}，成功 ${summary.deleted}，失败 ${summary.failed}`);
+
+  return {
+    images,
+    videos,
+    deleted: { images: images.deleted, videos: videos.deleted },
+    summary
+  };
+}
+
 async function deleteArticle(db, id, options = {}) {
   const existing = await getAdminArticle(db, id);
   if (!existing) return null;
@@ -403,5 +537,6 @@ module.exports = {
   isSafeBlogImageFilename,
   isSafeBlogVideoFilename,
   cleanupUnreferencedBlogImages,
-  cleanupUnreferencedBlogVideos
+  cleanupUnreferencedBlogVideos,
+  cleanupUnreferencedBlogMedia
 };

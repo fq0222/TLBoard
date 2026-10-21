@@ -181,6 +181,16 @@ async function listOtherArticleContents(db, excludeArticleId) {
   return db.prepare('SELECT id, content FROM blog_articles WHERE id != ?').all(excludeArticleId);
 }
 
+/**
+ * 查询全部博客正文，供全局媒体引用检查使用。
+ *
+ * @param {Object} db - 数据库实例
+ * @returns {Promise<Array<{content:string}>>} 全部文章正文
+ */
+async function listAllArticleContents(db) {
+  return db.prepare('SELECT content FROM blog_articles').all();
+}
+
 module.exports = {
   ensureBlogArticlesTable,
   listAdminArticles,
@@ -189,5 +199,6 @@ module.exports = {
   updateArticleFields,
   listAdminCategories,
   deleteArticle,
-  listOtherArticleContents
+  listOtherArticleContents,
+  listAllArticleContents
 };

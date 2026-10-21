@@ -149,6 +149,18 @@ async function main() {
     const extracted = blogService.extractLocalBlogImageFilenames(articleWithImages.content);
     assertOk(extracted.includes(localImageA) && extracted.includes(localImageB), '可以解析 Markdown 中的本地博客图片引用');
 
+    const htmlImageReferences = blogService.extractLocalBlogImageFilenames([
+      `<img alt="相对地址" src="/api/user/help/images/${localImageA}">`,
+      `<img src="http://localhost:30000/api/user/help/images/${localImageB}" alt="绝对地址">`,
+      `<img src="/api/user/help/images/${localImageA}">`
+    ].join('\n'));
+    assertOk(
+      htmlImageReferences.length === 2 &&
+        htmlImageReferences.includes(localImageA) &&
+        htmlImageReferences.includes(localImageB),
+      '可以解析并去重 HTML img 中相对和绝对的本地博客图片引用'
+    );
+
     await blogService.deleteArticle(db, articleWithImages.id, { uploadDir: imageUploadDir });
     assertOk(!fs.existsSync(path.join(imageUploadDir, localImageA)), '删除文章会清理不再被引用的本地图片');
     assertOk(fs.existsSync(path.join(imageUploadDir, localImageB)), '删除文章不会清理仍被其他文章引用的本地图片');
@@ -192,11 +204,60 @@ async function main() {
     assertOk(fs.existsSync(path.join(videoUploadDir, localVideoB)), '删除文章不会清理仍被其他文章引用的视频');
     assertOk(fs.existsSync(path.join(videoUploadDir, localVideoC)), '删除文章不会清理未被该文章引用的视频');
 
+    const globalOrphanImage = '99999999-9999-4999-8999-999999999999.png';
+    const globalProtectedImage = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.webp';
+    const globalOrphanVideo = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.mp4';
+    const globalHtmlReferencedImage = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc.png';
+    const globalNow = Date.now();
+    const oldMediaTime = new Date(globalNow - 25 * 60 * 60 * 1000);
+    const protectedMediaTime = new Date(globalNow - 23 * 60 * 60 * 1000);
+    const cleanupLogs = [];
+    const cleanupLogger = {
+      info(message) { cleanupLogs.push(message); },
+      error(message) { cleanupLogs.push(message); }
+    };
+
+    fs.writeFileSync(path.join(imageUploadDir, globalOrphanImage), 'global-orphan-image');
+    fs.writeFileSync(path.join(imageUploadDir, globalProtectedImage), 'global-protected-image');
+    fs.writeFileSync(path.join(imageUploadDir, globalHtmlReferencedImage), 'global-html-referenced-image');
+    fs.writeFileSync(path.join(videoUploadDir, globalOrphanVideo), 'global-orphan-video');
+    fs.utimesSync(path.join(imageUploadDir, globalOrphanImage), oldMediaTime, oldMediaTime);
+    fs.utimesSync(path.join(imageUploadDir, globalProtectedImage), protectedMediaTime, protectedMediaTime);
+    fs.utimesSync(path.join(imageUploadDir, globalHtmlReferencedImage), oldMediaTime, oldMediaTime);
+    fs.utimesSync(path.join(videoUploadDir, globalOrphanVideo), oldMediaTime, oldMediaTime);
+
+    await blogService.createArticle(db, {
+      title: '测试博客-HTML图片引用',
+      summary: 'HTML 图片引用简介',
+      category: '图片',
+      content: `<img src="/api/user/help/images/${globalHtmlReferencedImage}" alt="引用图片">`,
+      status: 'published'
+    });
+
+    const globalCleanup = await blogService.cleanupUnreferencedBlogMedia(db, {
+      uploadDir: imageUploadDir,
+      videoUploadDir,
+      logger: cleanupLogger,
+      now: globalNow
+    });
+    assertOk(!fs.existsSync(path.join(imageUploadDir, globalOrphanImage)), '全局清理会删除超过 24 小时的孤立图片');
+    assertOk(!fs.existsSync(path.join(videoUploadDir, globalOrphanVideo)), '全局清理会删除超过 24 小时的孤立视频');
+    assertOk(fs.existsSync(path.join(imageUploadDir, globalProtectedImage)), '全局清理会保留 24 小时保护期内的孤立媒体');
+    assertOk(fs.existsSync(path.join(imageUploadDir, globalHtmlReferencedImage)), '全局清理会保留 HTML img 引用的图片');
+    assertOk(globalCleanup.deleted.images.includes(globalOrphanImage), '全局清理结果会返回已删除图片');
+    assertOk(globalCleanup.deleted.videos.includes(globalOrphanVideo), '全局清理结果会返回已删除视频');
+    assertOk(cleanupLogs.some((message) => message.includes(globalOrphanImage)), '全局清理会记录成功删除的文件');
+    assertOk(cleanupLogs.some((message) => message.includes('清理汇总')), '全局清理会记录扫描汇总');
+
     await cleanupTestArticles(db);
     for (const filename of [localImageB, localImageC]) {
       const filePath = path.join(imageUploadDir, filename);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
+    const protectedImagePath = path.join(imageUploadDir, globalProtectedImage);
+    if (fs.existsSync(protectedImagePath)) fs.unlinkSync(protectedImagePath);
+    const htmlReferencedImagePath = path.join(imageUploadDir, globalHtmlReferencedImage);
+    if (fs.existsSync(htmlReferencedImagePath)) fs.unlinkSync(htmlReferencedImagePath);
     for (const filename of [localVideoB, localVideoC]) {
       const filePath = path.join(videoUploadDir, filename);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);

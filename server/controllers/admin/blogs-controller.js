@@ -40,6 +40,21 @@ function handleControllerError(res, action, error) {
   return legacyFail(res);
 }
 
+/**
+ * 文章保存成功后清理全局孤立媒体；清理异常只记录日志，不改变保存结果。
+ *
+ * @param {Object} db - 数据库实例
+ * @param {Object} options - 博客媒体目录配置
+ * @returns {Promise<void>}
+ */
+async function cleanupMediaAfterSave(db, options) {
+  try {
+    await blogService.cleanupUnreferencedBlogMedia(db, { ...options, logger });
+  } catch (error) {
+    logger.error(`博客文章已保存，但孤立媒体清理失败: ${error.message}`);
+  }
+}
+
 async function listArticles(req, res) {
   try {
     if (handleValidationFailure(req, res)) {
@@ -70,6 +85,7 @@ async function createArticle(req, res) {
 
     const article = await blogService.createArticle(req.app.locals.db, req.body);
     logger.info(`新增博客文章成功: ${article.title} (ID: ${article.id})`);
+    await cleanupMediaAfterSave(req.app.locals.db, req.blogMediaOptions);
     return legacySuccess(res, article);
   } catch (error) {
     logger.warn(`新增博客文章失败: ${error.message}`);
@@ -181,6 +197,7 @@ async function updateArticle(req, res) {
     }
 
     logger.info(`更新博客文章成功: ${article.title} (ID: ${article.id})`);
+    await cleanupMediaAfterSave(req.app.locals.db, req.blogMediaOptions);
     return legacySuccess(res, article);
   } catch (error) {
     logger.warn(`更新博客文章失败: ${error.message}`);

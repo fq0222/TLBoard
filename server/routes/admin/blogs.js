@@ -49,11 +49,12 @@ const articleValidators = [
   body('pinned').optional().isBoolean().withMessage('pinned 必须是布尔值')
 ];
 
-function attachBlogDeleteOptions(req, _res, next) {
+function attachBlogMediaOptions(req, _res, next) {
   req.blogDeleteOptions = {
     uploadDir: UPLOAD_DIR,
     videoUploadDir: VIDEO_UPLOAD_DIR
   };
+  req.blogMediaOptions = req.blogDeleteOptions;
   next();
 }
 
@@ -67,7 +68,7 @@ router.get('/', authenticateAdmin, [
 
 router.get('/categories', authenticateAdmin, blogsController.listCategories);
 
-router.post('/', authenticateAdmin, articleValidators, blogsController.createArticle);
+router.post('/', authenticateAdmin, articleValidators, attachBlogMediaOptions, blogsController.createArticle);
 
 router.post('/upload-image', authenticateAdmin, blogsController.createImageUploadHandler({ storage }));
 router.post('/upload-video', authenticateAdmin, blogsController.createVideoUploadHandler({ storage: videoStorage }));
@@ -79,10 +80,10 @@ router.get('/:id', authenticateAdmin, [
 router.put('/:id', authenticateAdmin, [
   param('id').isInt({ min: 1 }),
   ...articleValidators
-], blogsController.updateArticle);
+], attachBlogMediaOptions, blogsController.updateArticle);
 
 router.delete('/:id', authenticateAdmin, [
   param('id').isInt({ min: 1 })
-], attachBlogDeleteOptions, blogsController.deleteArticle);
+], attachBlogMediaOptions, blogsController.deleteArticle);
 
 module.exports = router;
