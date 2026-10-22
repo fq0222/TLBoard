@@ -261,12 +261,56 @@ function parseNodeConfig(node, settings, streamSettings, userEmail) {
 }
 
 /**
+ * 按节点协议校验代表客户端与本地配置的关键凭证，并保留调用方指定的可信原因。
+ *
+ * @param {Object} config - 本地 user_node_configs 与节点快照的组合记录
+ * @param {Object} client - 单条客户端或重复关联中选出的代表客户端
+ * @param {string} trustedReason - 全部凭证有效时返回的可观测原因
+ * @returns {{trusted:boolean,reason:string,client?:Object}} 协议级凭证校验结果
+ */
+function validateSnapshotClientCredentials(config, client, trustedReason) {
+  if (
+    !client.subId
+    || !config.sub_id
+    || String(client.subId) !== String(config.sub_id)
+  ) {
+    return { trusted: false, reason: 'sub_id_mismatch' };
+  }
+
+  // Hysteria2 使用 auth/password 作为客户端身份凭据，不使用普通节点 UUID。
+  const isHy2 = String(config.protocol || '').toLowerCase() === 'hysteria2'
+    || String(config.remark || '').toLowerCase().includes('hy2');
+  if (isHy2) {
+    const clientAuth = client.auth || client.password || '';
+    if (
+      !clientAuth
+      || !config.auth
+      || String(clientAuth) !== String(config.auth)
+    ) {
+      return { trusted: false, reason: 'auth_mismatch' };
+    }
+    return { trusted: true, reason: trustedReason, client };
+  }
+
+  const clientUuid = client.uuid || client.id || '';
+  if (
+    !clientUuid
+    || !config.uuid
+    || String(clientUuid) !== String(config.uuid)
+  ) {
+    return { trusted: false, reason: 'uuid_mismatch' };
+  }
+
+  return { trusted: true, reason: trustedReason, client };
+}
+
+/**
  * 检查本地入站快照是否能可信地证明当前用户节点配置已同步。
  *
  * @param {Object} user - 当前用户，email 用于拼接 3X-UI 客户端标识
  * @param {Object} config - user_node_configs JOIN xui_nodes 的组合记录，包含用户凭据和入站快照
- * @returns {{trusted:boolean,reason:string,client?:Object}} 检查结果；可信时携带唯一客户端，
- *   拒绝时 reason 表示快照缺失、解析失败、客户端重复或凭据不一致等核心分支
+ * @returns {{trusted:boolean,reason:string,client?:Object}} 检查结果；可信时携带与本地凭证一致的代表客户端，
+ *   拒绝时 reason 表示快照缺失、解析失败、重复身份冲突或凭据不一致等核心分支
  */
 function inspectUserInNodeSnapshot(user, config) {
   if (!config) {
@@ -308,53 +352,60 @@ function inspectUserInNodeSnapshot(user, config) {
     return { trusted: false, reason: 'invalid_clients' };
   }
 
-  const expectedEmails = [
-    user.email,
-    `${user.email}-${config.remark || config.inbound_id}`
-  ];
-  const matchingClients = settings.clients.filter(
-    (client) => client && expectedEmails.includes(client.email)
+  const canonicalClients = settings.clients.filter(
+    (client) => client && client.email === user.email
   );
+  const legacyEmail = `${user.email}-${config.remark || config.inbound_id}`;
+  const matchingClients = canonicalClients.length > 0
+    ? canonicalClients
+    : settings.clients.filter((client) => client && client.email === legacyEmail);
   if (matchingClients.length === 0) {
     return { trusted: false, reason: 'missing_user' };
   }
   if (matchingClients.length > 1) {
-    return { trusted: false, reason: 'duplicate_user' };
+    // 新模型只对 canonical email 的重复记录做身份去重，旧后缀邮箱不扩大兼容范围。
+    if (canonicalClients.length === 0) {
+      return { trusted: false, reason: 'duplicate_user' };
+    }
+
+    const getIdentity = (client) => ({
+      uuid: String(client.uuid ?? client.id ?? ''),
+      password: String(client.password ?? ''),
+      auth: String(client.auth ?? ''),
+      subId: String(client.subId ?? '')
+    });
+    const localIdentity = {
+      uuid: String(config.uuid ?? ''),
+      password: String(config.password ?? ''),
+      auth: String(config.auth ?? ''),
+      subId: String(config.sub_id ?? '')
+    };
+    const identities = matchingClients.map(getIdentity);
+    const equivalent = identities.every((identity) => (
+      identity.uuid === identities[0].uuid
+      && identity.password === identities[0].password
+      && identity.auth === identities[0].auth
+      && identity.subId === identities[0].subId
+    ));
+    const representativeIndex = identities.findIndex((identity) => (
+      identity.uuid === localIdentity.uuid
+      && identity.password === localIdentity.password
+      && identity.auth === localIdentity.auth
+      && identity.subId === localIdentity.subId
+    ));
+    if (!equivalent || representativeIndex < 0) {
+      return { trusted: false, reason: 'duplicate_identity' };
+    }
+
+    return validateSnapshotClientCredentials(
+      config,
+      matchingClients[representativeIndex],
+      'duplicate_association'
+    );
   }
 
   const client = matchingClients[0];
-  if (
-    !client.subId
-    || !config.sub_id
-    || String(client.subId || '') !== String(config.sub_id || '')
-  ) {
-    return { trusted: false, reason: 'sub_id_mismatch' };
-  }
-
-  // Hysteria2 使用 auth/password 作为客户端身份凭据，不使用普通节点 UUID。
-  const isHy2 = String(config.protocol || '').toLowerCase() === 'hysteria2'
-    || String(config.remark || '').toLowerCase().includes('hy2');
-  if (isHy2) {
-    const clientAuth = client.auth || client.password || '';
-    if (
-      !clientAuth
-      || !config.auth
-      || String(clientAuth) !== String(config.auth)
-    ) {
-      return { trusted: false, reason: 'auth_mismatch' };
-    }
-    return { trusted: true, reason: 'ok', client };
-  }
-
-  if (
-    !client.id
-    || !config.uuid
-    || String(client.id || '') !== String(config.uuid || '')
-  ) {
-    return { trusted: false, reason: 'uuid_mismatch' };
-  }
-
-  return { trusted: true, reason: 'ok', client };
+  return validateSnapshotClientCredentials(config, client, 'ok');
 }
 
 /**

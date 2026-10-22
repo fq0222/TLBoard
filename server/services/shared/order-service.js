@@ -490,6 +490,13 @@ async function syncUserToSingleServer(db, user, server, plan = {}) {
       }
 
       const existing = await xuiService.getServerClientByEmail(user.email);
+      if (existing.status === 'error') {
+        return {
+          successCount,
+          failureCount: failureCount + 1,
+          lastError: existing.message || '查询服务器级 3X-UI 用户失败'
+        };
+      }
       const existingClient = existing.success ? existing.client : null;
       const config = await ensureServerNodeConfigs(db, user, server, inbounds, existingClient);
       const totalBytes = getXuiTotalTrafficLimit(user, plan);
@@ -519,6 +526,8 @@ async function syncUserToSingleServer(db, user, server, plan = {}) {
       }
 
       let syncResult = await xuiService.upsertServerClient({
+        db,
+        serverId: server.id,
         email: user.email,
         inboundIds: inbounds.map((inbound) => inbound.id),
         client
@@ -531,6 +540,8 @@ async function syncUserToSingleServer(db, user, server, plan = {}) {
         client.subId = retryConfig.subId;
         logger.warn(`3X-UI subId 冲突，已为用户 ${user.email} 在服务器 ${server.name} 重新生成 subId 并重试`);
         syncResult = await xuiService.upsertServerClient({
+          db,
+          serverId: server.id,
           email: user.email,
           inboundIds: inbounds.map((inbound) => inbound.id),
           client

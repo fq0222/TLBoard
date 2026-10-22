@@ -636,9 +636,19 @@ class XuiService {
   }
 
   /**
+   * 判断 clients API 的失败响应是否明确表示记录不存在。
+   * @param {Object} response - 3X-UI clients/get 接口响应。
+   * @returns {boolean} 消息去除首尾空白后是否包含 `(record not found)`。
+   */
+  isServerClientNotFoundResponse(response = {}) {
+    const message = String(response.msg || response.message || '').trim();
+    return message.includes('(record not found)');
+  }
+
+  /**
    * 通过 canonical email 查询服务器级 3X-UI client。
    * @param {string} email - 本地用户邮箱，也是 3X-UI client email。
-   * @returns {Promise<Object>} 查询结果，成功时包含 client 与 inboundIds。
+   * @returns {Promise<Object>} 三态查询结果；found 时包含 client 与 inboundIds，error 可重试。
    */
   async getServerClientByEmail(email) {
     try {
@@ -647,36 +657,104 @@ class XuiService {
       }
 
       if (!this.usesClientApi() || typeof this.client.getClientByEmail !== 'function') {
-        return { success: false, message: 'clients API is not supported' };
+        return { success: false, status: 'error', retryable: true, message: 'clients API is not supported' };
       }
 
       const response = await this.client.getClientByEmail(email);
       if (!response.success) {
-        return { success: false, message: response.msg || 'client not found' };
+        const message = response.msg || response.message || '查询服务器级客户端失败';
+        if (this.isServerClientNotFoundResponse(response)) {
+          return { success: false, status: 'not_found', message };
+        }
+        return { success: false, status: 'error', retryable: true, message };
       }
 
       const obj = response.obj || {};
       const rawClient = obj.client || obj;
       return {
         success: true,
+        status: 'found',
         client: this.mapClientApiRecord(rawClient),
         inboundIds: this.normalizeInboundIds(obj.inboundIds || rawClient.inboundIds || [])
       };
     } catch (error) {
       logger.error(`查询服务器级客户端错误: ${email} - ${error.message}`);
-      return { success: false, message: error.message };
+      return { success: false, status: 'error', retryable: true, message: error.message };
+    }
+  }
+
+  /**
+   * 写操作抛出网络错误后通过只读查询核验目标状态，避免成功响应丢失导致重复写入。
+   * @param {string} email - canonical email。
+   * @param {Object} desiredClient - 期望的完整客户端字段。
+   * @param {number[]} inboundIds - 写操作完成后应关联的 inbound ID。
+   * @returns {Promise<boolean>} 当前远端状态是否已满足本次写入目标。
+   */
+  async verifyServerClientWrite(email, desiredClient, inboundIds) {
+    const verified = await this.getServerClientByEmail(email);
+    if (verified.status !== 'found' || this.shouldUpdateClient(verified.client, desiredClient)) {
+      return false;
+    }
+
+    const actualIds = new Set(this.normalizeInboundIds(verified.inboundIds));
+    return this.normalizeInboundIds(inboundIds).every((id) => actualIds.has(id));
+  }
+
+  /**
+   * 执行服务器级客户端写操作；网络结果未知时只读核验，无法确认则返回可重试失败。
+   * @param {Function} write - 实际 add、update 或 attach 调用。
+   * @param {string} email - canonical email。
+   * @param {Object} desiredClient - 期望客户端字段。
+   * @param {number[]} inboundIds - 核验时要求存在的关联。
+   * @returns {Promise<Object>} 原始写结果或核验后的统一结果。
+   */
+  async executeVerifiedServerClientWrite(write, email, desiredClient, inboundIds) {
+    try {
+      return await write();
+    } catch (error) {
+      if (await this.verifyServerClientWrite(email, desiredClient, inboundIds)) {
+        return { success: true, verified: true, msg: '写操作已通过只读查询确认' };
+      }
+      return { success: false, retryable: true, message: error.message };
     }
   }
 
   /**
    * 创建或更新每服务器唯一的全量 client，并补齐 inbound 关联。
    * @param {Object} payload - upsert 参数。
+   * @param {Object} [payload.db] - 数据库代理；生产调用传入后启用跨进程并发锁。
+   * @param {number|string} [payload.serverId] - 本地服务器 ID，用于生成并发锁键。
    * @param {string} payload.email - canonical email。
    * @param {number[]} payload.inboundIds - 目标 inbound ID 列表。
    * @param {Object} payload.client - 全量 client 凭证与状态。
    * @returns {Promise<Object>} 同步结果。
    */
   async upsertServerClient(payload = {}) {
+    const email = String(payload.email || payload.client?.email || '').trim();
+    const hasLockContext = payload.db && payload.serverId !== undefined && payload.serverId !== null;
+    if (!hasLockContext) {
+      return this.upsertServerClientUnlocked(payload);
+    }
+
+    try {
+      return await xuiSyncRepository.withServerClientLock(
+        payload.db,
+        payload.serverId,
+        email,
+        () => this.upsertServerClientUnlocked(payload)
+      );
+    } catch (error) {
+      logger.error(`获取服务器级客户端并发锁失败: server=${payload.serverId}, email=${email}, error=${error.message}`);
+      return { success: false, retryable: true, message: error.message };
+    }
+  }
+
+  /**
+   * 在调用方已持有服务器客户端锁时执行实际查询和写入。
+   * @param {Object} payload - 与 upsertServerClient 相同的参数。
+   * @returns {Promise<Object>} 同步结果。
+   */
+  async upsertServerClientUnlocked(payload = {}) {
     try {
       if (!this.client) {
         await this.init();
@@ -701,26 +779,61 @@ class XuiService {
       };
       const existing = await this.getServerClientByEmail(email);
 
-      if (!existing.success) {
-        const addResult = await this.client.addClient({ client: desiredClient, inboundIds });
+      if (existing.status === 'error') {
+        return {
+          success: false,
+          retryable: true,
+          message: existing.message || '查询服务器级客户端失败'
+        };
+      }
+
+      if (existing.status === 'not_found') {
+        const addResult = await this.executeVerifiedServerClientWrite(
+          () => this.client.addClient({ client: desiredClient, inboundIds }),
+          email,
+          desiredClient,
+          inboundIds
+        );
         return addResult.success
           ? { success: true, action: 'add', message: addResult.msg }
-          : { success: false, message: addResult.msg || addResult.message || '新增服务器级客户端失败' };
+          : {
+            success: false,
+            retryable: Boolean(addResult.retryable),
+            message: addResult.msg || addResult.message || '新增服务器级客户端失败'
+          };
       }
 
       if (this.shouldUpdateClient(existing.client, desiredClient)) {
-        const updateResult = await this.client.updateClient(email, desiredClient);
+        const updateResult = await this.executeVerifiedServerClientWrite(
+          () => this.client.updateClient(email, desiredClient),
+          email,
+          desiredClient,
+          existing.inboundIds
+        );
         if (!updateResult.success) {
-          return { success: false, message: updateResult.msg || updateResult.message || '更新服务器级客户端失败' };
+          return {
+            success: false,
+            retryable: Boolean(updateResult.retryable),
+            message: updateResult.msg || updateResult.message || '更新服务器级客户端失败'
+          };
         }
       }
 
       const existingIds = new Set(this.normalizeInboundIds(existing.inboundIds));
       const missingIds = inboundIds.filter((id) => !existingIds.has(id));
       if (missingIds.length > 0 && typeof this.client.attachClient === 'function') {
-        const attachResult = await this.client.attachClient(email, missingIds);
+        const attachResult = await this.executeVerifiedServerClientWrite(
+          () => this.client.attachClient(email, missingIds),
+          email,
+          desiredClient,
+          [...existingIds, ...missingIds]
+        );
         if (!attachResult.success) {
-          return { success: false, message: attachResult.msg || attachResult.message || '关联 inbound 失败' };
+          return {
+            success: false,
+            retryable: Boolean(attachResult.retryable),
+            message: attachResult.msg || attachResult.message || '关联 inbound 失败'
+          };
         }
       }
 

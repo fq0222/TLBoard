@@ -38,6 +38,7 @@ function createGenerationScenario({
   remainUntrusted = false,
   firstGeneration = false,
   includeTrustedInvalid = false,
+  duplicateCanonicalSnapshots = false,
   trustedAfterFirstServerIds,
   trustedAfterSecondServerIds,
   compensationResult = { success: true, successCount: 2, failureCount: 0 },
@@ -110,14 +111,55 @@ function createGenerationScenario({
       })
     })
   ];
+  if (duplicateCanonicalSnapshots) {
+    for (const config of staleConfigs) {
+      config.settings = JSON.stringify({
+        clients: [{
+          email: user.email,
+          id: config.uuid,
+          subId: config.sub_id,
+          enable: true,
+          expiryTime: 1000,
+          totalGB: 1024,
+          flow: 'xtls-rprx-vision'
+        }, {
+          email: user.email,
+          id: config.uuid,
+          subId: config.sub_id,
+          enable: false,
+          expiryTime: 2000,
+          totalGB: 2048,
+          flow: ''
+        }]
+      });
+    }
+  }
   const trustedConfigs = staleConfigs.map((config) => ({
     ...config,
     settings: JSON.stringify({
-      clients: [{
-        email: `${user.email}-${config.remark}`,
-        id: config.uuid,
-        subId: config.sub_id
-      }]
+      clients: duplicateCanonicalSnapshots
+        ? [{
+          email: user.email,
+          id: config.uuid,
+          subId: config.sub_id,
+          enable: true,
+          expiryTime: 1000,
+          totalGB: 1024,
+          flow: 'xtls-rprx-vision'
+        }, {
+          email: user.email,
+          id: config.uuid,
+          subId: config.sub_id,
+          enable: false,
+          expiryTime: 2000,
+          totalGB: 2048,
+          flow: ''
+        }]
+        : [{
+          email: `${user.email}-${config.remark}`,
+          id: config.uuid,
+          subId: config.sub_id
+        }]
     })
   }));
   const sources = new Map(staleConfigs.map((config) => [
@@ -262,6 +304,32 @@ async function testGenerateSubscriptionBatchesUntrustedServers() {
     '只应刷新最初失效的 pair，不得刷新原本可用的来源缓存'
   );
   assert.strictEqual(scenario.getCompensationCalls(), 0);
+}
+
+/**
+ * 验证 canonical email 的同身份重复快照直接刷新三个失效模板，不触发远程用户补偿。
+ *
+ * @returns {Promise<void>}
+ */
+async function testGenerateSubscriptionReusesEquivalentCanonicalDuplicates() {
+  const scenario = createGenerationScenario({
+    duplicateCanonicalSnapshots: true,
+    includeTrustedInvalid: false
+  });
+
+  await withRepositoryMocks(scenario.repositoryMocks, async () => {
+    await subscriptionService.generateSubscription({}, 19, scenario.logger, {
+      dependencies: scenario.dependencies
+    });
+  });
+
+  assert.deepStrictEqual(scenario.syncCalls, [], '同身份重复快照不得触发 inbound 补拉');
+  assert.strictEqual(scenario.getCompensationCalls(), 0, '同身份重复快照不得触发用户补偿');
+  assert.deepStrictEqual(
+    [...new Set(scenario.refreshedPairs)].sort(),
+    ['1:10', '1:11', '2:20'],
+    '应刷新三个原本失效且快照可信的模板'
+  );
 }
 
 /**
@@ -754,18 +822,157 @@ function testInspectUserInNodeSnapshot() {
   );
   assert.deepStrictEqual(invalidClients, { trusted: false, reason: 'invalid_clients' });
 
-  const duplicateUser = inspectUserInNodeSnapshot(
+  const duplicateAssociation = inspectUserInNodeSnapshot(
     user,
     createJoinedConfig({
+      settings: JSON.stringify({
+        clients: [
+          {
+            email: 'user@example.com', id: 'uuid-1', password: '', auth: '',
+            subId: 'sub-id-1', enable: true, expiryTime: 1000, totalGB: 1024,
+            flow: 'xtls-rprx-vision'
+          },
+          {
+            email: 'user@example.com', id: 'uuid-1', password: '', auth: '',
+            subId: 'sub-id-1', enable: false, expiryTime: 2000, totalGB: 2048,
+            flow: ''
+          }
+        ]
+      })
+    })
+  );
+  assert.strictEqual(duplicateAssociation.trusted, true);
+  assert.strictEqual(duplicateAssociation.reason, 'duplicate_association');
+  assert.strictEqual(duplicateAssociation.client.enable, true);
+
+  const duplicateIdentity = inspectUserInNodeSnapshot(
+    user,
+    createJoinedConfig({
+      settings: JSON.stringify({
+        clients: [
+          { email: 'user@example.com', id: 'uuid-1', password: '', auth: '', subId: 'sub-id-1' },
+          { email: 'user@example.com', id: 'other-uuid', password: '', auth: '', subId: 'sub-id-1' }
+        ]
+      })
+    })
+  );
+  assert.deepStrictEqual(duplicateIdentity, { trusted: false, reason: 'duplicate_identity' });
+
+  for (const [field, conflictingValue] of [
+    ['password', 'other-password'],
+    ['auth', 'other-auth'],
+    ['subId', 'other-sub-id']
+  ]) {
+    const secondClient = {
+      email: 'user@example.com',
+      id: 'uuid-1',
+      password: '',
+      auth: '',
+      subId: 'sub-id-1',
+      [field]: conflictingValue
+    };
+    assert.deepStrictEqual(
+      inspectUserInNodeSnapshot(user, createJoinedConfig({
+        settings: JSON.stringify({
+          clients: [
+            { email: 'user@example.com', id: 'uuid-1', password: '', auth: '', subId: 'sub-id-1' },
+            secondClient
+          ]
+        })
+      })),
+      { trusted: false, reason: 'duplicate_identity' },
+      `canonical 重复记录的 ${field} 不同时应拒绝快照`
+    );
+  }
+
+  assert.deepStrictEqual(
+    inspectUserInNodeSnapshot(user, createJoinedConfig({
+      password: 'local-password',
+      settings: JSON.stringify({
+        clients: [
+          { email: 'user@example.com', id: 'uuid-1', password: '', auth: '', subId: 'sub-id-1' },
+          { email: 'user@example.com', id: 'uuid-1', password: '', auth: '', subId: 'sub-id-1' }
+        ]
+      })
+    })),
+    { trusted: false, reason: 'duplicate_identity' },
+    '重复身份与本地 password 不一致时应拒绝快照'
+  );
+
+  for (const [field, expectedReason] of [
+    ['uuid', 'uuid_mismatch'],
+    ['sub_id', 'sub_id_mismatch']
+  ]) {
+    const config = createJoinedConfig({ [field]: '' });
+    config.settings = JSON.stringify({
+      clients: [
+        { email: 'user@example.com', id: field === 'uuid' ? '' : 'uuid-1', subId: field === 'sub_id' ? '' : 'sub-id-1' },
+        { email: 'user@example.com', id: field === 'uuid' ? '' : 'uuid-1', subId: field === 'sub_id' ? '' : 'sub-id-1' }
+      ]
+    });
+    assert.deepStrictEqual(
+      inspectUserInNodeSnapshot(user, config),
+      { trusted: false, reason: expectedReason },
+      `普通协议 canonical 重复记录的 ${field} 为空时应执行协议级校验`
+    );
+  }
+
+  for (const [field, expectedReason] of [
+    ['auth', 'auth_mismatch'],
+    ['sub_id', 'sub_id_mismatch']
+  ]) {
+    const config = createJoinedConfig({
+      remark: 'hy2',
+      protocol: 'hysteria2',
+      uuid: '',
+      auth: field === 'auth' ? '' : 'hy2-auth-1',
+      sub_id: field === 'sub_id' ? '' : 'sub-id-1'
+    });
+    config.settings = JSON.stringify({
+      clients: [
+        {
+          email: 'user@example.com',
+          auth: field === 'auth' ? '' : 'hy2-auth-1',
+          subId: field === 'sub_id' ? '' : 'sub-id-1'
+        },
+        {
+          email: 'user@example.com',
+          auth: field === 'auth' ? '' : 'hy2-auth-1',
+          subId: field === 'sub_id' ? '' : 'sub-id-1'
+        }
+      ]
+    });
+    assert.deepStrictEqual(
+      inspectUserInNodeSnapshot(user, config),
+      { trusted: false, reason: expectedReason },
+      `Hysteria2 canonical 重复记录的 ${field} 为空时应执行协议级校验`
+    );
+  }
+
+  assert.deepStrictEqual(
+    inspectUserInNodeSnapshot(user, createJoinedConfig({
       settings: JSON.stringify({
         clients: [
           { email: 'user@example.com-direct-node', id: 'uuid-1', subId: 'sub-id-1' },
           { email: 'user@example.com-direct-node', id: 'uuid-1', subId: 'sub-id-1' }
         ]
       })
-    })
+    })),
+    { trusted: false, reason: 'duplicate_user' },
+    '旧后缀 email 重复记录仍应拒绝，不扩大兼容范围'
   );
-  assert.deepStrictEqual(duplicateUser, { trusted: false, reason: 'duplicate_user' });
+
+  const canonicalPreferred = inspectUserInNodeSnapshot(user, createJoinedConfig({
+    settings: JSON.stringify({
+      clients: [
+        { email: 'user@example.com-direct-node', id: 'wrong-legacy-uuid', subId: 'wrong-legacy-sub-id' },
+        { email: 'user@example.com', id: 'uuid-1', subId: 'sub-id-1' }
+      ]
+    })
+  }));
+  assert.strictEqual(canonicalPreferred.trusted, true);
+  assert.strictEqual(canonicalPreferred.reason, 'ok');
+  assert.strictEqual(canonicalPreferred.client.email, 'user@example.com');
 
   for (const field of ['server_id', 'inbound_id', 'protocol', 'settings', 'stream_settings']) {
     const incompleteSnapshot = createJoinedConfig();
@@ -1156,6 +1363,7 @@ async function run() {
   testInspectUserInNodeSnapshot();
   await testListUserNodeConfigsSelectsAuth();
   await testGenerateSubscriptionBatchesUntrustedServers();
+  await testGenerateSubscriptionReusesEquivalentCanonicalDuplicates();
   await testGenerateSubscriptionCompensatesAtMostOnce();
   await testGenerateSubscriptionKeepsTrustedServersOnPartialCompensationFailure();
   await testGenerateSubscriptionUsesNamedSafeSummaryLogs();

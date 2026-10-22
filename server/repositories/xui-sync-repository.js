@@ -11,6 +11,56 @@ const USER_SYNC_TASK_TYPES = [
 ];
 
 /**
+ * 将服务器与 canonical email 转换为 PostgreSQL 双整数 advisory lock 键。
+ * @param {number|string} serverId - 本地 3X-UI 服务器 ID。
+ * @param {string} email - canonical email。
+ * @returns {[number, number]} PostgreSQL advisory lock 的两个 int32 键。
+ */
+function buildServerClientLockKeys(serverId, email) {
+  const crypto = require('crypto');
+  const digest = crypto.createHash('sha256')
+    .update(`${serverId}:${String(email || '').trim().toLowerCase()}`)
+    .digest();
+  return [digest.readInt32BE(0), digest.readInt32BE(4)];
+}
+
+/**
+ * 使用同一条专用数据库连接串行化单台服务器下同一邮箱的客户端 upsert。
+ * 锁覆盖远端查询与写入，等待者获得锁后会重新执行查询，避免并发重复创建。
+ * @param {Object} db - 暴露 PostgreSQL pool 的数据库代理。
+ * @param {number|string} serverId - 本地 3X-UI 服务器 ID。
+ * @param {string} email - canonical email。
+ * @param {Function} handler - 获得锁后执行的异步操作。
+ * @returns {Promise<*>} handler 返回值。
+ */
+async function withServerClientLock(db, serverId, email, handler) {
+  if (!db?.pool || typeof db.pool.connect !== 'function') {
+    throw new Error('数据库连接池不可用，无法获取服务器客户端并发锁');
+  }
+
+  const client = await db.pool.connect();
+  const lockKeys = buildServerClientLockKeys(serverId, email);
+  let locked = false;
+  try {
+    await client.query('SELECT pg_advisory_lock($1, $2)', lockKeys);
+    locked = true;
+    return await handler();
+  } finally {
+    let unlockError = null;
+    try {
+      if (locked) {
+        await client.query('SELECT pg_advisory_unlock($1, $2) AS unlocked', lockKeys);
+      }
+    } catch (error) {
+      unlockError = error;
+      throw error;
+    } finally {
+      client.release(unlockError || undefined);
+    }
+  }
+}
+
+/**
  * 查询单个用户节点配置。
  *
  * @param {Object} db - 数据库代理对象
@@ -403,6 +453,8 @@ async function insertServerNodeSnapshot(db, payload) {
 }
 
 module.exports = {
+  buildServerClientLockKeys,
+  withServerClientLock,
   findUserNodeConfig,
   listUserNodeConfigsByServer,
   saveUserNodeConfig,

@@ -833,6 +833,7 @@ async function checkAndDisableExpiredUsers(db, now = Math.floor(Date.now() / 100
  *
  * @param {Object} server - 服务器配置，需包含 api_url/api_token/panel_version。
  * @param {Object} context - 同步上下文。
+ * @param {Object} context.db - 数据库代理，用于服务器客户端并发锁。
  * @param {string} context.email - 目标用户邮箱。
  * @param {boolean} context.desiredEnabled - 目标启用状态，禁用时为 false。
  * @param {Object} [context.clientStatusSnapshot] - 流量同步阶段已采集的客户端状态快照。
@@ -890,6 +891,8 @@ async function syncDisableStatusToServer(server, context) {
       }
 
       const updateResult = await xuiService.upsertServerClient({
+        db: context.db,
+        serverId: server.id,
         email,
         inboundIds: inbounds.map((inbound) => inbound.id),
         client: updateClient
@@ -1010,6 +1013,7 @@ async function syncDisableStatusToXui(db, userId, disable, options = {}) {
       servers,
       INBOUND_FETCH_CONCURRENCY,
       (server) => syncDisableStatusToServer(server, {
+        db,
         email: user.email,
         desiredEnabled,
         clientStatusSnapshot

@@ -230,6 +230,68 @@ async function testOrderSyncKeepsSingleServerInboundSequence() {
 }
 
 /**
+ * 验证新版面板客户端预查询失败时订单同步不会继续执行 upsert。
+ *
+ * @returns {Promise<void>}
+ */
+async function testOrderSyncStopsWhenServerClientLookupErrors() {
+  let upsertCalls = 0;
+  const restoreXui = replaceMethods(XuiService, {
+    async getInstance() {
+      return {
+        async getInbounds() {
+          return {
+            success: true,
+            data: [{ id: 101, protocol: 'vless', remark: 'direct' }]
+          };
+        },
+        async getServerClientByEmail() {
+          return { success: false, status: 'error', retryable: true, message: 'request timed out' };
+        },
+        async upsertServerClient() {
+          upsertCalls++;
+          return { success: true };
+        }
+      };
+    }
+  });
+  const restoreSyncRepository = replaceMethods(xuiSyncRepository, {
+    async listOnlineXuiServers() {
+      return [{
+        id: 1,
+        name: 'lookup-error-server',
+        api_url: 'https://xui/error',
+        api_token: 'token',
+        panel_version: '3.4.2'
+      }];
+    }
+  });
+  const restoreOrderRepository = replaceMethods(orderRepository, {
+    async updateUserSyncStatus() {}
+  });
+
+  try {
+    const result = await orderService.syncUserToXuiServers({}, {
+      id: 20,
+      email: 'lookup-error@example.com',
+      enabled: 1,
+      expire_at: 0,
+      traffic_limit: 1024,
+      referral_traffic_limit: 0
+    }, {});
+
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.failureCount, 1);
+    assert.match(result.message, /request timed out/);
+    assert.strictEqual(upsertCalls, 0);
+  } finally {
+    restoreOrderRepository();
+    restoreSyncRepository();
+    restoreXui();
+  }
+}
+
+/**
  * 顺序运行订单同步回归测试，并让任一断言失败时以非零状态退出。
  *
  * @returns {Promise<void>}
@@ -237,6 +299,7 @@ async function testOrderSyncKeepsSingleServerInboundSequence() {
 async function run() {
   await testOrderSyncLimitsServerConcurrencyAndIsolatesFailures();
   await testOrderSyncKeepsSingleServerInboundSequence();
+  await testOrderSyncStopsWhenServerClientLookupErrors();
   console.log('order xui sync tests passed');
 }
 

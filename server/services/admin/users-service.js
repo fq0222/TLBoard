@@ -484,6 +484,8 @@ async function syncUserToXuiServers(db, user) {
           const requiresFlow = (nodeDetailsByServer[server.id] || [])
             .some((node) => getStrategyFromRemark(node.remark) === 'direct');
           await xuiService.upsertServerClient({
+            db,
+            serverId: server.id,
             email: user.email,
             inboundIds,
             client: {

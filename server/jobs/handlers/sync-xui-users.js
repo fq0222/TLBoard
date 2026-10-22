@@ -575,6 +575,8 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
           activeLogger.info(`用户 ${user.email} 在服务器 ${server.name} 不一致，原因=${mismatches.join('; ')}`);
 
           const syncResult = await xuiService.upsertServerClient({
+            db,
+            serverId: server.id,
             email: user.email,
             inboundIds,
             client: desiredClient
