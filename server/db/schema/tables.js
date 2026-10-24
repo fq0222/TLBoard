@@ -52,6 +52,7 @@ const tableDefinitions = [
         plan_id INTEGER,
         subscription_token VARCHAR(255) UNIQUE,
         sub_id VARCHAR(255) UNIQUE,
+        subscription_credentials_rotated_at BIGINT,
         traffic_used BIGINT DEFAULT 0,
         traffic_limit BIGINT DEFAULT 0,
         referral_traffic_limit BIGINT DEFAULT 0,

@@ -6,6 +6,7 @@
 const orderService = require('../../services/shared/order-service');
 const trafficManager = require('../../services/shared/traffic-manager');
 const userSubscriptionService = require('../../services/user/subscription-service');
+const subscriptionCredentialRotationService = require('../../services/user/subscription-credential-rotation-service');
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const { createLogger } = require('../../utils/logger');
@@ -64,6 +65,15 @@ async function getLatestUserForSyncTask(db, task, payload) {
 
   if (!user) {
     return null;
+  }
+
+  // 凭证轮换任务按安全约束不持久化用户权益快照，只展示当前数据库值，不能用缺失字段伪造 0→当前值。
+  if (task.task_type === xuiSyncTaskService.TASK_TYPES.CREDENTIAL_ROTATION_SYNC) {
+    logger.info(
+      `凭证轮换任务使用最新用户状态: task=${task.id}, user=${user.email}, `
+      + `traffic_limit=${user.traffic_limit || 0}, expire_at=${user.expire_at || 0}`
+    );
+    return user;
   }
 
   const payloadUser = payload.user || {};
@@ -167,6 +177,17 @@ async function runXuiSyncTasks(db) {
   try {
     result = await xuiSyncTaskService.processDueTasks(db, async task => {
       const payload = task.payload_data || {};
+
+      if (task.task_type === xuiSyncTaskService.TASK_TYPES.CREDENTIAL_ROTATION_SYNC) {
+        const currentUser = await getLatestUserForSyncTask(db, task, payload);
+        if (!currentUser) {
+          logger.warn(`凭证轮换任务对应用户不存在，跳过任务: task=${task.id}, user=${task.user_id || payload.user_id || 'unknown'}`);
+          return { success: true, message: '用户不存在，任务已跳过' };
+        }
+
+        // 传入完整任务，由专用服务读取顶层 serverIds 并在每次执行时重新查询最新本地凭证。
+        return subscriptionCredentialRotationService.processRotationTask(db, task, logger);
+      }
 
       if (
         task.task_type === xuiSyncTaskService.TASK_TYPES.INITIAL_USER_SYNC ||

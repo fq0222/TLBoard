@@ -17,7 +17,9 @@ const { getStrategyFromRemark } = require('./subscription-strategy');
 const { createLogger } = require('../../utils/logger');
 const { runWithConcurrency } = require('../../utils/concurrency');
 const { isValidXuiAuth, generateXuiAuth } = require('../../utils/xui-auth');
-const { resolveServerClientCredentials } = require('./xui-credential-resolver');
+const { selectCanonicalLocalConfig } = require('./xui-credential-resolver');
+const { XuiServerCredentialService } = require('./xui-server-credential-service');
+const credentialRotationRepository = require('../../repositories/subscription-credential-rotation-repository');
 const orderRepository = require('../../repositories/order-repository');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const referralService = require('../referral-service');
@@ -25,6 +27,7 @@ const orderActivationEmailService = require('./order-activation-email-service');
 
 const logger = createLogger('ORDER-SERVICE');
 const ORDER_XUI_SYNC_CONCURRENCY = 10;
+const serverCredentialService = new XuiServerCredentialService();
 
 /**
  * 清理用户单个节点的原始订阅模板缓存
@@ -280,28 +283,29 @@ async function ensureNodeConfig(db, user, server, inbound, existingClient = null
  * @returns {Promise<{uuid:string,password:string,auth:string,subId:string}>} 统一凭证。
  */
 async function ensureServerNodeConfigs(db, user, server, inbounds, existingClient = null, overrides = {}) {
-  const localConfigs = await xuiSyncRepository.listUserNodeConfigsByServer(db, user.id, server.id);
-  const { uuid, password, auth, subId } = resolveServerClientCredentials({
-    localConfigs,
-    remoteClient: existingClient,
-    expectedEmail: user.email,
-    overrideSubId: normalizeXuiSubId(overrides.subId)
-  });
-
-  for (const inbound of inbounds) {
-    await xuiSyncRepository.saveUserNodeConfig(db, {
+  // 首次和已有配置均先锁用户再锁服务器，与轮换保持一致，避免 FK KEY SHARE 锁顺序倒置。
+  const credentials = await credentialRotationRepository.withRotationTransaction(db, user.id, async client => {
+    await serverCredentialService.lockServerCredentials(client, server.id);
+    const currentConfigs = await credentialRotationRepository.listServerConfigs(client, user.id, server.id);
+    const local = selectCanonicalLocalConfig(currentConfigs);
+    const overrideSubId = normalizeXuiSubId(overrides.subId);
+    // 双重保护内选择凭证；合法本地字段复用，仅修复空/非法字段且经过共享唯一性检查。
+    const selected = local
+      ? { ...await serverCredentialService.repairLocalCredentials(client, server.id, user.id, local), subId: overrideSubId || local.sub_id }
+      : await serverCredentialService.resolveInitialCredentials(client, server.id, user, existingClient, overrideSubId);
+    await credentialRotationRepository.upsertServerConfigs(client, {
       userId: user.id,
       serverId: server.id,
-      inboundId: inbound.id,
-      uuid,
-      password,
-      auth,
-      subId
+      inboundIds: inbounds.map(inbound => inbound.id),
+      credentials: selected,
+      subId: selected.subId,
+      // 只有现有远端 subId 冲突恢复明确要求更换内部 ID；普通同步与轮换仍保留每行原值。
+      replaceSubId: Boolean(overrideSubId)
     });
-    await clearSubscriptionSourceCache(db, user.id, server.id, inbound.id);
-  }
-
-  return { uuid, password, auth, subId };
+    return selected;
+  });
+  for (const inbound of inbounds) await clearSubscriptionSourceCache(db, user.id, server.id, inbound.id);
+  return credentials;
 }
 
 /**

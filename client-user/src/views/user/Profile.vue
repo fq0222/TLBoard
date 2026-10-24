@@ -389,7 +389,7 @@
           <el-icon class="generate-loading-icon"><Loading /></el-icon>
         </div>
         <h3 class="generate-dialog-title">正在更换订阅链接</h3>
-        <p class="generate-dialog-text">系统正在生成新的订阅链接并刷新订阅缓存，请稍候。</p>
+        <p class="generate-dialog-text">系统正在同步节点凭证并生成新的订阅链接，请稍候。</p>
         <div class="generate-loading-dots" aria-hidden="true">
           <span></span>
           <span></span>
@@ -1141,9 +1141,25 @@ async function generateSubscription() {
 }
 
 /**
+ * 合并后端本轮实际返回的订阅 URL。
+ * @param {Object|null} current - 页面或 Store 中的当前用户资料。
+ * @param {Object} data - 更换接口响应数据。
+ * @returns {Object} 仅覆盖非空新 URL 的用户资料；缺失字段继续保留旧值。
+ */
+function mergeReplacementSubscriptionUrls(current, data) {
+  const next = { ...(current || {}), subscription_ready: true }
+  for (const key of ['subscription_url', 'clash_url', 'v2ray_url']) {
+    if (typeof data?.[key] === 'string' && data[key]) {
+      next[key] = data[key]
+    }
+  }
+  return next
+}
+
+/**
  * 确认并更换当前用户的公开订阅链接。
- * 职责：二次确认风险提示，成功后刷新页面中的通用/Clash 订阅地址。
- * 核心分支：用户取消时直接返回；后端失败时保留原链接并展示错误提示。
+ * 职责：二次确认链接和节点凭证失效风险，成功后刷新后端实际返回的订阅地址。
+ * 核心分支：有待重试服务器时仍保留新链接并提示后台更新；后端失败时保留原链接。
  *
  * @returns {Promise<void>}
  */
@@ -1154,12 +1170,17 @@ async function confirmReplaceSubscriptionLink() {
 
   try {
     await ElMessageBox.confirm(
-      '更换后，当前已导入到客户端中的订阅链接将失效，需要重新导入更换后的新订阅链接。',
+      '<strong style="font-size: 16px;">更换后，旧订阅链接和客户端中已导入的节点都将失效。</strong><br><br>'
+      + '请在更换后完成以下操作：<br>'
+      + '1. 删除客户端中已导入的旧订阅链接。<br>'
+      + '2. 从网站复制新的订阅链接，并重新导入客户端。<br>'
+      + '3. 更换订阅链接的操作每小时只能执行一次。',
       '更换订阅链接',
       {
         confirmButtonText: '确认更换',
         cancelButtonText: '取消',
-        type: 'warning'
+        type: 'warning',
+        dangerouslyUseHTMLString: true
       }
     )
   } catch (error) {
@@ -1170,19 +1191,16 @@ async function confirmReplaceSubscriptionLink() {
     replacingSubscription.value = true
     const response = await api.user.replaceSubscriptionLink()
     if (response.code === 0) {
-      userInfo.value = {
-        ...userInfo.value,
-        subscription_url: response.data.subscription_url,
-        clash_url: response.data.clash_url,
-        subscription_ready: true
+      userInfo.value = mergeReplacementSubscriptionUrls(userInfo.value, response.data)
+      userStore.userInfo = mergeReplacementSubscriptionUrls(userStore.userInfo, response.data)
+      const pendingServerIds = Array.isArray(response.data?.pending_server_ids)
+        ? response.data.pending_server_ids
+        : []
+      if (pendingServerIds.length > 0) {
+        ElMessage.success('部分节点后台更新中，新链接已可用；同步完成后请重新导入客户端')
+      } else {
+        ElMessage.success('订阅链接和节点凭证已更换，请重新导入客户端')
       }
-      userStore.userInfo = {
-        ...(userStore.userInfo || {}),
-        subscription_url: response.data.subscription_url,
-        clash_url: response.data.clash_url,
-        subscription_ready: true
-      }
-      ElMessage.success('订阅链接已更换，请重新导入客户端')
     } else {
       ElMessage.error(response.message || '更换订阅链接失败')
     }

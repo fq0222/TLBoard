@@ -28,6 +28,46 @@ function getStrategyFromRemark(remark) {
 }
 
 /**
+ * 解析标准 VMess `vmess://<Base64 JSON>` 载荷。
+ *
+ * @param {string} encodedPayload - VMess 链接协议头后的 Base64/Base64URL 文本
+ * @returns {object|null} 与 parseNodeLink 一致的节点信息；载荷无效时返回 null
+ */
+function parseVmessJsonPayload(encodedPayload) {
+  if (!encodedPayload || encodedPayload.includes('@')) return null;
+
+  try {
+    const normalized = encodedPayload.trim().replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const payload = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+    const uuid = typeof payload?.id === 'string' ? payload.id.trim() : '';
+    const address = typeof payload?.add === 'string' ? payload.add.trim() : '';
+    const port = Number.parseInt(payload?.port, 10) || 0;
+    if (!uuid || !address || port <= 0) return null;
+
+    return {
+      protocol: 'vmess',
+      uuid,
+      address: address.startsWith('[') && address.endsWith(']') ? address.slice(1, -1) : address,
+      port,
+      params: {
+        security: payload.tls || 'none',
+        type: payload.net || 'tcp',
+        host: payload.host || '',
+        path: payload.path || '',
+        sni: payload.sni || '',
+        fp: payload.fp || '',
+        alpn: payload.alpn || '',
+        headerType: payload.type || 'none'
+      },
+      remark: payload.ps || ''
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
  * 解析节点链接
  * @param {string} link - 节点链接（vless://, vmess://, trojan://）
  * @returns {object|null} 解析后的节点信息
@@ -40,6 +80,12 @@ function parseNodeLink(link) {
   
   const protocol = protocolMatch[1];
   const rest = link.substring(protocol.length + 3);
+
+  // 3X-UI 的 VMess 原始订阅通常使用 Base64 JSON，而不是 userinfo URI。
+  if (protocol === 'vmess') {
+    const vmessJsonNode = parseVmessJsonPayload(rest);
+    if (vmessJsonNode) return vmessJsonNode;
+  }
   
   // 分离 remark（# 后面的内容）
   const hashIndex = rest.indexOf('#');

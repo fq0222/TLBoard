@@ -237,12 +237,138 @@ async function testNewUserSyncTaskSupersedesOldPendingTask() {
   assert.strictEqual(db.tasks[2].task_type, 'renew_sync');
 }
 
+/**
+ * 验证凭证轮换任务与普通用户同步任务互不取代。
+ * 生产缺陷：若轮换类型被加入 USER_SYNC_TASK_TYPES，任一方向入队都会关闭仍需执行的另一类任务。
+ *
+ * @returns {Promise<void>}
+ */
+async function testCredentialRotationTaskIsNotSupersededByUserSync() {
+  const db = createFakeDb([]);
+
+  await syncTaskService.enqueueTask(db, {
+    userId: 10,
+    taskType: syncTaskService.TASK_TYPES.RENEW_SYNC,
+    payload: { user: { id: 10 } }
+  });
+  await syncTaskService.enqueueTask(db, {
+    userId: 10,
+    taskType: syncTaskService.TASK_TYPES.CREDENTIAL_ROTATION_SYNC,
+    payload: { user_id: 10, serverIds: [1, 2] }
+  });
+
+  assert.equal(db.tasks[0].status, 'pending');
+  assert.equal(db.tasks[1].status, 'pending');
+  assert.equal(db.tasks[1].task_type, 'credential_rotation_sync');
+
+  await syncTaskService.enqueueTask(db, {
+    userId: 10,
+    taskType: syncTaskService.TASK_TYPES.USER_SYNC,
+    payload: { user: { id: 10 } }
+  });
+
+  assert.equal(db.tasks[0].status, 'success');
+  assert.equal(db.tasks[1].status, 'pending');
+  assert.equal(db.tasks[2].status, 'pending');
+}
+
+/**
+ * 验证轮换任务部分失败时仅保留顶层失败服务器，且不会把敏感凭证持久化。
+ * 生产缺陷：沿用用户同步 plan 分支会导致轮换任务下轮仍重试全部服务器。
+ *
+ * @returns {Promise<void>}
+ */
+async function testCredentialRotationRetryNarrowsTopLevelServerIds() {
+  const db = createFakeDb([{
+    id: 8,
+    user_id: 10,
+    task_type: 'credential_rotation_sync',
+    status: 'pending',
+    attempts: 0,
+    payload: JSON.stringify({ user_id: 10, serverIds: [1, 2, 3] }),
+    next_retry_at: Math.floor(Date.now() / 1000) - 1
+  }]);
+
+  const result = await syncTaskService.processTask(db, db.tasks[0], async () => ({
+    success: false,
+    message: '部分服务器失败',
+    failedServerIds: [2, '2', 3, null]
+  }));
+
+  const payload = JSON.parse(db.tasks[0].payload);
+  assert.deepEqual(payload, { user_id: 10, serverIds: [2, 3] });
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'uuid'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'auth'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'password'), false);
+  assert.deepEqual(result.handlerResult.failedServerIds, [2, '2', 3, null]);
+}
+
+/**
+ * 验证轮换任务耗尽重试后只标记失败，不改写 payload 或触发额外清理。
+ * 生产缺陷：最终失败若复用其他补偿逻辑，可能破坏保留旧节点所需的缓存。
+ *
+ * @returns {Promise<void>}
+ */
+async function testCredentialRotationFinalFailureKeepsTaskPayload() {
+  const initialPayload = JSON.stringify({ user_id: 10, serverIds: [2] });
+  const db = createFakeDb([{
+    id: 9,
+    user_id: 10,
+    task_type: 'credential_rotation_sync',
+    status: 'pending',
+    attempts: 9,
+    payload: initialPayload,
+    next_retry_at: Math.floor(Date.now() / 1000) - 1
+  }]);
+
+  const result = await syncTaskService.processTask(db, db.tasks[0], async () => ({
+    success: false,
+    message: '仍然离线',
+    failedServerIds: [2]
+  }), { maxAttempts: 10 });
+
+  assert.equal(db.tasks[0].status, 'failed');
+  assert.equal(db.tasks[0].payload, initialPayload);
+  assert.equal(result.final, true);
+  assert.deepEqual(result.handlerResult.failedServerIds, [2]);
+}
+
+/**
+ * 验证单个轮换处理器异常不会阻断同批后续任务。
+ * 生产缺陷：批循环若直接传播 handler 异常，后续服务器任务会被饿死。
+ *
+ * @returns {Promise<void>}
+ */
+async function testCredentialRotationHandlerErrorDoesNotStopBatch() {
+  const dueAt = Math.floor(Date.now() / 1000) - 1;
+  const db = createFakeDb([
+    { id: 10, user_id: 10, task_type: 'credential_rotation_sync', status: 'pending', attempts: 0, payload: JSON.stringify({ user_id: 10, serverIds: [1] }), next_retry_at: dueAt },
+    { id: 11, user_id: 11, task_type: 'credential_rotation_sync', status: 'pending', attempts: 0, payload: JSON.stringify({ user_id: 11, serverIds: [2] }), next_retry_at: dueAt }
+  ]);
+  const visited = [];
+
+  const result = await syncTaskService.processDueTasks(db, async task => {
+    visited.push(task.id);
+    if (task.id === 10) throw new Error('server one failed');
+    return { success: true };
+  });
+
+  assert.deepEqual(visited, [10, 11]);
+  assert.equal(db.tasks[0].status, 'pending');
+  assert.equal(db.tasks[1].status, 'success');
+  assert.deepEqual(result, { processed: 2, success: 1, failed: 1, finalFailed: 0 });
+}
+
 async function run() {
   await testSuccessfulTaskIsMarkedSuccess();
   await testFailedTaskSchedulesRetry();
   await testFailedUserSyncTaskNarrowsRetryServerIds();
   await testExhaustedTaskIsMarkedFailed();
   await testNewUserSyncTaskSupersedesOldPendingTask();
+  await testCredentialRotationTaskIsNotSupersededByUserSync();
+  await testCredentialRotationRetryNarrowsTopLevelServerIds();
+  await testCredentialRotationFinalFailureKeepsTaskPayload();
+  await testCredentialRotationHandlerErrorDoesNotStopBatch();
   console.log('xui sync task service tests passed');
 }
 

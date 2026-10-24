@@ -30,7 +30,7 @@ function buildServerClientLockKeys(serverId, email) {
  * @param {Object} db - 暴露 PostgreSQL pool 的数据库代理。
  * @param {number|string} serverId - 本地 3X-UI 服务器 ID。
  * @param {string} email - canonical email。
- * @param {Function} handler - 获得锁后执行的异步操作。
+ * @param {Function} handler - 获得锁后执行的异步操作，接收当前持锁的专用 client。
  * @returns {Promise<*>} handler 返回值。
  */
 async function withServerClientLock(db, serverId, email, handler) {
@@ -44,7 +44,7 @@ async function withServerClientLock(db, serverId, email, handler) {
   try {
     await client.query('SELECT pg_advisory_lock($1, $2)', lockKeys);
     locked = true;
-    return await handler();
+    return await handler(client);
   } finally {
     let unlockError = null;
     try {

@@ -15,7 +15,9 @@ const {
 const { isTimedPlan } = require('../shared/plan-type');
 const { DISABLE_REASONS } = require('../shared/renew-policy');
 const xuiSyncTaskService = require('../../integrations/xui/xui-sync-task-service');
+const subscriptionCredentialRotationService = require('./subscription-credential-rotation-service');
 const subscriptionRepository = require('../../repositories/subscription-repository');
+const rotationRepository = require('../../repositories/subscription-credential-rotation-repository');
 const homeRoutingRepository = require('../../repositories/user-home-routing-repository');
 const { runWithConcurrency } = require('../../utils/concurrency');
 const { generatePublicSubscriptionId } = require('../../utils/subscription-id');
@@ -90,6 +92,23 @@ function getCfIpValue(cfIp) {
  * @returns {string} 替换后的节点链接
  */
 function replaceNodeRemark(link, nodeName) {
+  if (link.startsWith('vmess://')) {
+    const encodedPayload = link.slice('vmess://'.length);
+    if (encodedPayload && !encodedPayload.includes('@')) {
+      try {
+        const normalized = encodedPayload.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+        const payload = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+        if (payload && typeof payload === 'object' && payload.id && payload.add) {
+          payload.ps = nodeName;
+          return `vmess://${Buffer.from(JSON.stringify(payload)).toString('base64')}`;
+        }
+      } catch (error) {
+        // 非标准 VMess JSON 继续使用通用 fragment 规则，兼容项目既有 URI 格式。
+      }
+    }
+  }
+
   const hashIdx = link.indexOf('#');
   if (hashIdx > 0) {
     return link.substring(0, hashIdx + 1) + encodeURIComponent(nodeName);
@@ -1125,7 +1144,8 @@ async function refreshSubscriptionSources(db, user, nodeConfigs, serversById, lo
           throw new Error('未找到协议匹配的原始节点链接');
         }
 
-        await subscriptionRepository.upsertSubscriptionSource(db, {
+        const saveSource = dependencies.saveSubscriptionSource || subscriptionRepository.upsertSubscriptionSource;
+        await saveSource(db, {
           user_id: user.id,
           server_id: config.server_id,
           inbound_id: config.inbound_id,
@@ -1361,6 +1381,146 @@ function composeSubscriptionNodes(nodeConfigs, sourceMap, serversById, cfIps, lo
   }
 
   return allNodes;
+}
+
+/**
+ * 凭证轮换缓存编排：网络刷新先暂存，服务器完整成功后在用户锁内合并当前缓存。
+ * 来源与节点同事务提交；失败服务器和明确虚拟节点保留当前缓存原值。
+ */
+class RotatedServerCacheRefresher {
+  /** db/userId/serverIds 指定本轮远端成功目标；options.dependencies 仅替换外部拉取依赖。 */
+  constructor(db, userId, serverIds, logger, options) {
+    this.db = db;
+    this.userId = userId;
+    this.serverIds = [...new Set(serverIds.map(Number))];
+    this.logger = logger;
+    this.dependencies = options.dependencies || {};
+    this.expectedCredentialRevisions = options.expectedCredentialRevisions;
+  }
+
+  /**
+   * 校验原始来源中的客户端身份与本地最新凭证一致。
+   * VLESS/VMess 使用 uuid，Trojan 使用 password，Hysteria2 使用 auth。
+   */
+  isSourceCredentialCurrent(source, config) {
+    const parsed = parseNodeLink(source?.original_link);
+    const protocol = String(parsed?.protocol || '').toLowerCase();
+    const acceptedProtocols = new Set(getProtocolAliases(config.protocol));
+    if (!parsed || !acceptedProtocols.has(protocol)) return false;
+    const expected = protocol === 'trojan' ? config.password : protocol === 'hysteria2' ? config.auth : config.uuid;
+    return typeof expected === 'string' && expected.length > 0 && parsed.uuid === expected;
+  }
+
+  /**
+   * 将来源准备异常映射为可观测但不包含链接或凭证的稳定原因码。
+   * @param {Error} error - 单服务器来源准备失败原因
+   * @returns {string} 可安全写入日志的原因码
+   */
+  getSafePreparationFailureReason(error) {
+    return ({
+      '缺少支持的服务器或节点配置': 'missing_server_or_config',
+      '远端同步后本地凭证已变化': 'credential_revision_changed',
+      '来源刷新失败': 'source_refresh_failed',
+      '来源凭证与本地配置不一致': 'credential_mismatch',
+      '节点生成失败': 'node_generation_failed'
+    })[error?.message] || 'unexpected_source_error';
+  }
+
+  /** 单服务器暂存全部来源并组合候选；任何 inbound 失败或没有完整节点均抛错且不写数据库。 */
+  async prepareServer(serverId, user, configs, serversById, cfIps) {
+    const serverConfigs = configs.filter(config => Number(config.server_id) === serverId);
+    const server = serversById.get(serverId);
+    if (!server || !rotationRepository.supportsCredentialRotation(server.panel_version) || !serverConfigs.length) {
+      throw new Error('缺少支持的服务器或节点配置');
+    }
+    if (this.expectedCredentialRevisions && this.expectedCredentialRevisions[serverId]
+      !== rotationRepository.computeCredentialRevision(serverConfigs)) throw new Error('远端同步后本地凭证已变化');
+    const sources = [];
+    const result = await refreshSubscriptionSources(this.db, user, serverConfigs, serversById, this.logger, {
+      ...this.dependencies,
+      // 暂存覆盖共享刷新器的逐行写入，避免同服务器部分成功提前污染来源。
+      saveSubscriptionSource: async (_db, source) => { sources.push(source); }
+    });
+    if (result.failedConfigs.length || sources.length !== serverConfigs.length) throw new Error('来源刷新失败');
+    const sourceMap = mapSourcesByKey(sources);
+    if (serverConfigs.some(config => !this.isSourceCredentialCurrent(
+      sourceMap.get(buildSourceCacheKey(config.server_id, config.inbound_id)), config
+    ))) throw new Error('来源凭证与本地配置不一致');
+    const nodes = composeSubscriptionNodes(serverConfigs, sourceMap, serversById, cfIps, this.logger);
+    const expectedCount = serverConfigs.reduce((count, config) => count + (getStrategyFromRemark(config.remark) === 'cf' ? cfIps.length : 1), 0);
+    if (!nodes.length || nodes.length !== expectedCount || nodes.some(node => {
+      if (!node.link) return true;
+      // URL 型协议必须具备凭证、地址和有效端口；VMess 保持现有 Base64 编码处理规则。
+      if (!/^(vless|trojan|hysteria2):\/\//.test(node.link)) return false;
+      const parsed = parseNodeLink(node.link);
+      return !parsed?.uuid || !parsed.address || !Number.isInteger(parsed.port) || parsed.port <= 0 || parsed.port > 65535;
+    })) throw new Error('节点生成失败');
+    return { serverId, configs: serverConfigs, sources, nodes };
+  }
+
+  /** 读取刷新候选后锁内重读 user/token/cache，按 server_id 合并，避免交错任务丢失已完成服务器。 */
+  async run() {
+    const failedServerIds = [];
+    const candidates = [];
+    if (this.serverIds.length) {
+      const user = await subscriptionRepository.findSubscriptionUserById(this.db, this.userId);
+      if (!user) throw new Error('用户不存在');
+      const serversById = mapServersById(await subscriptionRepository.listOnlineServers(this.db));
+      const configs = await subscriptionRepository.listUserNodeConfigs(this.db, this.userId);
+      const cfIps = await subscriptionRepository.listEnabledUserCfIps(this.db, this.userId);
+      const results = await runWithConcurrency(this.serverIds, SOURCE_FETCH_CONCURRENCY,
+        serverId => this.prepareServer(serverId, user, configs, serversById, cfIps));
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') candidates.push(result.value);
+        else {
+          failedServerIds.push(this.serverIds[index]);
+          const reason = this.getSafePreparationFailureReason(result.reason);
+          this.logger?.warn?.(
+            `凭证轮换来源或节点准备失败: user=${this.userId}, email=${user.email}, `
+            + `server=${this.serverIds[index]}, phase=source, reason=${reason}`
+          );
+        }
+      });
+    }
+    try {
+      return await rotationRepository.withRotationTransaction(this.db, this.userId, async (client, user) => {
+        const cache = await rotationRepository.lockCurrentCache(client, user);
+        if (!cache || cache.sub_id !== user.sub_id) throw new Error('当前订阅缓存不存在');
+        const baseline = typeof cache.nodes_data === 'string' ? JSON.parse(cache.nodes_data) : cache.nodes_data;
+        if (!Array.isArray(baseline)) throw new Error('订阅缓存格式无效');
+        const ready = [];
+        for (const candidate of candidates) {
+          const { nodes: snapshots } = await rotationRepository.findServerState(client, candidate.serverId);
+          const inboundIds = new Set(snapshots.map(node => Number(node.inbound_id)));
+          // 与来源查询的 JOIN 范围一致，已不在快照中的历史配置不能阻塞有效 inbound 的重试。
+          const currentConfigs = (await rotationRepository.listServerConfigs(client, this.userId, candidate.serverId))
+            .filter(config => inboundIds.has(Number(config.inbound_id)));
+          // 拉取期间如再次轮换凭证，本轮候选不能发布到最新 token；保留基线等待重试。
+          const unchanged = currentConfigs.length === candidate.configs.length && candidate.configs.every(config => currentConfigs.some(row => Number(row.inbound_id) === Number(config.inbound_id)
+            && ['uuid', 'password', 'auth', 'sub_id'].every(field => row[field] === config[field])));
+          if (unchanged) ready.push(candidate);
+          else failedServerIds.push(candidate.serverId);
+        }
+        const successfulServerIds = ready.map(candidate => candidate.serverId);
+        if (ready.length) {
+          const replacements = new Set(successfulServerIds);
+          const retained = baseline.filter(node => node?.is_announcement === true || node?.strategy === 'announcement'
+            || node?.is_virtual === true || !replacements.has(Number(node?.server_id)));
+          await rotationRepository.saveRotatedSourcesAndCache(client, user, ready.flatMap(candidate => candidate.sources),
+            retained.concat(ready.flatMap(candidate => candidate.nodes)));
+        }
+        return { successfulServerIds, failedServerIds };
+      });
+    } catch (error) {
+      this.logger?.warn?.(`凭证轮换缓存事务失败: user=${this.userId}, phase=cache`);
+      return { successfulServerIds: [], failedServerIds: [...this.serverIds] };
+    }
+  }
+}
+
+/** 刷新 serverIds 并在用户锁内渐进替换，空集合仍验证当前新 token 的完整基线。 */
+async function refreshAndMergeRotatedServers(db, userId, serverIds, logger, options = {}) {
+  return new RotatedServerCacheRefresher(db, userId, serverIds, logger, options).run();
 }
 
 /**
@@ -2015,36 +2175,60 @@ async function generateSubscription(db, userId, logger, options = {}) {
 }
 
 /**
- * 更换用户公开订阅链接，并复用现有节点缓存。
- * 核心分支：先读取旧缓存，再替换 users.sub_id、清理旧缓存并用新 sub_id 写回同一批节点。
+ * 原子准备订阅凭证轮换，并通过已持久化任务立即尝试同步一次。
+ * 核心分支：本地准备失败原样拒绝；远端或任务处理异常则返回新 token 与待重试服务器，
+ * 让已提交的持久化任务继续由 worker 补偿，不能把部分服务器失败升级为整个接口失败。
  *
  * @param {Object} db - 数据库代理对象
  * @param {number} userId - 用户 ID
  * @param {Object} logger - 日志对象
- * @param {Object} [options={}] - 测试依赖注入与生成选项
- * @returns {Promise<string>} 新的公开订阅 ID
+ * @param {Object} [options={}] - 测试依赖注入选项
+ * @returns {Promise<{subId:string,pendingServerIds:number[],pendingServerNames:string[],retryScheduled:boolean}>}
  */
 async function replaceSubscriptionLink(db, userId, logger, options = {}) {
-  const user = assertActiveSubscriptionUser(
-    await subscriptionRepository.findSubscriptionUserById(db, userId)
-  );
-
   const dependencies = options.dependencies || {};
-  const createSubId = dependencies.generatePublicSubscriptionId || generatePublicSubscriptionId;
-  const existingSubscription = await subscriptionRepository.findLatestUserSubscription(db, userId);
-  if (!existingSubscription || !existingSubscription.nodes_data) {
-    throw createLegacyBusinessError(3002, '请先生成订阅链接', 400, null);
+  const rotationService = dependencies.rotationService || subscriptionCredentialRotationService;
+  const taskService = dependencies.taskService || xuiSyncTaskService;
+  const prepared = await rotationService.prepareRotation(db, userId);
+  const task = {
+    id: prepared.taskId,
+    user_id: userId,
+    task_type: taskService.TASK_TYPES?.CREDENTIAL_ROTATION_SYNC
+      || xuiSyncTaskService.TASK_TYPES.CREDENTIAL_ROTATION_SYNC,
+    attempts: 0,
+    payload_data: { user_id: userId, serverIds: prepared.serverIds }
+  };
+
+  let taskResult;
+  try {
+    taskResult = await taskService.processTask(
+      db,
+      task,
+      currentTask => rotationService.processRotationTask(db, currentTask, logger)
+    );
+  } catch (error) {
+    // 本地轮换及任务已提交；首次领取任务失败时仍交付新链接，由 pending 任务继续补偿。
+    logger?.warn?.(`订阅凭证首次同步未完成: user=${userId}, task=${prepared.taskId}, phase=task`);
+    taskResult = { success: false, final: false };
   }
 
-  const newSubId = createSubId();
-  const nodes = JSON.parse(existingSubscription.nodes_data || '[]');
+  const failedIds = taskResult.success
+    ? []
+    : taskResult.handlerResult?.failedServerIds || prepared.serverIds;
+  const pendingServerIds = [...new Set((failedIds || []).map(Number))]
+    .filter(serverId => Number.isInteger(serverId) && serverId > 0);
+  const serverNamesById = new Map(
+    prepared.serverIds.map((serverId, index) => [Number(serverId), prepared.serverNames[index]])
+  );
+  const pendingServerNames = pendingServerIds
+    .map(serverId => serverNamesById.get(serverId))
+    .filter(Boolean);
+  const retryScheduled = pendingServerIds.length > 0 && taskResult.final !== true;
 
-  await subscriptionRepository.replaceUserSubscriptionId(db, userId, newSubId);
-  await subscriptionRepository.deleteUserSubscriptionCaches(db, userId);
-  await subscriptionRepository.saveUserSubscriptionCache(db, userId, newSubId, nodes);
-
-  logger?.info?.(`用户 ${user.email} 更换订阅链接成功，复用 ${nodes.length} 个本地节点缓存`);
-  return newSubId;
+  logger?.info?.(
+    `用户 ${userId} 更换订阅凭证完成: task=${prepared.taskId}, pendingServers=${pendingServerIds.length}`
+  );
+  return { subId: prepared.subId, pendingServerIds, pendingServerNames, retryScheduled };
 }
 
 /**
@@ -2440,6 +2624,7 @@ function generateV2RayConfig(nodes) {
 module.exports = {
   generatePublicSubscriptionId,
   generateSubscription,
+  refreshAndMergeRotatedServers,
   retrySubscriptionSourceRefreshTask,
   replaceSubscriptionLink,
   getSubscriptionInfo,

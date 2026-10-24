@@ -312,7 +312,8 @@ const userApi = {
    * @returns {Promise<Object>} 响应数据
    */
   replaceSubscriptionLink() {
-    return apiClient.post('/subscription/replace-link', {}, { timeout: 120000 })
+    // Profile 需要展示服务端的一小时冷却等具体业务提示，由页面独占错误弹窗，避免与全局 429 文案重复。
+    return apiClient.post('/subscription/replace-link', {}, { timeout: 5 * 60 * 1000, skipGlobalError: true })
   },
 
   /**

@@ -92,6 +92,19 @@ it('无响应的网络错误只输出固定标签，保留网络错误提示', a
   expect(ElMessage.error).toHaveBeenCalledWith('网络连接失败')
 })
 
+it('更换订阅链接的 429 由页面独占提示，拦截器不重复弹出通用错误', async () => {
+  responseStatus = 429
+  businessCode = 3004
+
+  const caught = await api.replaceSubscriptionLink().catch(error => error)
+
+  expect(caught).toBe(failure)
+  expect(failure.config.skipGlobalError).toBe(true)
+  expect(failure.config.timeout).toBe(5 * 60 * 1000)
+  expect(failure.userMessage).toBe('fixture-server-secret')
+  expect(ElMessage.error).not.toHaveBeenCalled()
+})
+
 it('上游请求拦截器失败经过请求和响应错误处理时均不泄露原始错误', async () => {
   const requestFailure = new axios.AxiosError('fixture-error-secret', 'ERR_NETWORK', {
     data: { password: 'fixture-password-secret' }, headers: { Authorization: 'fixture-bearer-secret' }

@@ -16,7 +16,8 @@ const TASK_TYPES = {
   USER_SYNC: 'user_sync',
   ENABLE_SYNC: 'enable_sync',
   DISABLE_SYNC: 'disable_sync',
-  SUBSCRIPTION_SOURCE_REFRESH: 'subscription_source_refresh'
+  SUBSCRIPTION_SOURCE_REFRESH: 'subscription_source_refresh',
+  CREDENTIAL_ROTATION_SYNC: 'credential_rotation_sync'
 };
 
 const TASK_STATUS = {
@@ -189,14 +190,18 @@ async function markRetry(db, taskId, attempts, errorMessage, retryPayload = null
 }
 
 /**
- * 构建用户同步任务的下一轮局部重试 payload。
+ * 构建同步任务的下一轮局部重试 payload。
+ *
+ * 用户资料同步沿用 `plan.serverIds`；凭证轮换使用顶层 `serverIds`，
+ * 避免将任何凭证或旧的同步计划带入持久化重试任务。
  *
  * @param {Object} task - 当前任务记录
  * @param {Object} result - handler 返回的同步结果
  * @returns {Object|null} 缩小到失败服务器的 payload，无法缩小时返回 null
  */
 function buildPartialRetryPayload(task, result) {
-  if (!isUserSyncTaskType(task.task_type) || !Array.isArray(result?.failedServerIds) || result.failedServerIds.length === 0) {
+  const isCredentialRotation = task.task_type === TASK_TYPES.CREDENTIAL_ROTATION_SYNC;
+  if ((!isUserSyncTaskType(task.task_type) && !isCredentialRotation) || !Array.isArray(result?.failedServerIds) || result.failedServerIds.length === 0) {
     return null;
   }
 
@@ -219,6 +224,14 @@ function buildPartialRetryPayload(task, result) {
     ...parsePayload(task.payload),
     ...(task.payload_data || {})
   };
+
+  if (isCredentialRotation) {
+    return {
+      user_id: task.user_id || payload.user_id,
+      serverIds
+    };
+  }
+
   payload.plan = {
     ...(payload.plan || {}),
     serverIds
@@ -265,22 +278,23 @@ async function processTask(db, task, handler, options = {}) {
     if (result && result.success === false) {
       const error = new Error(result.message || '同步任务执行失败');
       error.retryPayload = buildPartialRetryPayload(task, result);
+      error.handlerResult = result;
       throw error;
     }
 
     await markSuccess(db, task.id);
-    return { success: true };
+    return { success: true, handlerResult: result };
   } catch (error) {
     const attempts = Number(task.attempts || 0) + 1;
     if (attempts >= maxAttempts) {
       await markFailed(db, task.id, attempts, error.message);
       logger.error(`3X-UI 同步任务最终失败: task=${task.id}, error=${error.message}`);
-      return { success: false, final: true, error: error.message };
+      return { success: false, final: true, error: error.message, handlerResult: error.handlerResult };
     }
 
     await markRetry(db, task.id, attempts, error.message, error.retryPayload);
     logger.warn(`3X-UI 同步任务失败，已安排重试: task=${task.id}, attempts=${attempts}, error=${error.message}`);
-    return { success: false, final: false, error: error.message };
+    return { success: false, final: false, error: error.message, handlerResult: error.handlerResult };
   }
 }
 

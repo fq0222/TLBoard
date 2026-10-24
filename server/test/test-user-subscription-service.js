@@ -1,4 +1,5 @@
 const assert = require('assert');
+const crypto = require('crypto');
 const http = require('http');
 const subscriptionService = require('../services/user/subscription-service');
 const subscriptionStrategy = require('../services/shared/subscription-strategy');
@@ -9,6 +10,299 @@ const subscriptionRepository = require('../repositories/subscription-repository'
 const userRepository = require('../repositories/user-repository');
 const xuiSyncTaskService = require('../integrations/xui/xui-sync-task-service');
 const xuiActivityTracker = require('../utils/xui-activity-tracker');
+const { RotationDatabase } = require('./test-subscription-credential-rotation-service');
+
+/** 渐进缓存使用真实仓储及事务替身，prepare 仅提供现有订阅仓储的只读查询。 */
+class RotatedCacheDatabase extends RotationDatabase {
+  constructor() {
+    super();
+    this.state.users[0].sub_id = 'current-public';
+    this.state.servers = [1, 2].map(id => ({ id, name: `server-${id}`, status: 1, panel_version: '3.4.2', sub_url: `https://server-${id}/sub/` }));
+    this.state.configs = [1, 2].map(id => ({ user_id: 7, server_id: id, inbound_id: id * 10, uuid: `new-${id}`, password: `pass-${id}`, auth: `auth-${id}`, sub_id: `internal-${id}` }));
+    this.state.nodes = [1, 2].map(id => ({ server_id: id, inbound_id: id * 10, remark: 'direct', protocol: 'vless', port: 443 }));
+    this.state.sources = [1, 2].map(id => ({ user_id: 7, server_id: id, inbound_id: id * 10, original_link: `vless://old-${id}@old.example:443` }));
+    this.state.caches = [{ user_id: 7, sub_id: 'current-public', updated_at: 1, nodes_data: JSON.stringify([
+      { server_id: 1, node_name: 'one-old-a', link: 'old-1a' }, { server_id: '1', node_name: 'one-old-b', link: 'old-1b' },
+      { server_id: 2, node_name: 'two-old', link: 'old-2', metadata: { retain: [1, 2] } },
+      { is_announcement: true, node_name: '公告' }, { is_virtual: true, node_name: '未知虚拟节点', metadata: { v: 1 } }
+    ]) }];
+  }
+
+  /** 只读模拟现有订阅仓储 SQL，未知查询拒绝，避免掩盖意外写入和缓存清理。 */
+  prepare(sql) {
+    return {
+      get: async userId => {
+        if (sql.includes('FROM users')) return this.state.users.find(row => row.id === userId);
+        throw new Error(`未定义 get: ${sql}`);
+      },
+      all: async userId => {
+        if (sql.includes('FROM user_node_configs')) return this.state.configs.filter(row => row.user_id === userId)
+          .filter(config => this.state.nodes.some(node => node.server_id === config.server_id && node.inbound_id === config.inbound_id)).map(config => ({
+          ...config, ...this.state.nodes.find(node => node.server_id === config.server_id && node.inbound_id === config.inbound_id)
+        }));
+        if (sql.includes('FROM xui_servers')) return this.state.servers;
+        if (sql.includes('FROM user_cf_ips')) return [{ ip: '1.1.1.1' }, { ip: '2.2.2.2' }];
+        throw new Error(`未定义 all: ${sql}`);
+      },
+      run: async () => { throw new Error('轮换不得在专用事务外写入来源或最终缓存'); }
+    };
+  }
+}
+
+const rotationLogger = { info() {}, warn() {}, error() {} };
+
+/** 真实解析和组合，只替代网络来源；不同服务器内容可识别。 */
+function rotationFetchOptions(overrides = {}) {
+  return { dependencies: { fetchOriginalSubscription: async url => {
+    const id = url.includes('server-1') ? 1 : 2;
+    return Buffer.from(`vless://new-${id}@new-${id}.example:443?type=tcp&security=none#direct`).toString('base64');
+  }, ...overrides } };
+}
+
+/** 成功服务器全部旧节点替换，其他真实/虚拟节点深度保持原样。 */
+async function testMergeReplacesOnlySuccessfulServerNodes() {
+  const db = new RotatedCacheDatabase();
+  const old = JSON.parse(db.state.caches[0].nodes_data);
+  const result = await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1], rotationLogger, rotationFetchOptions());
+  const nodes = JSON.parse(db.state.caches[0].nodes_data);
+  assert.deepStrictEqual(result, { successfulServerIds: [1], failedServerIds: [] });
+  assert.deepStrictEqual(nodes.filter(node => Number(node.server_id) !== 1), old.slice(2));
+  assert.strictEqual(nodes.filter(node => Number(node.server_id) === 1).length, 1);
+  assert.ok(nodes.find(node => node.server_id === 1).link.includes('new-1@'));
+  assert.ok(db.state.sources.find(row => row.server_id === 1).original_link.includes('new-1@'));
+  assert.strictEqual(db.state.sources.find(row => row.server_id === 2).original_link, 'vless://old-2@old.example:443');
+}
+
+/** 没有成功服务器时锁内验证基线，新 token 下完整缓存仍可用且无写入。 */
+async function testAllServersFailKeepsWholeBaselineUnderNewToken() {
+  const db = new RotatedCacheDatabase();
+  const baseline = JSON.stringify(db.state.caches);
+  await subscriptionService.refreshAndMergeRotatedServers(db, 7, [], rotationLogger, rotationFetchOptions());
+  assert.strictEqual(JSON.stringify(db.state.caches), baseline);
+  assert.ok(db.calls.some(row => row.sql.includes('pg_advisory_xact_lock') && row.params[0] === 31003));
+}
+
+/** 拉取期间再次轮换 token，锁内必须读取最新 token，不得重新插入旧 token 缓存。 */
+async function testCacheMergeAlwaysUsesLatestUserToken() {
+  const db = new RotatedCacheDatabase();
+  await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1], rotationLogger, rotationFetchOptions({
+    fetchOriginalSubscription: async () => {
+      db.state.users[0].sub_id = 'newest-public';
+      db.state.caches[0].sub_id = 'newest-public';
+      return Buffer.from('vless://new-1@new.example:443?type=tcp#direct').toString('base64');
+    }
+  }));
+  assert.deepStrictEqual(db.state.caches.map(row => row.sub_id), ['newest-public']);
+}
+
+/** 交错任务分别刷新服务器，第二次合并必须重读第一次已提交的节点。 */
+async function testInterleavedTasksDoNotLosePreviouslyMergedServer() {
+  const db = new RotatedCacheDatabase();
+  let unblock;
+  let entered;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { unblock = resolve; });
+  const first = subscriptionService.refreshAndMergeRotatedServers(db, 7, [1], rotationLogger, rotationFetchOptions({
+    fetchOriginalSubscription: async () => { entered(); await gate; return Buffer.from('vless://new-1@new.example:443?type=tcp#direct').toString('base64'); }
+  }));
+  await waiting;
+  await subscriptionService.refreshAndMergeRotatedServers(db, 7, [2], rotationLogger, rotationFetchOptions());
+  unblock();
+  await first;
+  const nodes = JSON.parse(db.state.caches[0].nodes_data);
+  assert.ok(nodes.find(node => node.server_id === 1).link.includes('new-1@'));
+  assert.ok(nodes.find(node => node.server_id === 2).link.includes('new-2@'));
+}
+
+/** 同服务器部分 inbound 来源失败时来源和最终节点均不得部分覆盖。 */
+async function testSourceFailurePreservesWholeServerAndOtherServerCanMerge() {
+  const db = new RotatedCacheDatabase();
+  db.state.configs.push({ ...db.state.configs[0], inbound_id: 11, sub_id: 'fail-source' });
+  db.state.nodes.push({ ...db.state.nodes[0], inbound_id: 11 });
+  const old = JSON.parse(db.state.caches[0].nodes_data).filter(row => Number(row.server_id) === 1);
+  const result = await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1, 2], rotationLogger, rotationFetchOptions({
+    fetchOriginalSubscription: async (url, subId) => {
+      if (subId === 'fail-source') throw new Error('timeout');
+      return Buffer.from(`vless://new-${url.includes('server-1') ? 1 : 2}@new.example:443?type=tcp#direct`).toString('base64');
+    }
+  }));
+  assert.deepStrictEqual(result, { successfulServerIds: [2], failedServerIds: [1] });
+  assert.deepStrictEqual(JSON.parse(db.state.caches[0].nodes_data).filter(row => Number(row.server_id) === 1), old);
+  assert.strictEqual(db.state.sources.find(row => row.server_id === 1).original_link, 'vless://old-1@old.example:443');
+}
+
+/** 原始来源只有协议前缀但缺地址/凭证时，不能发布无效新节点或覆盖旧来源。 */
+async function testInvalidComposedNodesKeepOldSourcesAndCache() {
+  const db = new RotatedCacheDatabase();
+  const baseline = JSON.stringify({ sources: db.state.sources, caches: db.state.caches });
+  const result = await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1], rotationLogger, rotationFetchOptions({
+    fetchOriginalSubscription: async () => Buffer.from('vless://invalid').toString('base64')
+  }));
+  assert.deepStrictEqual(result, { successfulServerIds: [], failedServerIds: [1] });
+  assert.strictEqual(JSON.stringify({ sources: db.state.sources, caches: db.state.caches }), baseline);
+}
+
+/** 拉取期间增加 inbound 时不能用旧配置集合替换服务器全部节点。 */
+async function testChangedInboundSetIsRetriedWithoutPublishingPartialNodes() {
+  const db = new RotatedCacheDatabase();
+  const baseline = JSON.stringify(db.state.caches);
+  const result = await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1], rotationLogger, rotationFetchOptions({
+    fetchOriginalSubscription: async () => {
+      db.state.configs.push({ ...db.state.configs[0], inbound_id: 11 });
+      db.state.nodes.push({ ...db.state.nodes[0], inbound_id: 11 });
+      return Buffer.from('vless://new-1@new.example:443?type=tcp#direct').toString('base64');
+    }
+  }));
+  assert.deepStrictEqual(result, { successfulServerIds: [], failedServerIds: [1] });
+  assert.strictEqual(JSON.stringify(db.state.caches), baseline);
+}
+
+/** 缓存写入失败必须回滚同事务的新来源，不能丢失完整基线。 */
+async function testCacheWriteFailureRollsBackSourcesAndPreservesBaseline() {
+  const db = new RotatedCacheDatabase();
+  db.options.failOn = sql => sql.startsWith('INSERT INTO user_subscriptions');
+  const baseline = JSON.stringify({ sources: db.state.sources, caches: db.state.caches });
+  const result = await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1, 2], rotationLogger, rotationFetchOptions());
+  assert.deepStrictEqual(result, { successfulServerIds: [], failedServerIds: [1, 2] });
+  assert.strictEqual(JSON.stringify({ sources: db.state.sources, caches: db.state.caches }), baseline);
+  assert.ok(db.calls.some(row => row.sql === 'ROLLBACK'));
+}
+
+/** 候选拉取中凭证再次轮换，旧任务必须失败保留基线，不能向当前 token 发布旧凭证。 */
+async function testCredentialsChangedDuringFetchPreserveCurrentBaseline() {
+  const db = new RotatedCacheDatabase();
+  const baseline = JSON.stringify(db.state.caches);
+  const result = await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1], rotationLogger, rotationFetchOptions({
+    fetchOriginalSubscription: async () => {
+      db.state.configs[0].uuid = 'even-newer-uuid';
+      return Buffer.from('vless://new-1@new.example:443?type=tcp#direct').toString('base64');
+    }
+  }));
+  assert.deepStrictEqual(result, { successfulServerIds: [], failedServerIds: [1] });
+  assert.strictEqual(JSON.stringify(db.state.caches), baseline);
+}
+
+/** 远端同步与来源准备之间再次轮换时，旧远端成功不能授权新配置的缓存发布。 */
+async function testExpectedRemoteRevisionRejectsCredentialsChangedBeforeFetch() {
+  const db = new RotatedCacheDatabase();
+  const baseline = JSON.stringify({ caches: db.state.caches, sources: db.state.sources });
+  const expectedRevision = crypto.createHash('sha256').update(JSON.stringify([
+    [1, 10, 'new-1', 'pass-1', 'auth-1', 'internal-1']
+  ])).digest('hex');
+  db.state.configs[0].uuid = 'newer-local-uuid';
+  const options = rotationFetchOptions();
+  options.expectedCredentialRevisions = { 1: expectedRevision };
+  const result = await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1], rotationLogger, options);
+  assert.deepStrictEqual(result, { successfulServerIds: [], failedServerIds: [1] });
+  assert.strictEqual(JSON.stringify({ caches: db.state.caches, sources: db.state.sources }), baseline);
+}
+
+/** 不再出现在快照中的历史配置不属于远端目标，不能让当前有效 inbound 永久无法合并。 */
+async function testHistoricalConfigWithoutSnapshotDoesNotBlockCurrentInbound() {
+  const db = new RotatedCacheDatabase();
+  db.state.configs.push({ ...db.state.configs[0], inbound_id: 99 });
+  const result = await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1], rotationLogger, rotationFetchOptions());
+  assert.deepStrictEqual(result, { successfulServerIds: [1], failedServerIds: [] });
+  assert.ok(JSON.parse(db.state.caches[0].nodes_data).find(node => node.server_id === 1).link.includes('new-1@'));
+}
+
+/** 各协议真实来源身份必须匹配本地新凭证；旧身份整台拒绝，当前身份正常提交。 */
+async function assertRotationSourceIdentity(protocol, expectedIdentity, remark = 'direct') {
+  for (const stale of [true, false]) {
+    const db = new RotatedCacheDatabase();
+    Object.assign(db.state.nodes[0], { protocol, remark });
+    const baseline = JSON.stringify({ caches: db.state.caches, sources: db.state.sources });
+    const identity = stale ? 'stale-identity' : expectedIdentity;
+    const result = await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1], rotationLogger, rotationFetchOptions({
+      fetchOriginalSubscription: async () => Buffer.from(`${protocol}://${identity}@new.example:443?type=tcp#${remark}`).toString('base64')
+    }));
+    assert.deepStrictEqual(result, stale ? { successfulServerIds: [], failedServerIds: [1] }
+      : { successfulServerIds: [1], failedServerIds: [] }, `${protocol}: ${stale ? '旧' : '当前'}凭证身份结果错误`);
+    if (stale) assert.strictEqual(JSON.stringify({ caches: db.state.caches, sources: db.state.sources }), baseline);
+    else {
+      assert.ok(db.state.sources.find(row => row.server_id === 1).original_link.includes(`${expectedIdentity}@`));
+      assert.ok(JSON.parse(db.state.caches[0].nodes_data).find(node => node.server_id === 1).link.includes(`${expectedIdentity}@`));
+    }
+  }
+}
+
+/** VLESS 来源必须使用新 UUID。 */
+async function testRotationVlessSourceRejectsStaleUuid() { await assertRotationSourceIdentity('vless', 'new-1'); }
+/** VMess 采用项目现有 parseNodeLink 的 URI 返回结构，来源必须使用新 UUID。 */
+async function testRotationVmessSourceRejectsStaleUuid() { await assertRotationSourceIdentity('vmess', 'new-1'); }
+
+/** 标准 VMess Base64 JSON 必须被真实解析，当前 UUID 可提交、旧 UUID 整台回退。 */
+async function testRotationStandardVmessSourceValidatesDecodedUuid() {
+  for (const stale of [true, false]) {
+    const db = new RotatedCacheDatabase();
+    Object.assign(db.state.nodes[0], { protocol: 'vmess', remark: 'direct' });
+    const baseline = JSON.stringify({ caches: db.state.caches, sources: db.state.sources });
+    const payload = {
+      v: '2',
+      ps: 'standard-vmess',
+      add: 'new.example',
+      port: '443',
+      id: stale ? 'stale-identity' : 'new-1',
+      aid: '0',
+      scy: 'auto',
+      net: 'ws',
+      type: 'none',
+      host: 'new.example',
+      path: '/ws',
+      tls: 'tls',
+      sni: 'new.example'
+    };
+    const vmessLink = `vmess://${Buffer.from(JSON.stringify(payload)).toString('base64')}`;
+    const result = await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1], rotationLogger, rotationFetchOptions({
+      fetchOriginalSubscription: async () => Buffer.from(vmessLink).toString('base64')
+    }));
+
+    assert.deepStrictEqual(result, stale ? { successfulServerIds: [], failedServerIds: [1] }
+      : { successfulServerIds: [1], failedServerIds: [] });
+    if (stale) {
+      assert.strictEqual(JSON.stringify({ caches: db.state.caches, sources: db.state.sources }), baseline);
+    } else {
+      assert.strictEqual(db.state.sources.find(row => row.server_id === 1).original_link, vmessLink);
+      const cachedLink = JSON.parse(db.state.caches[0].nodes_data).find(node => node.server_id === 1).link;
+      assert.ok(cachedLink.startsWith('vmess://'));
+      const cachedPayload = JSON.parse(Buffer.from(cachedLink.slice('vmess://'.length), 'base64').toString('utf8'));
+      assert.strictEqual(cachedPayload.id, 'new-1');
+      assert.strictEqual(cachedPayload.ps, 'server-1-direct');
+    }
+  }
+}
+/** Trojan 来源身份对应新 password，不能错误使用 uuid。 */
+async function testRotationTrojanSourceRejectsStalePassword() { await assertRotationSourceIdentity('trojan', 'pass-1'); }
+/** Hysteria2 来源身份对应新 auth，不能错误使用 uuid/password。 */
+async function testRotationHysteriaSourceRejectsStaleAuth() { await assertRotationSourceIdentity('hysteria2', 'auth-1', 'hy2'); }
+
+/** 3X-UI inbound 的 hysteria 与订阅链接 hysteria2 是同一协议别名，凭证一致时必须允许合并。 */
+async function testRotationHysteriaAliasAcceptsCurrentAuth() {
+  const db = new RotatedCacheDatabase();
+  Object.assign(db.state.nodes[0], { protocol: 'hysteria', remark: 'hy2' });
+  const result = await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1], rotationLogger, rotationFetchOptions({
+    fetchOriginalSubscription: async () => Buffer.from('hysteria2://auth-1@new.example:443?insecure=0#hy2').toString('base64')
+  }));
+
+  assert.deepStrictEqual(result, { successfulServerIds: [1], failedServerIds: [] });
+  assert.ok(db.state.sources.find(row => row.server_id === 1).original_link.includes('hysteria2://auth-1@'));
+}
+
+/** 来源阶段失败日志必须包含用户邮箱和脱敏原因，便于定位而不输出真实凭证。 */
+async function testRotationSourceFailureLogIncludesEmailAndSafeReason() {
+  const db = new RotatedCacheDatabase();
+  const warnings = [];
+  const logger = { info() {}, warn: message => warnings.push(message), error() {} };
+  const result = await subscriptionService.refreshAndMergeRotatedServers(db, 7, [1], logger, rotationFetchOptions({
+    fetchOriginalSubscription: async () => Buffer.from('vless://stale-identity@new.example:443?type=tcp#direct').toString('base64')
+  }));
+
+  assert.deepStrictEqual(result, { successfulServerIds: [], failedServerIds: [1] });
+  assert.ok(warnings.some(message => message.includes(
+    '凭证轮换来源或节点准备失败: user=7, email=u@example.com, server=1, phase=source, reason=credential_mismatch'
+  )));
+  assert.ok(!warnings.join('\n').includes('stale-identity'));
+}
 
 /**
  * 构造仅覆盖订阅查询 SQL 的轻量假数据库。
@@ -948,78 +1242,123 @@ async function testPublicSubscriptionIdShouldUse32HexChars() {
   assert.match(subId, /^[0-9a-f]{32}$/);
 }
 
-/**
- * 验证更换订阅链接只替换用户级 sub_id 并复用现有节点缓存，不触发全量订阅生成。
- *
- * @returns {Promise<void>}
- */
-async function testReplaceSubscriptionLinkShouldInvalidateOldCacheAndRegenerate() {
-  const originals = {
-    findSubscriptionUserById: subscriptionRepository.findSubscriptionUserById,
-    findLatestUserSubscription: subscriptionRepository.findLatestUserSubscription,
-    replaceUserSubscriptionId: subscriptionRepository.replaceUserSubscriptionId,
-    deleteUserSubscriptionCaches: subscriptionRepository.deleteUserSubscriptionCaches,
-    saveUserSubscriptionCache: subscriptionRepository.saveUserSubscriptionCache
-  };
+/** 入口必须先原子准备轮换，再由持久化任务服务执行第一次同步并返回完整成功结果。 */
+async function testReplaceSubscriptionLinkShouldRunPersistedRotationTask() {
+  const db = { name: 'fake-db' };
   const calls = [];
-  const logs = [];
-  const nodes = [{ node_name: 'node-a', link: 'vless://node-a' }];
-
-  subscriptionRepository.findSubscriptionUserById = async () => ({
-    id: 7,
-    email: 'replace@example.com',
-    sub_id: 'old-sub-id',
-    enabled: 1,
-    traffic_used: 0,
-    traffic_limit: 1024,
-    referral_traffic_limit: 0,
-    expire_at: 0
-  });
-  subscriptionRepository.findLatestUserSubscription = async (db, userId) => {
-    calls.push(['findLatestUserSubscription', db, userId]);
-    return {
-      nodes_data: JSON.stringify(nodes)
-    };
-  };
-  subscriptionRepository.replaceUserSubscriptionId = async (db, userId, subId) => {
-    calls.push(['replaceUserSubscriptionId', db, userId, subId]);
-  };
-  subscriptionRepository.deleteUserSubscriptionCaches = async (db, userId) => {
-    calls.push(['deleteUserSubscriptionCaches', db, userId]);
-  };
-  subscriptionRepository.saveUserSubscriptionCache = async (db, userId, subId, savedNodes) => {
-    calls.push(['saveUserSubscriptionCache', db, userId, subId, savedNodes]);
-  };
-
-  try {
-    const db = { name: 'fake-db' };
-    const logger = {
-      info(message) {
-        logs.push(message);
-      }
-    };
-    const result = await subscriptionService.replaceSubscriptionLink(db, 7, logger, {
-      dependencies: {
-        generatePublicSubscriptionId: () => '1234567890abcdef1234567890abcdef',
-        generateSubscription: async () => {
-          throw new Error('更换订阅链接不应触发全量订阅生成');
+  const logger = { info() {}, warn() {} };
+  const result = await subscriptionService.replaceSubscriptionLink(db, 7, logger, {
+    dependencies: {
+      rotationService: {
+        async prepareRotation(actualDb, userId) {
+          calls.push(['prepare', actualDb, userId]);
+          return { taskId: 41, subId: 'new-public-token', serverIds: [1, 2], serverNames: ['东京', '香港'] };
+        },
+        async processRotationTask(actualDb, task, actualLogger) {
+          calls.push(['handler', actualDb, task, actualLogger]);
+          return { success: true, successfulServerIds: [1, 2], failedServerIds: [] };
+        }
+      },
+      taskService: {
+        async processTask(actualDb, task, handler) {
+          calls.push(['processTask', actualDb, task]);
+          return { success: true, handlerResult: await handler(task) };
         }
       }
-    });
+    }
+  });
 
-    assert.strictEqual(result, '1234567890abcdef1234567890abcdef');
-    assert.deepStrictEqual(calls, [
-      ['findLatestUserSubscription', db, 7],
-      ['replaceUserSubscriptionId', db, 7, '1234567890abcdef1234567890abcdef'],
-      ['deleteUserSubscriptionCaches', db, 7],
-      ['saveUserSubscriptionCache', db, 7, '1234567890abcdef1234567890abcdef', nodes]
-    ]);
-    assert.deepStrictEqual(logs, [
-      '用户 replace@example.com 更换订阅链接成功，复用 1 个本地节点缓存'
-    ]);
-  } finally {
-    Object.assign(subscriptionRepository, originals);
-  }
+  assert.deepStrictEqual(result, {
+    subId: 'new-public-token',
+    pendingServerIds: [],
+    pendingServerNames: [],
+    retryScheduled: false
+  });
+  assert.deepStrictEqual(calls[0], ['prepare', db, 7]);
+  assert.deepStrictEqual(calls[1], ['processTask', db, {
+    id: 41,
+    user_id: 7,
+    task_type: 'credential_rotation_sync',
+    attempts: 0,
+    payload_data: { user_id: 7, serverIds: [1, 2] }
+  }]);
+  assert.strictEqual(calls[2][0], 'handler');
+  assert.strictEqual(calls[2][1], db);
+  assert.deepStrictEqual(calls[2][2], calls[1][2]);
+  assert.strictEqual(calls[2][3], logger);
+}
+
+/** 部分远端失败仍返回新 token，并把待重试服务器 ID 和名称交给前端。 */
+async function testReplaceSubscriptionLinkShouldResolvePartialFailure() {
+  const result = await subscriptionService.replaceSubscriptionLink({}, 7, { warn() {} }, {
+    dependencies: {
+      rotationService: {
+        async prepareRotation() {
+          return { taskId: 42, subId: 'new-public-token', serverIds: [1, 2, 3], serverNames: ['东京', '香港', '美国'] };
+        },
+        async processRotationTask() {
+          return { success: false, successfulServerIds: [1], failedServerIds: [3, 2, 3] };
+        }
+      },
+      taskService: {
+        async processTask(db, task, handler) {
+          return { success: false, final: false, handlerResult: await handler(task) };
+        }
+      }
+    }
+  });
+
+  assert.deepStrictEqual(result, {
+    subId: 'new-public-token',
+    pendingServerIds: [3, 2],
+    pendingServerNames: ['美国', '香港'],
+    retryScheduled: true
+  });
+}
+
+/** 首次任务领取/处理异常不能丢掉已提交任务，入口应把全部服务器报告为后台待重试。 */
+async function testReplaceSubscriptionLinkShouldKeepAllServersPendingWhenTaskProcessingThrows() {
+  const result = await subscriptionService.replaceSubscriptionLink({}, 7, { warn() {}, info() {} }, {
+    dependencies: {
+      rotationService: {
+        async prepareRotation() {
+          return { taskId: 43, subId: 'committed-token', serverIds: [3, 1, 3], serverNames: ['美国', '东京', '美国'] };
+        },
+        async processRotationTask() { throw new Error('不应在任务服务抛错后直接调用'); }
+      },
+      taskService: {
+        async processTask() { throw new Error('领取任务失败'); }
+      }
+    }
+  });
+
+  assert.deepStrictEqual(result, {
+    subId: 'committed-token',
+    pendingServerIds: [3, 1],
+    pendingServerNames: ['美国', '东京'],
+    retryScheduled: true
+  });
+}
+
+/** 本地原子准备失败必须原样拒绝，且不能尝试处理不存在的持久化任务。 */
+async function testReplaceSubscriptionLinkShouldRejectPreparationFailure() {
+  let processCalled = false;
+  const failure = new Error('任务持久化失败');
+  await assert.rejects(
+    subscriptionService.replaceSubscriptionLink({}, 7, {}, {
+      dependencies: {
+        rotationService: {
+          async prepareRotation() { throw failure; },
+          async processRotationTask() { throw new Error('不应调用'); }
+        },
+        taskService: {
+          async processTask() { processCalled = true; }
+        }
+      }
+    }),
+    error => error === failure
+  );
+  assert.strictEqual(processCalled, false);
 }
 
 /**
@@ -1723,6 +2062,20 @@ async function testGenerateSubscriptionShouldAskForSpeedChannelOptimization() {
 }
 
 async function run() {
+  let rotationFailures = 0;
+  for (const test of [testMergeReplacesOnlySuccessfulServerNodes, testAllServersFailKeepsWholeBaselineUnderNewToken,
+    testCacheMergeAlwaysUsesLatestUserToken, testInterleavedTasksDoNotLosePreviouslyMergedServer,
+    testSourceFailurePreservesWholeServerAndOtherServerCanMerge, testInvalidComposedNodesKeepOldSourcesAndCache,
+    testChangedInboundSetIsRetriedWithoutPublishingPartialNodes, testCacheWriteFailureRollsBackSourcesAndPreservesBaseline,
+    testCredentialsChangedDuringFetchPreserveCurrentBaseline, testExpectedRemoteRevisionRejectsCredentialsChangedBeforeFetch,
+    testHistoricalConfigWithoutSnapshotDoesNotBlockCurrentInbound, testRotationVlessSourceRejectsStaleUuid,
+    testRotationVmessSourceRejectsStaleUuid, testRotationStandardVmessSourceValidatesDecodedUuid,
+    testRotationTrojanSourceRejectsStalePassword, testRotationHysteriaSourceRejectsStaleAuth,
+    testRotationHysteriaAliasAcceptsCurrentAuth, testRotationSourceFailureLogIncludesEmailAndSafeReason]) {
+    try { await test(); console.log(`PASS ${test.name}`); }
+    catch (error) { rotationFailures++; console.error(`FAIL ${test.name}: ${error.message}`); }
+  }
+  assert.strictEqual(rotationFailures, 0, '轮换缓存行为存在失败');
   await testDefaultSubscriptionContentShouldReturnBase64AndUserinfo();
   await testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgroundCooldown();
   await testFetchOriginalSubscriptionShouldExposeStableTimeoutCode();
@@ -1750,7 +2103,10 @@ async function run() {
   await testAdminSubscriptionShouldReuseUserIncrementalGenerator();
   await testSubscriptionInfoShouldHideNodesBeforeFirstGeneration();
   await testPublicSubscriptionIdShouldUse32HexChars();
-  await testReplaceSubscriptionLinkShouldInvalidateOldCacheAndRegenerate();
+  await testReplaceSubscriptionLinkShouldRunPersistedRotationTask();
+  await testReplaceSubscriptionLinkShouldResolvePartialFailure();
+  await testReplaceSubscriptionLinkShouldKeepAllServersPendingWhenTaskProcessingThrows();
+  await testReplaceSubscriptionLinkShouldRejectPreparationFailure();
   await testUserCfIpQueriesShouldMatchCurrentSchema();
   await testSourceRefreshShouldPickInboundMatchedRealityLink();
   await testSourceRefreshShouldFetchSharedSubIdOnce();

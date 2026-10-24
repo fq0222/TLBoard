@@ -24,6 +24,10 @@ const logger = createLogger('USER-SUB');
  */
 function handleControllerError(res, action, error) {
   if (error && error.isLegacyBusinessError) {
+    const retryAfter = Math.ceil(Number(error.retryAfter));
+    if (Number.isInteger(retryAfter) && retryAfter > 0) {
+      res.setHeader('Retry-After', String(retryAfter));
+    }
     logger.warn(`${action}失败: ${error.message}`);
     return legacyFail(res, {
       statusCode: error.statusCode,
@@ -83,7 +87,7 @@ async function generateSubscription(req, res) {
 }
 
 /**
- * 更换当前用户的公开订阅链接并重新写入订阅缓存。
+ * 更换当前用户的公开订阅链接与节点凭证，并返回后台待重试服务器。
  *
  * @param {Object} req - Express 请求对象
  * @param {Object} res - Express 响应对象
@@ -91,13 +95,18 @@ async function generateSubscription(req, res) {
  */
 async function replaceSubscriptionLink(req, res) {
   try {
-    const subId = await subscriptionService.replaceSubscriptionLink(
+    const result = await subscriptionService.replaceSubscriptionLink(
       req.app.locals.db,
       req.user.id,
       logger
     );
-    const urls = generateSubscriptionUrls(req, subId);
-    return legacySuccess(res, urls);
+    const urls = generateSubscriptionUrls(req, result.subId);
+    return legacySuccess(res, {
+      ...urls,
+      pending_server_ids: result.pendingServerIds,
+      pending_server_names: result.pendingServerNames,
+      retry_scheduled: result.retryScheduled
+    });
   } catch (error) {
     return handleControllerError(res, '更换订阅链接', error);
   }
