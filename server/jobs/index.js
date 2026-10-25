@@ -3,22 +3,23 @@
  * 统一管理所有后台定时任务的注册、启动和停止，不承载具体业务实现。
  *
  * 任务配置表：
- * +------------------------+--------------+--------------------+----------------------+
- * | 任务名称               | 启动时执行   | 首次延迟           | 执行间隔             |
- * +------------------------+--------------+--------------------+----------------------+
- * | 标记过期订单           | 是           | 无                 | 10 分钟              |
- * | 删除过期订单           | 是           | 5 分钟             | 1 小时               |
- * | 清理僵尸用户           | 是           | 2 分钟             | 30 分钟              |
- * | 3X-UI 用户同步         | 是           | 1 分钟             | 6 小时               |
- * | 3X-UI 同步重试队列     | 是           | 30 秒              | 3 分钟               |
- * | 流量同步               | 是           | 10 分钟            | 30 分钟              |
- * | 工单自动关闭           | 是           | 3 分钟             | 1 小时               |
- * | 邮件群发               | 否           | 无                 | 每天 9:00            |
- * | 清理邮件日志           | 否           | 无                 | 每天 3:00            |
- * | 3X-UI 数据库备份       | 否           | 无                 | 每天 4:00            |
- * | 批量订阅任务恢复       | 否           | 15 秒              | 无（仅启动后一次）   |
- * | Telegram 健康巡检      | 否           | 13 分钟            | 40 分钟              |
- * +------------------------+--------------+--------------------+----------------------+
+ * +------------------------+------------------+--------------------+-------------------------+
+ * | 任务名称               | 启动时立即执行   | 首次延迟           | 执行间隔                |
+ * +------------------------+------------------+--------------------+-------------------------+
+ * | 标记过期订单           | 是               | 无                 | 10 分钟                 |
+ * | 删除过期订单           | 否               | 5 分钟             | 1 小时                  |
+ * | 清理僵尸用户           | 否               | 2 分钟             | 30 分钟                 |
+ * | 3X-UI 用户同步         | 否               | 1 分钟             | 6 小时                  |
+ * | 3X-UI 同步重试队列     | 否               | 30 秒              | 3 分钟                  |
+ * | 3X-UI 同步历史清理     | 否               | 无                 | 每天 12:00（北京时间）  |
+ * | 流量同步               | 否               | 10 分钟            | 30 分钟                 |
+ * | 工单自动关闭           | 否               | 3 分钟             | 1 小时                  |
+ * | 邮件群发               | 否               | 无                 | 每天 9:00               |
+ * | 清理邮件日志           | 否               | 无                 | 每天 3:00               |
+ * | 3X-UI 数据库备份       | 否               | 无                 | 每天 4:00               |
+ * | 批量订阅任务恢复       | 否               | 15 秒              | 无（仅启动后一次）      |
+ * | Telegram 健康巡检      | 否               | 13 分钟            | 40 分钟                 |
+ * +------------------------+------------------+--------------------+-------------------------+
  *
  * 任务说明：
  * - 标记过期订单：将超过 30 分钟未支付的 pending 订单标记为 expired
@@ -26,6 +27,7 @@
  * - 清理僵尸用户：删除未支付且超过 12 小时的用户（enabled=0, payment_count=0）
  * - 3X-UI 用户同步：确保所有已付费用户都在 3X-UI 节点中，并修复 sub_id、flow、流量上限等状态
  * - 3X-UI 同步重试队列：处理注册、续费、启用、禁用等同步失败后的补偿任务
+ * - 3X-UI 同步历史清理：每天北京时间 12:00 删除超过 15 天的 success/failed 终态记录，每次最多 50 条
  * - 流量同步：从 3X-UI 服务器同步用户流量数据到本地数据库
  * - 工单自动关闭：关闭用户已读后超过 24 小时无新回复的 pending 工单
  * - 邮件群发：处理待发送的邮件群发任务，每日限额 200 封
@@ -41,6 +43,7 @@ const { registerDeleteExpiredJob } = require('./handlers/delete-expired-orders')
 const { registerCleanZombieUsersJob } = require('./handlers/clean-zombie-users');
 const { registerXuiSyncJob } = require('./handlers/sync-xui-users');
 const { registerXuiSyncTaskJob } = require('./handlers/sync-xui-tasks');
+const { registerCleanXuiSyncTasksJob } = require('./handlers/clean-xui-sync-tasks');
 const { registerTrafficSyncJob } = require('./handlers/sync-traffic');
 const { registerTicketAutoCloseJob } = require('./handlers/auto-close-tickets');
 const { registerEmailCampaignJob } = require('./handlers/process-email-campaigns');
@@ -120,6 +123,7 @@ function startAllJobs(db) {
     registerCleanZombieUsersJob(context);
     registerXuiSyncJob(context);
     registerXuiSyncTaskJob(context);
+    registerCleanXuiSyncTasksJob(context);
     registerTrafficSyncJob(context);
     registerTicketAutoCloseJob(context);
     registerEmailCampaignJob(context);

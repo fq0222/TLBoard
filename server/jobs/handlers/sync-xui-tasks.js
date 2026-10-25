@@ -14,10 +14,6 @@ const xuiJobScheduler = require('../xui-job-scheduler');
 
 const logger = createLogger('JOBS');
 
-// 同步任务终态历史仅保留 15 天，每轮最多清理 50 条，限制数据库维护开销。
-const XUI_SYNC_TASK_RETENTION_SECONDS = 15 * 24 * 60 * 60;
-const XUI_SYNC_TASK_CLEANUP_LIMIT = 50;
-
 // 3X-UI 同步重试队列使用进程内锁，避免上一轮超时未结束时并发启动下一轮
 let isXuiSyncTaskRunning = false;
 
@@ -162,25 +158,6 @@ async function shouldSkipStaleStatusSyncTask(db, task, disable) {
 }
 
 /**
- * 清理过期的 3X-UI 同步终态任务，独立记录删除数量、错误原因与耗时。
- * @param {Object} db - 数据库实例，交由仓储删除超过保留期限的终态任务。
- * @returns {Promise<void>} 成功或失败均不影响当前同步流程。
- */
-async function cleanupExpiredXuiSyncTasks(db) {
-  const startTime = Date.now();
-  try {
-    const cutoffCreatedAt = Math.floor(Date.now() / 1000) - XUI_SYNC_TASK_RETENTION_SECONDS;
-    const deleted = await xuiSyncRepository.deleteExpiredTerminalTasks(db, cutoffCreatedAt, XUI_SYNC_TASK_CLEANUP_LIMIT);
-    // 清理成功仅记录维护结果，不修改本轮同步统计。
-    logger.info(`3X-UI 同步任务历史清理完成: deleted=${deleted}, duration=${Date.now() - startTime}ms`);
-  } catch (error) {
-    // 清理失败仅记录错误，避免维护操作阻断同步流程或向调度器抛错。
-    const message = error?.message || String(error);
-    logger.error(`3X-UI 同步任务历史清理失败: error=${message}, duration=${Date.now() - startTime}ms`);
-  }
-}
-
-/**
  * 执行 3X-UI 同步重试队列
  * 根据任务类型分发到用户同步或启用/禁用同步逻辑。
  * @param {Object} db - 数据库实例
@@ -267,9 +244,8 @@ async function runXuiSyncTasks(db) {
       if (hasExecutableTasks || result.processed > 0) {
         logger.info(`3X-UI 同步重试队列任务执行结束: status=${status}, processed=${result.processed}, success=${result.success}, failed=${result.failed}, finalFailed=${result.finalFailed}, duration=${duration}ms`);
       }
-      await cleanupExpiredXuiSyncTasks(db);
     } finally {
-      // 即使清理 helper 出现未预期异常，也必须释放运行锁，允许下一轮继续执行。
+      // 即使结束日志出现未预期异常，也必须释放运行锁，允许下一轮继续执行。
       isXuiSyncTaskRunning = false;
     }
   }
