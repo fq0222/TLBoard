@@ -69,6 +69,7 @@ const indexStatements = [
   'CREATE INDEX IF NOT EXISTS idx_batch_subscription_task_items_task_status ON batch_subscription_task_items(task_id, status)',
   'CREATE INDEX IF NOT EXISTS idx_batch_subscription_task_items_user_id ON batch_subscription_task_items(user_id)',
   'CREATE INDEX IF NOT EXISTS idx_xui_sync_tasks_status_retry ON xui_sync_tasks(status, next_retry_at)',
+  'CREATE INDEX IF NOT EXISTS idx_xui_sync_tasks_status_created_at_id ON xui_sync_tasks(status, created_at, id)',
   'CREATE INDEX IF NOT EXISTS idx_xui_sync_tasks_user_id ON xui_sync_tasks(user_id)',
   'CREATE INDEX IF NOT EXISTS idx_announcements_enabled_created_at ON announcements(enabled, created_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_user_announcement_popup_stats_user_id ON user_announcement_popup_stats(user_id)',

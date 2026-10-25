@@ -273,6 +273,27 @@ async function listDueXuiSyncTasks(db, now, limit) {
 }
 
 /**
+ * 限量清理过期终态同步任务，保留 pending、processing 和截止时间边界记录。
+ * 直接调用连接池且不重试，避免删除已提交但响应丢失时重放下一批。
+ * @param {Object} db - 数据库代理对象。
+ * @param {number} cutoffCreatedAt - 创建时间截止值（Unix 秒），仅删除严格早于此值的任务。
+ * @param {number} limit - 单批最多删除的条数，按创建时间和 ID 升序选取。
+ * @returns {Promise<number>} 实际删除数量；仅处理 success 和 failed 终态。
+ */
+async function deleteExpiredTerminalTasks(db, cutoffCreatedAt, limit) {
+  const result = await db.pool.query(`
+    WITH expired_tasks AS (
+      SELECT id FROM xui_sync_tasks
+      WHERE status IN ('success', 'failed') AND created_at < $1
+      ORDER BY created_at ASC, id ASC
+      LIMIT $2
+    )
+    DELETE FROM xui_sync_tasks WHERE id IN (SELECT id FROM expired_tasks)
+  `, [cutoffCreatedAt, limit]);
+  return Number(result.rowCount || 0);
+}
+
+/**
  * 标记同步任务处理中。
  *
  * @param {Object} db - 数据库代理对象
@@ -466,6 +487,7 @@ module.exports = {
   supersedePendingUserSyncTasks,
   insertXuiSyncTask,
   listDueXuiSyncTasks,
+  deleteExpiredTerminalTasks,
   markXuiSyncTaskProcessing,
   markXuiSyncTaskSuccess,
   markXuiSyncTaskRetry,
