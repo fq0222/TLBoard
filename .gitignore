@@ -168,6 +168,7 @@ server/test/*
 !server/test/test-rate-limiter-ip.js
 !server/test/test-db-pool-diagnostics.js
 !server/test/test-xui-service-v325.js
+!server/test/test-xui-sync-task-cleanup.js
 server/config.js
 server/uploads/
 server/backupDB/

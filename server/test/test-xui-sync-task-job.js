@@ -4,13 +4,15 @@ const Module = require('node:module');
 
 /**
  * 使用替身加载 3X-UI 重试队列 handler，避免真实服务依赖影响调度间隔断言。
- * @returns {{handler:Object,logs:string[],restore:Function}} 已隔离的 handler 与恢复函数。
+ * @param {Object} overrides - 需要覆盖的服务与仓储依赖。
+ * @returns {{handler:Object,logs:string[],logEntries:Object[],restore:Function}} 已隔离的 handler、分级日志与恢复函数。
  */
 function loadHandlerForTest(overrides = {}) {
   const handlerPath = require.resolve('../jobs/handlers/sync-xui-tasks');
   const originalCache = require.cache[handlerPath];
   const originalLoad = Module._load;
   const logs = [];
+  const logEntries = [];
 
   delete require.cache[handlerPath];
   const dependencies = {
@@ -19,8 +21,11 @@ function loadHandlerForTest(overrides = {}) {
     '../../services/user/subscription-service': {},
     '../../services/user/subscription-credential-rotation-service': {},
     '../../integrations/xui/xui-sync-task-service': {},
-    '../../repositories/xui-sync-repository': {},
-    ...overrides
+    ...overrides,
+    '../../repositories/xui-sync-repository': {
+      deleteExpiredTerminalTasks: async () => 0,
+      ...overrides['../../repositories/xui-sync-repository']
+    }
   };
 
   Module._load = function patchedLoad(request, parent, isMain) {
@@ -28,9 +33,18 @@ function loadHandlerForTest(overrides = {}) {
     if (request === '../../utils/logger') {
       return {
         createLogger: () => ({
-          info: message => logs.push(message),
-          warn: () => {},
-          error: () => {}
+          info: message => {
+            logs.push(message);
+            logEntries.push({ level: 'info', message });
+          },
+          warn: message => {
+            logs.push(message);
+            logEntries.push({ level: 'warn', message });
+          },
+          error: message => {
+            logs.push(message);
+            logEntries.push({ level: 'error', message });
+          }
         })
       };
     }
@@ -45,6 +59,7 @@ function loadHandlerForTest(overrides = {}) {
   return {
     handler,
     logs,
+    logEntries,
     restore: () => {
       Module._load = originalLoad;
       if (originalCache) {
@@ -211,6 +226,180 @@ test('凭证轮换任务用户不存在时安全结束', async () => {
     assert.equal(rotationCalls, 0);
     assert.deepEqual(handlerResult, { success: true, message: '用户不存在，任务已跳过' });
   } finally {
+    restore();
+  }
+});
+
+/** 缺少批次末尾清理、截止时间或批量参数错误时，应无法满足仓储调用及完成日志契约。 */
+test('同步批次结束后按 15 天截止时间清理最多 50 条', async () => {
+  const originalNow = Date.now;
+  let now = 1800000000789;
+  Date.now = () => now;
+  const db = { marker: 'cleanup-db' };
+  const calls = [];
+  const { handler, logs, logEntries, restore } = loadHandlerForTest({
+    '../../integrations/xui/xui-sync-task-service': {
+      async processDueTasks(receivedDb) {
+        assert.equal(receivedDb, db);
+        calls.push('process-start');
+        await Promise.resolve();
+        now += 10;
+        calls.push('process-end');
+        return { processed: 4, success: 2, failed: 1, finalFailed: 1 };
+      }
+    },
+    '../../repositories/xui-sync-repository': {
+      async deleteExpiredTerminalTasks(receivedDb, cutoff, limit) {
+        calls.push('cleanup');
+        assert.equal(receivedDb, db);
+        assert.equal(cutoff, 1798704000);
+        assert.equal(limit, 50);
+        now += 7;
+        return 3;
+      }
+    }
+  });
+
+  try {
+    await assert.doesNotReject(() => handler.runXuiSyncTasks(db));
+    assert.deepEqual(calls, ['process-start', 'process-end', 'cleanup']);
+    const summaryIndex = logs.findIndex(message => message.includes('status=success, processed=4, success=2, failed=1, finalFailed=1, duration=10ms'));
+    const cleanupIndex = logs.findIndex(message => message.includes('deleted=3, duration=7ms'));
+    assert.ok(summaryIndex >= 0);
+    assert.ok(cleanupIndex > summaryIndex);
+    assert.ok(logEntries.some(entry => entry.level === 'info' && entry.message.includes('deleted=3, duration=7ms')));
+    assert.ok(!logEntries.some(entry => entry.level === 'error'));
+  } finally {
+    Date.now = originalNow;
+    restore();
+  }
+});
+
+/** 空队列不能提前结束 worker，否则没有新增任务时过期历史将永远得不到清理。 */
+test('没有到期同步任务时仍执行历史清理', async () => {
+  const originalNow = Date.now;
+  Date.now = () => 1800000000789;
+  const calls = [];
+  const { handler, logEntries, restore } = loadHandlerForTest({
+    '../../integrations/xui/xui-sync-task-service': {
+      async processDueTasks() {
+        calls.push('process');
+        return { processed: 0, success: 0, failed: 0, finalFailed: 0 };
+      }
+    },
+    '../../repositories/xui-sync-repository': {
+      async deleteExpiredTerminalTasks() {
+        calls.push('cleanup');
+        return 0;
+      }
+    }
+  });
+
+  try {
+    await assert.doesNotReject(() => handler.runXuiSyncTasks({}));
+    assert.deepEqual(calls, ['process', 'cleanup']);
+    assert.ok(logEntries.some(entry => entry.level === 'info' && entry.message.includes('deleted=0, duration=0ms')));
+  } finally {
+    Date.now = originalNow;
+    restore();
+  }
+});
+
+/** 清理放在正常成功分支会遗漏同步异常路径；异常不能向调度器传播。 */
+test('同步处理抛错后仍执行历史清理', async () => {
+  const originalNow = Date.now;
+  Date.now = () => 1800000000789;
+  const calls = [];
+  const { handler, logEntries, restore } = loadHandlerForTest({
+    '../../integrations/xui/xui-sync-task-service': {
+      async processDueTasks() {
+        calls.push('process');
+        throw new Error('同步处理失败');
+      }
+    },
+    '../../repositories/xui-sync-repository': {
+      async deleteExpiredTerminalTasks() {
+        calls.push('cleanup');
+        return 0;
+      }
+    }
+  });
+
+  try {
+    await assert.doesNotReject(() => handler.runXuiSyncTasks({}));
+    assert.deepEqual(calls, ['process', 'cleanup']);
+    assert.ok(logEntries.some(entry => entry.level === 'error' && entry.message.includes('同步处理失败')));
+    assert.ok(logEntries.some(entry => entry.level === 'info' && entry.message.includes('deleted=0, duration=0ms')));
+  } finally {
+    Date.now = originalNow;
+    restore();
+  }
+});
+
+/** 清理异常必须被隔离并释放锁，否则异常会终止 worker 或让下一轮永久跳过。 */
+test('历史清理失败只写错误日志且不影响下一轮执行', async () => {
+  const originalNow = Date.now;
+  let now = 1800000000789;
+  Date.now = () => now;
+  let processCalls = 0;
+  let cleanupCalls = 0;
+  const { handler, logEntries, restore } = loadHandlerForTest({
+    '../../integrations/xui/xui-sync-task-service': {
+      async processDueTasks() {
+        processCalls++;
+        return { processed: 0, success: 0, failed: 0, finalFailed: 0 };
+      }
+    },
+    '../../repositories/xui-sync-repository': {
+      async deleteExpiredTerminalTasks() {
+        cleanupCalls++;
+        if (cleanupCalls === 1) {
+          now += 17;
+          throw new Error('历史清理数据库不可用');
+        }
+        return 0;
+      }
+    }
+  });
+
+  try {
+    await assert.doesNotReject(() => handler.runXuiSyncTasks({}));
+    assert.equal(cleanupCalls, 1);
+    assert.deepEqual(logEntries.map(entry => entry.level), ['error']);
+    assert.ok(logEntries[0].message.includes('error=历史清理数据库不可用, duration=17ms'));
+    await assert.doesNotReject(() => handler.runXuiSyncTasks({}));
+    assert.equal(processCalls, 2);
+    assert.equal(cleanupCalls, 2);
+    assert.equal(logEntries.filter(entry => entry.level === 'error').length, 1);
+    assert.ok(logEntries.some(entry => entry.level === 'info' && entry.message.includes('deleted=0, duration=0ms')));
+  } finally {
+    Date.now = originalNow;
+    restore();
+  }
+});
+
+/** 仓储拒绝值未携带 message 时，也必须记录原因并保持 worker 正常结束。 */
+test('历史清理抛出 null 时仍隔离错误并记录耗时', async () => {
+  const originalNow = Date.now;
+  Date.now = () => 1800000000789;
+  const { handler, logEntries, restore } = loadHandlerForTest({
+    '../../integrations/xui/xui-sync-task-service': {
+      processDueTasks: async () => ({ processed: 0, success: 0, failed: 0, finalFailed: 0 })
+    },
+    '../../repositories/xui-sync-repository': {
+      async deleteExpiredTerminalTasks() {
+        throw null;
+      }
+    }
+  });
+
+  try {
+    await assert.doesNotReject(() => handler.runXuiSyncTasks({}));
+    assert.equal(logEntries.length, 1);
+    assert.equal(logEntries[0].level, 'error');
+    assert.ok(logEntries[0].message.includes('error=null, duration=0ms'));
+  } finally {
+    Date.now = originalNow;
     restore();
   }
 });
