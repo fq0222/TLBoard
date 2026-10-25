@@ -169,6 +169,8 @@ server/test/*
 !server/test/test-db-pool-diagnostics.js
 !server/test/test-xui-service-v325.js
 !server/test/test-xui-sync-task-cleanup.js
+!server/test/test-clean-xui-sync-tasks-job.js
+!server/test/test-telegram-health-sync.js
 server/config.js
 server/uploads/
 server/backupDB/

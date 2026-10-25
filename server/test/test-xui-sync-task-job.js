@@ -230,13 +230,14 @@ test('凭证轮换任务用户不存在时安全结束', async () => {
   }
 });
 
-/** 缺少批次末尾清理、截止时间或批量参数错误时，应无法满足仓储调用及完成日志契约。 */
-test('同步批次结束后按 15 天截止时间清理最多 50 条', async () => {
+/** 同步批次只记录业务统计，不再执行或记录历史清理。 */
+test('同步批次结束后保留同步统计且不执行历史清理', async () => {
   const originalNow = Date.now;
   let now = 1800000000789;
   Date.now = () => now;
-  const db = { marker: 'cleanup-db' };
+  const db = { marker: 'sync-db' };
   const calls = [];
+  let cleanupCalls = 0;
   const { handler, logs, logEntries, restore } = loadHandlerForTest({
     '../../integrations/xui/xui-sync-task-service': {
       async processDueTasks(receivedDb) {
@@ -249,12 +250,8 @@ test('同步批次结束后按 15 天截止时间清理最多 50 条', async () 
       }
     },
     '../../repositories/xui-sync-repository': {
-      async deleteExpiredTerminalTasks(receivedDb, cutoff, limit) {
-        calls.push('cleanup');
-        assert.equal(receivedDb, db);
-        assert.equal(cutoff, 1798704000);
-        assert.equal(limit, 50);
-        now += 7;
+      async deleteExpiredTerminalTasks() {
+        cleanupCalls++;
         return 3;
       }
     }
@@ -262,12 +259,10 @@ test('同步批次结束后按 15 天截止时间清理最多 50 条', async () 
 
   try {
     await assert.doesNotReject(() => handler.runXuiSyncTasks(db));
-    assert.deepEqual(calls, ['process-start', 'process-end', 'cleanup']);
-    const summaryIndex = logs.findIndex(message => message.includes('status=success, processed=4, success=2, failed=1, finalFailed=1, duration=10ms'));
-    const cleanupIndex = logs.findIndex(message => message.includes('deleted=3, duration=7ms'));
-    assert.ok(summaryIndex >= 0);
-    assert.ok(cleanupIndex > summaryIndex);
-    assert.ok(logEntries.some(entry => entry.level === 'info' && entry.message.includes('deleted=3, duration=7ms')));
+    assert.deepEqual(calls, ['process-start', 'process-end']);
+    assert.equal(cleanupCalls, 0);
+    assert.ok(logs.some(message => message.includes('status=success, processed=4, success=2, failed=1, finalFailed=1, duration=10ms')));
+    assert.ok(!logs.some(message => message.includes('历史清理')));
     assert.ok(!logEntries.some(entry => entry.level === 'error'));
   } finally {
     Date.now = originalNow;
@@ -275,75 +270,11 @@ test('同步批次结束后按 15 天截止时间清理最多 50 条', async () 
   }
 });
 
-/** 空队列不能提前结束 worker，否则没有新增任务时过期历史将永远得不到清理。 */
-test('没有到期同步任务时仍执行历史清理', async () => {
-  const originalNow = Date.now;
-  Date.now = () => 1800000000789;
-  const calls = [];
-  const { handler, logEntries, restore } = loadHandlerForTest({
-    '../../integrations/xui/xui-sync-task-service': {
-      async processDueTasks() {
-        calls.push('process');
-        return { processed: 0, success: 0, failed: 0, finalFailed: 0 };
-      }
-    },
-    '../../repositories/xui-sync-repository': {
-      async deleteExpiredTerminalTasks() {
-        calls.push('cleanup');
-        return 0;
-      }
-    }
-  });
-
-  try {
-    await assert.doesNotReject(() => handler.runXuiSyncTasks({}));
-    assert.deepEqual(calls, ['process', 'cleanup']);
-    assert.ok(logEntries.some(entry => entry.level === 'info' && entry.message.includes('deleted=0, duration=0ms')));
-  } finally {
-    Date.now = originalNow;
-    restore();
-  }
-});
-
-/** 清理放在正常成功分支会遗漏同步异常路径；异常不能向调度器传播。 */
-test('同步处理抛错后仍执行历史清理', async () => {
-  const originalNow = Date.now;
-  Date.now = () => 1800000000789;
-  const calls = [];
-  const { handler, logEntries, restore } = loadHandlerForTest({
-    '../../integrations/xui/xui-sync-task-service': {
-      async processDueTasks() {
-        calls.push('process');
-        throw new Error('同步处理失败');
-      }
-    },
-    '../../repositories/xui-sync-repository': {
-      async deleteExpiredTerminalTasks() {
-        calls.push('cleanup');
-        return 0;
-      }
-    }
-  });
-
-  try {
-    await assert.doesNotReject(() => handler.runXuiSyncTasks({}));
-    assert.deepEqual(calls, ['process', 'cleanup']);
-    assert.ok(logEntries.some(entry => entry.level === 'error' && entry.message.includes('同步处理失败')));
-    assert.ok(logEntries.some(entry => entry.level === 'info' && entry.message.includes('deleted=0, duration=0ms')));
-  } finally {
-    Date.now = originalNow;
-    restore();
-  }
-});
-
-/** 清理异常必须被隔离并释放锁，否则异常会终止 worker 或让下一轮永久跳过。 */
-test('历史清理失败只写错误日志且不影响下一轮执行', async () => {
-  const originalNow = Date.now;
-  let now = 1800000000789;
-  Date.now = () => now;
+/** 空队列连续执行仍应释放运行锁，且不能调用清理仓储或输出清理日志。 */
+test('空队列不执行历史清理且下一轮仍可运行', async () => {
   let processCalls = 0;
   let cleanupCalls = 0;
-  const { handler, logEntries, restore } = loadHandlerForTest({
+  const { handler, logs, restore } = loadHandlerForTest({
     '../../integrations/xui/xui-sync-task-service': {
       async processDueTasks() {
         processCalls++;
@@ -353,10 +284,6 @@ test('历史清理失败只写错误日志且不影响下一轮执行', async ()
     '../../repositories/xui-sync-repository': {
       async deleteExpiredTerminalTasks() {
         cleanupCalls++;
-        if (cleanupCalls === 1) {
-          now += 17;
-          throw new Error('历史清理数据库不可用');
-        }
         return 0;
       }
     }
@@ -364,42 +291,52 @@ test('历史清理失败只写错误日志且不影响下一轮执行', async ()
 
   try {
     await assert.doesNotReject(() => handler.runXuiSyncTasks({}));
-    assert.equal(cleanupCalls, 1);
-    assert.deepEqual(logEntries.map(entry => entry.level), ['error']);
-    assert.ok(logEntries[0].message.includes('error=历史清理数据库不可用, duration=17ms'));
     await assert.doesNotReject(() => handler.runXuiSyncTasks({}));
     assert.equal(processCalls, 2);
-    assert.equal(cleanupCalls, 2);
-    assert.equal(logEntries.filter(entry => entry.level === 'error').length, 1);
-    assert.ok(logEntries.some(entry => entry.level === 'info' && entry.message.includes('deleted=0, duration=0ms')));
+    assert.equal(cleanupCalls, 0);
+    assert.ok(!logs.some(message => message.includes('历史清理')));
+    assert.ok(!logs.some(message => message.includes('上一轮仍在执行')));
   } finally {
-    Date.now = originalNow;
     restore();
   }
 });
 
-/** 仓储拒绝值未携带 message 时，也必须记录原因并保持 worker 正常结束。 */
-test('历史清理抛出 null 时仍隔离错误并记录耗时', async () => {
-  const originalNow = Date.now;
-  Date.now = () => 1800000000789;
-  const { handler, logEntries, restore } = loadHandlerForTest({
+/** 同步异常仅记录业务错误并释放锁，下一轮继续处理任务而不触发历史清理。 */
+test('同步处理抛错后不执行历史清理且下一轮仍可运行', async () => {
+  let processCalls = 0;
+  let cleanupCalls = 0;
+  const { handler, logs, logEntries, restore } = loadHandlerForTest({
     '../../integrations/xui/xui-sync-task-service': {
-      processDueTasks: async () => ({ processed: 0, success: 0, failed: 0, finalFailed: 0 })
+      async processDueTasks(db, handleTask, options) {
+        processCalls++;
+        options.onStart([{ id: processCalls }]);
+        if (processCalls === 1) {
+          throw new Error('同步处理失败');
+        }
+        return { processed: 1, success: 1, failed: 0, finalFailed: 0 };
+      }
     },
     '../../repositories/xui-sync-repository': {
       async deleteExpiredTerminalTasks() {
-        throw null;
+        cleanupCalls++;
+        return 0;
       }
     }
   });
 
   try {
     await assert.doesNotReject(() => handler.runXuiSyncTasks({}));
-    assert.equal(logEntries.length, 1);
-    assert.equal(logEntries[0].level, 'error');
-    assert.ok(logEntries[0].message.includes('error=null, duration=0ms'));
+    await assert.doesNotReject(() => handler.runXuiSyncTasks({}));
+    assert.equal(processCalls, 2);
+    assert.equal(cleanupCalls, 0);
+    assert.equal(logEntries.filter(entry => entry.level === 'error').length, 1);
+    assert.ok(logEntries.some(entry => entry.level === 'error'
+      && entry.message === '3X-UI 同步重试队列执行错误: 同步处理失败'));
+    assert.ok(logs.some(message => message.includes('任务执行结束: status=failed, processed=0')));
+    assert.ok(logs.some(message => message.includes('任务执行结束: status=success, processed=1, success=1')));
+    assert.ok(!logs.some(message => message.includes('历史清理')));
+    assert.ok(!logs.some(message => message.includes('上一轮仍在执行')));
   } finally {
-    Date.now = originalNow;
     restore();
   }
 });

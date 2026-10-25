@@ -32,7 +32,7 @@ async function waitFor(predicate, timeoutMs = 500) {
 }
 
 /**
- * 使用隔离模块替身加载任务中心，并记录清理行为。
+ * 使用隔离模块替身加载任务中心，记录注册器的上下文和句柄清理行为。
  * 注册异常分支由 throwOnRegister 控制；restore 必须在测试结束时调用以恢复模块缓存和全局函数。
  *
  * @param {{throwOnRegister: boolean}} options - 是否在第二个任务注册器中抛出异常
@@ -48,6 +48,7 @@ function loadJobsIndexForTest({ throwOnRegister }) {
     ['../jobs/handlers/clean-zombie-users', 'registerCleanZombieUsersJob'],
     ['../jobs/handlers/sync-xui-users', 'registerXuiSyncJob'],
     ['../jobs/handlers/sync-xui-tasks', 'registerXuiSyncTaskJob'],
+    ['../jobs/handlers/clean-xui-sync-tasks', 'registerCleanXuiSyncTasksJob'],
     ['../jobs/handlers/sync-traffic', 'registerTrafficSyncJob'],
     ['../jobs/handlers/auto-close-tickets', 'registerTicketAutoCloseJob'],
     ['../jobs/handlers/process-email-campaigns', 'registerEmailCampaignJob'],
@@ -70,6 +71,7 @@ function loadJobsIndexForTest({ throwOnRegister }) {
   const originalClearInterval = global.clearInterval;
   const originalClearTimeout = global.clearTimeout;
   const cleared = [];
+  const registrations = [];
   let stopCount = 0;
 
   const stubModule = (modulePath, exports) => {
@@ -99,12 +101,17 @@ function loadJobsIndexForTest({ throwOnRegister }) {
   handlerStubs.forEach(([request, exportName], index) => {
     stubModule(require.resolve(request), {
       [exportName]: context => {
+        registrations.push({ name: exportName, context });
         if (index === 0) {
           context.intervals.push('interval');
           context.timeouts.push('timeout');
           context.cronTasks.push({
             stop: () => cleared.push('cron')
           });
+        }
+        // 独立清理 cron 应由任务中心统一停止，不能遗留运行中的句柄。
+        if (exportName === 'registerCleanXuiSyncTasksJob') {
+          context.cronTasks.push({ stop: () => cleared.push('cleanup-cron') });
         }
         if (throwOnRegister && index === 1) {
           throw new Error('注册失败');
@@ -118,6 +125,7 @@ function loadJobsIndexForTest({ throwOnRegister }) {
 
   return {
     jobs,
+    registrations,
     schedulerStopCount: () => stopCount,
     clearedHandles: () => [...cleared],
     restore: () => {
@@ -188,17 +196,30 @@ test('四个指定定时任务接入统一调度器', () => {
   ]);
 });
 
-test('正常停止会停止调度器并清理全部已注册句柄', t => {
+test('任务中心只注册一次同步历史清理并共享上下文，停止时清理全部句柄', t => {
   const observation = loadJobsIndexForTest({ throwOnRegister: false });
   t.after(observation.restore);
-  observation.jobs.startAllJobs({});
+  const db = { marker: 'jobs-db' };
+  observation.jobs.startAllJobs(db);
+  observation.jobs.startAllJobs(db);
   observation.jobs.stopAllJobs();
 
+  const cleanupRegistrations = observation.registrations.filter(
+    registration => registration.name === 'registerCleanXuiSyncTasksJob'
+  );
+  assert.equal(cleanupRegistrations.length, 1);
+  const { context } = cleanupRegistrations[0];
+  assert.equal(context.db, db);
+  assert.ok(Array.isArray(context.cronTasks));
+  assert.ok(observation.registrations.every(registration => registration.context === context));
+  assert.equal(new Set(observation.registrations.map(registration => registration.name)).size,
+    observation.registrations.length);
   assert.equal(observation.schedulerStopCount(), 1);
   assert.deepEqual(observation.clearedHandles(), [
     'interval',
     'timeout',
-    'cron'
+    'cron',
+    'cleanup-cron'
   ]);
 });
 
