@@ -5,31 +5,7 @@
 
 const axios = require('axios');
 const xuiActivityTracker = require('../../utils/xui-activity-tracker');
-
-/**
- * 构建 Axios 代理配置。
- * @param {Object} [proxy={}] - 代理开关及连接参数。
- * @returns {false|Object} 关闭代理时返回 false，否则返回经过校验的代理配置。
- */
-function buildProxyConfig(proxy = {}) {
-  if (!proxy.enabled) return false;
-
-  const protocol = String(proxy.protocol || '').trim().replace(/:$/, '');
-  const host = String(proxy.host || '').trim();
-  const port = Number(proxy.port);
-  if (!host) throw new Error('3X-UI 代理主机不能为空');
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('3X-UI 代理端口无效');
-  if (!['http', 'https'].includes(protocol)) throw new Error('3X-UI 代理协议仅支持 http 或 https');
-
-  const result = { protocol, host, port };
-  const username = String(proxy.username || '');
-  const password = String(proxy.password || '');
-  if ((username && !password) || (!username && password)) {
-    throw new Error('3X-UI 代理用户名和密码必须同时配置');
-  }
-  if (username || password) result.auth = { username, password };
-  return result;
-}
+const { buildXuiProxyConfig } = require('./xui-proxy-config');
 
 /**
  * 归一化客户端启用状态。
@@ -65,7 +41,7 @@ class XuiApiClientV3102 {
     this.api = axios.create({
       baseURL: this.baseURL,
       timeout: options.timeout || 30000,
-      proxy: buildProxyConfig(options.proxy),
+      proxy: buildXuiProxyConfig(options.proxy),
       maxRedirects: 5,
       validateStatus: (status) => status >= 200 && status < 300,
       headers: {
