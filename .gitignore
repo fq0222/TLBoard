@@ -152,6 +152,7 @@ server/test/*
 !server/test/test-blog-articles.js
 !server/test/migrate-xui-traffic.js
 !server/test/test-user-subscription-service.js
+!server/test/test-subscription-service.js
 !server/test/test-user-onboarding.js
 !server/test/test-telegram-health-status.js
 !server/test/test-telegram-internal-rate-limit.js

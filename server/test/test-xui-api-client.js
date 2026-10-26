@@ -74,10 +74,29 @@ async function run() {
   const XuiApiClient = require('../integrations/xui/xui-api-client');
   const XuiApiClientV325 = require('../integrations/xui/xui-api-client-v325');
   const XuiApiClientV3102 = require('../integrations/xui/xui-api-client-v3102');
+  const { buildXuiProxyConfig } = require('../integrations/xui/xui-proxy-config');
   const {
     createXuiApiClient,
     resolveClientVersion
   } = require('../integrations/xui/xui-api-client-factory');
+
+  // 公共构建器需统一处理关闭、协议归一化、认证与无效配置。
+  assert.strictEqual(buildXuiProxyConfig(), false);
+  assert.strictEqual(buildXuiProxyConfig({ enabled: false, host: 'ignored' }), false);
+  assert.deepStrictEqual(buildXuiProxyConfig({
+    enabled: true,
+    protocol: ' https: ',
+    host: ' 127.0.0.1 ',
+    port: '27891',
+    username: 'user',
+    password: 'pass'
+  }), {
+    protocol: 'https',
+    host: '127.0.0.1',
+    port: 27891,
+    auth: { username: 'user', password: 'pass' }
+  });
+  assert.throws(() => buildXuiProxyConfig({ enabled: true, protocol: 'socks5', host: 'localhost', port: 80 }), /3X-UI 代理协议仅支持 http 或 https/);
 
   const client = new XuiApiClient('https://xui.example.com/', 'secret-token', { timeout: 1234 });
   const factoryResult = createXuiApiClient('https://xui.example.com/', 'secret-token', { timeout: 5678 });

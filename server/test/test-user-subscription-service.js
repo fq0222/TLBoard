@@ -473,6 +473,7 @@ async function testDefaultSubscriptionContentShouldReturnBase64AndUserinfo() {
  * @returns {Promise<void>}
  */
 async function testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgroundCooldown() {
+  const service = new sharedSubscriptionService.SubscriptionService({ proxy: { enabled: false } });
   const observedActiveCounts = [];
   const backgroundCountBefore = xuiActivityTracker.getBackgroundRequestCount();
   const server = http.createServer((req, res) => {
@@ -485,7 +486,7 @@ async function testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgrou
 
   try {
     const { port } = server.address();
-    const content = await sharedSubscriptionService.fetchOriginalSubscription(
+    const content = await service.fetchOriginalSubscription(
       `http://127.0.0.1:${port}/sub/`,
       'token',
       { timeout: 1000 }
@@ -510,6 +511,7 @@ async function testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgrou
  * @returns {Promise<void>}
  */
 async function testFetchOriginalSubscriptionShouldExposeStableTimeoutCode() {
+  const service = new sharedSubscriptionService.SubscriptionService({ proxy: { enabled: false } });
   const server = http.createServer((req, res) => {
     setTimeout(() => res.end('late response'), 100);
   });
@@ -518,7 +520,7 @@ async function testFetchOriginalSubscriptionShouldExposeStableTimeoutCode() {
   try {
     const { port } = server.address();
     await assert.rejects(
-      sharedSubscriptionService.fetchOriginalSubscription(
+      service.fetchOriginalSubscription(
         `http://127.0.0.1:${port}/sub/`,
         'token',
         { timeout: 10 }
@@ -2061,6 +2063,48 @@ async function testGenerateSubscriptionShouldAskForSpeedChannelOptimization() {
   }
 }
 
+/**
+ * 验证后台订阅拉取先等待前台空闲，HTTP 失败后也释放活动计数。
+ * @returns {Promise<void>} 请求结束且追踪器恢复原状态后完成。
+ */
+async function testBackgroundSubscriptionWaitsAndReleasesActivityAfterFailure() {
+  const service = new sharedSubscriptionService.SubscriptionService({ proxy: { enabled: false } });
+  const originalWait = xuiActivityTracker.waitForForegroundIdle;
+  const observedCounts = [];
+  let waited = false;
+  let releaseIdle;
+  const gate = new Promise(resolve => { releaseIdle = resolve; });
+  const server = http.createServer((request, response) => {
+    observedCounts.push(xuiActivityTracker.getActiveCount());
+    response.writeHead(503);
+    response.end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  xuiActivityTracker.reset();
+  xuiActivityTracker.waitForForegroundIdle = async () => { waited = true; await gate; };
+  let pending;
+  try {
+    pending = xuiActivityTracker.runAsBackground(() => service.fetchOriginalSubscription(
+      `http://127.0.0.1:${server.address().port}/sub/`, 'token', { timeout: 1000 }
+    ));
+    assert.strictEqual(waited, true);
+    assert.deepStrictEqual(observedCounts, []);
+    assert.strictEqual(xuiActivityTracker.getActiveCount(), 0);
+    releaseIdle();
+    await assert.rejects(pending, { message: '获取原始订阅失败，HTTP 状态码: 503' });
+    assert.deepStrictEqual(observedCounts, [1]);
+    assert.strictEqual(xuiActivityTracker.getBackgroundRequestCount(), 1);
+    assert.strictEqual(xuiActivityTracker.getActiveCount(), 0);
+  } finally {
+    releaseIdle();
+    if (pending) await pending.catch(() => {});
+    xuiActivityTracker.waitForForegroundIdle = originalWait;
+    xuiActivityTracker.reset();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
 async function run() {
   let rotationFailures = 0;
   for (const test of [testMergeReplacesOnlySuccessfulServerNodes, testAllServersFailKeepsWholeBaselineUnderNewToken,
@@ -2079,6 +2123,7 @@ async function run() {
   await testDefaultSubscriptionContentShouldReturnBase64AndUserinfo();
   await testFetchOriginalSubscriptionShouldTrackForegroundWithoutBackgroundCooldown();
   await testFetchOriginalSubscriptionShouldExposeStableTimeoutCode();
+  await testBackgroundSubscriptionWaitsAndReleasesActivityAfterFailure();
   await testClashSubscriptionShouldRenderYaml();
   await testActiveHomeRouteShouldDecorateSubscriptionFormats();
   await testDisabledHomeNodePrefixShouldKeepSubscriptionNames();
