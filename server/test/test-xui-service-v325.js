@@ -375,6 +375,101 @@ async function testUpsertServerClientVerifiesUnknownAttachResult() {
   }
 }
 
+/**
+ * 验证强制修复只绕过字段差异判断，不绕过服务器级客户端查询。
+ * 普通一致调用不得产生写入，巡检显式强制时必须重写完整客户端。
+ */
+async function testUpsertServerClientForceUpdateRepairsMatchingClient() {
+  const desired = {
+    id: 'uuid-repair',
+    password: 'password-repair',
+    auth: 'auth-repair',
+    email: 'repair@example.com',
+    enable: true,
+    expiryTime: 0,
+    totalGB: 1024,
+    limitIp: 0,
+    tgId: 0,
+    subId: 'sub-repair',
+    flow: 'xtls-rprx-vision'
+  };
+  let lookupCalls = 0;
+  let updateCalls = 0;
+  const service = createServiceWithClient({
+    supportsClientApi: true,
+    async getClientByEmail(email) {
+      lookupCalls += 1;
+      assert.strictEqual(email, desired.email);
+      return { success: true, obj: { client: { ...desired }, inboundIds: [10] } };
+    },
+    async updateClient(email, client) {
+      updateCalls += 1;
+      assert.strictEqual(email, desired.email);
+      assert.deepStrictEqual(client, desired);
+      return { success: true, msg: 'repaired' };
+    }
+  });
+
+  const normalResult = await service.upsertServerClient({
+    email: desired.email,
+    inboundIds: [10],
+    client: desired
+  });
+  assert.strictEqual(normalResult.success, true);
+  assert.strictEqual(normalResult.action, 'noop');
+  assert.strictEqual(updateCalls, 0);
+
+  const repairResult = await service.upsertServerClient({
+    email: desired.email,
+    inboundIds: [10],
+    client: desired,
+    forceUpdate: true
+  });
+  assert.strictEqual(repairResult.success, true);
+  assert.strictEqual(repairResult.action, 'repair');
+  assert.strictEqual(updateCalls, 1);
+  assert.strictEqual(lookupCalls, 2);
+}
+
+/**
+ * 验证仅为修复 inbound 投影而强制写入时，既有 canonical 状态不能用于确认未知写结果。
+ * 否则 update 在真正写入前断网，也会被原本一致的 clients API 结果误报为修复成功。
+ */
+async function testForceUpdateDoesNotVerifyUnknownWriteFromPreexistingState() {
+  const desired = {
+    id: 'uuid-uncertain-repair',
+    password: 'password-uncertain-repair',
+    auth: 'auth-uncertain-repair',
+    email: 'uncertain-repair@example.com',
+    enable: true,
+    expiryTime: 0,
+    totalGB: 1024,
+    subId: 'sub-uncertain-repair'
+  };
+  let lookupCalls = 0;
+  const service = createServiceWithClient({
+    supportsClientApi: true,
+    async getClientByEmail() {
+      lookupCalls += 1;
+      return { success: true, obj: { client: { ...desired }, inboundIds: [10] } };
+    },
+    async updateClient() {
+      throw new Error('connection closed before repair response');
+    }
+  });
+
+  const result = await service.upsertServerClient({
+    email: desired.email,
+    inboundIds: [10],
+    client: desired,
+    forceUpdate: true
+  });
+
+  assert.strictEqual(result.success, false);
+  assert.strictEqual(result.retryable, true);
+  assert.strictEqual(lookupCalls, 1);
+}
+
 async function testUpsertServerClientUpdatesAndAttachesMissingInbounds() {
   const calls = [];
   const service = createServiceWithClient({
@@ -474,6 +569,8 @@ async function run() {
   await testUpsertServerClientVerifiesUnknownAddResult();
   await testUpsertServerClientVerifiesUnknownUpdateResult();
   await testUpsertServerClientVerifiesUnknownAttachResult();
+  await testUpsertServerClientForceUpdateRepairsMatchingClient();
+  await testForceUpdateDoesNotVerifyUnknownWriteFromPreexistingState();
   await testUpsertServerClientUpdatesAndAttachesMissingInbounds();
   await testGetInboundsRetriesTransientNetworkError();
 

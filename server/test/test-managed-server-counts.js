@@ -172,29 +172,58 @@ test('六小时同步复用 inbounds 和待同步用户更新用户数且不查�
   assert.deepEqual(savedUserCount, { serverId: 10, userCount: 2 });
 });
 
-test('六小时任务的真实服务器同步入口会写入用户数缓存', async () => {
+test('六小时任务写入用户数缓存并强制修复缺失 password 的 inbound 投影', async () => {
   let savedUserCount = null;
+  let upsertPayload = null;
   const silentLogger = { info() {}, warn() {}, error() {} };
+  const localConfig = {
+    inbound_id: 1,
+    uuid: 'uuid-a',
+    password: 'password-a',
+    auth: 'authvalue0000000',
+    sub_id: 'abcdef0123456789'
+  };
   const inbounds = [{
     id: 1,
     remark: 'direct',
     protocol: 'vless',
     clientStats: [{ email: 'a@example.com' }],
-    settings: JSON.stringify({ clients: [] })
+    settings: JSON.stringify({
+      clients: [{
+        email: 'a@example.com',
+        id: localConfig.uuid,
+        auth: localConfig.auth,
+        enable: true,
+        expiryTime: 0,
+        totalGB: 1024,
+        subId: localConfig.sub_id,
+        flow: 'xtls-rprx-vision'
+      }]
+    })
   }];
 
   await syncXuiUsers.__testables.syncUsersToServer(
     {},
     { id: 12, name: '后台同步服务器', panel_version: '3.4.2' },
-    [{ id: 1, email: 'a@example.com', enabled: 1, payment_count: 1 }],
+    [{
+      id: 1,
+      email: 'a@example.com',
+      enabled: 1,
+      expire_at: 0,
+      traffic_limit: 1024,
+      payment_count: 1
+    }],
     {
       logger: silentLogger,
       xuiService: {
         getInbounds: async () => ({ success: true, data: inbounds }),
-        upsertServerClient: async () => ({ success: true })
+        upsertServerClient: async (payload) => {
+          upsertPayload = payload;
+          return { success: true };
+        }
       },
       repository: {
-        listUserNodeConfigsByServer: async () => [],
+        listUserNodeConfigsByServer: async () => [localConfig],
         saveUserNodeConfig: async () => {}
       },
       serversRepository: {
@@ -210,6 +239,7 @@ test('六小时任务的真实服务器同步入口会写入用户数缓存', as
   );
 
   assert.deepEqual(savedUserCount, { serverId: 12, userCount: 1 });
+  assert.equal(upsertPayload.forceUpdate, true);
 });
 
 test('六小时同步没有有效用户时将服务器用户数缓存归零', async () => {
