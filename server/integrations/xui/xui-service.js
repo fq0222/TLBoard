@@ -706,13 +706,16 @@ class XuiService {
    * @param {string} email - canonical email。
    * @param {Object} desiredClient - 期望客户端字段。
    * @param {number[]} inboundIds - 核验时要求存在的关联。
+   * @param {Object} [options={}] - 未知写结果的处理选项。
+   * @param {boolean} [options.verifyUnknownResult=true] - 是否允许用 clients API 当前状态确认写入成功。
    * @returns {Promise<Object>} 原始写结果或核验后的统一结果。
    */
-  async executeVerifiedServerClientWrite(write, email, desiredClient, inboundIds) {
+  async executeVerifiedServerClientWrite(write, email, desiredClient, inboundIds, options = {}) {
+    const verifyUnknownResult = options.verifyUnknownResult !== false;
     try {
       return await write();
     } catch (error) {
-      if (await this.verifyServerClientWrite(email, desiredClient, inboundIds)) {
+      if (verifyUnknownResult && await this.verifyServerClientWrite(email, desiredClient, inboundIds)) {
         return { success: true, verified: true, msg: '写操作已通过只读查询确认' };
       }
       return { success: false, retryable: true, message: error.message };
@@ -727,6 +730,7 @@ class XuiService {
    * @param {string} payload.email - canonical email。
    * @param {number[]} payload.inboundIds - 目标 inbound ID 列表。
    * @param {Object} payload.client - 全量 client 凭证与状态。
+   * @param {boolean} [payload.forceUpdate=false] - 是否在字段一致时仍强制重写 inbound 客户端投影。
    * @returns {Promise<Object>} 同步结果。
    */
   async upsertServerClient(payload = {}) {
@@ -777,6 +781,7 @@ class XuiService {
         ...(payload.client || {}),
         email
       };
+      const forceUpdate = payload.forceUpdate === true;
       const existing = await this.getServerClientByEmail(email);
 
       if (existing.status === 'error') {
@@ -803,12 +808,18 @@ class XuiService {
           };
       }
 
-      if (this.shouldUpdateClient(existing.client, desiredClient)) {
+      const clientChanged = this.shouldUpdateClient(existing.client, desiredClient);
+      let action = 'noop';
+      if (forceUpdate || clientChanged) {
         const updateResult = await this.executeVerifiedServerClientWrite(
           () => this.client.updateClient(email, desiredClient),
           email,
           desiredClient,
-          existing.inboundIds
+          existing.inboundIds,
+          {
+            // canonical 原本一致时，再次查询无法证明强制修复确实重写了 inbound 投影。
+            verifyUnknownResult: clientChanged
+          }
         );
         if (!updateResult.success) {
           return {
@@ -817,6 +828,7 @@ class XuiService {
             message: updateResult.msg || updateResult.message || '更新服务器级客户端失败'
           };
         }
+        action = forceUpdate ? 'repair' : 'update';
       }
 
       const existingIds = new Set(this.normalizeInboundIds(existing.inboundIds));
@@ -835,11 +847,14 @@ class XuiService {
             message: attachResult.msg || attachResult.message || '关联 inbound 失败'
           };
         }
+        if (action === 'noop') {
+          action = 'attach';
+        }
       }
 
       return {
         success: true,
-        action: this.shouldUpdateClient(existing.client, desiredClient) ? 'update' : 'attach'
+        action
       };
     } catch (error) {
       logger.error(`同步服务器级客户端错误: ${error.message}`);

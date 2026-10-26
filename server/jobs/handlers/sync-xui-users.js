@@ -579,12 +579,16 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
             serverId: server.id,
             email: user.email,
             inboundIds,
-            client: desiredClient
+            client: desiredClient,
+            forceUpdate: true
           });
 
           if (syncResult.success) {
             syncCount++;
-            activeLogger.info(`同步用户 ${user.email} 到服务器 ${server.name} 成功，关联 ${inbounds.length} 个 inbound`);
+            activeLogger.info(
+              `同步用户 ${user.email} 到服务器 ${server.name} 成功，`
+              + `action=${syncResult.action || 'unknown'}，关联 ${inbounds.length} 个 inbound`
+            );
           } else {
             activeLogger.warn(`同步用户 ${user.email} 到服务器 ${server.name} 失败: ${syncResult.message}`);
           }
