@@ -704,6 +704,7 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
 
       const results = await runWithConcurrency(users, XUI_USER_SYNC_CONCURRENCY, async (user) => {
         let client;
+        let releaseError;
         try {
           // session advisory lock 要求配置读写、获取锁与释放锁始终使用同一连接。
           client = await db.pool.connect();
@@ -717,11 +718,12 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
             existingClientsSnapshot, xuiService, repository, logger: activeLogger
           });
         } catch (error) {
+          releaseError = error;
           activeLogger.error(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${error.message}`);
           return 'failed';
         } finally {
-          // 获取连接失败时无需释放；其余成功、业务失败和异常分支均归还连接。
-          if (client) client.release();
+          // 异常时销毁无法证明已解锁的 session；正常及业务失败分支归还连接。
+          if (client) client.release(releaseError);
         }
       });
       const synced = results.filter((result) => result.status === 'fulfilled' && result.value === 'synced').length;

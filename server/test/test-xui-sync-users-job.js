@@ -933,6 +933,10 @@ class SessionLockClient extends EventEmitter {
       return { rows: [{ locked: true }] };
     }
     if (sql.includes('pg_advisory_unlock')) {
+      if (this.state.failUnlocks > 0) {
+        this.state.failUnlocks--;
+        throw new Error('unlock cancelled');
+      }
       const unlocked = this.state.locks.get(params[0]) === this.id;
       if (unlocked) this.state.locks.delete(params[0]);
       else this.state.failedUnlocks++;
@@ -955,9 +959,13 @@ class SessionLockClient extends EventEmitter {
     throw new Error(`Unexpected session SQL: ${sql}`);
   }
 
-  /** 结束物理连接，通知真实连接池完成清理。 */
+  /** 结束物理连接时清除该 session 所持锁，模拟 PostgreSQL 自动释放 session 锁。 */
   end(callback) {
     this._ending = true;
+    for (const [key, owner] of this.state.locks) {
+      if (owner === this.id) this.state.locks.delete(key);
+    }
+    if (this.state.closedSessions) this.state.closedSessions.push(this.id);
     this.emit('end');
     if (callback) callback();
   }
@@ -1021,6 +1029,55 @@ async function testLegacySyncShouldReleaseSessionLocksOnOwningConnection() {
   }
 }
 
+/** 验证解锁查询抛错时销毁可能持锁的物理连接，另一个 session 可重新获取同一锁。 */
+async function testLegacySyncShouldDestroyConnectionWhenUnlockThrows() {
+  const fixture = new UserSyncFixture(1);
+  fixture.server.panel_version = '3.0.2';
+  const state = {
+    nextSessionId: 0, locks: new Map(), configs: new Map(), configSessions: [],
+    lockAcquisitions: 0, failedUnlocks: 0, failUnlocks: 1, closedSessions: []
+  };
+  const pool = new Pool({ Client: SessionLockClient, sessionState: state, max: 20, idleTimeoutMillis: 0 });
+  fixture.db = createDbProxy({
+    pool, queryWithRetry: pool.query.bind(pool), convertPlaceholders, logger: fixture.dependencies.logger
+  });
+  fixture.dependencies.repository = xuiSyncRepository;
+  const service = Object.create(XuiService.prototype);
+  service.getInbounds = fixture.dependencies.xuiService.getInbounds;
+  service.addClientByContext = async () => ({ success: true });
+  fixture.dependencies.xuiService = service;
+
+  try {
+    await fixture.run();
+    assert.strictEqual(state.configs.size, 1, '必须执行真实 upsert 的配置保存后才模拟解锁失败');
+    assert.strictEqual(state.lockAcquisitions, 1);
+    assert.ok(fixture.logs.some((message) => message.includes('unlock cancelled')));
+    console.log(`legacy unlock exception: retainedLocks=${state.locks.size}, idleConnections=${pool.idleCount}, closedSessions=${state.closedSessions.length}`);
+    assert.strictEqual(pool.totalCount, 0, '无法证明安全的连接必须从池移除');
+    assert.strictEqual(pool.idleCount, 0, '不能复用解锁失败的连接');
+    assert.deepStrictEqual(state.closedSessions, [1]);
+    assert.strictEqual(state.locks.size, 0, '物理连接关闭必须释放遗留 session 锁');
+
+    const nextClient = await pool.connect();
+    const nextDb = createDbProxy({
+      pool: nextClient, queryWithRetry: nextClient.query.bind(nextClient),
+      convertPlaceholders, logger: fixture.dependencies.logger
+    });
+    const lockKey = service.buildUniqueClientLockKey(3, 10, 'user-1@example.com-direct');
+    try {
+      assert.notStrictEqual(nextClient.id, 1);
+      assert.strictEqual(await xuiSyncRepository.tryAcquireUniqueClientLock(nextDb, lockKey), true,
+        '新 session 必须能重新获取相同用户锁');
+      assert.strictEqual(await xuiSyncRepository.releaseUniqueClientLock(nextDb, lockKey), true);
+    } finally {
+      nextClient.release();
+    }
+    assert.strictEqual(state.locks.size, 0);
+  } finally {
+    await pool.end();
+  }
+}
+
 function run() {
   return testServerRepositoryShouldUpdateOnlyLastCheckAt()
     .then(() => {
@@ -1061,6 +1118,9 @@ function run() {
     })
     .then(() => {
       return testLegacySyncShouldReleaseSessionLocksOnOwningConnection();
+    })
+    .then(() => {
+      return testLegacySyncShouldDestroyConnectionWhenUnlockThrows();
     })
     .then(() => {
       console.log('test-xui-sync-users-job: PASS');
