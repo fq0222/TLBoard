@@ -27,7 +27,7 @@
 - 用户数少于并发上限或为空时，只处理实际用户且不产生额外任务；Task 2 的新版和旧版测试均断言调用次数等于输入数。
 - 某个 worker 抛异常时，其余用户仍完成；Task 2 的失败隔离测试断言全部用户都被尝试。
 - 3X-UI 返回 `{ success: false }` 而非抛错时，必须计入失败而不是同步成功；Task 2 的结果汇总测试覆盖该分支。
-- inbound settings 解析失败时，新版仍回退 clients API、旧版仍跳过该 inbound；Task 2 运行现有回归测试并保留对应断言。
+- inbound settings 解析失败时，新版仍回退 clients API、旧版仍跳过该 inbound；Task 2 分别新增完整分支测试并运行现有回归测试。
 - 同时存在多台服务器时不能形成服务器级并发；Task 2 的 `runXuiSync()` 编排测试观测最大活跃服务器数为 `1`。
 
 ---
@@ -84,6 +84,8 @@ git commit -m "文档：设计六小时用户并发同步方案"
 - 25 个邮箱各出现一次
 - `getInbounds()`、节点快照刷新和 `updateServerLastCheckAt()` 各调用一次
 
+同一步新增 `testModernSyncShouldFallbackToClientsApiWhenInboundSettingsMalformed()`：构造 settings 无法解析的 inbound，断言 `getServerClientByEmail()` 被调用，且用户仍完成同步；保留现有快照解析与凭证选择测试。
+
 - [ ] **Step 2: 运行新版并发测试并确认失败**
 
 Run: `node server/test/test-xui-sync-users-job.js`
@@ -136,6 +138,8 @@ Expected: PASS；若失败，修正结果分类或日志汇总，不改变远端
 
 再构造两个 inbound，记录第二个 inbound 的首个调用发生时间，断言第一个 inbound 的 25 个任务全部结束后才开始第二个 inbound。
 
+同一步新增 `testLegacySyncShouldSkipMalformedInboundSettings()`：构造 settings 无法解析的 inbound 和随后一个正常 inbound，断言异常 inbound 的用户未进入 `upsertUniqueClient()`，正常 inbound 的用户仍被处理，并记录包含服务器名与 inbound ID 的警告日志。
+
 - [ ] **Step 8: 运行旧版并发测试并确认失败**
 
 Run: `node server/test/test-xui-sync-users-job.js`
@@ -147,6 +151,7 @@ Expected: FAIL，首个场景的 `maxActive` 实际为 `1`。
 在 `server/jobs/handlers/sync-xui-users.js`：
 
 - 新增并注释 `syncLegacyInboundUser(db, server, inbound, user, context)`；`context` 包含 `existingClientsSnapshot`、`xuiService`、`repository`、`logger`。
+- 将现有 `syncUsersToServer()` 内的 `crypto` 导入移至模块级，供抽取后的 `syncLegacyInboundUser()` 使用 `randomUUID()` 和 `randomBytes()`。
 - 将旧版内层 `for (const user of users)` 逻辑迁入该方法，保持节点邮件名、hy2 auth、direct flow、凭证生成和 `upsertUniqueClient()` 参数不变。
 - 保留 inbound 外层 `for...of`；每个 inbound 内调用 `runWithConcurrency(users, 10, worker)` 并等待完成后才进入下一个 inbound。
 - worker 捕获并记录单用户异常；按 settled results 累加该服务器成功与失败数量。
