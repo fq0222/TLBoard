@@ -2,6 +2,12 @@ const assert = require('assert');
 const { __testables } = require('../jobs/handlers/sync-xui-users');
 const serversRepository = require('../repositories/servers-repository');
 const { resolveServerClientCredentials } = require('../services/shared/xui-credential-resolver');
+const { EventEmitter } = require('events');
+const { Pool } = require('pg');
+const XuiService = require('../integrations/xui/xui-service');
+const xuiSyncRepository = require('../repositories/xui-sync-repository');
+const { createDbProxy } = require('../db/proxy');
+const { convertPlaceholders } = require('../db/sql-utils');
 
 async function testServerRepositoryShouldUpdateOnlyLastCheckAt() {
   const calls = [];
@@ -639,7 +645,17 @@ async function testSyncUsersShouldChooseDeterministicLocalCredentials() {
  */
 class UserSyncFixture {
   constructor(userCount) {
-    this.db = { prepare() { return { async get() { return null; } }; } };
+    this.db = {
+      prepare() { return { async get() { return null; } }; },
+      pool: {
+        async connect() {
+          return {
+            async query() { return { rows: [], rowCount: 0 }; },
+            release() {}
+          };
+        }
+      }
+    };
     this.server = { id: 3, name: 'server-concurrency', panel_version: '3.4.2' };
     this.users = Array.from({ length: userCount }, (_, index) => ({
       id: index + 1,
@@ -775,7 +791,8 @@ async function testLegacySyncShouldLimitEachInboundUserConcurrencyToTen() {
     let firstInboundCompleted = 0;
     const calls = [];
     fixture.dependencies.xuiService.upsertUniqueClient = async (db, payload) => {
-      assert.strictEqual(db, fixture.db);
+      assert.notStrictEqual(db, fixture.db, '旧版用户应使用连接绑定的数据库接口');
+      assert.strictEqual(typeof db.prepare, 'function');
       if (payload.inbound.id === 11) assert.strictEqual(firstInboundCompleted, 25);
       active++;
       maxActive = Math.max(maxActive, active);
@@ -868,6 +885,142 @@ async function testRunXuiSyncShouldKeepServersSequential() {
   assert.strictEqual(serverQueries, 1);
 }
 
+/**
+ * 物理 PostgreSQL session 替身；由真实 pg-pool 分配，锁仅可由持有它的 session 释放。
+ * @param {Object} options pg-pool 传入的连接参数，sessionState 保存锁、节点配置和查询轨迹。
+ */
+class SessionLockClient extends EventEmitter {
+  constructor(options) {
+    super();
+    this.state = options.sessionState;
+    this.id = ++this.state.nextSessionId;
+    this._queryable = true;
+    this._ending = false;
+  }
+
+  /** 模拟异步连接完成，将后续复用顺序交给真实 pg-pool。 */
+  connect(callback) {
+    setImmediate(() => callback(null));
+  }
+
+  /**
+   * 执行被测服务/仓储实际发出的 SQL，支持 pg-pool 回调与专用 client Promise 两种接口。
+   * @param {string} sql 真实 SQL；保留 PostgreSQL session advisory lock 的归属语义。
+   * @param {Array} params 查询参数。
+   * @param {Function} callback pool.query 提供的可选完成回调。
+   */
+  query(sql, params = [], callback) {
+    const pending = new Promise((resolve) => setImmediate(resolve))
+      .then(() => this.execute(sql, params));
+    if (callback) {
+      pending.then((result) => callback(null, result), callback);
+      return;
+    }
+    return pending;
+  }
+
+  /**
+   * 应用 session 级锁和节点配置读写；无法识别的 SQL 直接失败，避免替身静默吞掉生产行为。
+   * @param {string} sql PostgreSQL 格式语句。
+   * @param {Array} params 参数列表。
+   */
+  execute(sql, params) {
+    if (sql.includes('pg_try_advisory_lock')) {
+      const owner = this.state.locks.get(params[0]);
+      if (owner !== undefined && owner !== this.id) return { rows: [{ locked: false }] };
+      this.state.locks.set(params[0], this.id);
+      this.state.lockAcquisitions++;
+      return { rows: [{ locked: true }] };
+    }
+    if (sql.includes('pg_advisory_unlock')) {
+      const unlocked = this.state.locks.get(params[0]) === this.id;
+      if (unlocked) this.state.locks.delete(params[0]);
+      else this.state.failedUnlocks++;
+      return { rows: [{ unlocked }] };
+    }
+    if (sql.includes('FROM user_node_configs')) {
+      assert.ok(sql.includes('user_id = $1'), '必须复用 PostgreSQL 占位符转换');
+      this.state.configSessions.push({ userId: params[0], sessionId: this.id });
+      const config = this.state.configs.get(params[0]);
+      return { rows: config ? [config] : [] };
+    }
+    if (sql.includes('INSERT INTO user_node_configs')) {
+      if (params[0] === this.state.failSaveUserId) throw new Error('config save failed');
+      this.state.configSessions.push({ userId: params[0], sessionId: this.id });
+      this.state.configs.set(params[0], {
+        uuid: params[3], password: params[4], auth: params[5], sub_id: params[6]
+      });
+      return { rows: [{ id: params[0] }], rowCount: 1 };
+    }
+    throw new Error(`Unexpected session SQL: ${sql}`);
+  }
+
+  /** 结束物理连接，通知真实连接池完成清理。 */
+  end(callback) {
+    this._ending = true;
+    this.emit('end');
+    if (callback) callback();
+  }
+}
+
+/** 验证真实旧版 upsert 和仓储锁路径在并发时不遗留 session 锁，配置读写使用同一连接。 */
+async function testLegacySyncShouldReleaseSessionLocksOnOwningConnection() {
+  for (const withFailures of [false, true]) {
+    const fixture = new UserSyncFixture(25);
+    fixture.server.panel_version = '3.0.2';
+    const state = {
+      nextSessionId: 0, locks: new Map(), configs: new Map(), configSessions: [],
+      lockAcquisitions: 0, failedUnlocks: 0, failSaveUserId: withFailures ? 3 : null
+    };
+    const pool = new Pool({ Client: SessionLockClient, sessionState: state, max: 20, idleTimeoutMillis: 0 });
+    let borrowed = 0;
+    let maxBorrowed = 0;
+    pool.on('acquire', () => { borrowed++; maxBorrowed = Math.max(maxBorrowed, borrowed); });
+    pool.on('release', () => { borrowed--; });
+    fixture.db = createDbProxy({
+      pool, queryWithRetry: pool.query.bind(pool), convertPlaceholders, logger: fixture.dependencies.logger
+    });
+    fixture.dependencies.repository = xuiSyncRepository;
+    const service = Object.create(XuiService.prototype);
+    service.getInbounds = fixture.dependencies.xuiService.getInbounds;
+    const addedEmails = [];
+    service.addClientByContext = async (_inboundId, _protocol, { email }) => {
+      addedEmails.push(email);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (withFailures && email === 'user-1@example.com-direct') throw new Error('remote exception');
+      if (withFailures && email === 'user-2@example.com-direct') return { success: false, message: 'remote failed' };
+      return { success: true };
+    };
+    fixture.dependencies.xuiService = service;
+
+    try {
+      await fixture.run();
+      assert.strictEqual(addedEmails.length, 25);
+      assert.strictEqual(state.configs.size, withFailures ? 22 : 25);
+      assert.strictEqual(state.lockAcquisitions, 25);
+      console.log(`legacy session locks (${withFailures ? 'failures' : 'success'}): failedUnlocks=${state.failedUnlocks}, retainedLocks=${state.locks.size}`);
+      assert.strictEqual(state.failedUnlocks, 0, 'advisory unlock 必须使用持锁 session');
+      assert.strictEqual(state.locks.size, 0, '不能将仍持 advisory lock 的连接归还池');
+      assert.strictEqual(borrowed, 0);
+      assert.strictEqual(maxBorrowed, 10);
+      assert.strictEqual(pool.idleCount, pool.totalCount, '所有借用连接必须已归还');
+      if (withFailures) {
+        assert.ok(fixture.logs.some((message) => message.includes('成功 22 个用户，失败 3 个用户')));
+        for (const reason of ['remote exception', 'remote failed', 'config save failed']) {
+          assert.ok(fixture.logs.some((message) => message.includes(reason)));
+        }
+      }
+      for (const user of fixture.users) {
+        const sessions = new Set(state.configSessions.filter((item) => item.userId === user.id)
+          .map((item) => item.sessionId));
+        assert.strictEqual(sessions.size, 1, '同一用户的配置查询和保存必须使用同一 session');
+      }
+    } finally {
+      await pool.end();
+    }
+  }
+}
+
 function run() {
   return testServerRepositoryShouldUpdateOnlyLastCheckAt()
     .then(() => {
@@ -905,6 +1058,9 @@ function run() {
     })
     .then(() => {
       return testRunXuiSyncShouldKeepServersSequential();
+    })
+    .then(() => {
+      return testLegacySyncShouldReleaseSessionLocksOnOwningConnection();
     })
     .then(() => {
       console.log('test-xui-sync-users-job: PASS');

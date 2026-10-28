@@ -5,6 +5,8 @@
 
 const crypto = require('crypto');
 const { runWithConcurrency } = require('../../utils/concurrency');
+const { createDbProxy } = require('../../db/proxy');
+const { convertPlaceholders } = require('../../db/sql-utils');
 
 const XUI_USER_SYNC_CONCURRENCY = 10;
 
@@ -701,13 +703,25 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
       }
 
       const results = await runWithConcurrency(users, XUI_USER_SYNC_CONCURRENCY, async (user) => {
+        let client;
         try {
-          return await syncLegacyInboundUser(db, server, inbound, user, {
+          // session advisory lock 要求配置读写、获取锁与释放锁始终使用同一连接。
+          client = await db.pool.connect();
+          const userDb = createDbProxy({
+            pool: client,
+            queryWithRetry: client.query.bind(client),
+            convertPlaceholders,
+            logger: activeLogger
+          });
+          return await syncLegacyInboundUser(userDb, server, inbound, user, {
             existingClientsSnapshot, xuiService, repository, logger: activeLogger
           });
         } catch (error) {
           activeLogger.error(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${error.message}`);
           return 'failed';
+        } finally {
+          // 获取连接失败时无需释放；其余成功、业务失败和异常分支均归还连接。
+          if (client) client.release();
         }
       });
       const synced = results.filter((result) => result.status === 'fulfilled' && result.value === 'synced').length;
