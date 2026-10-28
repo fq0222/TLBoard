@@ -3,6 +3,11 @@
  * 负责注册并执行用户节点状态巡检与补偿同步逻辑。
  */
 
+const crypto = require('crypto');
+const { runWithConcurrency } = require('../../utils/concurrency');
+
+const XUI_USER_SYNC_CONCURRENCY = 10;
+
 const XuiService = require('../../integrations/xui/xui-service');
 const serversRepository = require('../../repositories/servers-repository');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
@@ -478,6 +483,152 @@ async function legacySyncUsersToServer(db, server, users) {
 }
 
 /**
+ * 同步新版面板的单个用户，保留本地凭证优先、快照回退与强制修复语义。
+ * @param {Object} db 数据库实例
+ * @param {Object} server 当前服务器
+ * @param {Object} user 待同步用户
+ * @param {Object} context 共享的 inbounds、inboundIds、requiresFlow、xuiService、repository、logger
+ * @returns {Promise<'synced'|'skipped'|'failed'>} 一致时跳过，远端业务失败时返回 failed；异常由任务池隔离。
+ */
+async function syncModernUserToServer(db, server, user, context) {
+  const { inbounds, inboundIds, requiresFlow, xuiService, repository, logger: activeLogger } = context;
+
+  let existing = getServerClientFromInboundSnapshots(user.email, inbounds);
+  if (existing === null) {
+    activeLogger.warn(`服务器 ${server.name} inbound 快照解析失败，回退 clients API 查询: user=${user.email}`);
+    existing = await xuiService.getServerClientByEmail(user.email);
+  }
+  const localConfigs = await repository.listUserNodeConfigsByServer(db, user.id, server.id);
+  const credentials = resolveServerClientCredentials({
+    localConfigs,
+    remoteClient: existing.success ? existing.client : null,
+    expectedEmail: user.email
+  });
+  const { uuid, password, auth, subId } = credentials;
+  const desiredClient = {
+    id: uuid,
+    password,
+    auth,
+    email: user.email,
+    enable: normalizeComparableBoolean(user.enabled),
+    expiryTime: user.expire_at ? Number(user.expire_at) * 1000 : 0,
+    totalGB: getXuiTotalTrafficLimit(user),
+    limitIp: 0,
+    tgId: 0,
+    subId
+  };
+  if (requiresFlow) {
+    desiredClient.flow = 'xtls-rprx-vision';
+  }
+
+  for (const inbound of inbounds) {
+    await repository.saveUserNodeConfig(db, {
+      userId: user.id,
+      serverId: server.id,
+      inboundId: inbound.id,
+      uuid,
+      password,
+      auth,
+      subId
+    });
+  }
+
+  const mismatches = getServerClientSyncMismatches(existing, inboundIds, desiredClient, inbounds);
+  if (mismatches.length === 0) {
+    activeLogger.info(`用户 ${user.email} 在服务器 ${server.name} 已一致，跳过同步`);
+    return 'skipped';
+  }
+  activeLogger.info(`用户 ${user.email} 在服务器 ${server.name} 不一致，原因=${mismatches.join('; ')}`);
+
+  const syncResult = await xuiService.upsertServerClient({
+    db,
+    serverId: server.id,
+    email: user.email,
+    inboundIds,
+    client: desiredClient,
+    forceUpdate: true
+  });
+
+  if (syncResult.success) {
+    activeLogger.info(
+      `同步用户 ${user.email} 到服务器 ${server.name} 成功，`
+      + `action=${syncResult.action || 'unknown'}，关联 ${inbounds.length} 个 inbound`
+    );
+    return 'synced';
+  } else {
+    activeLogger.warn(`同步用户 ${user.email} 到服务器 ${server.name} 失败: ${syncResult.message}`);
+  }
+  return 'failed';
+}
+
+/**
+ * 同步旧版面板单个 inbound 的单个用户，保留节点邮件名、hy2 auth 与 direct flow 规则。
+ * @param {Object} db 数据库实例
+ * @param {Object} server 当前服务器
+ * @param {Object} inbound 当前串行处理的 inbound
+ * @param {Object} user 待同步用户
+ * @param {Object} context 共享的 existingClientsSnapshot、xuiService、repository、logger
+ * @returns {Promise<'synced'|'failed'>} 远端业务失败返回 failed，异常由任务池隔离。
+ */
+async function syncLegacyInboundUser(db, server, inbound, user, context) {
+  const { existingClientsSnapshot, xuiService, repository, logger } = context;
+  const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
+  const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
+  const totalBytes = getXuiTotalTrafficLimit(user);
+  const strategy = getStrategyFromRemark(inbound.remark);
+  const existingConfig = await repository.findUserNodeConfig(
+    db,
+    user.id,
+    server.id,
+    inbound.id
+  );
+
+  const generatedAuth = strategy === 'hy2'
+    ? generateXuiAuth()
+    : '';
+  const desiredAuth = strategy === 'hy2'
+    ? (isValidXuiAuth(existingConfig?.auth) ? existingConfig.auth : generatedAuth)
+    : '';
+
+  if (strategy === 'hy2' && existingConfig?.auth && !isValidXuiAuth(existingConfig.auth)) {
+    logger.info(`检测到非法 hy2 auth，准备重新生成: user=${user.email}, server=${server.id}, inbound=${inbound.id}`);
+  }
+
+  const desiredClient = {
+    id: existingConfig?.uuid || (strategy === 'hy2' ? '' : crypto.randomUUID()),
+    auth: desiredAuth,
+    email: nodeEmail,
+    enable: user.enabled === 1,
+    expiryTime,
+    totalGB: totalBytes,
+    subId: existingConfig?.sub_id || crypto.randomBytes(8).toString('hex'),
+    strategy,
+    protocol: inbound.protocol
+  };
+
+  if (strategy === 'direct') {
+    desiredClient.flow = 'xtls-rprx-vision';
+  }
+
+  const syncResult = await xuiService.upsertUniqueClient(db, {
+    userId: user.id,
+    serverId: server.id,
+    inbound,
+    email: nodeEmail,
+    existingClientsSnapshot,
+    desiredClient
+  });
+
+  if (syncResult.success) {
+    logger.info(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功: action=${syncResult.action}`);
+    return 'synced';
+  } else {
+    logger.warn(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${syncResult.message}`);
+  }
+  return 'failed';
+}
+
+/**
  * 同步一台 3X-UI 服务器上的用户状态
  * 负责按节点策略补齐唯一用户配置和订阅相关字段。
  * @param {Object} db - 数据库实例
@@ -485,9 +636,8 @@ async function legacySyncUsersToServer(db, server, users) {
  * @param {Array} users - 需要巡检同步的用户列表
  */
 async function syncUsersToServer(db, server, users, dependencies = {}) {
+  const activeLogger = dependencies.logger || logger;
   try {
-    const crypto = require('crypto');
-    const activeLogger = dependencies.logger || logger;
     const repository = dependencies.repository || xuiSyncRepository;
     const serverRepository = dependencies.serversRepository || serversRepository;
     const snapshotService = dependencies.snapshotService || xuiNodeSnapshotService;
@@ -519,163 +669,55 @@ async function syncUsersToServer(db, server, users, dependencies = {}) {
     activeLogger.info(`服务器 ${server.name} 节点快照已刷新: ${refreshResult.nodeCount} 个节点`);
 
     let syncCount = 0;
+    let failedCount = 0;
 
     if (isPanelVersionAtLeast(server.panel_version, '3.4.2')) {
       const inbounds = inboundsResult.data || [];
       const inboundIds = inbounds.map((inbound) => inbound.id);
       const requiresFlow = inbounds.some((inbound) => getStrategyFromRemark(inbound.remark) === 'direct');
 
-      for (const user of users) {
+      const results = await runWithConcurrency(users, XUI_USER_SYNC_CONCURRENCY, async (user) => {
         try {
-          let existing = getServerClientFromInboundSnapshots(user.email, inbounds);
-          if (existing === null) {
-            activeLogger.warn(`服务器 ${server.name} inbound 快照解析失败，回退 clients API 查询: user=${user.email}`);
-            existing = await xuiService.getServerClientByEmail(user.email);
-          }
-          const localConfigs = await repository.listUserNodeConfigsByServer(db, user.id, server.id);
-          const credentials = resolveServerClientCredentials({
-            localConfigs,
-            remoteClient: existing.success ? existing.client : null,
-            expectedEmail: user.email
+          return await syncModernUserToServer(db, server, user, {
+            inbounds, inboundIds, requiresFlow, xuiService, repository, logger: activeLogger
           });
-          const { uuid, password, auth, subId } = credentials;
-          const desiredClient = {
-            id: uuid,
-            password,
-            auth,
-            email: user.email,
-            enable: normalizeComparableBoolean(user.enabled),
-            expiryTime: user.expire_at ? Number(user.expire_at) * 1000 : 0,
-            totalGB: getXuiTotalTrafficLimit(user),
-            limitIp: 0,
-            tgId: 0,
-            subId
-          };
-          if (requiresFlow) {
-            desiredClient.flow = 'xtls-rprx-vision';
-          }
-
-          for (const inbound of inbounds) {
-            await repository.saveUserNodeConfig(db, {
-              userId: user.id,
-              serverId: server.id,
-              inboundId: inbound.id,
-              uuid,
-              password,
-              auth,
-              subId
-            });
-          }
-
-          const mismatches = getServerClientSyncMismatches(existing, inboundIds, desiredClient, inbounds);
-          if (mismatches.length === 0) {
-            activeLogger.info(`用户 ${user.email} 在服务器 ${server.name} 已一致，跳过同步`);
-            continue;
-          }
-          activeLogger.info(`用户 ${user.email} 在服务器 ${server.name} 不一致，原因=${mismatches.join('; ')}`);
-
-          const syncResult = await xuiService.upsertServerClient({
-            db,
-            serverId: server.id,
-            email: user.email,
-            inboundIds,
-            client: desiredClient,
-            forceUpdate: true
-          });
-
-          if (syncResult.success) {
-            syncCount++;
-            activeLogger.info(
-              `同步用户 ${user.email} 到服务器 ${server.name} 成功，`
-              + `action=${syncResult.action || 'unknown'}，关联 ${inbounds.length} 个 inbound`
-            );
-          } else {
-            activeLogger.warn(`同步用户 ${user.email} 到服务器 ${server.name} 失败: ${syncResult.message}`);
-          }
         } catch (error) {
           activeLogger.error(`同步用户 ${user.email} 到服务器 ${server.name} 失败: ${error.message}`);
+          return 'failed';
         }
-      }
-
-      if (syncCount > 0) {
-        activeLogger.info(`服务器 ${server.name} 同步完成，成功 ${syncCount} 个用户`);
-      }
+      });
+      const synced = results.filter((result) => result.status === 'fulfilled' && result.value === 'synced').length;
+      const skipped = results.filter((result) => result.status === 'fulfilled' && result.value === 'skipped').length;
+      const failed = results.length - synced - skipped;
+      activeLogger.info(`服务器 ${server.name} 同步完成，成功 ${synced} 个用户，跳过 ${skipped} 个用户，失败 ${failed} 个用户`);
       return;
     }
 
     for (const inbound of inboundsResult.data) {
       const existingClientsSnapshot = parseInboundClientsSnapshot(inbound);
       if (existingClientsSnapshot === null) {
-        logger.warn(`服务器 ${server.name} inbound ${inbound.id} 的 settings 解析失败，跳过该 inbound 本轮用户同步`);
+        activeLogger.warn(`服务器 ${server.name} inbound ${inbound.id} 的 settings 解析失败，跳过该 inbound 本轮用户同步`);
         continue;
       }
 
-      for (const user of users) {
+      const results = await runWithConcurrency(users, XUI_USER_SYNC_CONCURRENCY, async (user) => {
         try {
-          const nodeEmail = `${user.email}-${inbound.remark || inbound.id}`;
-          const expiryTime = user.expire_at ? Number(user.expire_at) * 1000 : 0;
-          const totalBytes = getXuiTotalTrafficLimit(user);
-          const strategy = getStrategyFromRemark(inbound.remark);
-          const existingConfig = await xuiSyncRepository.findUserNodeConfig(
-            db,
-            user.id,
-            server.id,
-            inbound.id
-          );
-
-          const generatedAuth = strategy === 'hy2'
-            ? generateXuiAuth()
-            : '';
-          const desiredAuth = strategy === 'hy2'
-            ? (isValidXuiAuth(existingConfig?.auth) ? existingConfig.auth : generatedAuth)
-            : '';
-
-          if (strategy === 'hy2' && existingConfig?.auth && !isValidXuiAuth(existingConfig.auth)) {
-            logger.info(`检测到非法 hy2 auth，准备重新生成: user=${user.email}, server=${server.id}, inbound=${inbound.id}`);
-          }
-
-          const desiredClient = {
-            id: existingConfig?.uuid || (strategy === 'hy2' ? '' : crypto.randomUUID()),
-            auth: desiredAuth,
-            email: nodeEmail,
-            enable: user.enabled === 1,
-            expiryTime,
-            totalGB: totalBytes,
-            subId: existingConfig?.sub_id || crypto.randomBytes(8).toString('hex'),
-            strategy,
-            protocol: inbound.protocol
-          };
-
-          if (strategy === 'direct') {
-            desiredClient.flow = 'xtls-rprx-vision';
-          }
-
-          const syncResult = await xuiService.upsertUniqueClient(db, {
-            userId: user.id,
-            serverId: server.id,
-            inbound,
-            email: nodeEmail,
-            existingClientsSnapshot,
-            desiredClient
+          return await syncLegacyInboundUser(db, server, inbound, user, {
+            existingClientsSnapshot, xuiService, repository, logger: activeLogger
           });
-
-          if (syncResult.success) {
-            syncCount++;
-            logger.info(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 成功: action=${syncResult.action}`);
-          } else {
-            logger.warn(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${syncResult.message}`);
-          }
         } catch (error) {
-          logger.error(`同步用户 ${user.email} 到 inbound ${inbound.id} 失败: ${error.message}`);
+          activeLogger.error(`同步用户 ${user.email} 到服务器 ${server.name} 的 inbound ${inbound.id} 失败: ${error.message}`);
+          return 'failed';
         }
-      }
+      });
+      const synced = results.filter((result) => result.status === 'fulfilled' && result.value === 'synced').length;
+      syncCount += synced;
+      failedCount += results.length - synced;
     }
 
-    if (syncCount > 0) {
-      logger.info(`服务器 ${server.name} 同步完成，成功 ${syncCount} 个用户`);
-    }
+    activeLogger.info(`服务器 ${server.name} 同步完成，成功 ${syncCount} 个用户，失败 ${failedCount} 个用户`);
   } catch (error) {
-    logger.error(`同步服务器 ${server.name} 错误: ${error.message}`);
+    activeLogger.error(`同步服务器 ${server.name} 错误: ${error.message}`);
   }
 }
 
@@ -717,38 +759,43 @@ function scheduleXuiUserSync(db) {
  * 执行 3X-UI 用户同步巡检
  * 查询所有启用且未过期用户，并逐台在线服务器执行同步补偿。
  * @param {Object} db - 数据库实例
+ * @param {Object} dependencies - 可替换的 repository、serverRepository、syncServer 与 logger；默认使用生产依赖
  */
-async function runXuiSync(db) {
+async function runXuiSync(db, dependencies = {}) {
+  const repository = dependencies.repository || xuiSyncRepository;
+  const serverRepository = dependencies.serverRepository || serversRepository;
+  const syncServer = dependencies.syncServer || syncUsersToServer;
+  const activeLogger = dependencies.logger || logger;
   try {
-    logger.info('开始执行3X-UI用户同步任务...');
+    activeLogger.info('开始执行3X-UI用户同步任务...');
 
     const now = Math.floor(Date.now() / 1000);
-    const users = await xuiSyncRepository.listUsersForXuiSync(db, now);
+    const users = await repository.listUsersForXuiSync(db, now);
 
     if (users.length === 0) {
-      logger.info('没有需要同步的用户');
-      await serversRepository.resetAllManagedUserCounts(db);
+      activeLogger.info('没有需要同步的用户');
+      await serverRepository.resetAllManagedUserCounts(db);
       return;
     }
 
-    logger.info(`需要同步的用户数量: ${users.length}`);
+    activeLogger.info(`需要同步的用户数量: ${users.length}`);
 
-    const servers = await xuiSyncRepository.listOnlineXuiServers(db);
+    const servers = await repository.listOnlineXuiServers(db);
 
     if (servers.length === 0) {
-      logger.info('没有在线的3X-UI服务器');
+      activeLogger.info('没有在线的3X-UI服务器');
       return;
     }
 
-    logger.info(`在线服务器数量: ${servers.length}`);
+    activeLogger.info(`在线服务器数量: ${servers.length}`);
 
     for (const server of servers) {
-      await syncUsersToServer(db, server, users);
+      await syncServer(db, server, users);
     }
 
-    logger.info('3X-UI用户同步任务完成');
+    activeLogger.info('3X-UI用户同步任务完成');
   } catch (error) {
-    logger.error(`3X-UI用户同步任务错误: ${error.message}`);
+    activeLogger.error(`3X-UI用户同步任务错误: ${error.message}`);
   }
 }
 
@@ -756,6 +803,9 @@ module.exports = {
   registerXuiSyncJob,
   scheduleXuiUserSync,
   __testables: {
+    XUI_USER_SYNC_CONCURRENCY,
+    syncModernUserToServer,
+    syncLegacyInboundUser,
     getServerClientSyncMismatches,
     getServerClientFromInboundSnapshots,
     isServerClientAlreadySynced,
