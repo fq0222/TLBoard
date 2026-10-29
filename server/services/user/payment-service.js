@@ -69,7 +69,15 @@ async function handleNotify(db, params) {
     };
   }
 
-  await orderService.completePaidOrder(db, payId, vmqOrderId || order.trade_no);
+  const completion = await orderService.completePaidOrder(db, payId, vmqOrderId || order.trade_no);
+  // 无法完结的通知仍确认收到以避免无效重试，同时保留原因而不误报权益已完成。
+  if (!completion.handled) {
+    return {
+      responseText: 'success',
+      logLevel: 'warn',
+      logMessage: `VMQ 回调未完成订单: payId=${payId}, reason=${completion.reason}, status=${completion.order?.status || order.status}`
+    };
+  }
   return {
     responseText: 'success',
     logLevel: 'info',

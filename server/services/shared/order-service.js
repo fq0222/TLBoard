@@ -768,6 +768,17 @@ async function enqueueAndTryUserSync(db, taskType, userInfo, plan) {
 }
 
 /**
+ * 未取得订单处理权时回读最新状态，供查单与回调入口判断实际结果。
+ * @param {Object} db - 事务结束后可用的数据库代理；余额支付仍使用外层事务代理。
+ * @param {string} outTradeNo - 当前竞争处理的订单号。
+ * @returns {Promise<Object>} handled=false 与明确原因，不登记或执行任何提交后副作用。
+ */
+async function resolveUnclaimedOrder(db, outTradeNo) {
+  const order = await orderRepository.findPaidOrderContextByOutTradeNo(db, outTradeNo);
+  return { handled: false, reason: 'order_not_pending', order };
+}
+
+/**
  * 计算支付成功后应写入用户的套餐权益。
  *
  * 职责：按订单类型和套餐类型统一生成 traffic_limit、expire_at 和是否清零已用流量。
@@ -886,11 +897,12 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null, options = {}) {
 
   if (entitlement.isHomeIp) {
     const transaction = db.transaction(async (transactionDb) => {
-      await orderRepository.markOrderPaid(transactionDb, {
+      const claim = await orderRepository.markOrderPaid(transactionDb, {
         outTradeNo,
         tradeNo: finalTradeNo,
         paidAt: now
       });
+      if (claim.changes !== 1) return false;
 
       await orderRepository.updateUserHomePlanAfterPaidOrder(transactionDb, {
         userId: order.user_id,
@@ -898,10 +910,10 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null, options = {}) {
         homeExpireAt: entitlement.homeExpireAt,
         updatedAt: now
       });
-
+      return true;
     });
 
-    await transaction();
+    if (!await transaction()) return resolveUnclaimedOrder(db, outTradeNo);
     // 回调接收外层提交后可继续使用的根代理，避免保留已释放的事务连接。
     const afterCommit = async effectDb => {
       logger.info(`家宽 IP 套餐支付完成: ${outTradeNo}, user=${order.email}, home_expire_at=${entitlement.homeExpireAt}`);
@@ -924,11 +936,12 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null, options = {}) {
   }
 
   const transaction = db.transaction(async (transactionDb) => {
-    await orderRepository.markOrderPaid(transactionDb, {
+    const claim = await orderRepository.markOrderPaid(transactionDb, {
       outTradeNo,
       tradeNo: finalTradeNo,
       paidAt: now
     });
+    if (claim.changes !== 1) return false;
 
     await orderRepository.updateUserAfterPaidOrder(transactionDb, {
       userId: order.user_id,
@@ -945,9 +958,10 @@ async function completePaidOrder(db, outTradeNo, tradeNo = null, options = {}) {
     if (!isRenewOrHomeIpOrder && Number(order.current_payment_count || 0) === 0 && order.referrer_user_id) {
       await referralService.issueFirstPaymentReward(transactionDb, order);
     }
+    return true;
   });
 
-  await transaction();
+  if (!await transaction()) return resolveUnclaimedOrder(db, outTradeNo);
 
   // 所有第三方副作用使用执行时提供的根代理，不捕获事务态 db。
   const afterCommit = async effectDb => {

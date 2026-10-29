@@ -149,11 +149,11 @@ async function findPaidOrderContextByOutTradeNo(db, outTradeNo) {
 }
 
 /**
- * 将订单标记为已支付。
+ * 原子抢占待支付订单；已被处理或已过期时返回 changes=0，供服务层回读状态。
  *
  * @param {Object} db - 数据库代理对象
  * @param {Object} payload - 订单支付结果
- * @returns {Promise<void>}
+ * @returns {Promise<{changes:number,lastInsertRowid:number}>} 实际更新行数及订单 ID
  */
 async function markOrderPaid(db, payload) {
   const {
@@ -162,12 +162,12 @@ async function markOrderPaid(db, payload) {
     paidAt
   } = payload;
 
-  await db.prepare(`
+  return db.prepare(`
     UPDATE orders SET
       status = 'paid',
       trade_no = ?,
       paid_at = ?
-    WHERE out_trade_no = ?
+    WHERE out_trade_no = ? AND status = 'pending'
   `).run(tradeNo, paidAt, outTradeNo);
 }
 

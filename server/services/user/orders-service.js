@@ -173,8 +173,9 @@ async function syncOrderStatusIfNeeded(db, order) {
   try {
     const vmqResult = await vmqService.checkOrder(order.trade_no);
     if (Number(vmqResult.code) === 1) {
-      await completePaidOrder(db, order.out_trade_no, order.trade_no);
-      return 'paid';
+      const completion = await completePaidOrder(db, order.out_trade_no, order.trade_no);
+      // VMQ 收款成功不代表本地权益已落账；竞争失败时使用完结服务回读的真实状态。
+      return completion.handled ? 'paid' : (completion.order?.status || order.status);
     }
 
     const vmqOrder = await vmqService.getOrder(order.trade_no);

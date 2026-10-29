@@ -1433,7 +1433,7 @@ async function testCompletePaidOrderIssuesRewardOnlyForFirstAttributedPurchase()
       return { ...baseOrder, out_trade_no: outTradeNo };
     },
     findPlanById: async () => plan,
-    markOrderPaid: async () => {},
+    markOrderPaid: async () => ({ changes: 1 }),
     updateUserAfterPaidOrder: async () => {},
     incrementPlanSalesCount: async () => {},
     decrementPlanSalesCount: async () => {},
@@ -1521,7 +1521,7 @@ async function testCompletePaidOrderSendsAccountActivationEmail() {
     await withObjectMocks(orderRepository, {
       findPaidOrderContextByOutTradeNo: async () => ({ ...baseOrder }),
       findPlanById: async () => plan,
-      markOrderPaid: async () => {},
+      markOrderPaid: async () => ({ changes: 1 }),
       updateUserAfterPaidOrder: async () => {},
       incrementPlanSalesCount: async () => {},
       decrementPlanSalesCount: async () => {},
@@ -1626,7 +1626,7 @@ async function testRenewActivationEmailUsesCurrentPlanTrafficOnly() {
   await withObjectMocks(orderRepository, {
     findPaidOrderContextByOutTradeNo: async () => ({ ...baseOrder }),
     findPlanById: async () => plan,
-    markOrderPaid: async () => {},
+    markOrderPaid: async () => ({ changes: 1 }),
     updateUserAfterPaidOrder: async (db, payload) => {
       assert.strictEqual(payload.trafficLimit, 27 * 1024 * 1024 * 1024);
     },
@@ -1711,7 +1711,7 @@ async function testHomeIpPaidOrderSendsAccountActivationEmail() {
   await withObjectMocks(orderRepository, {
     findPaidOrderContextByOutTradeNo: async () => ({ ...baseOrder }),
     findPlanById: async () => plan,
-    markOrderPaid: async () => {},
+    markOrderPaid: async () => ({ changes: 1 }),
     updateUserAfterPaidOrder: async () => {
       throw new Error('家宽套餐不应更新主流量套餐权益');
     },
@@ -1861,7 +1861,7 @@ async function testCompletePaidOrderKeepsEntitlementAndSyncWhenEmailFails() {
   await withObjectMocks(orderRepository, {
     findPaidOrderContextByOutTradeNo: async () => ({ ...baseOrder }),
     findPlanById: async () => plan,
-    markOrderPaid: async () => calls.push('markOrderPaid'),
+    markOrderPaid: async () => { calls.push('markOrderPaid'); return { changes: 1 }; },
     updateUserAfterPaidOrder: async () => calls.push('updateUserAfterPaidOrder'),
     incrementPlanSalesCount: async () => calls.push('incrementPlanSalesCount'),
     decrementPlanSalesCount: async () => {},

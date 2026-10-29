@@ -1050,7 +1050,7 @@ test('paid lifetime renew enqueue payload uses final accumulated traffic limit',
     duration_days: 0,
     traffic_limit: 2048
   });
-  orderRepository.markOrderPaid = async () => {};
+  orderRepository.markOrderPaid = async () => ({ changes: 1 });
   orderRepository.updateUserAfterPaidOrder = async () => {};
   orderRepository.incrementPlanSalesCount = async () => {};
   orderRepository.decrementPlanSalesCount = async () => {};
@@ -1120,7 +1120,7 @@ test('paid timed renew enqueue payload marks client traffic reset', async () => 
     duration_days: 30,
     traffic_limit: 4096
   });
-  orderRepository.markOrderPaid = async () => {};
+  orderRepository.markOrderPaid = async () => ({ changes: 1 });
   orderRepository.updateUserAfterPaidOrder = async () => {};
   orderRepository.incrementPlanSalesCount = async () => {};
   orderRepository.decrementPlanSalesCount = async () => {};
@@ -1192,7 +1192,7 @@ test('paid order sync payload keeps local enabled state for immediate xui sync',
     duration_days: 30,
     traffic_limit: 4096
   });
-  orderRepository.markOrderPaid = async () => {};
+  orderRepository.markOrderPaid = async () => ({ changes: 1 });
   orderRepository.updateUserAfterPaidOrder = async () => {};
   orderRepository.incrementPlanSalesCount = async () => {};
   orderRepository.decrementPlanSalesCount = async () => {};
@@ -1435,7 +1435,7 @@ test('paid expired timed renew enqueues renew sync with enabled user snapshot', 
     duration_days: 30,
     traffic_limit: 4096
   });
-  orderRepository.markOrderPaid = async () => {};
+  orderRepository.markOrderPaid = async () => ({ changes: 1 });
   orderRepository.updateUserAfterPaidOrder = async () => {};
   orderRepository.incrementPlanSalesCount = async () => {};
   orderRepository.decrementPlanSalesCount = async () => {};
@@ -1563,7 +1563,7 @@ test('renew switch plan does not write plan sales count', async () => {
     duration_days: 0,
     traffic_limit: 8192
   });
-  orderRepository.markOrderPaid = async () => {};
+  orderRepository.markOrderPaid = async () => ({ changes: 1 });
   orderRepository.updateUserAfterPaidOrder = async () => {};
   orderRepository.incrementPlanSalesCount = async (_db, planId) => {
     increments.push(planId);
@@ -1642,7 +1642,7 @@ test('new purchase does not write plan sales count', async () => {
     duration_days: 0,
     traffic_limit: 4096
   });
-  orderRepository.markOrderPaid = async () => {};
+  orderRepository.markOrderPaid = async () => ({ changes: 1 });
   orderRepository.updateUserAfterPaidOrder = async () => {};
   orderRepository.incrementPlanSalesCount = async (_db, planId) => {
     increments.push(planId);

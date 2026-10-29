@@ -95,6 +95,7 @@ async function testValidNotifyShouldCompleteOrder() {
   vmqService.verifyNotifySign = () => true;
   orderService.completePaidOrder = async (db, outTradeNo, tradeNo) => {
     completedOrder = { outTradeNo, tradeNo };
+    return { handled: true, alreadyPaid: false };
   };
 
   try {
@@ -112,10 +113,46 @@ async function testValidNotifyShouldCompleteOrder() {
     });
 
     assert.strictEqual(result.responseText, 'success');
+    assert.strictEqual(result.logLevel, 'info');
+    assert.match(result.logMessage, /VMQ notify handled/);
     assert.deepStrictEqual(completedOrder, {
       outTradeNo: 'ORD-3',
       tradeNo: 'VMQ-NEW'
     });
+  } finally {
+    vmqService.verifyNotifySign = originalVerifyNotifySign;
+    orderService.completePaidOrder = originalCompletePaidOrder;
+  }
+}
+
+/**
+ * 回调对已支付重复通知和未完成业务状态都返回 success，只有 handled=true 记录成功处理。
+ * completion 覆盖已支付、订单失效及套餐丢失；未完成原因应进入 warn 日志以便定位。
+ */
+async function testNotifyLoggingReflectsCompletionResult() {
+  const originalVerifyNotifySign = vmqService.verifyNotifySign;
+  const originalCompletePaidOrder = orderService.completePaidOrder;
+  vmqService.verifyNotifySign = () => true;
+  try {
+    for (const completion of [
+      { handled: false, reason: 'order_not_pending', order: { status: 'paid' } },
+      { handled: false, reason: 'order_not_pending', order: { status: 'expired' } },
+      { handled: false, reason: 'plan_not_found' },
+      { handled: true, alreadyPaid: true }
+    ]) {
+      orderService.completePaidOrder = async () => completion;
+      const result = await paymentService.handleNotify(createFakeDb({
+        out_trade_no: 'ORD-4', amount: 1000, trade_no: 'VMQ-4', status: 'pending'
+      }), { payId: 'ORD-4', sign: 'ok', price: '10.00', reallyPrice: '10.00' });
+      assert.strictEqual(result.responseText, 'success');
+      assert.strictEqual(result.logLevel, completion.handled ? 'info' : 'warn');
+      if (completion.handled) {
+        assert.match(result.logMessage, /VMQ notify handled/);
+      } else {
+        assert.ok(result.logMessage.includes(completion.reason));
+        assert.doesNotMatch(result.logMessage, /VMQ notify handled/);
+      }
+    }
   } finally {
     vmqService.verifyNotifySign = originalVerifyNotifySign;
     orderService.completePaidOrder = originalCompletePaidOrder;
@@ -136,6 +173,7 @@ async function run() {
   await testMissingOrderShouldReturnSuccess();
   await testLowerPaidAmountShouldFail();
   await testValidNotifyShouldCompleteOrder();
+  await testNotifyLoggingReflectsCompletionResult();
   await testReturnRedirectUrlShouldKeepOrderId();
   console.log('user payment service tests passed');
 }
