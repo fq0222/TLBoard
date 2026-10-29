@@ -76,6 +76,8 @@ const pollInterval = 5000
 const isPageVisible = ref(true)
 const hiddenTimestamp = ref(null)
 const paymentStartAt = ref(0)
+// 同一支付页可能同时存在轮询、可见性恢复和手动查单，只允许首个 paid 响应执行登录与跳转。
+let paymentSuccessHandled = false
 
 const paymentUrl = computed(() => String(route.query.payment_url || ''))
 const orderId = computed(() => String(route.query.order_id || ''))
@@ -199,6 +201,10 @@ async function checkPaymentStatus() {
 
     const status = response.data.status
     if (status === 'paid') {
+      if (paymentSuccessHandled) {
+        return
+      }
+      paymentSuccessHandled = true
       paymentSuccess.value = true
       loading.value = false
       clearPaymentSession()
