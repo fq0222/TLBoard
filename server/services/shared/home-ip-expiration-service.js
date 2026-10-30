@@ -93,7 +93,7 @@ async function cleanupExpiredHomeIpUser(db, user, now) {
 
 /**
  * 清理所有已到期家宽 IP 套餐。
- * 核心分支：只有 routing 清理成功后才标记 expired；清理失败保留 route 供下轮重试。
+ * 核心分支：在线 routing 清理失败保留 route 供下轮重试；离线跳过保留 pending 后仍可标记 expired。
  *
  * @param {Object} db - 数据库代理对象
  * @param {number} [now=Math.floor(Date.now() / 1000)] - 当前秒级时间戳，测试可传固定值

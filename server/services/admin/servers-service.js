@@ -2,6 +2,7 @@ const { formatTraffic } = require('../../shared/utils/format-traffic');
 const { createLogger } = require('../../utils/logger');
 const XuiService = require('../../integrations/xui/xui-service');
 const serversRepository = require('../../repositories/servers-repository');
+const userHomeRoutingRepository = require('../../repositories/user-home-routing-repository');
 const xuiSyncRepository = require('../../repositories/xui-sync-repository');
 const xuiNodeSnapshotService = require('../shared/xui-node-snapshot-service');
 const xuiBackupTaskService = require('./xui-backup-task-service');
@@ -304,6 +305,7 @@ async function updateServer(db, serverId, payload) {
 
 /**
  * 删除服务器。
+ * 先在同一事务内清理家宽 route 引用，再删除服务器，任一步失败均回滚。
  * 关联的节点、流量同步日志和用户节点配置由数据库级联外键自动清理。
  *
  * @param {Object} db - 数据库实例
@@ -316,7 +318,10 @@ async function deleteServer(db, serverId) {
     throw createLegacyBusinessError('服务器不存在');
   }
 
-  await serversRepository.deleteServer(db, serverId);
+  await db.transaction(async (transactionDb) => {
+    await userHomeRoutingRepository.removeServerIdFromAllHomeRoutes(transactionDb, serverId);
+    await serversRepository.deleteServer(transactionDb, serverId);
+  })();
 
   return {
     message: '服务器已删除'

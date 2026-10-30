@@ -314,7 +314,12 @@
           </el-select>
         </el-form-item>
         <el-form-item label="服务器">
-          <el-select v-model="homeRoutingForm.server_id_1" placeholder="请选择服务器" style="width: 100%">
+          <el-select
+            v-model="homeRoutingForm.server_id_1"
+            placeholder="请选择服务器"
+            no-data-text="服务器全部离线"
+            style="width: 100%"
+          >
             <el-option
               v-for="server in homeRoutingServers"
               :key="server.id"
@@ -328,6 +333,7 @@
             v-model="homeRoutingForm.server_id_2"
             clearable
             placeholder="可选第二台服务器"
+            :no-data-text="homeRoutingServers.length === 0 ? '服务器全部离线' : '暂无其他可选服务器'"
             style="width: 100%"
           >
             <el-option
@@ -532,6 +538,20 @@ function fallbackCopyText(text) {
 }
 
 /**
+ * 按原绑定顺序筛选在线服务器，最多回填两个槽位，避免离线旧 ID 进入选择框。
+ * @param {Array<number|string>} serverIds - 原绑定的服务器 ID。
+ * @param {Object[]} servers - 当前可选的在线服务器列表。
+ * @returns {Array<number|string>} 使用在线选项原始 ID 类型的回填值。
+ */
+function filterOnlineHomeRoutingServerIds(serverIds, servers) {
+  const onlineServerIds = new Map(servers.map((server) => [Number(server.id), server.id]))
+  return serverIds
+    .filter((id) => onlineServerIds.has(Number(id)))
+    .slice(0, 2)
+    .map((id) => onlineServerIds.get(Number(id)))
+}
+
+/**
  * 打开家宽 IP routing 添加或修改弹窗。
  * 核心分支：已有绑定时回填服务器与标识开关；未绑定或旧数据缺少开关时默认显示。
  */
@@ -541,7 +561,10 @@ function openHomeRoutingDialog() {
     return
   }
 
-  const routeServerIds = homeRoutingRoute.value?.server_ids || []
+  const routeServerIds = filterOnlineHomeRoutingServerIds(
+    homeRoutingRoute.value?.server_ids || [],
+    homeRoutingServers.value
+  )
   homeRoutingForm.value = {
     home_proxy_tag: homeRoutingOptions.value.home_proxy_tag || '',
     server_id_1: routeServerIds[0] || null,
@@ -589,7 +612,13 @@ async function submitHomeRouting() {
       ...(response.data || {})
     }
     homeRoutingDialogVisible.value = false
-    ElMessage.success('家宽 IP 配置已同步')
+    const skippedServers = response.data?.skipped_cleanup_servers || []
+    if (skippedServers.length > 0) {
+      const serverNames = skippedServers.map((server) => server.name).join('、')
+      ElMessage.warning(`新服务器绑定成功，离线旧服务器 ${serverNames} 待后续清理`)
+    } else {
+      ElMessage.success('家宽 IP 配置已同步')
+    }
     await fetchPageData()
   } catch (error) {
     console.error('同步家宽 IP routing 失败:', error)

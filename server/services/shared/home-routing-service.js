@@ -421,6 +421,9 @@ async function formatRoute(db, route) {
   }
 
   const serverIds = parseServerIds(route.server_ids);
+  if (serverIds.length === 0 && parseServerIds(route.pending_cleanup_server_ids).length > 0) {
+    return null;
+  }
   const servers = await repository.listServersByIds(db, serverIds);
   const serverMap = new Map(servers.map((server) => [Number(server.id), server]));
 
@@ -612,6 +615,50 @@ function collectFailedServers(servers, results) {
     }));
 }
 
+/**
+ * 清理指定服务器上的旧 routing，不修改本地绑定，供绑定更新及后续清理流程复用。
+ * 核心分支：不存在的服务器直接丢弃；离线目标不调用 XUI 并保留 pending；在线失败单独返回。
+ *
+ * @param {Object} db - 数据库代理对象
+ * @param {number[]} serverIds - 已排除新选择服务器的旧绑定及历史 pending ID
+ * @param {Object[]} onlineServers - 本次操作开始时的在线服务器记录
+ * @param {Object} context - 待删除规则的 homeProxyTag、previousHomeProxyTag 和用户 email
+ * @returns {Promise<{failedServers:Array,skippedServers:Array,remainingPendingServerIds:number[]}>} 远端清理结果
+ */
+async function cleanupServerRoutes(db, serverIds, onlineServers, context) {
+  const cleanupIds = normalizeServerIds(serverIds);
+  const servers = await repository.listServersByIds(db, cleanupIds);
+  const serverMap = new Map(servers.map((server) => [Number(server.id), server]));
+  const onlineIds = new Set(onlineServers.map((server) => Number(server.id)));
+  const onlineTargets = [];
+  const skippedServers = [];
+
+  for (const id of cleanupIds) {
+    const server = serverMap.get(id);
+    if (!server) {
+      continue;
+    }
+    if (!onlineIds.has(id)) {
+      skippedServers.push({ id, name: server.name, message: '服务器当前离线，已跳过 routing 清理' });
+      continue;
+    }
+    onlineTargets.push(server);
+  }
+
+  const results = await runWithConcurrency(
+    onlineTargets,
+    HOME_ROUTING_SYNC_CONCURRENCY,
+    (server) => syncServerRoute(server, { ...context, nextServerIds: [] })
+  );
+  const failedServers = collectFailedServers(onlineTargets, results);
+  const pendingIds = new Set([...skippedServers, ...failedServers].map((server) => server.id));
+  return {
+    failedServers,
+    skippedServers,
+    remainingPendingServerIds: cleanupIds.filter((id) => pendingIds.has(id))
+  };
+}
+
 async function saveSuccessfulRoute(db, payload) {
   if (typeof db.transaction !== 'function') {
     await repository.upsertUserHomeRoute(db, payload);
@@ -680,14 +727,33 @@ async function updateHomeRouting(db, userId, payload = {}, logger = console, opt
   assertSelectedServersOnline(nextServerIds, onlineServers);
 
   const oldServerIds = parseServerIds(currentRoute?.server_ids);
-  const involvedServers = await loadInvolvedServers(db, oldServerIds, nextServerIds, onlineServers);
+  const pendingServerIds = parseServerIds(currentRoute?.pending_cleanup_server_ids);
+  const cleanupServerIds = normalizeServerIds([...oldServerIds, ...pendingServerIds])
+    .filter((id) => !nextServerIds.includes(id));
+  const context = {
+    homeProxyTag: entitlement.homeProxyTag,
+    previousHomeProxyTag: currentRoute?.home_proxy_tag || '',
+    email: entitlement.email
+  };
+  const cleanupResult = await cleanupServerRoutes(db, cleanupServerIds, onlineServers, context);
+  if (cleanupResult.failedServers.length > 0) {
+    cleanupResult.failedServers.forEach((server) => {
+      logger.warn(`家宽 IP routing 同步失败: user=${entitlement.email}, serverId=${server.id}, server=${server.name}, tag=${entitlement.homeProxyTag}, error=${server.message}`);
+    });
+    throw createLegacyBusinessError('家宽 IP routing 同步失败，请重试', {
+      code: 4107,
+      data: { failed_servers: cleanupResult.failedServers, retryable: true }
+    });
+  }
+
+  // 旧 routing 清理全部完成后才开始新绑定，避免在线删除失败时扩大远端变更。
+  const onlineServerMap = new Map(onlineServers.map((server) => [Number(server.id), server]));
+  const involvedServers = nextServerIds.map((id) => onlineServerMap.get(id));
   const results = await runWithConcurrency(
     involvedServers,
     HOME_ROUTING_SYNC_CONCURRENCY,
     (server) => syncServerRoute(server, {
-      homeProxyTag: entitlement.homeProxyTag,
-      previousHomeProxyTag: currentRoute?.home_proxy_tag || '',
-      email: entitlement.email,
+      ...context,
       nextServerIds
     })
   );
@@ -710,18 +776,23 @@ async function updateHomeRouting(db, userId, payload = {}, logger = console, opt
     userId,
     homeProxyTag: entitlement.homeProxyTag,
     serverIds: nextServerIds,
+    pendingCleanupServerIds: cleanupResult.remainingPendingServerIds,
     showHomeNodePrefix,
     syncedAt: now,
-    message: `同步成功，共处理 ${involvedServers.length} 台服务器`
+    message: `同步成功，共绑定 ${involvedServers.length} 台服务器`
   });
 
-  return getHomeRoutingOptions(db, userId);
+  return {
+    ...await getHomeRoutingOptions(db, userId),
+    skipped_cleanup_servers: cleanupResult.skippedServers
+  };
 }
 
 /**
  * 清理当前用户家宽 IP routing 绑定并同步 3X-UI。
  * 职责：复用用户手动删除和套餐到期自动清理的远端 routing 删除流程。
- * 核心分支：手动删除默认遵守冷却并抛业务错误；到期清理可跳过冷却并返回失败结果。
+ * 核心分支：在线删除失败保留原记录重试；离线跳过后解绑 active，只保留内部 pending 记录。
+ * 手动删除默认遵守冷却并抛业务错误；到期清理可跳过冷却并返回失败结果。
  *
  * @param {Object} db - 数据库代理对象
  * @param {number} userId - 当前用户 ID
@@ -762,18 +833,13 @@ async function cleanupHomeRoutingForUser(db, userId, options = {}) {
   }
 
   const oldServerIds = parseServerIds(currentRoute.server_ids);
-  const involvedServers = await loadInvolvedServers(db, oldServerIds, [], onlineServers);
-  const results = await runWithConcurrency(
-    involvedServers,
-    HOME_ROUTING_SYNC_CONCURRENCY,
-    (server) => syncServerRoute(server, {
-      homeProxyTag: String(currentRoute.home_proxy_tag || '').trim(),
-      previousHomeProxyTag: '',
-      email: userContext.email,
-      nextServerIds: []
-    })
-  );
-  const failedServers = collectFailedServers(involvedServers, results);
+  const pendingServerIds = parseServerIds(currentRoute.pending_cleanup_server_ids);
+  const cleanupResult = await cleanupServerRoutes(db, [...oldServerIds, ...pendingServerIds], onlineServers, {
+    homeProxyTag: String(currentRoute.home_proxy_tag || '').trim(),
+    previousHomeProxyTag: '',
+    email: userContext.email
+  });
+  const { failedServers, remainingPendingServerIds } = cleanupResult;
 
   if (failedServers.length > 0) {
     failedServers.forEach((server) => {
@@ -796,7 +862,21 @@ async function cleanupHomeRoutingForUser(db, userId, options = {}) {
     });
   }
 
-  await deleteSuccessfulRoute(db, userId);
+  if (remainingPendingServerIds.length > 0) {
+    // 离线残留仅供后续清理，不再展示绑定；沿用原同步时间，不给解绑新增冷却。
+    const prefixValue = currentRoute.show_home_node_prefix;
+    await saveSuccessfulRoute(db, {
+      userId,
+      homeProxyTag: currentRoute.home_proxy_tag,
+      serverIds: [],
+      pendingCleanupServerIds: remainingPendingServerIds,
+      showHomeNodePrefix: prefixValue !== false && prefixValue !== 0 && prefixValue !== '0',
+      syncedAt: currentRoute.last_synced_at,
+      message: '家宽 IP routing 已解绑，离线服务器待清理'
+    });
+  } else {
+    await deleteSuccessfulRoute(db, userId);
+  }
   return { success: true, message: '家宽 IP routing 已清理' };
 }
 

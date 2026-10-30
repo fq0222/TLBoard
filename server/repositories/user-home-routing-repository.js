@@ -95,13 +95,14 @@ async function listServersByIds(db, ids) {
 
 /**
  * 保存用户家宽 routing 绑定，按 user_id 幂等覆盖。
- * 核心分支：只有远端全部成功后才调用本方法，因此这里固定写入 success 状态。
+ * 核心分支：保存已确认同步成功的绑定及仍需清理的离线服务器，状态固定为 success。
  *
  * @param {Object} db - 数据库代理对象，成功同步后传入普通 db 或事务态 db
  * @param {Object} payload - 绑定数据
  * @param {number} payload.userId - 用户 ID
  * @param {string} payload.homeProxyTag - 家宽 outbound tag
  * @param {number[]} payload.serverIds - 已成功同步服务器 ID
+ * @param {number[]} payload.pendingCleanupServerIds - 离线待清理服务器 ID，省略时为空数组
  * @param {boolean} payload.showHomeNodePrefix - 订阅节点是否展示家宽前缀
  * @param {number} payload.syncedAt - 成功同步时间
  * @param {string} payload.message - 成功摘要
@@ -110,12 +111,13 @@ async function listServersByIds(db, ids) {
 async function upsertUserHomeRoute(db, payload) {
   await db.prepare(`
     INSERT INTO user_home_proxy_routes (
-      user_id, home_proxy_tag, server_ids, show_home_node_prefix, last_synced_at, last_sync_status, last_sync_message, created_at, updated_at
+      user_id, home_proxy_tag, server_ids, show_home_node_prefix, last_synced_at, last_sync_status, last_sync_message, created_at, updated_at, pending_cleanup_server_ids
     )
-    VALUES (?, ?, ?, ?, ?, 'success', ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, 'success', ?, ?, ?, ?)
     ON CONFLICT (user_id) DO UPDATE SET
       home_proxy_tag = EXCLUDED.home_proxy_tag,
       server_ids = EXCLUDED.server_ids,
+      pending_cleanup_server_ids = EXCLUDED.pending_cleanup_server_ids,
       show_home_node_prefix = EXCLUDED.show_home_node_prefix,
       last_synced_at = EXCLUDED.last_synced_at,
       last_sync_status = EXCLUDED.last_sync_status,
@@ -129,7 +131,8 @@ async function upsertUserHomeRoute(db, payload) {
     payload.syncedAt,
     payload.message || '',
     payload.syncedAt,
-    payload.syncedAt
+    payload.syncedAt,
+    JSON.stringify(payload.pendingCleanupServerIds || [])
   );
 }
 
@@ -145,6 +148,62 @@ async function deleteUserHomeRoute(db, userId) {
   await db.prepare('DELETE FROM user_home_proxy_routes WHERE user_id = ?').run(userId);
 }
 
+/**
+ * 安全解析持久化的服务器 ID 数组。
+ * @param {string} value - 数据库 TEXT 字段中的 JSON
+ * @returns {Array|null} 有效数组，损坏或非数组 JSON 返回 null，禁止当作空绑定处理
+ */
+function parseRouteServerIds(value) {
+  try {
+    const ids = JSON.parse(value);
+    return Array.isArray(ids) ? ids : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * 从所有家宽 routing 记录中去掉已删除服务器的 ID。
+ * @param {Object} db - 调用方外层事务的数据库代理对象，行锁持有至事务结束
+ * @param {number} serverId - 待删除的正整数服务器 ID
+ * @returns {Promise<void>}
+ * 核心分支：非法 ID 不写入；任一字段无法解析为数组时跳过整条绑定；
+ * 读取时加行锁以串行化并发删除；无关联记录不改动；两列均为空时删除，否则保存剩余 ID。
+ */
+async function removeServerIdFromAllHomeRoutes(db, serverId) {
+  const normalizedId = Number(serverId);
+  if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
+    return;
+  }
+
+  const routes = await db.prepare(`
+    SELECT user_id, server_ids, pending_cleanup_server_ids
+    FROM user_home_proxy_routes
+    FOR UPDATE
+  `).all();
+  for (const route of routes) {
+    const serverIds = parseRouteServerIds(route.server_ids);
+    const pendingIds = parseRouteServerIds(route.pending_cleanup_server_ids);
+    if (serverIds === null || pendingIds === null) {
+      continue;
+    }
+    const remainingServerIds = serverIds.filter(id => Number(id) !== normalizedId);
+    const remainingPendingIds = pendingIds.filter(id => Number(id) !== normalizedId);
+    if (remainingServerIds.length === serverIds.length && remainingPendingIds.length === pendingIds.length) {
+      continue;
+    }
+    if (remainingServerIds.length === 0 && remainingPendingIds.length === 0) {
+      await deleteUserHomeRoute(db, route.user_id);
+    } else {
+      await db.prepare(`
+        UPDATE user_home_proxy_routes
+        SET server_ids = ?, pending_cleanup_server_ids = ?
+        WHERE user_id = ?
+      `).run(JSON.stringify(remainingServerIds), JSON.stringify(remainingPendingIds), route.user_id);
+    }
+  }
+}
+
 module.exports = {
   findHomeRoutingEntitlement,
   findUserHomeRoute,
@@ -152,5 +211,6 @@ module.exports = {
   listOnlineServers,
   listServersByIds,
   upsertUserHomeRoute,
-  deleteUserHomeRoute
+  deleteUserHomeRoute,
+  removeServerIdFromAllHomeRoutes
 };
