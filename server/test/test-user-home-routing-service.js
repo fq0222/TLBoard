@@ -64,6 +64,7 @@ function createMemoryRepository(initialState = {}) {
         user_id: payload.userId,
         home_proxy_tag: payload.homeProxyTag,
         server_ids: JSON.stringify(payload.serverIds),
+        pending_cleanup_server_ids: JSON.stringify(payload.pendingCleanupServerIds || []),
         last_synced_at: payload.syncedAt,
         last_sync_status: 'success',
         last_sync_message: payload.message || '',
@@ -91,9 +92,13 @@ function createServer(id, name = `服务器${id}`, status = 1) {
 function createFakeXuiFactory(configs, calls, failing = {}) {
   return async (apiUrl) => {
     const serverId = Number(String(apiUrl).replace('server-', ''));
+    calls.factory = calls.factory || [];
+    calls.factory.push(serverId);
+    calls.events = calls.events || [];
     return {
       async getXrayConfig() {
         calls.get.push(serverId);
+        calls.events.push(`get:${serverId}`);
         if (failing.get?.includes(serverId)) {
           throw new Error(`get failed ${serverId}`);
         }
@@ -118,6 +123,7 @@ function createFakeXuiFactory(configs, calls, failing = {}) {
       },
       async updateXrayConfig(xraySetting) {
         calls.update.push(serverId);
+        calls.events.push(`update:${serverId}`);
         if (failing.update?.includes(serverId)) {
           throw new Error(`update failed ${serverId}`);
         }
@@ -299,6 +305,214 @@ async function testDeletesOldServerRuleAndWritesNewRule() {
     { type: 'field', inboundTag: ['new-in'], outboundTag: 'local-ip-lax', user: ['user@example.com'] }
   ]);
   assert.deepStrictEqual(repository.state.savedRoutes[0].serverIds, [2]);
+  assert.deepStrictEqual(calls.events, ['get:1', 'update:1', 'get:2', 'update:2']);
+}
+
+/**
+ * 验证旧绑定和历史 pending 离线时不调用 XUI，绑定成功后保留待清理 ID 并返回跳过提示。
+ * @returns {Promise<void>} 新服务器绑定成功且仅离线目标留在 pending。
+ */
+async function testOfflineCleanupTargetsAreSkippedBeforeBinding() {
+  const configs = { 2: { inbounds: [{ tag: 'new-in' }], routing: { rules: [] } } };
+  const calls = { get: [], update: [] };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement(),
+    route: {
+      home_proxy_tag: 'local-ip-lax', server_ids: '[1]', pending_cleanup_server_ids: '[3,1]',
+      last_synced_at: Math.floor(Date.now() / 1000) - 3600
+    },
+    servers: [createServer(1, '离线旧服务器', 0), createServer(2), createServer(3, '离线待清理服务器', 0)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+
+  const result = await homeRoutingService.updateHomeRouting({}, 1, { server_ids: [2] });
+
+  assert.deepStrictEqual(calls.factory, [2]);
+  assert.deepStrictEqual(repository.state.savedRoutes[0].serverIds, [2]);
+  assert.deepStrictEqual(repository.state.savedRoutes[0].pendingCleanupServerIds, [1, 3]);
+  assert.deepStrictEqual(result.skipped_cleanup_servers.map((server) => ({ id: server.id, name: server.name })), [
+    { id: 1, name: '离线旧服务器' }, { id: 3, name: '离线待清理服务器' }
+  ]);
+  assert.ok(result.skipped_cleanup_servers.every((server) => typeof server.message === 'string' && server.message));
+  assert.deepStrictEqual(configs[2].routing.rules[0].user, ['user@example.com']);
+}
+
+/**
+ * 验证在线旧服务器删除失败时阻断全部新绑定请求，保留原路由和冷却时间。
+ * @returns {Promise<void>} 失败为 4107，且新服务器尚未创建 XUI 实例。
+ */
+async function testCleanupFailurePreventsEveryNewServerRequest() {
+  const calls = { get: [], update: [] };
+  const configs = {
+    1: { inbounds: [{ tag: 'old-in' }], routing: { rules: [
+      { type: 'field', outboundTag: 'local-ip-lax', user: ['user@example.com'] }
+    ] } },
+    2: { inbounds: [{ tag: 'new-in' }], routing: { rules: [] } }
+  };
+  const originalRoute = {
+    home_proxy_tag: 'local-ip-lax', server_ids: '[1]', pending_cleanup_server_ids: '[]',
+    last_synced_at: Math.floor(Date.now() / 1000) - 3600
+  };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement(), route: originalRoute, servers: [createServer(1), createServer(2)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls, { update: [1] }));
+
+  await assert.rejects(
+    () => homeRoutingService.updateHomeRouting({}, 1, { server_ids: [2] }),
+    (error) => error.code === 4107 && error.data.failed_servers[0].id === 1
+  );
+
+  assert.deepStrictEqual(calls.factory, [1]);
+  assert.deepStrictEqual(calls.events, ['get:1', 'update:1']);
+  assert.strictEqual(repository.state.savedRoutes.length, 0);
+  assert.deepStrictEqual(repository.state.route, originalRoute);
+  assert.deepStrictEqual(configs[2].routing.rules, []);
+}
+
+/**
+ * 验证历史 pending 恢复在线后先删除其规则，完成后才处理新的服务器绑定。
+ * @returns {Promise<void>} pending 规则清空并从成功保存的记录中移除。
+ */
+async function testOnlinePendingIsCleanedBeforeNextBinding() {
+  const calls = { get: [], update: [] };
+  const configs = {
+    1: { inbounds: [{ tag: 'old-in' }], routing: { rules: [
+      { type: 'field', outboundTag: 'local-ip-lax', user: ['user@example.com'] }
+    ] } },
+    2: { inbounds: [{ tag: 'new-in' }], routing: { rules: [] } }
+  };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement(),
+    route: { home_proxy_tag: 'local-ip-lax', server_ids: '[]', pending_cleanup_server_ids: '[1]' },
+    servers: [createServer(1), createServer(2)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+
+  const result = await homeRoutingService.updateHomeRouting({}, 1, { server_ids: [2] });
+
+  assert.deepStrictEqual(calls.events, ['get:1', 'update:1', 'get:2', 'update:2']);
+  assert.deepStrictEqual(configs[1].routing.rules, []);
+  assert.deepStrictEqual(repository.state.savedRoutes[0].pendingCleanupServerIds, []);
+  assert.deepStrictEqual(result.skipped_cleanup_servers, []);
+}
+
+/**
+ * 验证重新选择 pending 服务器时直接绑定，不先删除再写入同一服务器。
+ * @returns {Promise<void>} 单次回写保留新绑定并移除 pending。
+ */
+async function testReselectedPendingIsBoundWithoutCleanup() {
+  const calls = { get: [], update: [] };
+  const configs = { 1: { inbounds: [{ tag: 'in-a' }], routing: { rules: [
+    { type: 'field', outboundTag: 'local-ip-lax', user: ['user@example.com', 'other@example.com'] }
+  ] } } };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement(),
+    route: { home_proxy_tag: 'local-ip-lax', server_ids: '[]', pending_cleanup_server_ids: '[1]' },
+    servers: [createServer(1)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+
+  await homeRoutingService.updateHomeRouting({}, 1, { server_ids: [1] });
+
+  assert.deepStrictEqual(calls.events, ['get:1', 'update:1']);
+  assert.deepStrictEqual(repository.state.savedRoutes[0].pendingCleanupServerIds, []);
+  assert.deepStrictEqual(configs[1].routing.rules[0].user, ['other@example.com', 'user@example.com']);
+}
+
+/**
+ * 验证不存在的历史 pending 直接丢弃，不阻止新服务器绑定。
+ * @returns {Promise<void>} 不存在的服务器不会发请求，也不会作为跳过项返回。
+ */
+async function testMissingPendingIsDiscarded() {
+  const calls = { get: [], update: [] };
+  const configs = { 2: { inbounds: [{ tag: 'in-a' }], routing: { rules: [] } } };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement(),
+    route: { home_proxy_tag: 'local-ip-lax', server_ids: '[]', pending_cleanup_server_ids: '[99]' },
+    servers: [createServer(2)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+
+  const result = await homeRoutingService.updateHomeRouting({}, 1, { server_ids: [2] });
+
+  assert.deepStrictEqual(calls.factory, [2]);
+  assert.deepStrictEqual(repository.state.savedRoutes[0].pendingCleanupServerIds, []);
+  assert.deepStrictEqual(result.skipped_cleanup_servers, []);
+}
+
+/**
+ * 验证 1—2 台新服务器中任意一台离线或不存在时，旧路由也不能执行远程清理。
+ * @returns {Promise<void>} 校验先于所有远程请求，且本地记录保持原样。
+ */
+async function testInvalidSelectionPreventsCleanupRequests() {
+  for (const selectedIds of [[2, 3], [2, 99], [3]]) {
+    const calls = { get: [], update: [] };
+    const repository = createMemoryRepository({
+      entitlement: createEntitlement(),
+      route: { home_proxy_tag: 'local-ip-lax', server_ids: '[1]', pending_cleanup_server_ids: '[4]' },
+      servers: [createServer(1), createServer(2), createServer(3, '离线新服务器', 0), createServer(4)]
+    });
+    installTestDependencies(repository, createFakeXuiFactory({}, calls));
+
+    await assert.rejects(
+      () => homeRoutingService.updateHomeRouting({}, 1, { server_ids: selectedIds }),
+      (error) => error.code === 4108
+    );
+
+    assert.deepStrictEqual(calls.get, []);
+    assert.deepStrictEqual(calls.update, []);
+    assert.strictEqual(calls.factory, undefined);
+    assert.strictEqual(repository.state.savedRoutes.length, 0);
+  }
+}
+
+/**
+ * 验证只有待清理记录时，正常和过期权益的 options 都不展示有效绑定。
+ * @returns {Promise<void>} 内部 pending 记录仍保留，但用户拿到 route: null。
+ */
+async function testPendingOnlyRouteIsHiddenInOptions() {
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement(),
+    route: { home_proxy_tag: 'local-ip-lax', server_ids: '[]', pending_cleanup_server_ids: '[1]' },
+    servers: [createServer(1, '待清理服务器', 0)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory({}, { get: [], update: [] }));
+
+  assert.strictEqual((await homeRoutingService.getHomeRoutingOptions({}, 1)).route, null);
+  repository.state.entitlement = createEntitlement({ home_status: 'expired' });
+  assert.strictEqual((await homeRoutingService.getHomeRoutingOptions({}, 1)).route, null);
+  assert.strictEqual(repository.state.route.pending_cleanup_server_ids, '[1]');
+}
+
+/**
+ * 验证两台新服务器只有一台绑定成功时，不能保存新绑定或覆盖旧 pending。
+ * @returns {Promise<void>} 远端部分成功不更新本地记录，也不产生新的冷却时间。
+ */
+async function testPartialBindingFailureKeepsOriginalPending() {
+  const calls = { get: [], update: [] };
+  const configs = {
+    2: { inbounds: [{ tag: 'new-in-a' }], routing: { rules: [] } },
+    3: { inbounds: [{ tag: 'new-in-b' }], routing: { rules: [] } }
+  };
+  const originalRoute = {
+    home_proxy_tag: 'local-ip-lax', server_ids: '[1]', pending_cleanup_server_ids: '[4]',
+    last_synced_at: Math.floor(Date.now() / 1000) - 3600
+  };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement(), route: originalRoute,
+    servers: [createServer(1, '离线旧服务器', 0), createServer(2), createServer(3), createServer(4, '离线 pending', 0)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls, { update: [3] }));
+
+  await assert.rejects(
+    () => homeRoutingService.updateHomeRouting({}, 1, { server_ids: [2, 3] }),
+    (error) => error.code === 4107 && error.data.failed_servers[0].id === 3
+  );
+
+  assert.deepStrictEqual(calls.factory, [2, 3]);
+  assert.strictEqual(repository.state.savedRoutes.length, 0);
+  assert.deepStrictEqual(repository.state.route, originalRoute);
 }
 
 async function testRemoteDeleteFailureDoesNotSaveOrCooldown() {
@@ -798,8 +1012,111 @@ async function testDeleteCanSkipCooldownForAdmin() {
   assert.deepStrictEqual(repository.state.deletedRoutes, [{ userId: 1 }]);
 }
 
+/**
+ * 验证手动解绑合并 active/pending 并只保留离线清理记录。
+ * 参数无；离线跳过、在线失败保留原记录、全部完成则删除本地记录。
+ */
+async function testDeleteMergesPendingAndSkipsOfflineServers() {
+  const calls = { get: [], update: [], factory: [] };
+  const configs = { 2: { routing: { rules: [
+    { type: 'field', outboundTag: 'local-ip-lax', user: ['user@example.com', 'other@example.com'] }
+  ] } } };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement(),
+    route: {
+      user_id: 1, home_proxy_tag: 'local-ip-lax', server_ids: '[1]',
+      pending_cleanup_server_ids: '[2,3]', show_home_node_prefix: 0, last_synced_at: 1
+    },
+    servers: [createServer(1, '离线服务器', 0), createServer(2)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+
+  const result = await homeRoutingService.deleteHomeRouting({}, 1);
+
+  assert.deepStrictEqual(calls.factory, [2]);
+  assert.deepStrictEqual(calls.update, [2]);
+  assert.deepStrictEqual(configs[2].routing.rules[0].user, ['other@example.com']);
+  assert.deepStrictEqual(JSON.parse(repository.state.route.server_ids), []);
+  assert.deepStrictEqual(JSON.parse(repository.state.route.pending_cleanup_server_ids), [1]);
+  assert.strictEqual(repository.state.route.show_home_node_prefix, false);
+  assert.strictEqual(result.route, null);
+  assert.strictEqual(repository.state.deletedRoutes.length, 0);
+}
+
+/** 验证在线 pending 也必须清理；两个列表为空（含初始已空）才删除 route。 */
+async function testDeleteRemovesRouteAfterActiveAndPendingAreEmpty() {
+  for (const serverIds of [[1], []]) {
+    const calls = { get: [], update: [], factory: [] };
+    const configs = { 1: { routing: { rules: [] } }, 2: { routing: { rules: [] } } };
+    const pendingIds = serverIds.length ? [2] : [];
+    const repository = createMemoryRepository({
+      entitlement: createEntitlement(),
+      route: {
+        user_id: 1, home_proxy_tag: 'local-ip-lax', server_ids: JSON.stringify(serverIds),
+        pending_cleanup_server_ids: JSON.stringify(pendingIds), last_synced_at: 1
+      },
+      servers: [createServer(1), createServer(2)]
+    });
+    installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+    const result = await homeRoutingService.deleteHomeRouting({}, 1);
+    assert.deepStrictEqual(calls.factory, serverIds.length ? [1, 2] : []);
+    assert.deepStrictEqual(calls.update, serverIds.length ? [1, 2] : []);
+    assert.strictEqual(repository.state.route, undefined);
+    assert.strictEqual(result.route, null);
+    assert.deepStrictEqual(repository.state.deletedRoutes, [{ userId: 1 }]);
+  }
+}
+
+/** 验证在线 pending 删除失败阻止解绑，完整保留 active 和 pending 供重试。 */
+async function testDeletePendingFailureKeepsOriginalRoute() {
+  const calls = { get: [], update: [] };
+  const route = {
+    user_id: 1, home_proxy_tag: 'local-ip-lax', server_ids: '[1]',
+    pending_cleanup_server_ids: '[2]', last_synced_at: 1
+  };
+  const repository = createMemoryRepository({
+    entitlement: createEntitlement(), route,
+    servers: [createServer(1, '离线服务器', 0), createServer(2)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory({ 2: { routing: { rules: [] } } }, calls, { update: [2] }));
+  await assert.rejects(() => homeRoutingService.deleteHomeRouting({}, 1), (error) => {
+    assert.strictEqual(error.code, 4110);
+    assert.deepStrictEqual(error.data.failed_servers.map((server) => server.id), [2]);
+    return true;
+  });
+  assert.deepStrictEqual(repository.state.route, route);
+  assert.strictEqual(repository.state.savedRoutes.length, 0);
+  assert.strictEqual(repository.state.deletedRoutes.length, 0);
+}
+
 async function run() {
   try {
+    const cleanupTests = [
+      testDeleteMergesPendingAndSkipsOfflineServers,
+      testDeleteRemovesRouteAfterActiveAndPendingAreEmpty,
+      testDeletePendingFailureKeepsOriginalRoute,
+      testOfflineCleanupTargetsAreSkippedBeforeBinding,
+      testCleanupFailurePreventsEveryNewServerRequest,
+      testOnlinePendingIsCleanedBeforeNextBinding,
+      testReselectedPendingIsBoundWithoutCleanup,
+      testMissingPendingIsDiscarded,
+      testInvalidSelectionPreventsCleanupRequests,
+      testPendingOnlyRouteIsHiddenInOptions,
+      testPartialBindingFailureKeepsOriginalPending
+    ];
+    const failures = [];
+    for (const test of cleanupTests) {
+      try {
+        await test();
+        console.log(`通过: ${test.name}`);
+      } catch (error) {
+        console.error(`失败: ${test.name}: ${error.message}`);
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, `${failures.length} 项离线清理行为测试失败`);
+    }
     testCooldownConstantIsFiveMinutes();
     await testRejectsMissingEntitlement();
     await testRejectsMoreThanTwoServers();

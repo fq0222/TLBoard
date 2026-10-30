@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const migration = require('../db/migrations/018-xui-server-cascade-cleanup');
 const serversService = require('../services/admin/servers-service');
 const serversRepository = require('../repositories/servers-repository');
+const userHomeRoutingRepository = require('../repositories/user-home-routing-repository');
+const { createDbProxy } = require('../db/proxy');
 
 /**
  * 构造迁移脚本专用的 PostgreSQL 连接池桩。
@@ -162,35 +164,128 @@ test('迁移脚本失败时回滚事务', async () => {
   }
 });
 
-test('管理端删除服务器时只删除 xui_servers 并依赖数据库级联', async () => {
-  const originalFindServerById = serversRepository.findServerById;
-  const originalDeleteServer = serversRepository.deleteServer;
-  const originalDeleteServerNodes = serversRepository.deleteServerNodes;
-  const calls = [];
-
-  serversRepository.findServerById = async (db, serverId) => {
-    calls.push(['findServerById', db, serverId]);
-    return { id: serverId, name: '测试服务器' };
-  };
-  serversRepository.deleteServer = async (db, serverId) => {
-    calls.push(['deleteServer', db, serverId]);
-  };
-  serversRepository.deleteServerNodes = async (db, serverId) => {
-    calls.push(['deleteServerNodes', db, serverId]);
-  };
-
-  try {
-    const db = { name: 'fake-db' };
-    const result = await serversService.deleteServer(db, 12);
-
-    assert.equal(result.message, '服务器已删除');
-    assert.deepEqual(calls, [
-      ['findServerById', db, 12],
-      ['deleteServer', db, 12]
-    ]);
-  } finally {
-    serversRepository.findServerById = originalFindServerById;
-    serversRepository.deleteServer = originalDeleteServer;
-    serversRepository.deleteServerNodes = originalDeleteServerNodes;
+/**
+ * 删除编排测试夹具：保留真实数据库事务代理，仅替换数据库连接与仓储边界。
+ * 记录调用参数和提交/回滚顺序，不重复实现仓储层的数组清理算法。
+ */
+class DeleteServerFixture {
+  /** 构造独立调用日志和真实数据库事务代理。 */
+  constructor() {
+    this.calls = [];
+    this.transactionDb = null;
+    this.db = createDbProxy({
+      pool: this,
+      queryWithRetry: (sql) => this.query(sql),
+      convertPlaceholders: (sql) => sql,
+      logger: { error() {}, info() {} }
+    });
   }
+
+  /** @returns {Promise<Object>} 返回可记录事务操作的连接。 */
+  async connect() {
+    return this;
+  }
+
+  /** @param {string} sql - 事务控制 SQL；仓储操作由单独边界桩记录。 */
+  async query(sql) {
+    this.calls.push([sql]);
+    return { rows: [], rowCount: 0 };
+  }
+
+  /** 记录连接归还，确保失败路径也释放连接。 */
+  release() {
+    this.calls.push(['release']);
+  }
+
+  /**
+   * 安装自动恢复的仓储边界桩，保留服务与真实事务代理的调用行为。
+   * @param {Object} t - node:test 上下文
+   * @param {Object} options - 不存在、清理失败或删除失败的分支配置
+   */
+  mockRepositories(t, options = {}) {
+    t.mock.method(serversRepository, 'findServerById', async (db, serverId) => {
+      this.calls.push(['findServerById', db, serverId]);
+      return options.missing ? undefined : { id: serverId, name: '测试服务器' };
+    });
+    t.mock.method(userHomeRoutingRepository, 'removeServerIdFromAllHomeRoutes', async (db, serverId) => {
+      this.transactionDb = db;
+      this.calls.push(['removeServerIdFromAllHomeRoutes', db, serverId]);
+      if (options.cleanupError) {
+        throw options.cleanupError;
+      }
+    });
+    t.mock.method(serversRepository, 'deleteServer', async (db, serverId) => {
+      this.calls.push(['deleteServer', db, serverId]);
+      if (options.deleteError) {
+        throw options.deleteError;
+      }
+    });
+  }
+}
+
+test('管理端删除服务器时在同一事务内先清理 route 引用再删除服务器并提交', async (t) => {
+  const fixture = new DeleteServerFixture();
+  fixture.mockRepositories(t);
+
+  const result = await serversService.deleteServer(fixture.db, 12);
+
+  assert.equal(result.message, '服务器已删除');
+  assert.ok(fixture.transactionDb);
+  assert.notEqual(fixture.transactionDb, fixture.db);
+  assert.equal(fixture.transactionDb.pool, fixture);
+  assert.deepEqual(fixture.calls, [
+    ['findServerById', fixture.db, 12],
+    ['BEGIN'],
+    ['removeServerIdFromAllHomeRoutes', fixture.transactionDb, 12],
+    ['deleteServer', fixture.transactionDb, 12],
+    ['COMMIT'],
+    ['release']
+  ]);
+});
+
+test('管理端清理 route 引用失败时回滚且不删除服务器', async (t) => {
+  const fixture = new DeleteServerFixture();
+  const cleanupError = new Error('route cleanup failed');
+  fixture.mockRepositories(t, { cleanupError });
+
+  await assert.rejects(() => serversService.deleteServer(fixture.db, 12), cleanupError);
+
+  assert.deepEqual(fixture.calls, [
+    ['findServerById', fixture.db, 12],
+    ['BEGIN'],
+    ['removeServerIdFromAllHomeRoutes', fixture.transactionDb, 12],
+    ['ROLLBACK'],
+    ['release']
+  ]);
+});
+
+test('管理端删除服务器失败时回滚 route 清理所在事务', async (t) => {
+  const fixture = new DeleteServerFixture();
+  const deleteError = new Error('server delete failed');
+  fixture.mockRepositories(t, { deleteError });
+
+  await assert.rejects(() => serversService.deleteServer(fixture.db, 12), deleteError);
+
+  assert.deepEqual(fixture.calls, [
+    ['findServerById', fixture.db, 12],
+    ['BEGIN'],
+    ['removeServerIdFromAllHomeRoutes', fixture.transactionDb, 12],
+    ['deleteServer', fixture.transactionDb, 12],
+    ['ROLLBACK'],
+    ['release']
+  ]);
+});
+
+test('管理端删除不存在服务器时保留业务错误且不进入事务', async (t) => {
+  const fixture = new DeleteServerFixture();
+  fixture.mockRepositories(t, { missing: true });
+
+  await assert.rejects(() => serversService.deleteServer(fixture.db, 12), {
+    message: '服务器不存在',
+    isLegacyBusinessError: true,
+    statusCode: 400,
+    code: 1001,
+    data: null
+  });
+  assert.deepEqual(fixture.calls, [['findServerById', fixture.db, 12]]);
 });

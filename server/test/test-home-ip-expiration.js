@@ -295,6 +295,112 @@ test('家宽到期清理失败时不标记过期也不发送邮件', async () =>
   }
 });
 
+/**
+ * 到期清理集成夹具：仅替换数据库、远端 XUI 和邮件边界，使用真实 routing 清理。
+ * scenario 指定离线服务器或在线写入失败，保留本地记录与远端配置供断言。
+ */
+class ExpirationCleanupFixture {
+  constructor(scenario) {
+    this.scenario = scenario;
+    this.route = {
+      user_id: 21, home_proxy_tag: 'home-proxy', server_ids: '[1]',
+      pending_cleanup_server_ids: '[2]', last_synced_at: 1999, show_home_node_prefix: true
+    };
+    this.servers = [1, 2].map((id) => ({
+      id, name: `服务器${id}`, status: scenario.offlineIds.includes(id) ? 0 : 1,
+      api_url: String(id), api_token: 'test-token'
+    }));
+    this.requested = [];
+    this.updated = [];
+    this.marked = 0;
+    this.configs = { 1: { routing: { rules: [] } }, 2: { routing: { rules: [] } } };
+  }
+
+  /** 按 userId 返回测试用户；到期服务负责跳过近期同步的冷却。 */
+  async findUserHomeRoutingContext(db, userId) {
+    assert.equal(userId, 21);
+    return { user_id: 21, email: 'expired@example.com' };
+  }
+
+  /** 返回当前持久化记录；在线失败时应保持原值。 */
+  async findUserHomeRoute() { return this.route; }
+
+  /** 提供独立在线快照，避免将离线记录当作在线请求目标。 */
+  async listOnlineServers() { return this.servers.filter((server) => server.status === 1); }
+
+  /** 按目标 ID 读取完整服务器列表，包含离线记录。 */
+  async listServersByIds(db, ids) { return this.servers.filter((server) => ids.includes(server.id)); }
+
+  /** 保存清理结果，区分 active 解绑与内部 pending 残留。 */
+  async upsertUserHomeRoute(db, payload) {
+    this.route = {
+      ...this.route, server_ids: JSON.stringify(payload.serverIds),
+      pending_cleanup_server_ids: JSON.stringify(payload.pendingCleanupServerIds)
+    };
+  }
+
+  /** 两个列表都已完成清理时删除本地 route。 */
+  async deleteUserHomeRoute() { this.route = undefined; }
+
+  /** 为 apiUrl 指定服务器提供远端边界；在线写入失败用于验证下轮重试。 */
+  async createXui(apiUrl) {
+    const id = Number(apiUrl);
+    this.requested.push(id);
+    return {
+      getXrayConfig: async () => ({ obj: { xraySetting: this.configs[id] } }),
+      updateXrayConfig: async (config) => {
+        if (this.scenario.failedId === id) { throw new Error('在线写入失败'); }
+        this.updated.push(id);
+        this.configs[id] = config;
+        return { success: true };
+      }
+    };
+  }
+}
+
+for (const scenario of [
+  { name: '离线跳过仍标记过期并保留 pending-only route', offlineIds: [1], expired: 1, failed: 0, requested: [2], updated: [2] },
+  { name: '在线 pending 删除失败不标记过期并保留原记录', offlineIds: [], failedId: 2, expired: 0, failed: 1, requested: [1, 2], updated: [1] },
+  { name: '在线全部成功清理 active 和 pending 后删除 route', offlineIds: [], expired: 1, failed: 0, requested: [1, 2], updated: [1, 2] }
+]) {
+  test(`真实家宽到期流程：${scenario.name}`, async () => {
+    const trafficRepository = require('../repositories/traffic-repository');
+    const homeRoutingService = require('../services/shared/home-routing-service');
+    const expirationService = require('../services/shared/home-ip-expiration-service');
+    const originals = { ...trafficRepository };
+    const fixture = new ExpirationCleanupFixture(scenario);
+    const originalRoute = { ...fixture.route };
+    const { db } = createDbStub();
+    homeRoutingService.setRepositoryForTest(fixture);
+    homeRoutingService.setXuiServiceFactoryForTest(fixture.createXui.bind(fixture));
+    trafficRepository.listExpiredHomeIpUsers = async () => [{ id: 21, email: 'expired@example.com' }];
+    trafficRepository.markHomeIpExpired = async () => { fixture.marked += 1; return { expired: true }; };
+    trafficRepository.claimHomeIpExpiredNotice = async () => ({ claimed: false });
+    trafficRepository.releaseExpiredHomeIpSlots = async () => ({ releasedCount: 0 });
+
+    try {
+      const result = await expirationService.cleanupExpiredHomeIpPlans(db, 2000);
+      assert.equal(result.expiredCount, scenario.expired);
+      assert.equal(result.failedCount, scenario.failed);
+      assert.equal(result.retryCount, scenario.failed);
+      assert.equal(fixture.marked, scenario.expired);
+      assert.deepEqual(fixture.requested, scenario.requested);
+      assert.deepEqual(fixture.updated, scenario.updated);
+      if (scenario.failed) {
+        assert.deepEqual(fixture.route, originalRoute);
+      } else if (scenario.offlineIds.length) {
+        assert.deepEqual(JSON.parse(fixture.route.server_ids), []);
+        assert.deepEqual(JSON.parse(fixture.route.pending_cleanup_server_ids), [1]);
+      } else {
+        assert.equal(fixture.route, undefined);
+      }
+    } finally {
+      Object.assign(trafficRepository, originals);
+      homeRoutingService.resetTestDependencies();
+    }
+  });
+}
+
 test('traffic-manager 在流量到期检查后调度家宽到期服务', () => {
   const source = fs.readFileSync(trafficManagerPath, 'utf8');
 
