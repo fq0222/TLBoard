@@ -149,6 +149,27 @@ async function deleteUserHomeRoute(db, userId) {
 }
 
 /**
+ * 查询仍包含待清理服务器的家宽 routing 记录。
+ * @param {Object} db - 数据库代理对象。
+ * @returns {Promise<Array>} 包含用户邮箱和 routing 清理上下文的候选记录。
+ * 核心分支：只按 TEXT 的空数组字面值筛选，不强制转换 JSON，损坏数据交由服务层识别。
+ */
+async function listPendingCleanupRoutes(db) {
+  return db.prepare(`
+    SELECT
+      r.user_id,
+      u.email,
+      r.home_proxy_tag,
+      r.server_ids,
+      r.pending_cleanup_server_ids
+    FROM user_home_proxy_routes r
+    JOIN users u ON u.id = r.user_id
+    WHERE r.pending_cleanup_server_ids <> '[]'
+    ORDER BY r.user_id ASC
+  `).all();
+}
+
+/**
  * 安全解析持久化的服务器 ID 数组。
  * @param {string} value - 数据库 TEXT 字段中的 JSON
  * @returns {Array|null} 有效数组，损坏或非数组 JSON 返回 null，禁止当作空绑定处理
@@ -160,6 +181,77 @@ function parseRouteServerIds(value) {
   } catch (error) {
     return null;
   }
+}
+
+/**
+ * 严格解析 routing 服务器 ID 数组。
+ * @param {string} value - 数据库 TEXT 字段中的 JSON。
+ * @returns {number[]|null} 规范化后的正整数数组；格式或元素异常时返回 null。
+ */
+function parseNormalizedRouteServerIds(value) {
+  const ids = parseRouteServerIds(value);
+  if (ids === null) {
+    return null;
+  }
+
+  const isValidId = (id) => (
+    (typeof id === 'number' && Number.isSafeInteger(id) && id > 0)
+    || (typeof id === 'string' && /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id)))
+  );
+  if (ids.some((id) => !isValidId(id))) {
+    return null;
+  }
+  const normalizedIds = ids.map(Number);
+  return Array.from(new Set(normalizedIds));
+}
+
+/**
+ * 从最新 routing 记录中移除已确认完成的待清理服务器 ID。
+ * @param {Object} db - 支持 transaction() 的数据库代理对象。
+ * @param {number} userId - 用户 ID。
+ * @param {number[]} removableServerIds - 本次已成功清理、已不存在或与 active 重叠的服务器 ID。
+ * @returns {Promise<{status:'updated'|'deleted'|'missing'|'invalid',remainingPendingServerIds?:number[]}>} 写回结果。
+ * 核心分支：短事务内加行锁并读取最新值；损坏数据不写入；两个列表均空时删除整条记录。
+ */
+async function removePendingCleanupServerIds(db, userId, removableServerIds) {
+  const removableIds = new Set((removableServerIds || [])
+    .map(Number)
+    .filter((id) => Number.isInteger(id) && id > 0));
+  const transaction = db.transaction(async (transactionDb) => {
+    const route = await transactionDb.prepare(`
+      SELECT user_id, server_ids, pending_cleanup_server_ids
+      FROM user_home_proxy_routes
+      WHERE user_id = ?
+      FOR UPDATE
+    `).get(userId);
+
+    if (!route) {
+      return { status: 'missing' };
+    }
+
+    const serverIds = parseNormalizedRouteServerIds(route.server_ids);
+    const pendingIds = parseNormalizedRouteServerIds(route.pending_cleanup_server_ids);
+    if (serverIds === null || pendingIds === null) {
+      return { status: 'invalid' };
+    }
+
+    const remainingPendingServerIds = pendingIds.filter((id) => !removableIds.has(id));
+    if (serverIds.length === 0 && remainingPendingServerIds.length === 0) {
+      await deleteUserHomeRoute(transactionDb, userId);
+      return { status: 'deleted', remainingPendingServerIds };
+    }
+
+    if (remainingPendingServerIds.length !== pendingIds.length) {
+      await transactionDb.prepare(`
+        UPDATE user_home_proxy_routes
+        SET pending_cleanup_server_ids = ?
+        WHERE user_id = ?
+      `).run(JSON.stringify(remainingPendingServerIds), userId);
+    }
+    return { status: 'updated', remainingPendingServerIds };
+  });
+
+  return transaction();
 }
 
 /**
@@ -212,5 +304,7 @@ module.exports = {
   listServersByIds,
   upsertUserHomeRoute,
   deleteUserHomeRoute,
+  listPendingCleanupRoutes,
+  removePendingCleanupServerIds,
   removeServerIdFromAllHomeRoutes
 };

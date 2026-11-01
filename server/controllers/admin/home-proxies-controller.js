@@ -116,10 +116,28 @@ async function syncHomeProxy(req, res) {
   }
 }
 
+/**
+ * 将家宽 routing 残留清理任务提交到统一 XUI 队列。
+ * @param {Object} req - Express 请求对象，通过 app.locals.db 提供数据库实例。
+ * @param {Object} res - Express 响应对象。
+ * @returns {Promise<Object>} 旧管理端响应结构。
+ * 核心分支：同名任务已存在时仍返回成功，由 service 标记为 merged。
+ */
+async function runPendingHomeRouteCleanupTask(req, res) {
+  try {
+    const result = homeProxiesService.runPendingHomeRouteCleanupTask(req.app.locals.db);
+    logger.info(`提交家宽 routing 残留清理任务: queued=${result.queued}, merged=${result.merged}`);
+    return legacySuccess(res, result);
+  } catch (error) {
+    return handleControllerError(res, '提交家宽 routing 残留清理任务', error);
+  }
+}
+
 module.exports = {
   listHomeProxies,
   createHomeProxy,
   updateHomeProxy,
   deleteHomeProxy,
-  syncHomeProxy
+  syncHomeProxy,
+  runPendingHomeRouteCleanupTask
 };

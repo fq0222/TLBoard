@@ -1,6 +1,7 @@
 const { createLogger } = require('../../utils/logger');
 const { runWithConcurrency } = require('../../utils/concurrency');
 const XuiService = require('../../integrations/xui/xui-service');
+const { schedulePendingHomeRouteCleanup } = require('../../jobs/handlers/clean-pending-home-routes');
 let homeProxiesRepository = require('../../repositories/home-proxies-repository');
 
 const logger = createLogger('ADMIN-HOME-PROXIES');
@@ -616,6 +617,23 @@ async function deleteHomeProxy(db, id) {
 }
 
 /**
+ * 将家宽 routing 残留清理任务提交到统一 XUI 队列。
+ * @param {Object} db - 数据库代理对象。
+ * @returns {{queued: boolean, merged: boolean, message: string}} 入队或同名任务合并结果。
+ * 核心分支：队列拒绝重复任务时按成功合并返回，不直接执行清理。
+ */
+function runPendingHomeRouteCleanupTask(db) {
+  const queued = schedulePendingHomeRouteCleanup(db);
+  return {
+    queued,
+    merged: !queued,
+    message: queued
+      ? '残留路由清理任务已加入队列'
+      : '已有残留路由清理任务正在执行或等待，已自动合并'
+  };
+}
+
+/**
  * 测试用：替换 XUI service factory，避免服务层测试访问真实 3X-UI。
  *
  * @param {Function} factory - 测试 factory
@@ -654,6 +672,7 @@ module.exports = {
   updateHomeProxy,
   syncHomeProxy,
   deleteHomeProxy,
+  runPendingHomeRouteCleanupTask,
   setXuiServiceFactoryForTest,
   setRepositoryForTest,
   resetTestDependencies

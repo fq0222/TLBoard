@@ -12,6 +12,7 @@
  * | 3X-UI 用户同步         | 否               | 1 分钟             | 6 小时                  |
  * | 3X-UI 同步重试队列     | 否               | 30 秒              | 3 分钟                  |
  * | 3X-UI 同步历史清理     | 否               | 无                 | 每天 12:00（北京时间）  |
+ * | 家宽 routing 残留清理  | 否               | 无                 | 每天 12:00 入 XUI 队列  |
  * | 流量同步               | 否               | 10 分钟            | 30 分钟                 |
  * | 工单自动关闭           | 否               | 3 分钟             | 1 小时                  |
  * | 邮件群发               | 否               | 无                 | 每天 9:00               |
@@ -28,6 +29,7 @@
  * - 3X-UI 用户同步：确保所有已付费用户都在 3X-UI 节点中，并修复 sub_id、flow、流量上限等状态
  * - 3X-UI 同步重试队列：处理注册、续费、启用、禁用等同步失败后的补偿任务
  * - 3X-UI 同步历史清理：每天北京时间 12:00 删除超过 15 天的 success/failed 终态记录，每次最多 50 条
+ * - 家宽 routing 残留清理：每天北京时间 12:00 入 XUI 队列，串行重试清理在线服务器的残留 routing
  * - 流量同步：从 3X-UI 服务器同步用户流量数据到本地数据库
  * - 工单自动关闭：关闭用户已读后超过 24 小时无新回复的 pending 工单
  * - 邮件群发：处理待发送的邮件群发任务，每日限额 200 封
@@ -44,6 +46,7 @@ const { registerCleanZombieUsersJob } = require('./handlers/clean-zombie-users')
 const { registerXuiSyncJob } = require('./handlers/sync-xui-users');
 const { registerXuiSyncTaskJob } = require('./handlers/sync-xui-tasks');
 const { registerCleanXuiSyncTasksJob } = require('./handlers/clean-xui-sync-tasks');
+const { registerPendingHomeRouteCleanupJob } = require('./handlers/clean-pending-home-routes');
 const { registerTrafficSyncJob } = require('./handlers/sync-traffic');
 const { registerTicketAutoCloseJob } = require('./handlers/auto-close-tickets');
 const { registerEmailCampaignJob } = require('./handlers/process-email-campaigns');
@@ -124,6 +127,7 @@ function startAllJobs(db) {
     registerXuiSyncJob(context);
     registerXuiSyncTaskJob(context);
     registerCleanXuiSyncTasksJob(context);
+    registerPendingHomeRouteCleanupJob(context);
     registerTrafficSyncJob(context);
     registerTicketAutoCloseJob(context);
     registerEmailCampaignJob(context);

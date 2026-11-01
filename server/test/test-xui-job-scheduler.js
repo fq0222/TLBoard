@@ -49,6 +49,7 @@ function loadJobsIndexForTest({ throwOnRegister }) {
     ['../jobs/handlers/sync-xui-users', 'registerXuiSyncJob'],
     ['../jobs/handlers/sync-xui-tasks', 'registerXuiSyncTaskJob'],
     ['../jobs/handlers/clean-xui-sync-tasks', 'registerCleanXuiSyncTasksJob'],
+    ['../jobs/handlers/clean-pending-home-routes', 'registerPendingHomeRouteCleanupJob'],
     ['../jobs/handlers/sync-traffic', 'registerTrafficSyncJob'],
     ['../jobs/handlers/auto-close-tickets', 'registerTicketAutoCloseJob'],
     ['../jobs/handlers/process-email-campaigns', 'registerEmailCampaignJob'],
@@ -112,6 +113,9 @@ function loadJobsIndexForTest({ throwOnRegister }) {
         // 独立清理 cron 应由任务中心统一停止，不能遗留运行中的句柄。
         if (exportName === 'registerCleanXuiSyncTasksJob') {
           context.cronTasks.push({ stop: () => cleared.push('cleanup-cron') });
+        }
+        if (exportName === 'registerPendingHomeRouteCleanupJob') {
+          context.cronTasks.push({ stop: () => cleared.push('pending-home-cron') });
         }
         if (throwOnRegister && index === 1) {
           throw new Error('注册失败');
@@ -180,7 +184,7 @@ function loadXuiApiClientWithAxiosStub(requests) {
   }
 }
 
-test('四个指定定时任务接入统一调度器', () => {
+test('五个指定定时任务接入统一调度器', () => {
   const handlersDir = path.join(__dirname, '..', 'jobs', 'handlers');
   const scheduledHandlers = fs.readdirSync(handlersDir)
     .filter(file => file.endsWith('.js'))
@@ -189,6 +193,7 @@ test('四个指定定时任务接入统一调度器', () => {
     .sort();
 
   assert.deepEqual(scheduledHandlers, [
+    'clean-pending-home-routes.js',
     'sync-traffic.js',
     'sync-xui-tasks.js',
     'sync-xui-users.js',
@@ -196,7 +201,7 @@ test('四个指定定时任务接入统一调度器', () => {
   ]);
 });
 
-test('任务中心只注册一次同步历史清理并共享上下文，停止时清理全部句柄', t => {
+test('任务中心只注册一次两个每日清理任务并共享上下文，停止时清理全部句柄', t => {
   const observation = loadJobsIndexForTest({ throwOnRegister: false });
   t.after(observation.restore);
   const db = { marker: 'jobs-db' };
@@ -208,6 +213,10 @@ test('任务中心只注册一次同步历史清理并共享上下文，停止�
     registration => registration.name === 'registerCleanXuiSyncTasksJob'
   );
   assert.equal(cleanupRegistrations.length, 1);
+  const pendingHomeRegistrations = observation.registrations.filter(
+    registration => registration.name === 'registerPendingHomeRouteCleanupJob'
+  );
+  assert.equal(pendingHomeRegistrations.length, 1);
   const { context } = cleanupRegistrations[0];
   assert.equal(context.db, db);
   assert.ok(Array.isArray(context.cronTasks));
@@ -219,7 +228,8 @@ test('任务中心只注册一次同步历史清理并共享上下文，停止�
     'interval',
     'timeout',
     'cron',
-    'cleanup-cron'
+    'cleanup-cron',
+    'pending-home-cron'
   ]);
 });
 

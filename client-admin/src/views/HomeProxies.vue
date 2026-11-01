@@ -11,6 +11,15 @@
           <el-icon><Plus /></el-icon>
           添加家宽 IP
         </el-button>
+        <el-button
+          type="primary"
+          plain
+          :loading="pendingCleanupSubmitting"
+          @click="runPendingHomeRouteCleanupTask"
+        >
+          <el-icon v-if="!pendingCleanupSubmitting"><Refresh /></el-icon>
+          {{ pendingCleanupSubmitting ? '提交中' : '清理残留路由' }}
+        </el-button>
         <span class="total-info">共 {{ homeProxies.length }} 条记录</span>
       </div>
 
@@ -199,6 +208,7 @@ const editingId = ref(null)
 const submitting = ref(false)
 const syncingId = ref(null)
 const deletingId = ref(null)
+const pendingCleanupSubmitting = ref(false)
 const proxyFormRef = ref(null)
 
 const proxyForm = reactive({
@@ -325,6 +335,24 @@ async function syncProxy(proxy) {
     console.error('同步家宽 IP 失败:', error)
   } finally {
     syncingId.value = null
+  }
+}
+
+/**
+ * 将家宽 routing 残留清理任务提交到统一 XUI 队列。
+ * 核心分支：接口成功时展示入队或合并提示，请求结束后始终恢复按钮状态。
+ */
+async function runPendingHomeRouteCleanupTask() {
+  pendingCleanupSubmitting.value = true
+  try {
+    const response = await api.admin.runPendingHomeRouteCleanupTask()
+    if (response.code === 0) {
+      ElMessage.success(response.data.message)
+    }
+  } catch {
+    console.error('提交家宽 routing 残留清理任务失败')
+  } finally {
+    pendingCleanupSubmitting.value = false
   }
 }
 

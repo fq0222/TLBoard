@@ -212,6 +212,9 @@ test('任务中心会注册 Telegram 服务器健康巡检任务', () => {
     './handlers/clean-xui-sync-tasks': {
       registerCleanXuiSyncTasksJob() {}
     },
+    './handlers/clean-pending-home-routes': {
+      registerPendingHomeRouteCleanupJob() {}
+    },
     './handlers/sync-traffic': {
       registerTrafficSyncJob() {}
     },

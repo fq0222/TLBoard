@@ -261,6 +261,14 @@ const adminApi = {
   },
 
   /**
+   * 将家宽 routing 残留清理任务提交到统一 XUI 队列
+   * @returns {Promise<Object>} 入队或同名任务合并结果
+   */
+  runPendingHomeRouteCleanupTask() {
+    return apiClient.post('/home-proxies/cleanup-routes/run', {}, { timeout: 10000 })
+  },
+
+  /**
    * 启动 3X-UI 数据库手动备份任务
    * @returns {Promise<Object>} 当前备份任务状态
    */

@@ -78,6 +78,61 @@ function createMemoryRepository(initialState = {}) {
   };
 }
 
+/**
+ * 构造定时清理专用的多用户内存仓储。
+ * @param {Object} initialState - 初始 routes 和 servers。
+ * @returns {Object} 可观测写回结果的仓储替身。
+ */
+function createPendingCleanupRepository(initialState = {}) {
+  const state = {
+    routes: new Map((initialState.routes || []).map(route => [Number(route.user_id), clone(route)])),
+    servers: clone(initialState.servers || []),
+    writes: []
+  };
+
+  return {
+    state,
+    async listPendingCleanupRoutes() {
+      return Array.from(state.routes.values()).map(clone);
+    },
+    async findUserHomeRoute(db, userId) {
+      const route = state.routes.get(Number(userId));
+      return route ? clone(route) : undefined;
+    },
+    async listOnlineServers() {
+      return clone(state.servers.filter(server => Number(server.status) === 1));
+    },
+    async listServersByIds(db, ids) {
+      const idSet = new Set((ids || []).map(Number));
+      return clone(state.servers.filter(server => idSet.has(Number(server.id))));
+    },
+    async removePendingCleanupServerIds(db, userId, removableServerIds) {
+      const route = state.routes.get(Number(userId));
+      if (!route) return { status: 'missing' };
+      let serverIds;
+      let pendingIds;
+      try {
+        serverIds = JSON.parse(route.server_ids);
+        pendingIds = JSON.parse(route.pending_cleanup_server_ids);
+      } catch (error) {
+        return { status: 'invalid' };
+      }
+      if (!Array.isArray(serverIds) || !Array.isArray(pendingIds)) {
+        return { status: 'invalid' };
+      }
+      const removable = new Set(removableServerIds.map(Number));
+      const remaining = pendingIds.map(Number).filter(id => !removable.has(id));
+      state.writes.push({ userId: Number(userId), removableServerIds: [...removable] });
+      if (serverIds.length === 0 && remaining.length === 0) {
+        state.routes.delete(Number(userId));
+        return { status: 'deleted', remainingPendingServerIds: [] };
+      }
+      route.pending_cleanup_server_ids = JSON.stringify(remaining);
+      return { status: 'updated', remainingPendingServerIds: remaining };
+    }
+  };
+}
+
 function createServer(id, name = `服务器${id}`, status = 1) {
   return {
     id,
@@ -1089,12 +1144,277 @@ async function testDeletePendingFailureKeepsOriginalRoute() {
   assert.strictEqual(repository.state.deletedRoutes.length, 0);
 }
 
+/** 在线服务器清理成功后，应删除远端当前用户规则并移除本地 pending ID。 */
+async function testScheduledCleanupRemovesOnlinePendingRoute() {
+  const calls = { get: [], update: [], factory: [] };
+  const configs = { 1: { routing: { rules: [
+    { type: 'field', outboundTag: 'local-ip-lax', user: ['pending@example.com', 'other@example.com'] }
+  ] } } };
+  const repository = createPendingCleanupRepository({
+    routes: [{
+      user_id: 1, email: 'pending@example.com', home_proxy_tag: 'local-ip-lax',
+      server_ids: '[]', pending_cleanup_server_ids: '[1]'
+    }],
+    servers: [createServer(1)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls));
+
+  const summary = await homeRoutingService.cleanupPendingHomeRoutes({});
+
+  assert.deepStrictEqual(summary, {
+    scannedUsers: 1, cleanedServers: 1, skippedOfflineServers: 0,
+    failedServers: 0, invalidRoutes: 0
+  });
+  assert.deepStrictEqual(configs[1].routing.rules[0].user, ['other@example.com']);
+  assert.strictEqual(repository.state.routes.has(1), false);
+}
+
+/** 离线服务器不得发起 XUI 请求，pending ID 留待下一次任务。 */
+async function testScheduledCleanupKeepsOfflinePendingRoute() {
+  const calls = { get: [], update: [], factory: [] };
+  const repository = createPendingCleanupRepository({
+    routes: [{
+      user_id: 1, email: 'pending@example.com', home_proxy_tag: 'local-ip-lax',
+      server_ids: '[]', pending_cleanup_server_ids: '[1]'
+    }],
+    servers: [createServer(1, '离线服务器', 0)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory({}, calls));
+
+  const summary = await homeRoutingService.cleanupPendingHomeRoutes({});
+
+  assert.deepStrictEqual(calls.factory, []);
+  assert.deepStrictEqual(summary, {
+    scannedUsers: 1, cleanedServers: 0, skippedOfflineServers: 1,
+    failedServers: 0, invalidRoutes: 0
+  });
+  assert.strictEqual(repository.state.routes.get(1).pending_cleanup_server_ids, '[1]');
+}
+
+/** 已不存在的服务器无需远端请求，应直接清除本地残留 ID。 */
+async function testScheduledCleanupDropsMissingServerId() {
+  const calls = { get: [], update: [], factory: [] };
+  const repository = createPendingCleanupRepository({
+    routes: [{
+      user_id: 1, email: 'pending@example.com', home_proxy_tag: 'local-ip-lax',
+      server_ids: '[]', pending_cleanup_server_ids: '[99]'
+    }]
+  });
+  installTestDependencies(repository, createFakeXuiFactory({}, calls));
+
+  const summary = await homeRoutingService.cleanupPendingHomeRoutes({});
+
+  assert.deepStrictEqual(calls.factory, []);
+  assert.strictEqual(summary.cleanedServers, 1);
+  assert.strictEqual(repository.state.routes.has(1), false);
+}
+
+/** pending 与当前 active 重叠时只修复本地状态，不能误删新绑定 routing。 */
+async function testScheduledCleanupProtectsReboundServer() {
+  const calls = { get: [], update: [], factory: [] };
+  const repository = createPendingCleanupRepository({
+    routes: [{
+      user_id: 1, email: 'pending@example.com', home_proxy_tag: 'local-ip-lax',
+      server_ids: '[1]', pending_cleanup_server_ids: '[1]'
+    }],
+    servers: [createServer(1)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory({}, calls));
+
+  const summary = await homeRoutingService.cleanupPendingHomeRoutes({});
+
+  assert.deepStrictEqual(calls.factory, []);
+  assert.strictEqual(summary.cleanedServers, 1);
+  assert.strictEqual(repository.state.routes.get(1).server_ids, '[1]');
+  assert.strictEqual(repository.state.routes.get(1).pending_cleanup_server_ids, '[]');
+}
+
+/** 一个用户远端删除失败时保留其 ID，并继续清理后续用户。 */
+async function testScheduledCleanupContinuesAfterServerFailure() {
+  const calls = { get: [], update: [], factory: [] };
+  const configs = {
+    1: { routing: { rules: [] } },
+    2: { routing: { rules: [] } }
+  };
+  const repository = createPendingCleanupRepository({
+    routes: [
+      { user_id: 1, email: 'failed@example.com', home_proxy_tag: 'tag-1', server_ids: '[]', pending_cleanup_server_ids: '[1]' },
+      { user_id: 2, email: 'success@example.com', home_proxy_tag: 'tag-2', server_ids: '[]', pending_cleanup_server_ids: '[2]' }
+    ],
+    servers: [createServer(1), createServer(2)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory(configs, calls, { update: [1] }));
+
+  const summary = await homeRoutingService.cleanupPendingHomeRoutes({}, { warn() {} });
+
+  assert.deepStrictEqual(calls.factory, [1, 2]);
+  assert.deepStrictEqual(summary, {
+    scannedUsers: 2, cleanedServers: 1, skippedOfflineServers: 0,
+    failedServers: 1, invalidRoutes: 0
+  });
+  assert.strictEqual(repository.state.routes.get(1).pending_cleanup_server_ids, '[1]');
+  assert.strictEqual(repository.state.routes.has(2), false);
+}
+
+/** 损坏 JSON 必须计入异常并保持原记录，不能被当作空 pending 删除。 */
+async function testScheduledCleanupSkipsMalformedPendingJson() {
+  const calls = { get: [], update: [], factory: [] };
+  const repository = createPendingCleanupRepository({
+    routes: [{
+      user_id: 1, email: 'broken@example.com', home_proxy_tag: 'local-ip-lax',
+      server_ids: '[]', pending_cleanup_server_ids: '{bad'
+    }],
+    servers: [createServer(1)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory({}, calls));
+
+  const summary = await homeRoutingService.cleanupPendingHomeRoutes({}, { warn() {} });
+
+  assert.deepStrictEqual(summary, {
+    scannedUsers: 1, cleanedServers: 0, skippedOfflineServers: 0,
+    failedServers: 0, invalidRoutes: 1
+  });
+  assert.deepStrictEqual(repository.state.writes, []);
+  assert.strictEqual(repository.state.routes.get(1).pending_cleanup_server_ids, '{bad');
+}
+
+/** 布尔值等非数字元素不能被 Number() 转成真实服务器 ID 后执行远端删除。 */
+async function testScheduledCleanupRejectsBooleanServerId() {
+  const calls = { get: [], update: [], factory: [] };
+  const repository = createPendingCleanupRepository({
+    routes: [{
+      user_id: 1, email: 'broken@example.com', home_proxy_tag: 'local-ip-lax',
+      server_ids: '[]', pending_cleanup_server_ids: '[true]'
+    }],
+    servers: [createServer(1)]
+  });
+  installTestDependencies(repository, createFakeXuiFactory({
+    1: { routing: { rules: [] } }
+  }, calls));
+
+  const summary = await homeRoutingService.cleanupPendingHomeRoutes({}, { warn() {} });
+
+  assert.deepStrictEqual(summary, {
+    scannedUsers: 1, cleanedServers: 0, skippedOfflineServers: 0,
+    failedServers: 0, invalidRoutes: 1
+  });
+  assert.deepStrictEqual(calls.factory, []);
+  assert.deepStrictEqual(repository.state.writes, []);
+}
+
+/** 定时清理与同一用户重新绑定必须串行，不能用旧快照删除刚创建的 routing。 */
+async function testScheduledCleanupSerializesWithRebinding() {
+  const server = createServer(1);
+  const entitlement = createEntitlement();
+  const state = {
+    route: {
+      user_id: 1,
+      email: entitlement.email,
+      home_proxy_tag: entitlement.home_proxy_tag,
+      server_ids: '[]',
+      pending_cleanup_server_ids: '[1]',
+      last_synced_at: 0,
+      show_home_node_prefix: 1
+    }
+  };
+  const repository = {
+    async listPendingCleanupRoutes() {
+      return state.route ? [clone(state.route)] : [];
+    },
+    async findUserHomeRoute() {
+      return state.route ? clone(state.route) : undefined;
+    },
+    async findHomeRoutingEntitlement() {
+      return clone(entitlement);
+    },
+    async listOnlineServers() {
+      return [clone(server)];
+    },
+    async listServersByIds(db, ids) {
+      return ids.map(Number).includes(1) ? [clone(server)] : [];
+    },
+    async removePendingCleanupServerIds(db, userId, removableServerIds) {
+      const removable = new Set(removableServerIds.map(Number));
+      const active = JSON.parse(state.route.server_ids);
+      const remaining = JSON.parse(state.route.pending_cleanup_server_ids)
+        .filter(id => !removable.has(Number(id)));
+      if (active.length === 0 && remaining.length === 0) {
+        state.route = undefined;
+        return { status: 'deleted', remainingPendingServerIds: [] };
+      }
+      state.route.pending_cleanup_server_ids = JSON.stringify(remaining);
+      return { status: 'updated', remainingPendingServerIds: remaining };
+    },
+    async upsertUserHomeRoute(db, payload) {
+      state.route = {
+        user_id: payload.userId,
+        email: entitlement.email,
+        home_proxy_tag: payload.homeProxyTag,
+        server_ids: JSON.stringify(payload.serverIds),
+        pending_cleanup_server_ids: JSON.stringify(payload.pendingCleanupServerIds),
+        last_synced_at: payload.syncedAt,
+        show_home_node_prefix: payload.showHomeNodePrefix
+      };
+    }
+  };
+  const configs = { 1: { inbounds: [{ tag: 'in-1' }], routing: { rules: [] } } };
+  let factoryCalls = 0;
+  let releaseFirstRead;
+  let notifyFirstRead;
+  const firstReadStarted = new Promise(resolve => { notifyFirstRead = resolve; });
+  const firstReadGate = new Promise(resolve => { releaseFirstRead = resolve; });
+  const factory = async () => {
+    factoryCalls += 1;
+    const callNumber = factoryCalls;
+    return {
+      async getXrayConfig() {
+        if (callNumber === 1) {
+          notifyFirstRead();
+          await firstReadGate;
+        }
+        return { success: true, obj: { xraySetting: clone(configs[1]) } };
+      },
+      async getInbounds() {
+        return { success: true, data: clone(configs[1].inbounds) };
+      },
+      async updateXrayConfig(xraySetting) {
+        configs[1] = clone(xraySetting);
+        return { success: true };
+      }
+    };
+  };
+  installTestDependencies(repository, factory);
+
+  const cleanupPromise = homeRoutingService.cleanupPendingHomeRoutes({}, { warn() {} });
+  await firstReadStarted;
+  const rebindPromise = homeRoutingService.updateHomeRouting({}, 1, { server_ids: [1] });
+  await new Promise(resolve => setImmediate(resolve));
+  const factoryCallsWhileCleanupBlocked = factoryCalls;
+  releaseFirstRead();
+  await Promise.all([cleanupPromise, rebindPromise]);
+
+  assert.strictEqual(factoryCallsWhileCleanupBlocked, 1, '重新绑定必须等待同一用户的定时清理结束');
+  assert.deepStrictEqual(JSON.parse(state.route.server_ids), [1]);
+  assert.ok(configs[1].routing.rules.some(rule =>
+    rule.outboundTag === entitlement.home_proxy_tag
+      && rule.user.includes(entitlement.email)
+  ));
+}
+
 async function run() {
   try {
     const cleanupTests = [
       testDeleteMergesPendingAndSkipsOfflineServers,
       testDeleteRemovesRouteAfterActiveAndPendingAreEmpty,
       testDeletePendingFailureKeepsOriginalRoute,
+      testScheduledCleanupRemovesOnlinePendingRoute,
+      testScheduledCleanupKeepsOfflinePendingRoute,
+      testScheduledCleanupDropsMissingServerId,
+      testScheduledCleanupProtectsReboundServer,
+      testScheduledCleanupContinuesAfterServerFailure,
+      testScheduledCleanupSkipsMalformedPendingJson,
+      testScheduledCleanupRejectsBooleanServerId,
+      testScheduledCleanupSerializesWithRebinding,
       testOfflineCleanupTargetsAreSkippedBeforeBinding,
       testCleanupFailurePreventsEveryNewServerRequest,
       testOnlinePendingIsCleanedBeforeNextBinding,

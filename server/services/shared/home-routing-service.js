@@ -14,6 +14,44 @@ const HOME_STATUS = {
 let xuiServiceFactory = XuiService.getInstance.bind(XuiService);
 
 /**
+ * 按用户串行化家宽 routing 的远端读改写操作。
+ * 职责：避免定时清理、绑定和解绑在同一进程内并发覆盖同一用户的远端 routing。
+ */
+class HomeRoutingUserOperationLock {
+  constructor() {
+    this.pendingTurns = new Map();
+  }
+
+  /**
+   * 等待同一用户的前序操作完成后执行回调。
+   * @param {number} userId - 用户 ID。
+   * @param {Function} operation - 需要串行执行的异步操作。
+   * @returns {Promise<*>} 操作结果。
+   */
+  async run(userId, operation) {
+    const key = Number(userId);
+    const previousTurn = this.pendingTurns.get(key) || Promise.resolve();
+    let releaseTurn;
+    const currentTurn = new Promise((resolve) => {
+      releaseTurn = resolve;
+    });
+    this.pendingTurns.set(key, currentTurn);
+
+    await previousTurn;
+    try {
+      return await operation();
+    } finally {
+      releaseTurn();
+      if (this.pendingTurns.get(key) === currentTurn) {
+        this.pendingTurns.delete(key);
+      }
+    }
+  }
+}
+
+const homeRoutingUserOperationLock = new HomeRoutingUserOperationLock();
+
+/**
  * 用户家宽 IP routing 服务。
  * 职责：校验用户家宽权益、维护本地绑定记录，并将 routing rule 同步到 3X-UI。
  */
@@ -79,6 +117,38 @@ function parseServerIds(value) {
   } catch (error) {
     return [];
   }
+}
+
+/**
+ * 严格解析定时清理使用的服务器 ID 数组。
+ * @param {string|number[]|undefined|null} value - 数据库 JSON 或数组。
+ * @returns {number[]|null} 正整数去重数组；格式、类型或元素异常时返回 null。
+ */
+function parseStrictServerIds(value) {
+  let ids = value;
+  if (!Array.isArray(ids)) {
+    if (typeof ids !== 'string') {
+      return null;
+    }
+    try {
+      ids = JSON.parse(ids);
+    } catch (error) {
+      return null;
+    }
+  }
+  if (!Array.isArray(ids)) {
+    return null;
+  }
+
+  const isValidId = (id) => (
+    (typeof id === 'number' && Number.isSafeInteger(id) && id > 0)
+    || (typeof id === 'string' && /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id)))
+  );
+  if (ids.some((id) => !isValidId(id))) {
+    return null;
+  }
+  const normalizedIds = ids.map(Number);
+  return Array.from(new Set(normalizedIds));
 }
 
 function parseJsonLikeConfig(value, label) {
@@ -659,6 +729,82 @@ async function cleanupServerRoutes(db, serverIds, onlineServers, context) {
   };
 }
 
+/**
+ * 批量重试清理所有用户遗留在离线服务器上的家宽 routing。
+ * @param {Object} db - 数据库代理对象。
+ * @param {Object} [logger=console] - 提供 warn() 的日志实例。
+ * @returns {Promise<{scannedUsers:number,cleanedServers:number,skippedOfflineServers:number,failedServers:number,invalidRoutes:number}>} 本次清理汇总。
+ * 核心分支：重新绑定的 active ID 只修复本地 pending；离线和远端失败继续保留；单条异常不阻断后续用户。
+ */
+async function cleanupPendingHomeRoutes(db, logger = console) {
+  const routes = await repository.listPendingCleanupRoutes(db);
+  const onlineServers = await repository.listOnlineServers(db);
+  const summary = {
+    scannedUsers: routes.length,
+    cleanedServers: 0,
+    skippedOfflineServers: 0,
+    failedServers: 0,
+    invalidRoutes: 0
+  };
+
+  for (const candidate of routes) {
+    try {
+      await homeRoutingUserOperationLock.run(candidate.user_id, async () => {
+        const currentRoute = await repository.findUserHomeRoute(db, candidate.user_id);
+        if (!currentRoute) {
+          return;
+        }
+
+        const activeServerIds = parseStrictServerIds(currentRoute.server_ids);
+        const pendingServerIds = parseStrictServerIds(currentRoute.pending_cleanup_server_ids);
+        const homeProxyTag = String(currentRoute.home_proxy_tag || candidate.home_proxy_tag || '').trim();
+        const email = String(candidate.email || '').trim();
+        if (activeServerIds === null || pendingServerIds === null || !homeProxyTag || !email) {
+          summary.invalidRoutes += 1;
+          logger.warn?.(`家宽 IP routing 定时清理跳过异常记录: userId=${candidate.user_id}`);
+          return;
+        }
+
+        const activeIds = new Set(activeServerIds);
+        const cleanupIds = pendingServerIds.filter((id) => !activeIds.has(id));
+        const cleanupResult = await cleanupServerRoutes(db, cleanupIds, onlineServers, {
+          homeProxyTag,
+          previousHomeProxyTag: '',
+          email
+        });
+        summary.skippedOfflineServers += cleanupResult.skippedServers.length;
+        summary.failedServers += cleanupResult.failedServers.length;
+        cleanupResult.failedServers.forEach((server) => {
+          logger.warn?.(`家宽 IP routing 定时清理失败: user=${email}, serverId=${server.id}, server=${server.name}, tag=${homeProxyTag}, error=${server.message}`);
+        });
+
+        const remainingIds = new Set(cleanupResult.remainingPendingServerIds);
+        const removableIds = pendingServerIds.filter((id) => !remainingIds.has(id));
+        if (removableIds.length === 0) {
+          return;
+        }
+
+        const writeResult = await repository.removePendingCleanupServerIds(
+          db,
+          candidate.user_id,
+          removableIds
+        );
+        if (writeResult.status === 'invalid') {
+          summary.invalidRoutes += 1;
+          logger.warn?.(`家宽 IP routing 定时清理写回跳过异常记录: userId=${candidate.user_id}`);
+          return;
+        }
+        summary.cleanedServers += removableIds.length;
+      });
+    } catch (error) {
+      summary.failedServers += 1;
+      logger.warn?.(`家宽 IP routing 定时清理用户失败: userId=${candidate.user_id}, error=${error?.message || String(error)}`);
+    }
+  }
+
+  return summary;
+}
+
 async function saveSuccessfulRoute(db, payload) {
   if (typeof db.transaction !== 'function') {
     await repository.upsertUserHomeRoute(db, payload);
@@ -684,7 +830,7 @@ async function deleteSuccessfulRoute(db, userId) {
 }
 
 /**
- * 更新指定用户家宽 IP routing 绑定并同步到 3X-UI。
+ * 在已取得用户操作锁后更新家宽 IP routing 绑定并同步到 3X-UI。
  *
  * @param {Object} db - 数据库代理对象
  * @param {number} userId - 用户 ID
@@ -695,7 +841,7 @@ async function deleteSuccessfulRoute(db, userId) {
  * @param {boolean} [options.skipCooldown=false] - 是否跳过手动修改冷却，管理端操作使用。
  * @returns {Promise<Object>} 更新后的绑定选项
  */
-async function updateHomeRouting(db, userId, payload = {}, logger = console, options = {}) {
+async function updateHomeRoutingUnlocked(db, userId, payload = {}, logger = console, options = {}) {
   const now = getNowTimestamp();
   const nextServerIds = normalizeServerIds(payload.server_ids);
   assertServerSelection(nextServerIds);
@@ -789,7 +935,24 @@ async function updateHomeRouting(db, userId, payload = {}, logger = console, opt
 }
 
 /**
- * 清理当前用户家宽 IP routing 绑定并同步 3X-UI。
+ * 更新指定用户家宽 IP routing 绑定并同步到 3X-UI。
+ * @param {Object} db - 数据库代理对象。
+ * @param {number} userId - 用户 ID。
+ * @param {Object} payload - 前端提交数据。
+ * @param {Object} logger - 日志实例。
+ * @param {Object} options - 同步选项。
+ * @returns {Promise<Object>} 更新后的绑定选项。
+ * 核心分支：与定时清理和解绑按用户串行，取得锁后重新读取并执行完整远端读改写。
+ */
+async function updateHomeRouting(db, userId, payload = {}, logger = console, options = {}) {
+  return homeRoutingUserOperationLock.run(
+    userId,
+    () => updateHomeRoutingUnlocked(db, userId, payload, logger, options)
+  );
+}
+
+/**
+ * 在已取得用户操作锁后清理当前用户家宽 IP routing 绑定并同步 3X-UI。
  * 职责：复用用户手动删除和套餐到期自动清理的远端 routing 删除流程。
  * 核心分支：在线删除失败保留原记录重试；离线跳过后解绑 active，只保留内部 pending 记录。
  * 手动删除默认遵守冷却并抛业务错误；到期清理可跳过冷却并返回失败结果。
@@ -799,7 +962,7 @@ async function updateHomeRouting(db, userId, payload = {}, logger = console, opt
  * @param {Object} options - 清理选项
  * @returns {Promise<{success:boolean,retryable?:boolean,message?:string}>} 清理结果
  */
-async function cleanupHomeRoutingForUser(db, userId, options = {}) {
+async function cleanupHomeRoutingForUserUnlocked(db, userId, options = {}) {
   const logger = options.logger || console;
   const now = options.now || getNowTimestamp();
   const skipCooldown = options.skipCooldown === true;
@@ -881,6 +1044,21 @@ async function cleanupHomeRoutingForUser(db, userId, options = {}) {
 }
 
 /**
+ * 清理当前用户家宽 IP routing 绑定并同步 3X-UI。
+ * @param {Object} db - 数据库代理对象。
+ * @param {number} userId - 用户 ID。
+ * @param {Object} options - 清理选项。
+ * @returns {Promise<{success:boolean,retryable?:boolean,message?:string}>} 清理结果。
+ * 核心分支：与定时清理和绑定按用户串行，避免远端 Xray 配置相互覆盖。
+ */
+async function cleanupHomeRoutingForUser(db, userId, options = {}) {
+  return homeRoutingUserOperationLock.run(
+    userId,
+    () => cleanupHomeRoutingForUserUnlocked(db, userId, options)
+  );
+}
+
+/**
  * 删除指定用户家宽 IP routing 绑定并同步清理 3X-UI。
  * 核心分支：用户端删除遵守 5 分钟冷却；管理端可通过 skipCooldown 绕过。
  *
@@ -917,6 +1095,7 @@ module.exports = {
   HOME_STATUS,
   getHomeRoutingOptions,
   updateHomeRouting,
+  cleanupPendingHomeRoutes,
   cleanupHomeRoutingForUser,
   deleteHomeRouting,
   __testables: {

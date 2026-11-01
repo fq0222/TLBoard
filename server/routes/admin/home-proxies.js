@@ -65,6 +65,12 @@ router.get('/', authenticateAdmin, homeProxiesController.listHomeProxies);
 
 router.post('/', authenticateAdmin, homeProxyValidators, homeProxiesController.createHomeProxy);
 
+router.post(
+  '/cleanup-routes/run',
+  authenticateAdmin,
+  homeProxiesController.runPendingHomeRouteCleanupTask
+);
+
 router.put('/:id', authenticateAdmin, [
   ...idValidator,
   ...homeProxyUpdateValidators
