@@ -69,7 +69,7 @@
               </div>
               <div class="sync-item">
                 <span class="sync-label">时间</span>
-                <span class="sync-value">{{ formatTime(proxy.last_sync_at) }}</span>
+                <span class="sync-value sync-time">{{ formatTime(proxy.last_sync_at) }}</span>
               </div>
             </div>
 
@@ -542,6 +542,15 @@ onMounted(() => {
 
 .sync-value.danger {
   color: #f56c6c;
+}
+
+.sync-time {
+  font-size: 11px;
+  white-space: normal;
+  text-overflow: clip;
+  overflow: visible;
+  text-align: center;
+  line-height: 1.25;
 }
 
 .message-row {

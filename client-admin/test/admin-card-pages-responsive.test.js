@@ -24,3 +24,13 @@ test('服务器页面移动端顶部操作按钮等宽对齐', () => {
     /@media \(max-width: 767px\)[\s\S]*\.toolbar \.el-button\s*\{[\s\S]*width:\s*100%[\s\S]*margin-left:\s*0/
   )
 })
+
+test('家宽卡片同步时间使用较小字号并允许分两行完整显示', () => {
+  const page = read('HomeProxies')
+
+  assert.match(page, /class="sync-value sync-time"/)
+  assert.match(
+    page,
+    /\.sync-time\s*\{[\s\S]*font-size:\s*11px[\s\S]*white-space:\s*normal[\s\S]*text-overflow:\s*clip/
+  )
+})
