@@ -7,6 +7,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { resolveUserNavigation } from './user-session-guard'
 import { handleUnauthorized } from '@/utils/auth-session'
+import LoginShell from '@/views/LoginShell.vue'
 
 const routes = [
   {
@@ -18,7 +19,7 @@ const routes = [
   {
     path: '/login',
     name: 'Login',
-    component: () => import('@/views/Login.vue'),
+    component: LoginShell,
     meta: { title: '登录', guest: true }
   },
   {
