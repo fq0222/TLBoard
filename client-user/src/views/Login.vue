@@ -166,7 +166,7 @@
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                联系我们
+                在线客服
               </a>
             </template>
           </p>
@@ -440,7 +440,7 @@ async function initializeReferralTracking() {
 
 /**
  * 加载登录页公开设置。
- * 核心分支：后端未配置客服链接时保持空字符串，模板会隐藏“联系我们”入口。
+ * 核心分支：后端未配置客服链接时保持空字符串，模板会隐藏“在线客服”入口。
  */
 async function loadPublicSettings() {
   try {
