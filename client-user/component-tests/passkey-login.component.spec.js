@@ -23,6 +23,7 @@ const loginData = { token: 'passkey-token', user: { id: 7, email: 'user@example.
 const assertion = { id: 'credential', response: { signature: 'signed' }, type: 'public-key' }
 const originalAdapter = axios.defaults.adapter
 const passkeyModulePath = '../src/utils/passkey-client.js'
+const preloaderModulePath = '../src/utils/user-center-preloader.js'
 // API 模块创建客户端之前替换传输层，保留实际 JSON 转换与请求拦截器。
 axios.defaults.adapter = async config => {
   requests.push(config)
@@ -73,6 +74,8 @@ beforeEach(() => {
   vi.stubGlobal('isSecureContext', true)
   vi.stubGlobal('PublicKeyCredential', class PublicKeyCredential {})
   vi.stubGlobal('navigator', { credentials: { get: vi.fn(), create: vi.fn() } })
+  // 页面挂载只安排空闲任务，测试显式执行回调，避免实际页面资源加载干扰认证断言。
+  vi.stubGlobal('requestIdleCallback', vi.fn())
   browser.browserSupportsPasskeys.mockResolvedValue(true)
   browser.startAuthentication.mockResolvedValue(assertion)
   browser.startRegistration.mockResolvedValue({ id: 'new-key', response: {} })
@@ -85,11 +88,108 @@ afterEach(() => {
   wrappers.splice(0).forEach(wrapper => wrapper.unmount())
   mountHosts.splice(0).forEach(host => host.remove())
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 afterAll(() => { axios.defaults.adapter = originalAdapter })
 
 describe('原登录按钮区域的双登录入口', () => {
+  it.each(['password', 'passkey'])('%s 认证成功后保持锁定，等待真实导航完成才显示成功', async method => {
+    const { wrapper, router } = await mountLogin({ redirect: '/user/profile' })
+    let finishNavigation
+    const navigation = new Promise(resolve => { finishNavigation = resolve })
+    router.beforeEach(() => navigation)
+    const replace = vi.spyOn(router, 'replace')
+    const inputs = wrapper.findAll('input')
+    await inputs[0].setValue('user@example.test')
+    await inputs[1].setValue('password123')
+    await wrapper.get(method === 'password' ? '.login-btn' : '.passkey-login-btn').trigger('click')
+    await flushPromises()
+    const activeButton = wrapper.get(method === 'password' ? '.login-btn' : '.passkey-login-btn')
+    expect(activeButton.classes()).toContain('is-loading')
+    expect(activeButton.text()).toBe(method === 'password' ? '登录' : 'Passkey 登录')
+    expect(wrapper.get('.login-btn').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.passkey-login-btn').attributes('disabled')).toBeDefined()
+    expect(messages.success).not.toHaveBeenCalled()
+    expect(router.currentRoute.value.path).toBe('/login')
+    await wrapper.findAll('input')[1].trigger('keyup.enter')
+    expect(requests.filter(request => request.url === '/login')).toHaveLength(method === 'password' ? 1 : 0)
+    finishNavigation(true)
+    await flushPromises()
+    expect(replace).toHaveBeenCalledWith('/user/profile')
+    expect(router.currentRoute.value.path).toBe('/user/profile')
+    expect(messages.success.mock.calls).toEqual([['登录成功']])
+    expect(activeButton.classes()).not.toContain('is-loading')
+    replace.mockRestore()
+  })
+
+  it.each(['password', 'passkey'])('%s 导航拒绝不显示成功，恢复按钮并使用原错误出口', async method => {
+    const { wrapper, router } = await mountLogin()
+    let rejectNavigation
+    router.beforeEach(() => new Promise((resolve, reject) => { rejectNavigation = reject }))
+    // 路由错误有监听器时由应用接收，避免 Vue Router 的默认控制台警告。
+    router.onError(() => {})
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const inputs = wrapper.findAll('input')
+      await inputs[0].setValue('user@example.test')
+      await inputs[1].setValue('password123')
+      await wrapper.get(method === 'password' ? '.login-btn' : '.passkey-login-btn').trigger('click')
+      await flushPromises()
+      rejectNavigation(new Error('用户中心加载失败'))
+      await flushPromises()
+      expect(messages.success).not.toHaveBeenCalled()
+      expect(router.currentRoute.value.path).toBe('/login')
+      expect(wrapper.get('.login-btn').attributes('disabled')).toBeUndefined()
+      expect(wrapper.get('.passkey-login-btn').attributes('disabled')).toBeUndefined()
+      expect(wrapper.get('.login-btn').text()).toBe('登录')
+      expect(wrapper.get('.passkey-login-btn').text()).toBe('Passkey 登录')
+      if (method === 'password') expect(log).toHaveBeenCalledWith('提交表单错误:', expect.any(Error))
+      else expect(messages.error).toHaveBeenCalledWith('用户中心加载失败')
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  describe.each(['password', 'passkey'])('%s 导航失败返回值', method => {
+    it.each(['aborted', 'cancelled'])('%s 不显示成功，恢复按钮并使用原错误出口', async failure => {
+      const { wrapper, router } = await mountLogin()
+      let finishNavigation
+      router.beforeEach(to => {
+        if (to.path !== '/user') return true
+        if (failure === 'aborted') return false
+        return new Promise(resolve => { finishNavigation = resolve })
+      })
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const inputs = wrapper.findAll('input')
+        await inputs[0].setValue('user@example.test')
+        await inputs[1].setValue('password123')
+        await wrapper.get(method === 'password' ? '.login-btn' : '.passkey-login-btn').trigger('click')
+        await flushPromises()
+        if (failure === 'cancelled') {
+          // 新导航替代尚未结束的用户中心导航，旧导航 resolve 为 cancelled 而非 reject。
+          await router.push('/login?cancelled=1')
+          finishNavigation(true)
+          await flushPromises()
+        }
+        expect(messages.success).not.toHaveBeenCalled()
+        expect(router.currentRoute.value.path).toBe('/login')
+        expect(wrapper.get('.login-btn').attributes('disabled')).toBeUndefined()
+        expect(wrapper.get('.passkey-login-btn').attributes('disabled')).toBeUndefined()
+        expect(wrapper.get('.login-btn').classes()).not.toContain('is-loading')
+        expect(wrapper.get('.passkey-login-btn').classes()).not.toContain('is-loading')
+        if (method === 'password') {
+          expect(log).toHaveBeenCalledWith('提交表单错误:', expect.objectContaining({ message: '进入用户中心失败，请重试' }))
+        } else {
+          expect(messages.error).toHaveBeenCalledWith('进入用户中心失败，请重试')
+        }
+      } finally {
+        log.mockRestore()
+      }
+    })
+  })
+
   it('仅在原区域按密码、Passkey 顺序显示两个按钮，注册模式保持单按钮', async () => {
     const { wrapper } = await mountLogin()
     const buttons = wrapper.findAll('.login-actions button')
@@ -283,6 +383,57 @@ describe('原登录按钮区域的双登录入口', () => {
     await flushPromises()
     expect(authenticationRequests()).toHaveLength(0)
     expect(requests.filter(request => request.url === '/login')).toHaveLength(1)
+  })
+})
+
+describe('用户中心预加载调度', () => {
+  it('挂载登录页后安排空闲预加载，不阻塞页面初始化', async () => {
+    const { wrapper } = await mountLogin()
+    expect(globalThis.requestIdleCallback).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.passkey-login-btn').attributes('disabled')).toBeUndefined()
+  })
+
+  it('优先在空闲回调执行独立加载任务，不提前加载', async () => {
+    const { scheduleUserCenterPreload } = await import(preloaderModulePath)
+    const loaded = []
+    scheduleUserCenterPreload({ loaders: [() => { loaded.push('layout') }, () => { loaded.push('profile') }] })
+    expect(loaded).toEqual([])
+    expect(globalThis.requestIdleCallback).toHaveBeenCalledTimes(1)
+    globalThis.requestIdleCallback.mock.calls[0][0]()
+    await flushPromises()
+    expect(loaded).toEqual(['layout', 'profile'])
+  })
+
+  it('无空闲 API 时等待 300ms 再加载', async () => {
+    const { scheduleUserCenterPreload } = await import(preloaderModulePath)
+    vi.stubGlobal('requestIdleCallback', undefined)
+    vi.useFakeTimers()
+    const loaded = []
+    scheduleUserCenterPreload({ loaders: [() => { loaded.push('layout') }, () => { loaded.push('profile') }] })
+    await vi.advanceTimersByTimeAsync(299)
+    expect(loaded).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(loaded).toEqual(['layout', 'profile'])
+  })
+
+  it.each(['rejection', 'throw'])('单个任务 %s 不影响另一个任务或登录，不产生未处理 rejection', async failure => {
+    const { scheduleUserCenterPreload } = await import(preloaderModulePath)
+    const { wrapper, router } = await mountLogin()
+    const loaded = []
+    scheduleUserCenterPreload({ loaders: [
+      () => {
+        if (failure === 'throw') throw new Error('资源不可用')
+        return Promise.reject(new Error('资源不可用'))
+      },
+      () => { loaded.push('profile') }
+    ] })
+    globalThis.requestIdleCallback.mock.calls[1][0]()
+    await flushPromises()
+    expect(loaded).toEqual(['profile'])
+    await wrapper.get('.passkey-login-btn').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/user')
+    expect(messages.success.mock.calls).toEqual([['登录成功']])
   })
 })
 

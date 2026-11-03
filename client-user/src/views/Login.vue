@@ -232,13 +232,14 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { isNavigationFailure, useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import api from '@/api'
 import { ElMessage } from 'element-plus'
 import { Key, Lock, Message } from '@element-plus/icons-vue'
 import { PasskeyClient } from '@/utils/passkey-client'
 import { getSafeRedirect } from '@/utils/auth-session'
+import { scheduleUserCenterPreload } from '@/utils/user-center-preloader'
 
 const router = useRouter()
 const route = useRoute()
@@ -371,9 +372,12 @@ async function handleSubmit() {
     })
 
     if (result.success) {
-      ElMessage.success('登录成功')
       const redirect = getSafeRedirect(route.query.redirect)
-      router.push(redirect)
+      // 认证成功后继续锁定入口，等待目标页面资源和导航完成再提示成功。
+      const navigationFailure = await router.replace(redirect)
+      // 被守卫阻止或被新导航取消会 resolve 失败对象，统一交给现有错误出口处理。
+      if (isNavigationFailure(navigationFailure)) throw new Error('进入用户中心失败，请重试')
+      ElMessage.success('登录成功')
     } else {
       ElMessage.error(result.message || '登录失败')
     }
@@ -395,8 +399,10 @@ async function handlePasskeyLogin() {
     const data = await passkeyClient.login()
     if (!data) return
     userStore.applyLoginResult(data)
+    const navigationFailure = await router.replace(getSafeRedirect(route.query.redirect))
+    // 正常成功返回 undefined；仅对 Router 标识的失败恢复按钮并提示错误。
+    if (isNavigationFailure(navigationFailure)) throw new Error('进入用户中心失败，请重试')
     ElMessage.success('登录成功')
-    router.push(getSafeRedirect(route.query.redirect))
   } catch (error) {
     ElMessage.error(error?.response?.data?.message || error?.userMessage || error?.message || 'Passkey 登录失败')
   } finally {
@@ -454,6 +460,7 @@ async function loadPublicSettings() {
 }
 
 onMounted(() => {
+  scheduleUserCenterPreload()
   initializePasskeySupport()
   initializeReferralTracking()
   loadPublicSettings()
