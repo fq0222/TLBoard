@@ -54,6 +54,10 @@ module.exports = {
         // 安全配置
         RATE_LIMIT_WINDOW: 900000, // 15分钟 = 15 * 60 * 1000 = 900000毫秒
         RATE_LIMIT_MAX: 3, // 最大尝试次数
+        // 未注册路由扫描：10 分钟内累计 2 次，封禁 30 分钟。
+        UNREGISTERED_ROUTE_WINDOW_MS: 600000,
+        UNREGISTERED_ROUTE_MAX_ATTEMPTS: 2,
+        UNREGISTERED_ROUTE_BLOCK_MS: 1800000,
         BCRYPT_ROUNDS: 12
       },
       
@@ -95,6 +99,10 @@ module.exports = {
         // 安全配置
         RATE_LIMIT_WINDOW: 900000,
         RATE_LIMIT_MAX: 3,
+        // 未注册路由扫描：10 分钟内累计 2 次，封禁 30 分钟。
+        UNREGISTERED_ROUTE_WINDOW_MS: 600000,
+        UNREGISTERED_ROUTE_MAX_ATTEMPTS: 2,
+        UNREGISTERED_ROUTE_BLOCK_MS: 1800000,
         BCRYPT_ROUNDS: 12
       },
       

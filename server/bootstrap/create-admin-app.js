@@ -4,6 +4,7 @@
  * @param {Object} params 创建参数
  * @param {Object} params.db 数据库实例
  * @param {Object} params.logger 日志实例
+ * @param {Object} [params.routeBlocker] 双端共享的未注册路由封禁器，可注入独立测试状态
  * @returns {import('express').Express}
  */
 
@@ -15,14 +16,17 @@ const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const registerAdminRoutes = require('./register-admin-routes');
 const telegramInternalRoutes = require('../routes/internal/telegram');
+const { unregisteredRouteBlocker } = require('../middleware/unregistered-route-blocker');
 
-function createAdminApp({ db, logger }) {
+function createAdminApp({ db, logger, routeBlocker = unregisteredRouteBlocker }) {
   const app = express();
 
   app.locals.db = db;
   app.set('trust proxy', 1);
 
   app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+  // 先拦截所有封禁请求，避免 CORS 预检或请求体解析提前结束响应。
+  app.use(routeBlocker.createGuardMiddleware());
   app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
@@ -56,7 +60,7 @@ function createAdminApp({ db, logger }) {
   });
 
   app.use(telegramInternalRoutes);
-  registerAdminRoutes(app, logger);
+  registerAdminRoutes(app, logger, routeBlocker);
 
   return app;
 }

@@ -3,6 +3,7 @@
  * 负责统一挂载管理端 API 路由与兜底错误处理，保持现有接口语义不变
  * @param {import('express').Express} app Express 应用实例
  * @param {Object} logger 日志实例
+ * @param {Object} [routeBlocker] 未注册路由封禁器，仅最终兜底命中时记录
  */
 
 const adminAuthRoutes = require('../routes/admin/auth');
@@ -25,8 +26,9 @@ const adminFeedbackRoutes = require('../routes/admin/feedback');
 const adminHomeProxiesRoutes = require('../routes/admin/home-proxies');
 const adminWalletRoutes = require('../routes/admin/wallet');
 const adminPasskeyRoutes = require('../routes/admin/passkeys');
+const { unregisteredRouteBlocker } = require('../middleware/unregistered-route-blocker');
 
-function registerAdminRoutes(app, logger) {
+function registerAdminRoutes(app, logger, routeBlocker = unregisteredRouteBlocker) {
   const adminPrefix = '/api/admin';
 
   app.use(adminPrefix, adminAuthRoutes);
@@ -51,6 +53,11 @@ function registerAdminRoutes(app, logger) {
   app.use(`${adminPrefix}/passkeys`, adminPasskeyRoutes);
 
   app.use((req, res) => {
+    const { blocked, ipKey, blockDurationMs } = routeBlocker.recordNotFound(req);
+    // 守卫已拦截有效封禁，此处只在首次建立封禁时记录 IP 与时长，避免泄露 URL/token。
+    if (blocked) {
+      logger.warn(`[ADMIN] 未注册路由访问触发封禁: IP ${ipKey}，封禁 ${blockDurationMs / 60000} 分钟`);
+    }
     res.status(404).json({ code: 404, message: '接口不存在', data: null });
   });
 

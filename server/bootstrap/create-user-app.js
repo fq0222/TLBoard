@@ -4,6 +4,7 @@
  * @param {Object} params 创建参数
  * @param {Object} params.db 数据库实例
  * @param {Object} params.logger 日志实例
+ * @param {Object} [params.routeBlocker] 双端共享的未注册路由封禁器，可注入独立测试状态
  * @returns {import('express').Express}
  */
 
@@ -14,14 +15,17 @@ const morgan = require('morgan');
 const config = require('../config');
 const registerUserRoutes = require('./register-user-routes');
 const { shouldSkipSuccessfulRangeDownloadLog } = require('../middleware/download-log-filter');
+const { unregisteredRouteBlocker } = require('../middleware/unregistered-route-blocker');
 
-function createUserApp({ db, logger }) {
+function createUserApp({ db, logger, routeBlocker = unregisteredRouteBlocker }) {
   const app = express();
 
   app.locals.db = db;
   app.set('trust proxy', 2);
 
   app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+  // 先拦截所有封禁请求，避免 CORS 预检或请求体解析提前结束响应。
+  app.use(routeBlocker.createGuardMiddleware());
   app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'], allowedHeaders: ['Content-Type', 'Authorization'] }));
   app.use(morgan('short', {
     skip: shouldSkipSuccessfulRangeDownloadLog,
@@ -34,7 +38,7 @@ function createUserApp({ db, logger }) {
     res.json({ code: 0, message: 'ok', data: { status: 'healthy', port: config.user.port, timestamp: Date.now() } });
   });
 
-  registerUserRoutes(app, logger);
+  registerUserRoutes(app, logger, routeBlocker);
 
   return app;
 }
