@@ -4,6 +4,7 @@
  */
 
 const trafficUsageStatsRepository = require('../../repositories/traffic-usage-stats-repository');
+const { calculateTrafficCounterIncrement } = require('../../utils/traffic-counter');
 
 const MB = 1024 * 1024;
 const GB = 1024 * 1024 * 1024;
@@ -57,11 +58,11 @@ function buildCurrentTrafficUsageSnapshot({
       }
 
       const lastSyncTraffic = syncLogMap.get(`${user.id}-${serverId}`) || 0;
-      if (userTraffic.total < lastSyncTraffic) {
-        continue;
-      }
-
-      const increment = Math.round((userTraffic.total - lastSyncTraffic) * multiplier);
+      const { increment } = calculateTrafficCounterIncrement(
+        userTraffic.total,
+        lastSyncTraffic,
+        multiplier
+      );
       if (increment <= 0) {
         continue;
       }

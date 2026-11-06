@@ -9,6 +9,7 @@ const { withUserStatusLock } = require('./user-status-lock');
 const { DISABLE_REASONS } = require('./renew-policy');
 const { createLogger } = require('../../utils/logger');
 const { runWithConcurrency } = require('../../utils/concurrency');
+const { calculateTrafficCounterIncrement } = require('../../utils/traffic-counter');
 const trafficRepository = require('../../repositories/traffic-repository');
 const trafficUsageStatsRepository = require('../../repositories/traffic-usage-stats-repository');
 const trafficUsageStatsService = require('../admin/traffic-usage-stats-service');
@@ -408,14 +409,19 @@ async function calculateUserTotalTraffic(db, serverTrafficData) {
           const lastSyncTraffic = syncLogMap.get(`${user.id}-${serverId}`) || 0;
           const currentTraffic = Number(userServerTraffic.total) || 0;
 
-          let increment = 0;
-          let rawIncrement = 0;
-          if (currentTraffic >= lastSyncTraffic) {
-            rawIncrement = currentTraffic - lastSyncTraffic;
-            increment = Math.round(rawIncrement * trafficUsageMultiplier);
-          } else {
+          const {
+            rawIncrement,
+            increment,
+            resetDetected
+          } = calculateTrafficCounterIncrement(
+            currentTraffic,
+            lastSyncTraffic,
+            trafficUsageMultiplier
+          );
+          if (resetDetected) {
             logger.warn(
-              `服务器 ${serverId} 用户 ${user.email} 流量回退: 当前 ${currentTraffic} < 上次 ${lastSyncTraffic}，本次不累加，仅重置同步基线`
+              `服务器 ${serverId} 用户 ${user.email} 流量回退: 当前 ${currentTraffic} < 上次 ${lastSyncTraffic}，` +
+              '检测到远端计数器重置，将当前值作为本轮原始增量并更新同步基线'
             );
           }
 

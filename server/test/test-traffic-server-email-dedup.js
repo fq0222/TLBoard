@@ -85,13 +85,15 @@ async function testSameEmailAcrossInboundsKeepsLargestCompleteSnapshot() {
   }
 }
 
-function createCalculationDb() {
+function createCalculationDb(lastSyncTraffic = 100, multiplier = '1') {
+  const queryCalls = [];
   return {
+    queryCalls,
     prepare(sql) {
       return {
         async get() {
           if (sql.includes('traffic_usage_multiplier')) {
-            return { value: '1' };
+            return { value: multiplier };
           }
           return undefined;
         },
@@ -115,9 +117,10 @@ function createCalculationDb() {
     pool: {
       async connect() {
         return {
-          async query(sql) {
+          async query(sql, params = []) {
+            queryCalls.push({ sql, params });
             if (sql.includes('SELECT user_id, server_id, last_sync_traffic')) {
-              return { rows: [{ user_id: 1, server_id: 2, last_sync_traffic: 100 }] };
+              return { rows: [{ user_id: 1, server_id: 2, last_sync_traffic: lastSyncTraffic }] };
             }
             return { rows: [], rowCount: 0 };
           },
@@ -189,6 +192,32 @@ async function testTrafficCalculationAddsIndependentServerIncrements() {
   assert.strictEqual(result[1].trafficUsed, 1500);
 }
 
+/** 验证计数器回退后把当前值作为倍率计算前的新增量。 */
+async function testTrafficCalculationUsesCurrentValueAfterCounterReset() {
+  const db = createCalculationDb(200, '2.5');
+  const result = await trafficManager.calculateUserTotalTraffic(db, {
+    2: { 'user@example.com': { total: 100 } }
+  });
+
+  assert.strictEqual(result[1].increment, 250);
+  assert.strictEqual(result[1].trafficUsed, 1250);
+  const baselineWrite = db.queryCalls.find(call => call.sql.includes('INSERT INTO traffic_sync_log'));
+  assert.strictEqual(baselineWrite.params[2], 100);
+}
+
+/** 验证计数器回退到零时不增加流量，但仍把同步基线写为零。 */
+async function testTrafficCalculationResetsBaselineToZeroWithoutIncrement() {
+  const db = createCalculationDb(200, '2.5');
+  const result = await trafficManager.calculateUserTotalTraffic(db, {
+    2: { 'user@example.com': { total: 0 } }
+  });
+
+  assert.strictEqual(result[1].increment, 0);
+  assert.strictEqual(result[1].trafficUsed, 1000);
+  const baselineWrite = db.queryCalls.find(call => call.sql.includes('INSERT INTO traffic_sync_log'));
+  assert.strictEqual(baselineWrite.params[2], 0);
+}
+
 function testAdminSnapshotUsesExactEmailOnly() {
   const snapshot = trafficUsageStatsService.buildCurrentTrafficUsageSnapshot({
     serverTrafficData: {
@@ -209,11 +238,33 @@ function testAdminSnapshotUsesExactEmailOnly() {
   ]);
 }
 
+/** 验证管理端最近一轮快照与用户实际入账共享回退计算语义。 */
+function testAdminSnapshotUsesCurrentValueAfterCounterReset() {
+  const snapshot = trafficUsageStatsService.buildCurrentTrafficUsageSnapshot({
+    serverTrafficData: {
+      2: { 'user@example.com': { total: 100 } }
+    },
+    users: [{ id: 1, email: 'user@example.com' }],
+    syncLogMap: new Map([['1-2', 200]]),
+    serversById: new Map([['2', { id: 2, name: 'server-a' }]]),
+    multiplier: 2.5,
+    syncAt: 123456
+  });
+
+  assert.strictEqual(snapshot[0].totalTraffic, 250);
+  assert.deepStrictEqual(snapshot[0].users, [
+    { userId: 1, email: 'user@example.com', traffic: 250 }
+  ]);
+}
+
 async function run() {
   await testSameEmailAcrossInboundsKeepsLargestCompleteSnapshot();
   await testTrafficCalculationUsesExactEmailOnly();
   await testTrafficCalculationAddsIndependentServerIncrements();
+  await testTrafficCalculationUsesCurrentValueAfterCounterReset();
+  await testTrafficCalculationResetsBaselineToZeroWithoutIncrement();
   testAdminSnapshotUsesExactEmailOnly();
+  testAdminSnapshotUsesCurrentValueAfterCounterReset();
   console.log('test-traffic-server-email-dedup: PASS');
 }
 
