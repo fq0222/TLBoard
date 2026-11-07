@@ -37,6 +37,10 @@ router.post('/', authenticateAdmin, [
     .optional()
     .isBoolean()
     .withMessage('show_on_home必须是布尔值'),
+  body('show_on_referral_home')
+    .optional()
+    .isBoolean()
+    .withMessage('show_on_referral_home必须是布尔值'),
   body('sort_order')
     .optional()
     .isInt({ min: 0 })
@@ -79,6 +83,10 @@ router.put('/:id', authenticateAdmin, [
     .optional()
     .isBoolean()
     .withMessage('show_on_home必须是布尔值'),
+  body('show_on_referral_home')
+    .optional()
+    .isBoolean()
+    .withMessage('show_on_referral_home必须是布尔值'),
   body('sort_order')
     .optional()
     .isInt({ min: 0 })

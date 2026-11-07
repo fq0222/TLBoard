@@ -121,6 +121,7 @@ function formatPlan(plan) {
     plan_type_text: getPlanTypeText(plan.plan_type),
     home_proxy_tag: plan.home_proxy_tag || '',
     show_on_home: plan.show_on_home === undefined ? 1 : Number(plan.show_on_home),
+    show_on_referral_home: normalizeBooleanFlag(plan.show_on_referral_home),
     sort_order: plan.sort_order,
     enabled: plan.enabled,
     sales_limit: plan.sales_limit,
@@ -173,6 +174,8 @@ async function createPlan(db, payload) {
     planType: normalizedPlanType,
     homeProxyTag,
     showOnHome: payload.show_on_home === undefined ? 1 : normalizeBooleanFlag(payload.show_on_home),
+    // 推荐首页展示默认关闭，显式传值时复用布尔归一化规则。
+    showOnReferralHome: payload.show_on_referral_home === undefined ? 0 : normalizeBooleanFlag(payload.show_on_referral_home),
     sortOrder: payload.sort_order === undefined ? 0 : payload.sort_order,
     enabled: payload.enabled === undefined ? 1 : (payload.enabled ? 1 : 0),
     salesLimit: payload.sales_limit === undefined ? -1 : payload.sales_limit
@@ -244,6 +247,11 @@ async function updatePlan(db, planId, payload) {
   if (payload.show_on_home !== undefined) {
     updates.push('show_on_home = ?');
     values.push(normalizeBooleanFlag(payload.show_on_home));
+  }
+  // 仅显式提交开关时更新，兼容未携带此字段的旧管理端。
+  if (payload.show_on_referral_home !== undefined) {
+    updates.push('show_on_referral_home = ?');
+    values.push(normalizeBooleanFlag(payload.show_on_referral_home));
   }
   if (payload.sort_order !== undefined) {
     updates.push('sort_order = ?');

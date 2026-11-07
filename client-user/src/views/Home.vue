@@ -139,7 +139,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ArrowRight, User } from '@element-plus/icons-vue'
@@ -155,6 +155,8 @@ const userStore = useUserStore()
 const plans = ref([])
 const loading = ref(false)
 const loadError = ref(false)
+// 仅允许最新一轮套餐请求写入页面状态，避免路由切换后的过期响应覆盖当前列表。
+let plansRequestId = 0
 const activePlanFilter = ref('all')
 const planFilters = [
   { label: '全部', value: 'all' },
@@ -183,18 +185,33 @@ const displayPlans = computed(() =>
   }))
 )
 
+/**
+ * 加载当前 URL 推广码可见的套餐；本轮重试复用同一推广码，不读取归因缓存。
+ * 请求序号标识当前轮次，过期轮次不得更新套餐、错误或加载状态。
+ */
 async function fetchPlans() {
+  const referralCode = String(route.query.ref || '').trim()
+  const requestId = ++plansRequestId
   try {
     loading.value = true
     loadError.value = false
-    plans.value = await loadPlansWithRetry(() => api.user.getPlans())
+    const loadedPlans = await loadPlansWithRetry(() => api.user.getPlans(referralCode))
+    if (requestId === plansRequestId) {
+      plans.value = loadedPlans
+    }
   } catch (error) {
+    if (requestId !== plansRequestId) return
     console.error('获取套餐列表失败:', error)
     loadError.value = true
   } finally {
-    loading.value = false
+    if (requestId === plansRequestId) {
+      loading.value = false
+    }
   }
 }
+
+// 同组件导航时仅按当前 URL 的有效推广码刷新套餐；初次加载仍由 onMounted 负责。
+watch(() => String(route.query.ref || '').trim(), fetchPlans)
 
 function formatDuration(durationDays) {
   return Number(durationDays) === 0 ? '不限时' : `${durationDays} 天`

@@ -107,6 +107,7 @@ test('admin plan service formats plan type and show on home', async () => {
             traffic_limit: 1024,
             plan_type: 'timed',
             show_on_home: 1,
+            show_on_referral_home: 1,
             sort_order: 0,
             enabled: 1,
             sales_limit: -1,
@@ -123,7 +124,88 @@ test('admin plan service formats plan type and show on home', async () => {
   assert.equal(result.list[0].plan_type, 'timed');
   assert.equal(result.list[0].plan_type_text, '限时套餐');
   assert.equal(result.list[0].show_on_home, 1);
+  assert.equal(result.list[0].show_on_referral_home, 1);
 });
+
+// 验证创建推荐首页开关：显式 true 写入 1，未传字段写入 0；索引紧跟 show_on_home。
+for (const { value, expected } of [{ value: true, expected: 1 }, { value: undefined, expected: 0 }]) {
+  test(`admin plan service creates referral home flag ${String(value)} as ${expected}`, async () => {
+    const plansService = require('../services/admin/plans-service');
+    let insertValues = [];
+    const db = {
+      prepare(sql) {
+        if (/INSERT INTO plans/.test(sql)) {
+          assert.match(sql, /show_on_home, show_on_referral_home, sort_order/);
+          return {
+            run(...values) {
+              insertValues = values;
+              return { lastInsertRowid: 20 };
+            }
+          };
+        }
+        return {
+          get() {
+            return {
+              id: 20,
+              price: 990,
+              duration_days: 30,
+              traffic_limit: 1024,
+              plan_type: 'timed',
+              show_on_referral_home: insertValues[8]
+            };
+          }
+        };
+      }
+    };
+    const payload = { name: '月卡', price: 990, duration_days: 30, traffic_limit: 1024 };
+    if (value !== undefined) payload.show_on_referral_home = value;
+
+    const result = await plansService.createPlan(db, payload);
+    assert.equal(insertValues[8], expected);
+    assert.equal(result.show_on_referral_home, expected);
+  });
+}
+
+// 验证更新推荐首页开关：字符串 '0' 关闭；省略字段时仅更新名称并保留原开关。
+for (const value of ['0', undefined]) {
+  test(`admin plan service updates referral home flag ${String(value)}`, async () => {
+    const plansService = require('../services/admin/plans-service');
+    let updateValues = [];
+    const db = {
+      prepare(sql) {
+        if (/UPDATE plans SET/.test(sql)) {
+          if (value === undefined) {
+            assert.doesNotMatch(sql, /show_on_referral_home/);
+          } else {
+            assert.match(sql, /show_on_referral_home = \?/);
+          }
+          return {
+            run(...values) {
+              updateValues = values;
+            }
+          };
+        }
+        return {
+          get() {
+            return {
+              id: 21,
+              price: 990,
+              duration_days: 30,
+              traffic_limit: 1024,
+              plan_type: 'timed',
+              show_on_referral_home: value !== undefined && updateValues.length ? updateValues[0] : 1
+            };
+          }
+        };
+      }
+    };
+    const payload = value === undefined ? { name: '新名称' } : { show_on_referral_home: value };
+
+    const result = await plansService.updatePlan(db, 21, payload);
+    assert.deepEqual(updateValues, value === undefined ? ['新名称', 21] : [0, 21]);
+    assert.equal(result.show_on_referral_home, value === undefined ? 1 : 0);
+  });
+}
 
 test('admin plan service rejects lifetime plans with duration days', async () => {
   const plansService = require('../services/admin/plans-service');

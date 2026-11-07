@@ -166,6 +166,7 @@ const tableDefinitions = [
         plan_type VARCHAR(20) DEFAULT 'lifetime',
         home_proxy_tag VARCHAR(255),
         show_on_home INTEGER DEFAULT 1,
+        show_on_referral_home INTEGER NOT NULL DEFAULT 0,
         sort_order INTEGER DEFAULT 0,
         enabled INTEGER DEFAULT 1,
         sales_limit INTEGER DEFAULT -1,

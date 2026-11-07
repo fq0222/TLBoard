@@ -223,9 +223,14 @@ const userApi = {
 
   /**
    * 获取套餐列表
+   * @param {string} referralCode 当前 URL 的推广码；去空白后为空时不发送查询参数
    * @returns {Promise<Object>} 响应数据
    */
-  getPlans() {
+  getPlans(referralCode = '') {
+    const ref = String(referralCode || '').trim()
+    if (ref) {
+      return apiClient.get('/plans', { params: { ref } })
+    }
     return apiClient.get('/plans')
   },
 

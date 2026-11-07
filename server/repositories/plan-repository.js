@@ -4,17 +4,24 @@
  */
 
 /**
- * 查询所有已上架套餐。
+ * 查询当前首页可见的已上架套餐。
+ * 职责：根据推广码校验结果切换首页可见性条件，使用单次查询避免重复套餐。
+ * 核心分支：普通模式只展示 show_on_home，推广模式额外展示 show_on_referral_home。
  *
  * @param {Object} db - 数据库实例
+ * @param {boolean} includeReferralHome - 当前请求是否携带有效启用推广码
  * @returns {Promise<Array<Object>>} 套餐记录列表
  */
-async function findEnabledPlans(db) {
+async function findEnabledPlans(db, includeReferralHome = false) {
+  const visibilityCondition = includeReferralHome
+    ? '(show_on_home = 1 OR show_on_referral_home = 1)'
+    : 'show_on_home = 1';
+
   return db.prepare(`
-    SELECT id, name, description, price, duration_days, traffic_limit, plan_type, home_proxy_tag, show_on_home, sort_order, sales_limit, sales_count
+    SELECT id, name, description, price, duration_days, traffic_limit, plan_type, home_proxy_tag, show_on_home, show_on_referral_home, sort_order, sales_limit, sales_count
     FROM plans
     WHERE enabled = 1
-      AND show_on_home = 1
+      AND ${visibilityCondition}
     ORDER BY sort_order ASC, id ASC
   `).all();
 }

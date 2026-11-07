@@ -58,6 +58,13 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="推广展示" width="100">
+          <template #default="scope">
+            <el-tag :type="scope.row.show_on_referral_home ? 'success' : 'info'">
+              {{ scope.row.show_on_referral_home ? '展示' : '隐藏' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="最后更新时间" width="160">
           <template #default="scope">
             {{ scope.row.updated_at ? formatTime(scope.row.updated_at) : '-' }}
@@ -85,7 +92,7 @@
       <div class="tw-grid tw-gap-3 md:tw-hidden">
         <article v-for="plan in plans" :key="plan.id" class="mobile-plan-card">
           <div class="mobile-plan-header"><strong>{{ plan.name }}</strong><el-tag :type="plan.enabled ? 'success' : 'danger'">{{ plan.enabled ? '已上架' : '已下架' }}</el-tag></div>
-          <dl class="mobile-plan-fields"><div><dt>类型</dt><dd>{{ plan.plan_type_text || getPlanTypeText(plan.plan_type) }}</dd></div><div><dt>价格</dt><dd>¥{{ plan.price_text }}</dd></div><div><dt>有效期</dt><dd>{{ formatDuration(plan) }}</dd></div><div><dt>流量</dt><dd>{{ plan.plan_type === 'home_ip' ? '不限制流量' : plan.traffic_text }}</dd></div><div><dt>销量</dt><dd>{{ plan.sales_count }} / {{ plan.sales_limit === -1 ? '不限' : plan.sales_limit }}</dd></div></dl>
+          <dl class="mobile-plan-fields"><div><dt>类型</dt><dd>{{ plan.plan_type_text || getPlanTypeText(plan.plan_type) }}</dd></div><div><dt>价格</dt><dd>¥{{ plan.price_text }}</dd></div><div><dt>有效期</dt><dd>{{ formatDuration(plan) }}</dd></div><div><dt>流量</dt><dd>{{ plan.plan_type === 'home_ip' ? '不限制流量' : plan.traffic_text }}</dd></div><div><dt>销量</dt><dd>{{ plan.sales_count }} / {{ plan.sales_limit === -1 ? '不限' : plan.sales_limit }}</dd></div><div><dt>首页展示</dt><dd>{{ plan.show_on_home ? '展示' : '隐藏' }}</dd></div><div><dt>推广展示</dt><dd>{{ plan.show_on_referral_home ? '展示' : '隐藏' }}</dd></div></dl>
           <div class="mobile-plan-actions"><el-button size="small" type="primary" @click="showEditDialog(plan)">编辑</el-button><el-button size="small" type="danger" @click="deletePlan(plan)">删除</el-button></div>
         </article>
       </div>
@@ -159,6 +166,9 @@
         <el-form-item label="首页展示" prop="show_on_home">
           <el-switch v-model="planForm.show_on_home" />
         </el-form-item>
+        <el-form-item label="推广首页展示" prop="show_on_referral_home">
+          <el-switch v-model="planForm.show_on_referral_home" />
+        </el-form-item>
         <el-form-item label="是否上架" prop="enabled">
           <el-switch v-model="planForm.enabled" />
         </el-form-item>
@@ -201,6 +211,8 @@ const planForm = reactive({
   sort_order: 0,
   enabled: true,
   show_on_home: true,
+  // 推广首页默认隐藏，由管理员单独开启。
+  show_on_referral_home: false,
   sales_limit: -1
 })
 
@@ -344,6 +356,7 @@ function showEditDialog(plan) {
   planForm.sort_order = plan.sort_order
   planForm.enabled = !!plan.enabled  // 将数字转换为布尔值
   planForm.show_on_home = !!plan.show_on_home
+  planForm.show_on_referral_home = !!plan.show_on_referral_home
   planForm.sales_limit = plan.sales_limit
   
   // 计算流量值和单位
@@ -377,6 +390,7 @@ function resetForm() {
   planForm.sort_order = 0
   planForm.enabled = true
   planForm.show_on_home = true
+  planForm.show_on_referral_home = false
   planForm.sales_limit = -1
   trafficValue.value = 0
   trafficUnit.value = 1073741824
