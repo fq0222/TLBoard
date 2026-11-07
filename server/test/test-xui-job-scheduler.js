@@ -184,6 +184,63 @@ function loadXuiApiClientWithAxiosStub(requests) {
   }
 }
 
+/**
+ * 使用隔离依赖加载 3X-UI 数据库备份任务处理器，并记录 cron 调度结果。
+ * @returns {{handler: Object, schedules: Array, restore: Function}} 处理器、调度记录和恢复函数
+ */
+function loadBackupXuiDbJobForTest() {
+  const handlerPath = require.resolve('../jobs/handlers/backup-xui-db');
+  const originalCache = require.cache[handlerPath];
+  const originalLoad = Module._load;
+  const schedules = [];
+  const dependencies = {
+    'node-cron': {
+      schedule(expression, callback) {
+        const task = { expression, callback };
+        schedules.push(task);
+        return task;
+      }
+    },
+    '../backupDB': { backupXuiDatabases: async () => ({}) },
+    '../../utils/logger': {
+      createLogger: () => ({ info() {}, error() {} })
+    }
+  };
+
+  delete require.cache[handlerPath];
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (Object.prototype.hasOwnProperty.call(dependencies, request)) {
+      return dependencies[request];
+    }
+    return originalLoad(request, parent, isMain);
+  };
+
+  try {
+    return {
+      handler: require(handlerPath),
+      schedules,
+      restore() {
+        if (originalCache) require.cache[handlerPath] = originalCache;
+        else delete require.cache[handlerPath];
+      }
+    };
+  } finally {
+    Module._load = originalLoad;
+  }
+}
+
+test('3X-UI 数据库备份任务每天凌晨 3 点执行', t => {
+  const fixture = loadBackupXuiDbJobForTest();
+  t.after(fixture.restore);
+  const cronTasks = [];
+
+  fixture.handler.registerBackupXuiDbJob({ db: {}, cronTasks });
+
+  assert.equal(fixture.schedules.length, 1);
+  assert.equal(fixture.schedules[0].expression, '0 3 * * *');
+  assert.deepEqual(cronTasks, [fixture.schedules[0]]);
+});
+
 test('五个指定定时任务接入统一调度器', () => {
   const handlersDir = path.join(__dirname, '..', 'jobs', 'handlers');
   const scheduledHandlers = fs.readdirSync(handlersDir)
