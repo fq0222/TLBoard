@@ -13,26 +13,6 @@
 
     <main class="main">
       <section class="plans-section">
-        <div class="section-head">
-          <div>
-            <h2 class="section-title">选择适合你的套餐</h2>
-          </div>
-        </div>
-
-        <div class="plan-filter" aria-label="套餐分类">
-          <button
-            v-for="filter in planFilters"
-            :key="filter.value"
-            type="button"
-            class="filter-button"
-            :class="{ active: activePlanFilter === filter.value }"
-            :aria-pressed="activePlanFilter === filter.value"
-            @click="activePlanFilter = filter.value"
-          >
-            {{ filter.label }}
-          </button>
-        </div>
-
         <div
           v-if="loading"
           class="plans-grid plans-loading"
@@ -61,7 +41,36 @@
           <button type="button" class="state-retry" @click="fetchPlans">重新加载</button>
         </div>
 
-        <div v-else-if="displayPlans.length === 0" class="plans-state" role="status">
+        <el-carousel v-else-if="plans.length === 0" class="home-empty-carousel"
+          :interval="5000" :autoplay="true" :pause-on-hover="true"
+          arrow="never" indicator-position="none">
+          <el-carousel-item v-for="(image, index) in homeCarouselImages" :key="image.name">
+            <img class="home-carousel-image" :src="image.src" :alt="image.name" :loading="index === 0 ? 'eager' : 'lazy'">
+          </el-carousel-item>
+        </el-carousel>
+
+        <template v-else>
+        <div class="section-head">
+          <div>
+            <h2 class="section-title">选择适合你的套餐</h2>
+          </div>
+        </div>
+
+        <div class="plan-filter" aria-label="套餐分类">
+          <button
+            v-for="filter in planFilters"
+            :key="filter.value"
+            type="button"
+            class="filter-button"
+            :class="{ active: activePlanFilter === filter.value }"
+            :aria-pressed="activePlanFilter === filter.value"
+            @click="activePlanFilter = filter.value"
+          >
+            {{ filter.label }}
+          </button>
+        </div>
+
+        <div v-if="displayPlans.length === 0" class="plans-state" role="status">
           <div class="state-title">当前分类暂无套餐</div>
           <p>可以切换到其他分类查看可购买套餐。</p>
         </div>
@@ -128,6 +137,7 @@
             </div>
           </article>
         </div>
+        </template>
       </section>
 
     </main>
@@ -143,7 +153,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ArrowRight, User } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElCarousel, ElCarouselItem, ElMessage } from 'element-plus'
+import 'element-plus/theme-chalk/el-carousel.css'
+import 'element-plus/theme-chalk/el-carousel-item.css'
 import api from '@/api'
 import { filterPlansByDurationType } from '@/utils/plan-filter'
 import { loadPlansWithRetry } from '@/utils/plan-loader'
@@ -155,6 +167,10 @@ const userStore = useUserStore()
 const plans = ref([])
 const loading = ref(false)
 const loadError = ref(false)
+// 构建时发现轮播图片，按文件名的数字顺序生成展示数据。
+const homeCarouselImages = Object.entries(import.meta.glob('/src/assets/home-carousel/*.{png,jpg,jpeg,webp,gif}', { eager: true, import: 'default' }))
+  .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+  .map(([, src], index) => ({ name: `轮播图片 ${index + 1}`, src }))
 // 仅允许最新一轮套餐请求写入页面状态，避免路由切换后的过期响应覆盖当前列表。
 let plansRequestId = 0
 const activePlanFilter = ref('all')
@@ -368,6 +384,23 @@ onMounted(() => {
   max-width: 1180px;
   margin: 0 auto;
   padding: 28px 20px 56px;
+}
+
+.home-empty-carousel {
+  height: 745px;
+  border-radius: 22px;
+  overflow: hidden;
+}
+
+.home-empty-carousel :deep(.el-carousel__container) {
+  height: 100%;
+}
+
+.home-carousel-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
 }
 
 .section-head {
@@ -776,6 +809,9 @@ onMounted(() => {
 }
 
 @media (max-width: 1024px) {
+  .home-empty-carousel {
+    height: 520px;
+  }
   .section-head {
     align-items: start;
     flex-direction: column;
@@ -792,6 +828,9 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
+  .home-empty-carousel {
+    height: 320px;
+  }
   .header-content {
     padding: 0 14px;
     min-height: 52px;

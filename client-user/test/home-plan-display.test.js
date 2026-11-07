@@ -41,3 +41,21 @@ test('住宅 IP 无描述时摘要不会引用普通套餐流量', () => {
 test('程序化调用 selectPlan 时住宅 IP 在导航前直接返回', () => {
   assert.match(source, /function selectPlan\(plan\)\s*\{\s*if\s*\(plan\.plan_type\s*===\s*'home_ip'\)\s*\{\s*return\s*\}/)
 })
+
+test('首页轮播构建时自动发现图片并按数字顺序排列', () => {
+  assert.match(source, /import\.meta\.glob\(\s*['"]\/src\/assets\/home-carousel\/\*\.\{png,jpg,jpeg,webp,gif\}['"]\s*,\s*\{\s*eager:\s*true\s*,\s*import:\s*['"]default['"]\s*\}\s*\)/)
+  assert.match(source, /localeCompare\([^)]*\{\s*numeric:\s*true\s*\}/)
+  assert.doesNotMatch(source, /import\s+image\d+\s+from/)
+})
+
+test('轮播按屏幕宽度设置高度并居中裁切图片', () => {
+  assert.match(source, /\.home-empty-carousel\s*\{\s*height:\s*745px;/)
+  assert.match(source, /@media \(max-width: 1024px\)\s*\{\s*\.home-empty-carousel\s*\{\s*height:\s*520px;/)
+  assert.match(source, /@media \(max-width: 768px\)\s*\{\s*\.home-empty-carousel\s*\{\s*height:\s*320px;/)
+  assert.match(source, /\.home-carousel-image\s*\{[^}]*object-fit:\s*cover;[^}]*object-position:\s*center;/)
+})
+
+test('轮播及轮播项各自导入 Element Plus 样式', () => {
+  assert.match(source, /import 'element-plus\/theme-chalk\/el-carousel\.css'/)
+  assert.match(source, /import 'element-plus\/theme-chalk\/el-carousel-item\.css'/)
+})
