@@ -39,7 +39,7 @@ afterEach(() => {
 })
 
 describe('首页成功空套餐轮播', () => {
-  it('全部套餐为空时替换套餐区域并按顺序展示四张图片', async () => {
+  it('全部套餐为空时替换套餐区域并按数字顺序展示目录图片', async () => {
     apiState.getPlans.mockResolvedValue({ code: 0, data: { plans: [] } })
     await mountHome()
     expect(wrapper.find('.section-head').exists()).toBe(false)
@@ -48,8 +48,11 @@ describe('首页成功空套餐轮播', () => {
     const carousel = wrapper.getComponent(CarouselStub)
     expect(carousel.props()).toMatchObject({ interval: 5000, autoplay: true, pauseOnHover: true, arrow: 'never', indicatorPosition: 'none' })
     const images = wrapper.findAll('.home-carousel-image')
-    expect(images.map(image => image.attributes('src').match(/(456536|736462|789596|1322308)\.webp/)[1])).toEqual(['456536', '736462', '789596', '1322308'])
-    expect(images.map(image => image.attributes('loading'))).toEqual(['eager', 'lazy', 'lazy', 'lazy'])
+    const imageNumbers = images.map(image => Number(image.attributes('src').match(/(\d+)\.webp/)[1]))
+    expect(imageNumbers.length).toBeGreaterThan(0)
+    expect(imageNumbers).toEqual([...imageNumbers].sort((left, right) => left - right))
+    expect(images[0].attributes('loading')).toBe('eager')
+    expect(images.slice(1).every(image => image.attributes('loading') === 'lazy')).toBe(true)
     expect(images.every(image => image.attributes('alt'))).toBe(true)
     expect(wrapper.find('.home-empty-carousel a').exists()).toBe(false)
   })
