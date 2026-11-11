@@ -131,7 +131,7 @@
                 :disabled="plan.is_soldout || plan.plan_type === 'home_ip'"
                 @click="selectPlan(plan)"
               >
-                {{ plan.plan_type === 'home_ip' ? '仅展示' : plan.is_soldout ? '已售罄' : '立即购买' }}
+                {{ plan.plan_type === 'home_ip' ? '仅展示' : plan.is_soldout ? '已售罄' : '购买并注册' }}
                 <el-icon class="btn-icon"><ArrowRight /></el-icon>
               </el-button>
             </div>

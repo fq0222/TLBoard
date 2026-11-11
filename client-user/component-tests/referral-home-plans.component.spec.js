@@ -38,7 +38,13 @@ async function mountHome(path) {
   await router.push(path)
   await router.isReady()
   wrapper = mount(RouterView, {
-    global: { plugins: [router], stubs: { 'el-icon': true, 'el-button': true } }
+    global: {
+      plugins: [router],
+      stubs: {
+        'el-icon': true,
+        'el-button': defineComponent({ template: '<button><slot /></button>' })
+      }
+    }
   })
   await flushPromises()
 }
@@ -57,6 +63,11 @@ afterEach(() => {
 })
 
 describe('首页当前 URL 推广套餐', () => {
+  it('可购买套餐的主按钮显示购买并注册', async () => {
+    await mountHome('/')
+    expect(wrapper.find('.buy-btn').text()).toContain('购买并注册')
+  })
+
   it('初始 ref 归一化后仅请求一次，移除 ref 时复用组件并重新加载普通套餐', async () => {
     apiState.getPlans.mockResolvedValueOnce(referralResponse)
     await mountHome('/?ref=%20VALID%20')
